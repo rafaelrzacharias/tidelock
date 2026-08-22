@@ -14,3 +14,6 @@
 - `build_id` over a *flag string* is a lie: compile definitions, `-std`, `CXXFLAGS` from the environment, `cmake/` edits and git-ignored sources all bypass it. Hash the resolved compile commands (`compile_commands.json`) plus the content of the files they name.
 - `[[nodiscard]]` cannot attach to a typedef. An error code that must not be discarded has to be an `enum`, not `using ErrCode = u16`.
 - A doc sentence that names no tool ("the fingerprint tool asserts it") is a phantom gate; grep for the tool before believing it.
+- `build_id` had to answer one question, and it was answering two: "are we the same program?" (must be target-independent, or PC + Deck + Pi peers can never hand-shake) and "what exactly built this binary?" (compiler, triple, flags). Two questions, two values: `build_id` is compared, `build_env` is reported (`docs/BUILD.md` §9 R-8).
+- clang spells it `-std=c++20`, clang-cl `-std:c++20`. Normalise driver spellings before they reach a hash, or two targets disagree on a value that is supposed to be identical.
+- The audit selftest found four bugs in its first run - two in the fixtures, one in the new `build_id`, one real gate hole (a header's contract block was counting as the first function's contract comment). Write the negative test the same day as the gate.

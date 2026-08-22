@@ -14,6 +14,7 @@ set(TL_FINGERPRINT_CMD
   --binary-dir "${CMAKE_BINARY_DIR}"
   --out-cpp "${TL_BUILD_ID_CPP}"
   --out-txt "${CMAKE_BINARY_DIR}/build_id.txt"
+  --out-env "${CMAKE_BINARY_DIR}/build_env.txt"
   --out-flags "${CMAKE_BINARY_DIR}/flags.txt")
 
 execute_process(COMMAND ${TL_FINGERPRINT_CMD} --flags "configure" RESULT_VARIABLE tl_fp_rc)
@@ -25,6 +26,7 @@ add_custom_target(tl_fingerprint ALL
   COMMAND ${TL_FINGERPRINT_CMD}
           --flags "$<JOIN:$<TARGET_PROPERTY:tl_flags_common,INTERFACE_COMPILE_OPTIONS>, >"
   BYPRODUCTS "${TL_BUILD_ID_CPP}" "${CMAKE_BINARY_DIR}/build_id.txt"
+             "${CMAKE_BINARY_DIR}/build_env.txt" "${CMAKE_BINARY_DIR}/flags.txt"
   COMMENT "fingerprint: build_id (${TL_TIER})"
   COMMAND_EXPAND_LISTS VERBATIM)
 

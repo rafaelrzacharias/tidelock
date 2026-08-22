@@ -83,7 +83,10 @@ GREP_BANS = (
 NOT_A_FUNCTION = re.compile(
     r'^\s*(#|//|/\*|\*|\}|\{|\)|template\s*<.*>\s*$|namespace\b|struct\b|class\b|enum\b|union\b'
     r'|using\b|typedef\b|static_assert\b|extern\s*"C"|public:|private:|protected:)')
-FUNC_LIKE = re.compile(r'[A-Za-z_]\w*\s*\([^;]*\)\s*(?:const\s*)?(?:noexcept\s*)?[;{]\s*$')
+# The `[;{]` is not anchored to end-of-line: a one-line inline definition
+# (`int f(int a) { return a; }`) is a public function too, and fx.h will be nothing but those.
+FUNC_LIKE = re.compile(r'[A-Za-z_]\w*\s*\([^()]*\)\s*(?:const\s*)?(?:noexcept\s*)?[;{]')
+TEMPLATE_HEAD = re.compile(r'^\s*template\s*<')
 
 
 def nondet_stems(root):
@@ -241,15 +244,26 @@ def check_file(root, path, nondet, errors):
         if not re.search(r'//.*Spec:\s*docs/[A-Z0-9-]+\.md\s*§', "\n".join(raw_lines[:30])):
             errors.append("%s:1: public header has no contract block naming its spec section "
                           "(docs/CPP-SUBSET.md §6)" % rel)
+        # Where the contract block ends: the first line that is not `#pragma`, a comment or blank.
+        # A per-function contract comment must live after it - otherwise the first declaration in
+        # every header would inherit the file's contract block and never need one of its own.
+        body_start = 0
+        for j, line in enumerate(raw_lines):
+            t = line.strip()
+            if t and not t.startswith(("//", "/*", "*", "#pragma")):
+                body_start = j
+                break
         for idx, unit in logical_units(code_lines):
-            if NOT_A_FUNCTION.match(unit) or not FUNC_LIKE.search(unit):
+            if idx < body_start or NOT_A_FUNCTION.match(unit) or not FUNC_LIKE.search(unit):
                 continue
-            prev = ""
+            # A template head belongs to the function below it, so the contract comment sits above
+            # it, not between it and the signature.
+            prev, prev_idx = "", -1
             for j in range(idx - 1, -1, -1):
-                if raw_lines[j].strip():
-                    prev = raw_lines[j].strip()
+                if raw_lines[j].strip() and not TEMPLATE_HEAD.match(raw_lines[j]):
+                    prev, prev_idx = raw_lines[j].strip(), j
                     break
-            if not prev.startswith(("//", "*", "/*")):
+            if not (prev.startswith(("//", "*", "/*")) and prev_idx >= body_start):
                 errors.append("%s:%d: public function has no contract comment "
                               "(docs/CPP-SUBSET.md §6): %s" % (rel, idx + 1, unit[:60]))
 

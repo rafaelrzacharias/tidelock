@@ -47,7 +47,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `FX-PALETTE.md` -> §5
 - `GATE0-BENCH.md` -> §2
 - `LUAU-LAYER.md` -> §5
-- `NETCODE.md` -> §5
+- `NETCODE.md` -> §5, §9
 - `ROADMAP.md` -> §10.5
 - `TESTING.md` -> §2
 - `TOOLING.md` -> §3
@@ -182,7 +182,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ALLOY.md` -> §3, §7, §17
 - `ARCHITECTURE.md` -> §5, §19.5
 - `ASSETS-AND-DATA.md` -> §11, §11.4
-- `BUILD.md` -> §15.1
+- `BUILD.md` -> §15.1, §19.5
 - `CANON.md` -> §15.1
 - `CONTAINERS.md` -> §14.1
 - `DETERMINISM.md` -> §14

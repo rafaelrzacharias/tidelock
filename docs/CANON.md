@@ -116,7 +116,8 @@ binding tables, pure `string`/`table` functions. The interrupt budget counts **s
 |---|---|---|
 | tick | `u64` in state/snapshots/saves/log; `InputFrame.tick` = low 32 bits; containers carry `u64 base_tick` | FRAME-LOOP §1 |
 | state hash | rapidhash64, seed `TL_HASH_SEED`, per registered arena over `[base, used)`; world hash = rapidhash over the per-arena u64s in registry order | DETERMINISM §4 |
-| `build_id` | BLAKE2b-256 at build (compiler, flags, tree hash of `src/ vendor/ script/sim/ script/lib/ toolchain/VERSIONS`, `FX_PALETTE_REV`, sim+lib bytecode) | BUILD §5 |
+| `build_id` | BLAKE2b-256 at build, **target-independent**: tree hash of `src/ cmake/ vendor/ script/sim/ script/lib/ toolchain/VERSIONS`, the semantic compile defines, tier, `FX_PALETTE_REV`, sim+lib bytecode. Compared between peers; a mismatch ends the session | BUILD §5, §9 R-8 |
+| `build_env` | BLAKE2b-256 at build, **local**: compiler id/version/triple and the full resolved compile commands. Reported in CSV headers, crash reports and soak metadata; never compared between peers | BUILD §5 |
 | `session_fingerprint` | BLAKE2b-256 at init (`build_id` ‖ reflection tables ‖ arena order ‖ action map ‖ data-table hash ‖ SIM cvars) | BUILD §5 |
 | `rng_for(seed, tick, system_id, carrier_id, draw)` → u64 | splitmix64-finalizer mix; `rng_below`, `rng_q`, `rng_range<R>`; `system_id` enum in `rng_systems.h` with a 256-wide `RNG_SYS_LUAU_BASE` block | DETERMINISM §3 |
 | world-gen RNG | `gen_hash(seed, cx, cy, channel)` — separate family | ALLOY §12 |

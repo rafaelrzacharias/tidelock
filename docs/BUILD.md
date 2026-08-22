@@ -79,14 +79,23 @@ Two 256-bit BLAKE2b values with fixed names used identically in every doc:
 
 | Name | Computed | Over |
 |---|---|---|
-| **`build_id`** | at build, by `tools/fingerprint.py`, embedded in a generated TU as `const u8 TL_BUILD_ID[32]` | compiler version string · the tier's flag set · **the resolved compile command of every TU (`compile_commands.json`, absolute paths tokenised) and the content of every source those commands name** · git tree hash of `src/` + `vendor/` + `script/sim/` + `script/lib/` + `toolchain/VERSIONS`, plus `git diff HEAD` and every untracked-**or-ignored** source under them · `FX_PALETTE_REV` · the precompiled sim-script bytecode bytes (`script/sim/**` + `script/lib/**`) in load order |
+| **`build_id`** | at build, by `tools/fingerprint.py`, embedded as `const u8 TL_BUILD_ID[32]` | **target-independent by construction (§9 R-8).** git tree hash of `src/` + `cmake/` + `CMakeLists.txt` + `CMakePresets.json` + `vendor/` + `script/sim/` + `script/lib/` + `toolchain/VERSIONS`, plus `git diff HEAD` and the content of every untracked-**or-ignored** source under them · the canonical compile tokens of the TUs under `src/`: every `-D` define minus a platform drop-list, plus `-std` · the tier name · `FX_PALETTE_REV` · the precompiled sim-script bytecode bytes (`script/sim/**` + `script/lib/**`) in load order |
+| **`build_env`** | at build, alongside it, embedded as `const u8 TL_BUILD_ENV[32]` | the compiler id/version/target triple and the full resolved compile commands · everything `build_id` deliberately drops. **Reported, never compared** |
 | **`session_fingerprint`** | at init, once the world is built (`app/` after all registrations) | `build_id` ‖ reflection field tables in registration order (name-hash, kind, offset, size per field; component name-hash per table) ‖ arena registry order (ids) ‖ action map (name-hash, kind, class per action in order) ‖ `hash(DataTables)` ‖ every `SIM`-flagged cvar value |
 
-The compile-command input is what closes the bypasses the W0 review found: compile *definitions*,
-the language standard, a `CXXFLAGS` environment variable and edits to `cmake/` are all invisible to
-a flag string and to a git tree hash, and a `.gitignore`d `.cpp` is compiled by the
-`CONFIGURE_DEPENDS` glob while being invisible to `git ls-files --exclude-standard`. Each was
-verified to change `build_id` after the fix.
+The define/`-std` input is what closes the bypasses the W0 review found: compile *definitions*, the
+language standard and a `CXXFLAGS` environment variable are invisible to a flag string; edits to the
+flag set itself are covered because `cmake/` is in the tree hash; and a `.gitignore`d `.cpp` is
+compiled by the `CONFIGURE_DEPENDS` glob while being invisible to `git ls-files --exclude-standard`,
+so the untracked scan no longer excludes ignored files. Each is a case in
+`tools/audit/selftest.py`, which also asserts that a Windows and a Linux compile line over the same
+tree produce the **same** `build_id`.
+
+Residual, stated rather than hidden: an optimisation, warning or debug-info flag injected through
+the environment changes `build_env` and not `build_id`. Under fixed point that cannot change a
+result except through a compiler bug or UB in our code (§1), and the per-tick hash exchange
+(`NETCODE.md` App. B `CHECKSUM_INTERVAL_TICKS`) bounds the damage to 30 ticks with `build_env` in
+every CSV to name the odd peer out.
 
 **Rules.** The handshake carries both (`NETCODE.md` §15.1); a mismatch on either ends the session
 with a named diagnostic. Snapshots and the rollback ring are stamped with `session_fingerprint`;
@@ -167,6 +176,22 @@ Durable context lives in committed files only (`docs/`, `TODO.md`, `LESSONS.md`)
   the pinned LLVM, trading a real gate for a red lane. Ruled after the W0 review found the pin
   compared against nothing.
 
+- **R-8 `build_id` is target-independent; `build_env` carries the rest.** The W0 review found that
+  putting the compiler string and the resolved compile commands into `build_id` made a mixed-target
+  session impossible to hand-shake: `netcode-win`, `netcode-linux` and `netcode-pi4` differ by
+  target triple and driver spelling alone, so `NETCODE.md` §19.5's Milestone A ("build once;
+  one `build_id` for all three") and §15's "two peers on one release agree by construction" were
+  both unreachable. Ruled: `build_id` covers only what can change a tick's bytes - source tree
+  (including `cmake/`, so the flag set itself is covered portably), semantic defines, `-std`, tier,
+  palette rev, bytecode - and peers refuse on it. Compiler, triple, optimisation level, warning and
+  debug flags move to `build_env`, which is reported in CSVs, crash reports and soak metadata and
+  never compared. This is the same premise Gate 0 exists to prove: under fixed point, codegen
+  cannot change results except through UB. Alternatives rejected: keeping `build_id`
+  target-specific (coherent, but it deletes PC + Deck + Pi peers from the product, which is a scope
+  decision, not a build one); a thin `build_id` of source tree + palette + bytecode only (a `dev`
+  peer could then join a `netcode` session and be caught only by the tick-30 checksum, which
+  abandons refuse-early for detect-late).
+
 ## 10. Implementation specification
 
 ### 10.1 Repository tree (build-relevant)
@@ -222,6 +247,10 @@ render/net when their tests are compiled in). `tl_sim` and `tl_foundation_det` c
 - `tools/audit/sysroot_hash.py`: verifies a downloaded sysroot tarball against the pin in
   `toolchain/VERSIONS` before any cross build uses it (R-3).
 - `tools/audit/tier_parity.py`: the §3 netcode/ship flag-parity check, over `compile_commands.json`.
+- `tools/audit/selftest.py`: the audits' own negative tests - every gate is run against a planted
+  violation in a throwaway tree, plus the no-false-positive fixtures (prose about floats, a
+  commented-out include, an all-inline template header) and the win/linux `build_id` equality
+  check for R-8. A PR job and the `tl_audit_selftest` target.
 - `tools/audit/symbols.py` takes `--layer NAME=PATH` **in DAG order** (a lib may reference only its
   own symbols and those of layers named before it) and `--data-only NAME=PATH` for the rest of
   `src/`; besides undefined symbols it fails on any object file with a non-empty `.data`/`.bss`,
@@ -267,4 +296,4 @@ The pi4 leg is **unmet and blocked on hardware**: clang emits aarch64 ELF and th
 loudly without `TL_SYSROOT`, but the R-3 sysroot tarball needs a live Pi. `TODO.md` carries it as a
 ruling request.
 
-*Rev 1 — 2026-08-22; §9 R-4..R-7 and §3/§5/§10.1/§10.3/§10.4/§10.5 reconciled with the W0 skeleton and its adversarial review, 2026-08-22.*
+*Rev 1 — 2026-08-22; §9 R-4..R-8 and §3/§5/§10.1/§10.3/§10.4/§10.5 reconciled with the W0 skeleton, its adversarial review and the R-8 ruling, 2026-08-22.*

@@ -26,6 +26,10 @@ jobs:
         run: git diff --exit-code -- docs/XREF.md
       - name: include firewall + header contracts
         run: python tools/audit/includes.py --root .
+      - name: install clang + llvm (the selftest compiles its fixtures)
+        run: sudo apt-get update && sudo apt-get install -y clang lld llvm
+      - name: audit selftest - the gates' own planted violations
+        run: python tools/audit/selftest.py
       - name: a src/<module>/ change touches that module's doc (or says [docs:none])
         run: python tools/audit/commit_docs.py --base "${{ github.event.pull_request.base.sha || github.event.before }}"
 

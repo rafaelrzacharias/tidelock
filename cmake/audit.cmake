@@ -6,6 +6,8 @@
 #   tl_audit           all of the above
 find_program(TL_LLVM_NM NAMES llvm-nm llvm-nm-22 REQUIRED)
 find_program(TL_LLVM_OBJDUMP NAMES llvm-objdump llvm-objdump-22 REQUIRED)
+find_program(TL_LLVM_AR NAMES llvm-ar llvm-ar-22 REQUIRED)
+find_program(TL_CLANGXX NAMES clang++ clang-cl REQUIRED)
 
 # --layer order is the module DAG bottom-up: a lib may only reference symbols from itself or
 # from a layer named before it (docs/ARCHITECTURE.md §1). The .data/.bss check runs on every
@@ -45,4 +47,13 @@ add_custom_target(tl_rebuild_budget
   COMMENT "audit: rebuild-time budget"
   VERBATIM)
 
-add_custom_target(tl_audit DEPENDS tl_audit_symbols tl_audit_includes tl_audit_docs)
+# The gates' own negative tests (docs/TESTING.md §5). An audit nobody plants a violation
+# against is a decoration; this runs the planted violations on every PR.
+add_custom_target(tl_audit_selftest
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/audit/selftest.py"
+          --nm "${TL_LLVM_NM}" --objdump "${TL_LLVM_OBJDUMP}"
+          --ar "${TL_LLVM_AR}" --cxx "${TL_CLANGXX}"
+  COMMENT "audit: selftest (the gates' planted violations)"
+  VERBATIM)
+
+add_custom_target(tl_audit DEPENDS tl_audit_symbols tl_audit_includes tl_audit_docs tl_audit_selftest)

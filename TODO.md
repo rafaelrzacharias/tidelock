@@ -33,18 +33,6 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [ ] **RR-2 `nightly.yml` / `weekly.yml` (`docs/BUILD.md` §10.4).** Both need self-hosted `pi4`
       and `deck` runners; committing them before the runners exist buys a nightly red build.
       Land them with RR-1.
-- [ ] **RR-3 One `build_id` for three targets, or three?** `NETCODE.md` §19.5's Milestone A runbook
-      says "build once; `tools/fingerprint` prints one `build_id` for all three", and §15 says "two
-      peers on one release agree by construction" — but `BUILD.md` §5 puts the compiler string and
-      the resolved compile commands into `build_id`, which differ between `netcode-win`,
-      `netcode-linux` and `netcode-pi4` by target triple and driver spelling alone. As implemented,
-      a mixed-platform lockstep session can never pass the §15.1 handshake — i.e. the stated moat
-      (PC + Deck + Pi peers) is unreachable. The two docs cannot both be right. Recommendation:
-      `build_id` becomes target-independent (source tree, palette rev, bytecode, tier, and the
-      portable half of the flag set), with compiler/triple carried as a separate handshake field
-      that is *reported* on mismatch rather than *refused* — which is consistent with `BUILD.md` §1's
-      own claim that fixed point makes codegen differences unable to change results, except through
-      UB. Do not implement either half until this is ruled: it changes what peers compare.
 - [ ] The ubuntu-clang half of `pr.yml` is written against the non-MSVC flag path but has only
       been exercised through the GNU driver locally (`clang++` on the real sources, clean under
       `-Werror`); the first PR run is its real proof. The runners also carry stock clang, not the

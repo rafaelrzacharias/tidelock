@@ -1180,8 +1180,12 @@ The player never drops. Recovery is secondary; if it fires often, §14.4 is what
 | **Session model** | `session_model` + `origin` in handshake; mismatch fails at handshake | Per world, at creation |
 
 **`build_id`** (build-time) and **`session_fingerprint`** (init-time) are defined once, in
-`BUILD.md` §5, and used under those names everywhere. `build_id` covers compiler, flags, source
-tree, palette rev and sim-script bytecode; `session_fingerprint` covers `build_id` plus the
+`BUILD.md` §5, and used under those names everywhere. `build_id` covers the source tree, the
+semantic compile defines, the tier, the palette rev and the sim-script bytecode - and is
+deliberately **target-independent** (`BUILD.md` §9 R-8), which is what lets one `build_id` cover the
+PC, the Deck and the Pi in §19.5's runbook; the compiler, triple and flag spellings live in
+`build_env`, reported in CSVs and crash reports and never compared. `session_fingerprint` covers
+`build_id` plus the
 reflection field tables (the cross-peer layout check for hashed state that is not a hand-written
 `WIRE_STRUCT`), the arena registry order, the action map, the compiled data tables and the
 `SIM` cvars. Anything that can change a tick's bytes is in one of them; clang is pinned per
