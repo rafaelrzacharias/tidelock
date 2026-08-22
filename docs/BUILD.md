@@ -138,7 +138,7 @@ cmake/presets.json             dev-win · debug-win · netcode-win · ship-win �
 cmake/tier.cmake               flag sets per tier (CPP-SUBSET.md §7, BUILD.md §3) as interface targets tl_flags_common / tl_flags_sim
 cmake/toolchain-pi4.cmake      CMAKE_SYSTEM_NAME Linux, processor aarch64, clang --target=aarch64-linux-gnu, --sysroot=${TL_SYSROOT}
 cmake/toolchain-deck.cmake     x86-64 Linux sysroot variant
-cmake/audit.cmake              custom targets: tl_audit_symbols (llvm-nm), tl_audit_includes (grep), tl_rebuild_budget
+cmake/audit.cmake              custom targets: tl_audit_symbols (llvm-nm), tl_audit_includes (grep), tl_audit_docs (tools/docaudit), tl_rebuild_budget
 cmake/fingerprint.cmake        generates build/generated/build_id.cpp from tools/fingerprint at configure+build
 src/<module>/CMakeLists.txt    one static lib each; PRIVATE include dirs; PUBLIC only the module's public header dir
 vendor/CMakeLists.txt          SDL3 (subdir), SDL_ttf, imgui (sources listed), luau (VM + Compiler libs; LUA_USE_LONGJMP=1), enet, stb (one TU), monocypher, rapidhash (header)

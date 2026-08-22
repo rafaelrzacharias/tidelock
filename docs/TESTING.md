@@ -83,6 +83,7 @@ successor of Ore's 43 M-tick run.
 | WIRE_STRUCT | every struct in `net/wire.h`, `save.h`, `InputFrame` has sizeof + offsetof static_asserts (a script checks the macro was used) | PR, blocking |
 | rebuild-time budget | full rebuild < 10 s, incremental (touch one sim TU) < 2 s on the reference PC; a regression is a failure, like perf | PR, blocking (measured on the CI box with its own budget) |
 | fingerprint stability | two clean builds of the same tree produce the same fingerprint | PR |
+| **doc audit** | `tools/docaudit/docaudit.py`: dangling `NAME.md §x.y` refs, numbers contradicting `CANON.md`, docs missing from `docs/README.md`, stale markers; regenerates `docs/XREF.md`; a commit touching `src/<module>/` without its doc needs `[docs:none]` | PR, blocking |
 | warnings | `-Werror` across all tiers and all platforms incl. the cross target | PR |
 
 ---

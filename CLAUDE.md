@@ -57,6 +57,26 @@ about a constraint, or about to improvise past the spec → stop, state the gap 
 contract.** Code that contradicts a doc is a bug in one of them; fix the right one in the same
 commit. Silence in the spec is not permission.
 
+### Doc integrity protocol — how we stop drift (enforced every session, every commit)
+The foundry/ore program rotted because facts were restated in several docs and code was built one
+narrow slice at a time. Two rules, one tool:
+- **Before implementing anything, write a slice brief** (in the reply, ≤12 lines, before any code):
+  (1) the spec section being built; (2) the docs it consumes (its "Read first" list + `CANON.md`);
+  (3) its **consumers** — open `docs/XREF.md` and read every section that cites the one you are
+  building; (4) the next milestone item that will use it (`ARCHITECTURE.md` §9, `TODO.md`);
+  (5) the assumptions other systems make about it (interfaces, ordering, hashing, tiers);
+  (6) what would be wrong in the big picture if this slice were built as literally specified. If (6)
+  finds anything, stop and file a ruling request — do not build the narrow slice.
+- **One fact, one home.** A value, name, or rule lives in exactly one doc (constants in `CANON.md`);
+  every other doc *cites the section* (`NAME.md §x.y`), never restates it. Restating is drift.
+  When a decision changes: edit its home, run the audit, fix every consumer XREF lists, same commit.
+- **`python tools/docaudit/docaudit.py` is a PR gate** and is run before every docs commit: it fails
+  on dangling `NAME.md §x.y` references, on any number that contradicts `CANON.md`, on docs missing
+  from `docs/README.md`, and on stale markers (`OPEN`, `Lean:`, `TBD`, `provisional`); it regenerates
+  `docs/XREF.md`. A commit touching `src/<module>/` must touch that module's doc or say `[docs:none]`
+  in the message (CI checks). Docs say "best so far", never "final"; a doc's status line carries the
+  date of its last reconciliation pass.
+
 ### Working boundaries
 - **Single-hat rule.** Don't plan architecture, write code, and write tests in one turn. Stage:
   Design → Validate → Test-definition → Implementation (test-infra-first). Tuning phases may relax it.
