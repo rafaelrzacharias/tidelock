@@ -134,15 +134,15 @@ cross-build load of a fixture saved by the previous commit (a nightly job).
 
 ---
 
-## 7. Open
+## 7. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Whether the data VM is the editor/UI VM or a third, throwaway VM per compile. Lean:
-  a throwaway VM (fresh state per compile; nothing leaks between reloads; it is destroyed after
-  the POD is built).
-- **O-2** fx literals in Luau data: `"12.5"` strings vs `fx.pos(12.5)` constructor calls (which
-  would pass a double through Luau — exact for such literals but a trap for computed values).
-  Lean: constructor calls are allowed only with literal arguments; the compiler rejects a
-  non-literal double (it can tell — the binding receives the Luau number and refuses anything
-  not exactly representable at the row quantum).
+- **R-1 The data VM is a throwaway VM per compile** — created, run, walked, destroyed. Fresh
+  state per reload; nothing leaks between compiles; the UI VM never sees raw data tables.
+- **R-2 fx literals in data are constructor calls with exactly-representable arguments**:
+  `fx.pos(12.5)`, `fx.q(0.25)`. The binding receives the Luau number and accepts it only if
+  `value × 2^FRAC` is an integer within the row's range (i.e. the literal is exactly
+  representable at the row quantum); anything else is a named compile error naming table/row/
+  field. Decimal strings are rejected (a second parser for no gain). Computed values must be
+  built from integer arithmetic and `fx.raw(bits)` — the data author sees the quantum explicitly.
 
 *Rev 1 — 2026-08-22.*

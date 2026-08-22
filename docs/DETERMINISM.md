@@ -186,13 +186,14 @@ reflection field tables give a field-by-field diff of the diverging component (`
 
 ---
 
-## 8. Open
+## 8. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Hash-exchange cadence for the *local* harness: every tick (dev) vs every N ticks
-  (soaks). Lean: every tick in dual-sim/replay tests; `CHECKSUM_INTERVAL_TICKS` (30) for
-  three-machine soaks, as NETCODE App. B.
-- **O-2** Whether the per-arena hash is incremental (dirty-range) or full each tick. Lean: full
-  (≈0.5 ms at nominal load, and "incremental" is a correctness risk); revisit if hashing shows in
-  G-05's cost column.
+- **R-1 Hash cadence:** every tick in the local harness (dual-sim, replay, worker sweep);
+  `CHECKSUM_INTERVAL_TICKS = 30` on the wire for three-machine soaks (NETCODE App. B). The hash is
+  *computed* every tick in every tier; only the exchange is sampled.
+- **R-2 The per-arena hash is full, never incremental.** ≈0.5 ms at nominal load is inside the
+  budget; a dirty-range hash is a second correctness surface (a missed dirty mark is a silent
+  hole) for a win G-05 has not asked for. If G-05 shows hashing binding, the lever is chunk-
+  parallel hashing (`JOBS.md` §4), not incrementality.
 
 *Rev 1 — 2026-08-22. Supersedes `../foundry/DETERMINISM-DESIGN.md` for this engine.*

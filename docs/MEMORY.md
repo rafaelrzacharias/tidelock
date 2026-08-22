@@ -172,13 +172,15 @@ render interpolation is snapped. That is the only hook; nothing else may observe
 
 ---
 
-## 7. Open
+## 7. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Whether the ECS column per-type reserve is one VMem range per column (stable base per
-  column, many reserves) or one big range sliced by max-entities × stride (fewer reserves, fixed
-  cap). Lean: per column (growth without a cap; 64-bit address space is free). Decide at ECS build.
-- **O-2** Snapshot ring slot sizing when Alloy pools grow past the budget mid-session: fatal
-  (budget is a contract) vs ring re-allocation at a barrier. Lean: fatal in `netcode` tier
-  (lockstep peers must agree on limits anyway), warn-and-grow in `dev`.
+- **R-1 One VMem range per ECS column** (and per Alloy pool column). Stable base per column,
+  growth without a cap, 64-bit address space is free; the reserve count (a few hundred) is far
+  below any OS mapping limit. A shared sliced range would impose a fixed entity cap for nothing.
+- **R-2 Ring overflow is a budget violation.** `netcode`/`ship` tiers: `TL_FATAL` with the arena
+  named (lockstep peers must agree on limits, so a budget is part of the contract and is
+  fingerprinted via the reserve table). `dev` tier: `TL_LOG_WARN` once and grow the ring at the
+  next barrier, so a tuning session is not killed by a guess in the reserve table; the warning is
+  the signal to raise the budget in `app/`.
 
 *Rev 1 — 2026-08-22.*

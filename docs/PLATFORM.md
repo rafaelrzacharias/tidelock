@@ -116,11 +116,12 @@ SDL's software renderer in an offscreen surface — still the sdl3 impl, not hea
 
 ---
 
-## 9. Open
+## 9. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Whether `DrawApi` exposes `SDL_RenderGeometry`-shaped batches (vertex/index arrays) only,
-  or also a "blit texture rect" fast path for the sim-view quads. Lean: geometry only — one verb,
-  the batcher emits quads for everything; add the fast path only if a profile shows it.
-- **O-2** Gamepad at v0 or on first consumer: on first consumer (bindings only; `INPUT.md` §2).
+- **R-1 `DrawApi` exposes geometry batches only** (vertex/index spans + texture + clip). One verb;
+  the batcher emits quads for sprites, sim-view chunks, text and debug lines alike. A blit fast
+  path is rejected: it would be a second verb for a cost no profile has shown.
+- **R-2 Gamepad lands with its first consumer**, as bindings only (`INPUT.md` §2); the `RawEvent`
+  union already reserves `pad_axis`/`pad_button` so the seam does not change then.
 
 *Rev 1 — 2026-08-22.*

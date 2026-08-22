@@ -3,8 +3,9 @@
 > **Status: rev 1, 2026-08-22 — best so far, not final.** Alloy is the deterministic matter sim
 > module of tidelock, living in `src/sim/` as a static lib. §1–§8 mechanisms are carried whole
 > from the foundry design; §9–§13 are re-homed onto the C++/Luau/fixed-point stack ruled in
-> `PIVOT-DESIGN.md`. Sections marked **DECIDED** are locked (lock = best so far, never final);
-> **OPEN** items are bench-gated and enumerated in the closing "Open items & gates" section.
+> `PIVOT-DESIGN.md`. Every section is **DECIDED** (lock = best so far, never final); items a
+> measurement verifies carry a pre-committed flip condition in the closing "Open items & gates"
+> section.
 > Where this doc and `PIVOT-DESIGN.md` conflict, PIVOT wins and this doc has a bug.
 
 *Lineage: supersedes `../foundry/ALLOY-DESIGN.md` (2026-07-11, Ore era). Not a live reference.*
@@ -136,8 +137,8 @@ thousands of cells; SAP+grid hybrid — incremental sort state is extra desync s
 - **Coarse tier**: body AABBs in a coarser grid; body–body candidate pairs from cell overlap,
   pair list ID-sorted. Particle–body: body AABB → fine-tier cell range walk.
 - Rebuild cadence: broadphase once per tick with a support margin covering max substep travel
-  (`V_MAX_WORLD × h × 8`); substeps reuse the pair list (standard XPBD practice; provisional
-  pending bench).
+  (`V_MAX_WORLD × h × 8`); substeps reuse the pair list (standard XPBD practice — DECIDED; the
+  tunneling test at `V_MAX_WORLD` verifies, flip condition in the closing table).
 
 **Sort = bespoke LSD radix on integer `(cell_key: u32, index: u32)` keys — DECIDED.** There is
 no stdlib to bench against (§2 of PIVOT bans it); the only alternative is our own comparison
@@ -177,11 +178,16 @@ non-commutative combine safe (`JOBS.md` reduction rule, PIVOT §12a).
 
 `@fp_pin` has no replacement: nothing to pin.
 
-### §1.4 Open substrate items
+### §1.4 Substrate rulings (closed 2026-08-22)
 
-- **Substep count: RESOLVED = 8** (PIVOT §3.1a; Gate 0 sweeps 4/8/16 and may move the constant).
-- Particle budget envelope — G-05 decides (20k nominal; §11.2).
-- Exact hot-row packing + whether `temp` lives in the hot row or a warm column — bench.
+- **Substeps = 8** (PIVOT §3.1a). Gate 0's 4/8/16 sweep verifies; a move is a recorded constant
+  change.
+- **Particle budget = 20k active at nominal load** (§11.2); G-05 verifies on PC and Pi.
+- **Hot row = 32 B, `temp` in the hot row:** `pos` 8 · `prev_pos` 8 · `inv_mass` 4 ·
+  `mass_quanta` 4 · `species_id` 2 · `flags` 2 · `temp` 2 · `_pad0` 2. Two rows per 64-byte line.
+  `temp` stays hot because pass 1 and pass 4 both read it per particle every tick; a warm column
+  would add a second stream to the two hottest passes. Field *order* may be tuned by a cache bench;
+  the width and membership are decided.
 
 ---
 
@@ -261,13 +267,17 @@ tuning burden; overkill). **Chosen** — the mid-fidelity tier:
   solved — an unbroken crate is nearly free until stressed.
 - Pre-fail *telegraphing* (creak events at X% load) is an event-stream feature.
 
-### §2.4 Open solids items
+### §2.4 Solids rulings (closed 2026-08-22)
 
-- Texel resolution: **RESOLVED = 1/16 m** (PIVOT §3.1a). `i8` vs `i16` distance: **OPEN**
-  (feel/memory bench — i8 halves SDF store; i16 buys sub-texel gradient precision for contact
-  normals).
-- Redistancing algorithm (local fast-sweep vs Chamfer two-pass) — correctness bench.
-- Analytic-primitive fast path for machine parts — parked.
+- **Texel = 1/16 m** (PIVOT §3.1a). **SDF distance = `i16` with 4 fractional bits** (1/16 texel,
+  ±2,048 texels) — `FX-PALETTE.md` §9 R-2: contact normals need the sub-texel gradient; memory is
+  ~2 MB resident. `i8` rejected.
+- **Redistancing = integer Chamfer two-pass** (3-4 weights scaled to the 4-bit fraction, forward
+  then backward sweep over the dirty window + 1-texel halo). Exact integer arithmetic, bounded
+  cost, order-fixed by construction. Fast-sweeping rejected: its accuracy advantage is a float
+  property and its per-texel divergence behaviour is a correctness surface.
+- Analytic-primitive fast path for machine parts — **rejected until a contraption design names a
+  part the sampled SDF cannot represent at 1/16 m**; carvable machine parts are the norm.
 
 ---
 
@@ -323,11 +333,15 @@ immiscibility logic) and the solvent+solute hybrid (parked). **A particle IS one
 - **Authored flow**: coarse flow-map zones (a §5.4 field kind) for designed rivers, with
   source-at-head / sink-at-mouth.
 
-### §3.5 Open liquid items
+### §3.5 Liquid rulings (closed 2026-08-22)
 
-- Per-species particle radius: start uniform (one fine-tier cell size).
-- XSPH vs constraint-based viscosity — feel bench.
-- Basin identification shares cavity machinery (§4.1).
+- **Uniform particle radius, world-wide:** rest spacing = 2 texels (0.125 m), kernel radius
+  `h_kernel` = 4 texels (0.25 m) = the fine-tier cell size. A `LiquidSpecies` row cannot change it
+  (per-species radii would make the fine tier species-dependent). A 1 m² pool ≈ 64 particles.
+- **Viscosity = XSPH** (velocity smoothing over neighbours, weight `q_t` per species); a
+  constraint-based viscosity is rejected — XSPH is one extra neighbour sweep with no λ, and its
+  feel range covers water through honey. Higher viscosities are bulk behaviour (§3.2).
+- Basin identification shares cavity machinery (§4.1) — decided there.
 
 ---
 
@@ -374,11 +388,17 @@ authoritative state; parked as a possible non-authoritative visual layer). **Cho
 - Authored wind (weather, fans, spells) = ordinary §5.4 zone fields; machine-driven fans /
   bellows inject flow at an opening.
 
-### §4.4 Open gas items
+### §4.4 Gas rulings (closed 2026-08-22)
 
-- Coarse-sampling resolution + dirty-region policy (bench; a missed 1-texel breach must still
-  connect cavities within a bounded tick count).
-- Sound/shockwave through cavities — parked; likely an event-stream query.
+- **Coarse sampling = 4-texel cells (0.25 m), re-sampled only over dirty regions.** A 1-texel
+  breach cannot be missed because breaches are never *discovered* by sampling: every carve,
+  fracture and phase transition reports the texels it emptied (§2.1 returns removed quanta per
+  texel window), and pass 5 marks those cells' cavities for re-flood the same tick. The bound is
+  therefore **one tick**, by construction, not by sampling resolution; the coarse grid only
+  decides merge/split *extent* and opening width.
+- Sound/shockwave through cavities — **ruled as a query, not state:** `alloy_cavity_path(a, b) →
+  (hops, min_opening)` over the cavity graph; games derive audibility/pressure-wave effects from
+  it in Luau. No propagation state exists.
 
 ---
 
@@ -387,8 +407,8 @@ authoritative state; parked as a possible non-authoritative visual layer). **Cho
 Fields live on the graphs that already exist (neighbor, bond, contact, cavity) — **never on a
 world grid**. All field state is plain integer quanta (carrier `temp`: i16; accumulators i32;
 moles/charge: i32/i64). Transport runs in pass 1. Quanta-path coefficients (reciprocal thermal
-mass, conductance) are plain integers with one named `SHIFT` per table — not palette rows, never
-implicitly mixed (a `FX-PALETTE.md` question whether they earn a `coef_t` row; default: no).
+mass, conductance, rate multipliers) are **`scalar_t`** (`FX-PALETTE.md` §9 R-5) — one row,
+explicit `mul<R>` at every use, never an ad-hoc shift.
 
 ### §5.1 Temperature (DECIDED)
 
@@ -589,7 +609,7 @@ restitution** → writeback. **Fixed-point discipline inside the loop** (precisi
 (effective inv-mass spread saturates at 4096:1; statics 0 exactly). Residual carry (rung 3) is
 a standing bench variant.
 
-**Solver kernel = colored Gauss-Seidel** (provisional pending Gate 0; sequential GS disqualified
+**Solver kernel = colored Gauss-Seidel — DECIDED** (Gate 0 verifies; sequential GS disqualified
 on perf; Jacobi needs ordered scatter-add — no longer a determinism problem in fixed point, only a
 convergence one; CGS gives *structural* thread-invariance). Coloring: deterministic greedy in
 stable-id order, lowest free color; **persistent constraints color once and cache, contacts
@@ -633,11 +653,17 @@ struct MoveIntent {            // WIRE_STRUCT: explicitly padded, offsets static
 - Creature articulation beyond one capsule is render/game-side; a multi-segment sim creature is
   bodies + §8.1 constraints.
 
-### §8.3 Open mechanics items
+### §8.3 Mechanics rulings (closed 2026-08-22)
 
-- AgentBody tuning surface (accel curves, step height, coyote grace, **commit_ticks**) — data
-  vs game-side; decided against real game feel, with the T-A-04 rollback coupling on the table.
-- Ragdoll handoff — parked until a game asks.
+- **The entire AgentBody tuning surface is data** — `AgentSpecies` rows (§11.1): ground accel /
+  decel curves (piecewise `q_t` tables), step height, jump impulse budget, coyote grace (ticks),
+  swim/fly thrust, drag anisotropy, and **`commit_ticks` per action class** with engine defaults
+  **0 for movement, 6 for committed actions** (= `CONFIRMATION_HORIZON_TICKS`, so a committed
+  action can never be mispredicted). Game-side code only *produces* intents. The feel pass tunes
+  rows, never code; the rollback coupling is recorded in the row's comment.
+- **Ragdoll handoff** — ruled as a composition, not a feature: on death the game replaces the
+  agent's capsule body with N segment bodies + §8.1 constraints via ordinary edit commands. No
+  Alloy mechanism is added.
 
 ---
 
@@ -931,11 +957,11 @@ The unit of paging is the §2.2 terrain chunk (8 m, 128² texels) + its dependen
 
 ---
 
-## Open items & gates
+## Gates & rulings ledger (nothing open — closed 2026-08-22)
 
 ### Netcode-driven (carried; `NETCODE.md` §3/§7)
 
-**T-A-01 — closure-scoped arena restore prototype. THE GATE for speculation. OPEN.**
+**T-A-01 — closure-scoped arena restore prototype. THE GATE for speculation — GATED, response pre-committed.**
 A full-world resim at depth 6 is ~48 ms vs a 16.7 ms frame, so restore must be scoped to the
 island **closure** (islands that merged/split with the target over the window). Alloy's pools
 are global SoA — restoring one closure is a scatter, not a memcpy. Three candidates:
@@ -952,43 +978,44 @@ full depth regardless (~0.5 ms × depth) and is counted in the budget. If closur
 unaffordable, the netcode collapses to **delay-only lockstep with no rollback** — smaller,
 simpler, shippable, and what §9.1 already assumes. Fine outcome; discovering it late is not.
 
-**T-A-02 — `v_max` in the validator. DECIDED mechanism, OPEN coverage.** §11.1. The debug
-assert on per-tick displacement is the only net for a code path that outruns its data — the
-weakest link in the causal argument, accepted.
+**T-A-02 — `v_max` in the validator. DECIDED; coverage ACCEPTED.** §11.1. The debug assert on
+per-tick displacement is the net for a code path that outruns its data; in release an overrun
+degrades to a late frame handled by the quorum fold, never a divergence (`NETCODE.md` §17 R2).
 
-**T-A-03 — measure arena-set size at nominal load. OPEN.** ~20k particles / ~2k awake bodies /
-~500 dirty regions. Blocks the snapshot-ring sizing, rejoin-latency and storage budgets. Alloy
-owns the pools, so Alloy owns the number. Measured on the first headless stress scene.
+**T-A-03 — arena-set size. DECIDED method, number pending the first stress scene.** Budget
+reserves are the `MEMORY.md` §6 table until then; the measurement (20k particles / 2k awake
+bodies / 500 dirty regions, `registry_hash_all` reporting Σ used) replaces the table in one
+commit and sizes the snapshot ring. Until measured, the ring is sized at the reserve table.
 
-**T-A-04 — `commit_ticks` on `MoveIntent`. DECIDED** (§8.2); tuning OPEN (§8.3) with the
-rollback-frequency coupling on the table.
+**T-A-04 — `commit_ticks` on `MoveIntent`. DECIDED** (§8.2); defaults 0 / 6 ticks per action
+class, tuned as `AgentSpecies` data (§8.3) with the rollback-frequency coupling recorded.
 
 **T-A-05 — per-arena hashes at per-arena granularity on the view surface. DECIDED** (§9.2).
 Confirm-and-shape when the view surface lands; never collapse to one world hash.
 
-**T-A-06 — island-merge telegraph / `AOE_ISLAND_LIMIT`. DECIDED mechanism** (§6.2b: detonation
-tick fixed at trigger time, carried in the command); **OPEN data**: the limit (suggest 4) and
-telegraph period are game data and must reach both consumer games' combat design.
+**T-A-06 — island-merge telegraph / `AOE_ISLAND_LIMIT`. DECIDED** (§6.2b: detonation tick fixed
+at trigger time, carried in the command). **Engine defaults: `AOE_ISLAND_LIMIT = 4`, minimum
+telegraph = `CONFIRMATION_HORIZON_TICKS` = 6 ticks**; the validator rejects any area-effect row
+whose telegraph is shorter. A game may raise both, never lower them; the rule is therefore
+enforced at `init()`, not left to combat design to remember.
 
 *(T-A-07, the sort bench, is void — §1.2 decided.)*
 
-### Bench-gated (Gate 0 and the headless harness decide)
+### Decided defaults that a measurement verifies (the flip condition is pre-committed)
 
-| Item | Section | Decider |
-|---|---|---|
-| Palette rows (esp. `pos_t` fx<i32,18>); ladder rung 3 residual carry; rung 4 wide-state fallback | §8.1, §10 | Gate 0 G-01..G-04 (`GATE0-BENCH.md`) |
-| Substep constant (8; sweep 4/8/16) | §1.4 | Gate 0 substep sweep |
-| Particle budget / per-pass budgets; Pi min-spec | §11.2 | G-05 |
-| Cross-ISA + run-twice + worker-count traces | §10 | G-06, then the harness forever |
-| `i8` vs `i16` SDF distance | §2.4 | feel/memory bench |
-| Redistancing (fast-sweep vs Chamfer) | §2.4 | correctness bench |
-| Hot-row packing; `temp` hot vs warm | §1.4 | cache bench |
-| Broadphase pair-list reuse across substeps | §1.2 | tunneling test at `V_MAX_WORLD` |
-| CGS vs Jacobi/hybrid kernel | §8.1 | Gate 0 convergence + SIMD utilization |
-| XSPH vs constraint viscosity | §3.5 | feel bench |
-| Coarse occupancy sampling resolution / dirty policy | §4.4 | breach-connectivity bound test |
-| Grass as pinned particles | §7 | count bench |
-| `coef_t` palette row for quanta-path coefficients | §5 | `FX-PALETTE.md` rev 2 |
+| Item | Decided | Verified by | Pre-committed response if it fails |
+|---|---|---|---|
+| Palette rows (esp. `pos_t` fx<i32,18>) | `FX-PALETTE.md` §3 values | Gate 0 G-01..G-04 | climb the ladder rung by rung; rung 4 (wide state, narrow math); then the float fallback |
+| Substeps | 8 | Gate 0 sweep 4/8/16 | move the constant (recorded) |
+| Particle budget | 20k active; Pi = reference peer | G-05 | PC miss = pivot-level; Pi-only miss = Pi becomes stretch peer |
+| Cross-ISA / run-twice / worker traces | identical | G-06, then the harness forever | it is UB: sanitizers, never the palette |
+| Broadphase pair list reused across substeps | yes, margin `V_MAX_WORLD × h × 8` | tunneling test at `V_MAX_WORLD` | rebuild the fine tier every 4 substeps (the margin halves) |
+| Solver kernel | colored Gauss-Seidel | Gate 0 convergence + lane utilization | Jacobi-within-color hybrid behind the same skeleton |
+| Hot-row field order | §1.4 order | cache bench | reorder fields; width and membership stay |
+| Grass/brush as pinned particles | yes, when a plant consumer exists | count bench at that time | promote dense grass to a per-chunk SDF decal (render-only) |
+
+Everything else formerly in this table is ruled in its section (§1.4, §2.4, §3.5, §4.4, §8.3,
+§5).
 
 ### Parked (recorded so they are not re-proposed)
 

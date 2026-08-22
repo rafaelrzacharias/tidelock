@@ -205,13 +205,14 @@ per-column hashes every tick.
 
 ---
 
-## 9. Open
+## 9. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** `MAX_COMPONENT_TYPES`: 1024 (foundry) vs 256 (`u8` ids everywhere). Lean: 256 — a
-  `u16` id costs nothing either way and 256 is plenty for these games, but 1024 is the registry
-  bound, not a per-entity cost. Keep 1024; the id stays `u16`.
-- **O-2** Whether Luau-declared components may contain fx-row fields directly (yes — the kind
-  enum names palette rows; Luau writes them as raw bits — `FX-PALETTE.md` §6) and whether the
-  validator range-checks them on write (lean: debug only).
+- **R-1 `MAX_COMPONENT_TYPES = 1024`, `ComponentId` is `u16`.** It is a registry bound (tens of
+  KB), not a per-entity cost; 256 would save nothing measurable and cap a modded game.
+- **R-2 Luau-declared components may contain fx-row fields.** The kind enum names every palette
+  row; Luau reads/writes them as raw bits (`FX-PALETTE.md` §6). **No write-side range check exists**:
+  every `i32` bit pattern is a legal value of a 32-bit row by definition (the row's range *is*
+  the type's range), so there is nothing to check; semantic limits (e.g. `V_MAX_WORLD`) are the
+  data validator's job at `init()`, and the integrator's debug assert catches a runaway at runtime.
 
 *Rev 1 — 2026-08-22.*

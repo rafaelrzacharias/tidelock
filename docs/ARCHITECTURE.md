@@ -188,15 +188,16 @@ side is ever read back into the sim (D10, INV-6). The full loop and phase semant
 
 ---
 
-## 8. Open
+## 8. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Whether `render/` should see `sim/` views directly (fast upload of SDF/particle views)
-  or only through `core/` view handles. Lean: direct read of Alloy's *read-only view structs* is
-  allowed (views are POD snapshots, not sim internals); the include is `sim/views.h` only. Decide
-  at Milestone 2 with the upload path in hand.
-- **O-2** Whether `net/` needs its own arena or lives on the permanent arena + a frame scratch.
-  Lean: own permanent sub-arena (registered, hashed? — no: net state is not authoritative) so the
-  snapshot ring and the log ring are sized independently. Decide at Hovel Milestone A.
+- **R-1 `render/` reads Alloy views directly.** `sim/views.h` is the one public header `render/`
+  may include from `sim/`: read-only POD view structs (chunk rasters, particle spans, body poses),
+  never pool internals. Going through `core/` handles would add a copy of the largest per-frame
+  payload for no seam benefit; the include firewall pins it to that header.
+- **R-2 `net/` owns one permanent, non-registered arena** (protocol state, log ring, redundancy
+  window, ENet buffers via its pool hook) plus main scratch for per-frame encode/decode. Not
+  hashed, not snapshotted — none of it is authoritative. The snapshot ring (registered set) and
+  the log ring are therefore sized independently.
 
 *Rev 1 — written 2026-08-22 from the pivot ruling. Supersedes `FOUNDRY-CORE.md` §0/§1/§4/§7 and
 `ENGINE-DESIGN.md` A1 for this engine.*

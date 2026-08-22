@@ -117,12 +117,13 @@ arena-offset guard's last report. Luau VM panel: pool usage, GC step time, instr
 
 ---
 
-## 9. Open
+## 9. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Whether the Inspector supports multi-select edits (lean: later; single-select v0).
-- **O-2** ImGui multi-viewport (tear-off panels) at v0 — the SDLRenderer3 backend supports it;
-  cost is nothing. Lean: on.
-- **O-3** A headless `--dump-probes` mode for the test driver so probe TSVs are CI artifacts
-  (yes, trivially — the sink is the same).
+- **R-1 The Inspector is single-select through v0.** Multi-select edit is part of the editor-shell
+  seam (`RESERVED-SEAMS.md` §12 — the selection service) and lands with it, not before.
+- **R-2 ImGui multi-viewport is on from v0** (docking branch + SDLRenderer3 backend support it;
+  zero cost).
+- **R-3 The driver has `--dump-probes`**: the probe TSV sink writes to a CI artifact path; same
+  sink as the panel.
 
 *Rev 1 — 2026-08-22.*

@@ -135,13 +135,16 @@ is skipped entirely for sim-only tests), and the loop runs as fast as the CPU al
 
 ---
 
-## 7. Open
+## 7. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** `MAX_PEERS` frames per tick in `World` vs one merged frame: keep per-peer frames
-  (the action-map runs per player slot; the game decides which slot is "me").
-- **O-2** Whether `alloy_step` is one `UPDATE` system or five (one per pass) so game systems can
-  interleave between passes. Lean: one system at v0; split only when a consumer needs a hook
-  between passes — and then the hook is a command applied at a pass boundary, not interleaved
-  code.
+- **R-1 `World` holds `InputFrame[MAX_PEERS]` per tick plus a `PeerSlots` singleton**
+  (`live_mask`, local slot, slot→player id). The action-map runs per live slot; the game's script
+  reads `PeerSlots.local` to know which slot is "me". One merged frame would lose per-peer
+  substitution and per-peer commitment windows.
+- **R-2 `alloy_step` is one `UPDATE` system, permanently.** Game code never interleaves between
+  passes: anything that must happen "between pass 3 and pass 4" is a command applied at that
+  pass boundary inside Alloy (the edit channel already has pass-boundary application semantics,
+  `ALLOY.md` §0.4). Splitting the step into five systems would expose pass internals as a seam
+  and is rejected, not deferred.
 
 *Rev 1 — 2026-08-22.*

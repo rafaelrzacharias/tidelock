@@ -118,12 +118,16 @@ Durable context lives in committed files only (`docs/`, `TODO.md`, `LESSONS.md`)
 
 ---
 
-## 9. Open
+## 9. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** ccache/sccache on Windows with clang-cl: verify it honours our flag set before
-  counting on it for the incremental budget.
-- **O-2** Whether `ship` uses LTO. Lean: no at v0 (compile-time budget; no measured win yet).
-- **O-3** Sysroot source for the Pi cross target: a tarball of the Pi's `/usr` + `/lib` checked
-  into a release bucket (not git), versioned in `toolchain/VERSIONS`.
+- **R-1 The rebuild budget is met without a compiler cache.** ccache/sccache may be enabled
+  locally as a convenience, but the CI measurement runs cold; a budget that only holds with a
+  cache is not a budget.
+- **R-2 No LTO in any tier.** It costs link time against the budget and has no measured win; it
+  would also be a fingerprint input for nothing. Revisit only with a profile showing a cross-TU
+  inlining loss in a hot sim loop — and then the fix is unity-build placement, not LTO.
+- **R-3 Pi sysroot = a tarball of the Pi's `/usr/include`, `/usr/lib`, `/lib` captured by
+  `tools/sysroot.sh`**, stored in a release bucket (not git), its hash pinned in
+  `toolchain/VERSIONS`. The Deck uses the same mechanism with an x86-64 Linux sysroot.
 
 *Rev 1 — 2026-08-22.*

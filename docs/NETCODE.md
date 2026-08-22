@@ -387,7 +387,7 @@ process exiting immediately after its last send can lose the queue.
 ack.** The pattern is a short epilogue `[final_tick][final_ref_hash][all_agree]`. Used for:
 session end, snapshot handoff completion, custody handoff (§11.6), succession confirmation.
 
-### 5.5 NAT traversal — OPEN
+### 5.5 NAT traversal — RULED 2026-08-22: LAN / direct-IP for v1
 
 The project's trade-off axes are *single-process, deterministic, no services; not
 latency/SPOF/CAP*. STUN + hole punching, a TURN relay, and session auth are a **service
@@ -398,9 +398,12 @@ dependency** — a new axis, not an implementation detail.
 3. **Platform-provided sessions** (Steam Datagram Relay or equivalent). Trades the service for a
    platform SDK — must live strictly outside the sim boundary and behind `PLATFORM.md`.
 
-**No pick.** Product decision. Option 2 is a **legitimate v1 answer** for 8-player co-op — one
-port-forwarded host is the normal configuration in this genre (Valheim, Terraria, Factorio) — not
-a placeholder. ENet is NAT-agnostic: all three options sit below it.
+**Ruling: option 2.** One port-forwarded host (or LAN) is the normal configuration in this genre
+(Valheim, Terraria, Factorio); it keeps the project's "no services" axis intact; ENet is
+NAT-agnostic so nothing in this doc changes if a relay is added later. **Reopening condition:** a
+shipped game that wants public matchmaking — then option 3 (platform relay behind `PLATFORM.md`,
+an FFI dependency outside the sim boundary) is the next step, never option 1's own service. The
+lobby seating (§9.2) needs the full RTT matrix, which direct IP provides.
 
 ---
 
@@ -707,7 +710,11 @@ re-sequences from the last quorum-confirmed tick; every peer rolls back to it. C
 of depth equal to the confirmation horizon**.
 
 > **The confirmation horizon is simultaneously speculation depth, failover cost, and
-> irreversible-event display delay.** One tunable, three consequences documented next to it.
+> irreversible-event display delay.** One constant, three consequences documented next to it.
+> **`CONFIRMATION_HORIZON_TICKS = 6` (100 ms) — RULED 2026-08-22.** It equals the upper bound of
+> `LOCAL_INPUT_DELAY_TICKS` (a peer at max delay is exactly at the horizon), satisfies
+> `REDUNDANCY_TICKS (9) ≥ 6`, and is the depth every budget in §7.2 and §16.2 was computed at.
+> Hovel S-13 measures the degradation curve around it; the value moves only by a recorded ruling.
 
 Epochs do *not* prevent a **behind** successor claiming `e+1` and re-sequencing over ticks others
 had confirmed.
@@ -1286,7 +1293,7 @@ Arena-set size is the one unknown that most affects `Persistent`. §19's ballast
 |---|---|
 | Sim tick = network tick | 60 Hz (16.7 ms) — **one rate** |
 | Local input delay | `LOCAL_INPUT_DELAY_TICKS` 3–6, adaptive per peer (§7.4) |
-| Confirmation horizon | Tunable — **also failover cost and irreversible-display delay** |
+| Confirmation horizon | **6 ticks (100 ms)** — **also failover cost and irreversible-display delay** (§9.5) |
 | Failover, detected | 1 tick + one horizon-depth rollback |
 | Failover, graceful | 0 rollback — sequenced at a known tick (§10.3) |
 | Rejoin, warm (≤ 5 s hot checkpoint) | snapshot transfer + ≤ 2.4 s replay |
@@ -1294,45 +1301,65 @@ Arena-set size is the one unknown that most affects `Persistent`. §19's ballast
 
 ---
 
-## 17. Risks
+## 17. Risks — every entry closed, accepted, or gated (2026-08-22 sweep)
 
-Ordered by cost if discovered late. Rev 3 numbering preserved where the risk survives.
+Ordered by cost if discovered late. Rev 3 numbering preserved. Nothing here is an open question:
+each risk is **closed** (ruled), **accepted** (the residual is named and owned), or **gated** (a
+measurement with a pre-committed response).
 
 **R1 — Hidden information. CLOSED** (2026-08-21, PIVOT §8): full-world visibility. Reopening is a
 redesign trigger.
 
-**R2 — `v_max` enforcement is data-level (§3.3).** A code path outrunning its declared entry is
-caught by a debug assert only. **Confidence: Medium.** The causal deadline's soundness rests on it.
+**R2 — `v_max` enforcement is data-level (§3.3). ACCEPTED.** The validator covers data; the
+integrator's debug assert on per-tick displacement covers code paths in testing; in release an
+overrun can only produce a *late* input (a missed causal deadline), which the quorum fold handles
+as a missing frame — degraded, never divergent. That bound is why Medium confidence is enough.
 
-**R3 — Closure-scoped restore, both halves (§3.7, §7.3). Highest-risk unknown.**
-(a) *cost:* Alloy's pools are global SoA, so a scoped restore is a scatter; (b) *scope:* the
-closure can approach the whole world under dense load. **Confidence: Low** that both are free.
-Gate 4 / T-A-01 measures both; §19.6 S-14 measures (b) early on Hovel.
+**R3 — Closure-scoped restore, both halves (§3.7, §7.3). GATED — the highest-risk unknown.**
+(a) *cost:* scatter restore over global SoA pools; (b) *scope:* closure growth under dense load.
+Gate 4 / T-A-01 measures both; S-14 measures (b) early on Hovel. **Pre-committed response:** fail
+either half → delay-only lockstep, no speculation (§18.2), which this design already supports
+with §7.4 + §7.5 carrying the feel. No third option exists.
 
-**R5 — Gap re-sequencing under partial views (§9.5). Test, not argument.** The log-completeness
-constraint closes the behind-successor hole. §19.6 S-08.
+**R5 — Gap re-sequencing under partial views (§9.5). CLOSED by construction, verified by S-08.**
+The log-completeness constraint makes a behind-successor's claim unacknowledgeable.
 
-**R6 — Eviction idempotency under re-sequencing (§10.2).** If the coordinator dies mid-eviction the
-successor re-sequences and the eviction tick can shift. Every sequenced one-shot (leave, custody
-handoff, construction commit) must be **idempotent under re-sequencing**, not merely deterministic.
+**R6 — Eviction idempotency under re-sequencing (§10.2). CLOSED — the rule:** every sequenced
+one-shot (eviction, leave, custody handoff, construction commit) carries a stable id
+`(originating_slot, seq)` assigned at creation, never at sequencing. Re-sequencing changes the
+event's *tick*, not its id. Because re-sequencing always follows a rollback to the last confirmed
+tick, any earlier application of the event is undone by the rollback itself and the event is
+applied exactly once in the new ordering; the id additionally makes a duplicate delivery (same
+id, same or later tick) a no-op. Idempotency therefore follows from (rollback-then-reapply) +
+(id-keyed dedup), and it is tested by S-06/S-07 run together.
 
-**R10 — Quorum-loss termination vs partition rule (§8.3, §10.8).** Needs a correctness argument
-that no sequence of evictions lets a minority shrink its own denominator into a majority.
-**Proposed guard: eviction requires quorum of the *pre-eviction* live set.** Proven, not asserted.
+**R10 — Quorum-loss termination vs partition. CLOSED — the argument:** let `L` be the sequenced-
+live set when a partition splits it into `A` and `B`. An eviction is sequenced only with quorum of
+the *pre-eviction* live set, i.e. > |L|/2 acknowledgements. A side with |A| ≤ |L|/2 cannot gather
+them from its own members, so it can never sequence an eviction and its denominator never
+shrinks; it reaches `QUORUM_LOSS_TICKS` and terminates (§8.3). A side with |B| > |L|/2 holds quorum
+of `L`, evicts one `A` member, and now holds quorum of `L \ {a}` (it lost no members), so it can
+continue inductively until `A` is fully evicted. Exactly half on each side: neither has a strict
+majority, both terminate, both write identical checkpoints (§10.8). Sequential departures *before*
+the split each shrank `L` under quorum of the then-live set, so the induction base holds. Hence no
+sequence of evictions lets a minority bootstrap itself into legitimacy. Verified by S-09 at N=8.
 
-**R11 — Inter-session world forking (§11.5, §11.6; `Persistent` only).** Ordinary use creates
-forks (A+B Tuesday, A+C Wednesday). No merge. Mitigated by chain detection + custody baton; the
-canonical-save rule is a product decision.
+**R11 — Inter-session world forking (`Persistent`). CLOSED — the product rule:** the chain whose
+latest entry carries a *signed, acked* custody handoff is canonical; a forced-takeover chain is
+presented as a **new world** named `<world> (fork of <date>)` with the fork point shown, never as
+the same world. Two forks are never merged; the UI offers to keep either or both. The netcode's
+obligation (make the fork unambiguous and locatable) is met by §11.5; this rule is the product
+half, ruled here so no game re-derives it.
 
-**R12 — CSPRNG. RESOLVED — entropy behind the platform seam.** `BCryptGenRandom` /
-`getrandom(2)` in `PLATFORM.md`, header unreachable from sim, symbol gate proves it; Monocypher
-Ed25519/BLAKE2b; never roll own crypto. `Persistent` is no longer blocked.
+**R12 — CSPRNG. CLOSED** — entropy behind the platform seam (`PLATFORM.md`), Monocypher
+Ed25519/BLAKE2b, symbol gate proves unreachability. `Persistent` is not blocked.
 
-**R13 — Coordinator capability drift (§16.1).** Mitigated by capability-ordered seating; 1.40
-Mbit/s is a low bar. Reopening condition: if sessions routinely run on an under-capacity
-coordinator, reintroduce a *single* gate — not a score.
+**R13 — Coordinator capability drift (§16.1). ACCEPTED.** Capability-ordered seating at the
+lobby; degradation over a long session is ended by end-and-reseat (free under `Persistent`).
+Reopening condition: measured sessions routinely on an under-capacity coordinator → one single
+gate (upstream headroom), never a score.
 
-**R16 — UB is the residual silent-desync class.** *(new in tidelock)* Fixed point removes FP as a
+**R16 — UB is the residual silent-desync class. ACCEPTED and instrumented.** *(new in tidelock)* Fixed point removes FP as a
 source of divergence; what remains is signed overflow, uninitialized padding, out-of-bounds
 reads, and data races — all silent, all ISA/opt-level-sensitive. Mitigation: sanctioned
 wrapping/saturating helpers only in quanta paths, explicit padding, zero-filled arenas, UBSan +
@@ -1688,7 +1715,7 @@ All tick counts are **sim ticks at 60 Hz**. One unit (§4.4).
 | `SIM_TICK_RATE` | 60 Hz | Network tick is the same tick |
 | `LOCAL_INPUT_DELAY_TICKS` | 3–6 (50–100 ms) | Adaptive per peer (§7.4), sequenced |
 | `REDUNDANCY_TICKS` | 9 (150 ms) | **≥ `CONFIRMATION_HORIZON_TICKS`**, `static_assert`ed. Raise to 16 under measured loss |
-| `CONFIRMATION_HORIZON_TICKS` | Tune | **Speculation depth = failover cost = irreversible display delay** |
+| `CONFIRMATION_HORIZON_TICKS` | **6 (100 ms)** | **Speculation depth = failover cost = irreversible display delay** (§9.5); = max `LOCAL_INPUT_DELAY_TICKS`; ≤ `REDUNDANCY_TICKS` |
 | `MAX_TICKS_PER_PACKET` | 9, floor 3 under churn | §12.3 MTU guard (T-N-07, Low) |
 | `SUB_DECAY_TICKS` | 6 (100 ms) | `AXIS` substitution decay (§8.4) |
 | `AOE_ISLAND_LIMIT` | 4 | Above this, telegraph required (§3.5) |

@@ -115,12 +115,12 @@ net packet decode, Luau bytecode loader — under ASan in nightly.
 
 ---
 
-## 8. Open
+## 8. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Runner output format for the IDE: TSV + a `--junit` writer if a CI system wants it
-  (trivial; add when the CI is chosen).
-- **O-2** Whether `tests/` code must obey the full subset. Ruling: yes, except the generated list
-  and an allowance for `printf`-class io (tests are not sim code; they may read the clock and the
-  filesystem). Tools under `tools/` are fully exempt.
+- **R-1 The runner emits TSV and `--junit` from day one** (the JUnit XML writer is ~40 lines over
+  stb_sprintf; every CI system reads it). CI is **GitHub Actions** for the Windows/Linux/cross
+  lanes, with the Pi and Deck as self-hosted runners for the nightly cross-ISA job.
+- **R-2 `tests/` obeys the subset**, with two exemptions: the generated test list and
+  `printf`-class io + clock + filesystem access (tests are not sim code). `tools/` is fully exempt.
 
 *Rev 1 — 2026-08-22.*

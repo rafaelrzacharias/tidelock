@@ -169,12 +169,16 @@ if (r.err) { TL_LOG_ERR(ERR_NAME(r.err)); return r.err; }
 
 ---
 
-## 9. Open
+## 9. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Whether to allow `[[nodiscard]]` on `Result<T>` returns (yes, lean: it costs nothing and
-  catches the unchecked-error class) — confirm clang-cl honours it under `-Werror`.
-- **O-2** A `TL_HASHED_STRUCT(Name)` macro that static_asserts trivial copyability, explicit
-  padding (sizeof == Σ field sizes), and registers the struct's field table for the desync dump —
-  shape decided with `ECS.md` §6's X-macro; whether it's the same macro or a sibling is open.
+- **R-1 `[[nodiscard]]` is mandatory** on `Result<T>` and `ErrCode`. clang and clang-cl both honour
+  it under `-Werror`; an ignored result is a compile error. The sanctioned "I know this can't
+  fail" form is `TL_CHECK(call().err == 0)`.
+- **R-2 One field list, three doors.** Every reflected struct declares one `TL_FIELDS_Name(X,XA,XH)`
+  list. Three macros consume it: `TL_COMPONENT(Name)` (ECS column + registration), `TL_POOL_ROW(Name)`
+  (Alloy/engine pool rows: trivially-copyable + explicit-padding static_asserts + field table for the
+  desync dump, no column), and `TL_WIRE_STRUCT(Name)` (adds the leading `u32 format_version`, an
+  `offsetof` static_assert per field generated from the list, and the little-endian write/read
+  pair). Same table, same kinds, same inspector; nothing is declared twice.
 
 *Rev 1 — 2026-08-22.*

@@ -124,13 +124,13 @@ constant change is a separate ruling); the 32-bit-vectorizable rule (rung 4 is t
 
 ---
 
-## 7. Open
+## 7. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Box–box contact generation for G-01: corner-vs-SDF deepest-point (Alloy's real method) vs
-  SAT on boxes (simpler for the bench). Lean: corner-vs-SDF, so the bench exercises the real
-  contact path's precision, not a simplified one.
-- **O-2** Whether G-05 should include the broadphase rebuild cost. Lean: yes (the tiered hash +
-  radix sort are integer code and part of the real per-tick cost), but report solve and broadphase
-  as separate columns so the verdict is attributable.
+- **R-1 Box–box contacts are corner-vs-SDF deepest-point** (Alloy's real method, `ALLOY.md` §2.1),
+  not SAT. The bench must exercise the precision of the contact path the sim will ship, or G-01's
+  verdict is about a solver nobody builds.
+- **R-2 G-05 includes the broadphase rebuild** (tiered hash + radix sort) in the budget, reported as
+  separate `solve_us` and `broadphase_us` columns so a miss is attributable. The threshold applies
+  to the sum.
 
 *Rev 1 — 2026-08-22.*

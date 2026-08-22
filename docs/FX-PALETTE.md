@@ -1,8 +1,9 @@
 # The fx palette and det math (tidelock, rev 1)
 
-> **Status:** design rev 1, 2026-08-22. Mechanism and policy **DECIDED**; the palette rows are
-> **PROPOSED pending Gate 0** (`GATE0-BENCH.md`). After Gate 0 this doc gets rev 2 with measured
-> values and the DECIDED stamp; `fx_palette.h` is written from rev 2, not rev 1.
+> **Status:** design rev 1.1, 2026-08-22. Mechanism, policy and rows **DECIDED**; Gate 0
+> (`GATE0-BENCH.md`) *verifies* the rows and may force a recorded rev-2 revision through the
+> pre-committed ladder (§3.2, §9 R-1). `fx_palette.h` is written from this doc; rev 2 carries the
+> measured values.
 > **Lineage:** expands `PIVOT-DESIGN.md` §3.1–§3.2. PIVOT is the ruling.
 > **Owns:** `src/foundation/fx.h`, `fx_palette.h`, `det_math.h`, `fx_float.h`.
 
@@ -69,7 +70,7 @@ change, not a redesign.
 
 ---
 
-## 3. The palette rows (PROPOSED, pending Gate 0)
+## 3. The palette rows (DECIDED — verified by Gate 0)
 
 **Derivation rule:** integer bits ≥ ⌈log₂(range × margin)⌉, the rest is FRAC; 32-bit wherever the
 solver should vectorize. Each row carries a range/resolution line; the `init()` table validator
@@ -85,7 +86,8 @@ checks game data against these ranges (same slot as `v_max`).
 | `angle_t` | **fx<i32,30>** | ±2 turns | ~1e-9 turn | **turns, not radians** — wraps free at ±1 by masking; sin/cos index naturally |
 | `omega_t` | **fx<i32,20>** | ±2,048 turn/s | ~1e-6 turn/s | angular velocity |
 | `dt_t` | **fx<i32,30>** | ±2 s | 9.3e-10 s | h, and only h. h² is never a runtime operand (α̃ is precomputed); `inv_h` is the plain integer 480 |
-| `lambda_t` | **fx<i32,16>** (accumulated in i64) | ±32,768 m·mass | 1.5e-5 | XPBD Lagrange multiplier (length × mass units). Storage row is the least certain; it is an i64 accumulator within a substep (rung 1) and narrows once at writeback |
+| `scalar_t` | **fx<i32,16>** | ±32,768 | 1.5e-5 | unitless scalars outside the solver: quanta-path coefficients, animation speed, modifiers, utility scores (§9 R-5) |
+| `lambda_t` | **= `scalar_t`** (accumulated in i64) | ±32,768 m·mass | 1.5e-5 | XPBD Lagrange multiplier (length × mass units); an alias of `scalar_t`. The row most likely to move at rev 2; it is an i64 accumulator within a substep (rung 1) and narrows once at writeback |
 | conserved quanta | **plain i32 / i64** | — | — | mass-quanta, moles, charge, load: integers, saturating ops only (`ALLOY.md` §10). Never an fx row |
 
 Stress-case mapping: the feather→boulder denominator is `invmass_t`'s clamp; the sub-texel
@@ -244,22 +246,27 @@ be — if rung 4 ever fires, `LUAU-LAYER.md` §3 gains a boxed-i64 rule.
 
 ---
 
-## 9. Open
+## 9. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Rows: every `fx<i32,·>` row above is pending Gate 0 (`GATE0-BENCH.md` §3 names which
-  scenario gates which row). `lambda_t`'s storage format is the least certain.
-- **O-2** SDF texel distance: `i8` vs `i16` quantized signed distance in texel units —
-  `ALLOY.md` §2.4 bench; it is a storage width, not a palette row (it never enters the solver
-  without being converted to `pos_t` through one multiply).
-- **O-3** Whether `exp`/`log` are needed at all before a chemistry consumer (rates are integer
-  quanta/tick; decay is keyed-RNG probability). Lean: no; port on pull.
-- **O-4** SIMD: the fx helpers are scalar at v0. A `fx4<Rep,FRAC>` lane type over SSE2/NEON
-  intrinsics (in `foundation/`, not `<immintrin.h>` leaking upward) is a performance item after
-  G-05 reports — the column layout is what matters now, and it is decided (32-bit rows).
-- **O-5** A unitless **`scalar_t = fx<i32,16>`** row (±32,768, 1.5e-5) is requested by three
-  consumers outside the solver: `ALLOY.md` §5's quanta-path coefficients (`coef_t`),
-  `RESERVED-SEAMS.md` §6's animation speed and §9's attribute modifiers / utility scores. `q_t`'s
-  ±2 range is too narrow for them; `lambda_t` already has this format. Lean: add the row at rev 2
-  as `scalar_t` and make `lambda_t` an alias of it — one format, two names, no ad-hoc rows.
+- **R-1 The rows are DECIDED at the §3 values.** Gate 0 *verifies* them; it does not choose them.
+  A convergence failure triggers the pre-committed ladder (§3.2) and, if a row must move, a
+  recorded rev-2 edit within the derivation rule — the same "best so far" revision discipline as
+  every other lock, not an open question. `lambda_t` is the row most likely to move; its fallback
+  is already named (i64 accumulate, narrow once).
+- **R-2 SDF texel distance is `i16`, 4 fractional bits** (1/16 texel resolution, ±2,048 texels
+  range). `i8` is rejected: contact normals come from the SDF gradient, and 1/16-texel precision is
+  what keeps resting contacts from jittering at the `pos_t` quantum. Memory is irrelevant
+  (128² × 2 B = 32 KB per chunk; ~60 resident chunks ≈ 2 MB). Storage width, not a palette row.
+- **R-3 No `exp`/`log`/`pow` at v0.** Rates are integer quanta/tick; decay is keyed-RNG
+  probability from half-life (precomputed per-tick probability in `q_t` at `init()`). Ported from
+  FixPointCS only when a consumer exists; the port goes through the §4.4 oracle like every kernel.
+- **R-4 The fx helpers are scalar through v0 and Gate 0.** A `fx4<Rep,FRAC>` lane type over
+  SSE2/NEON intrinsics lands only if G-05 names a column where it buys the budget; the 32-bit-row
+  rule is what keeps that option open and is decided now.
+- **R-5 `scalar_t = fx<i32,16>` is a palette row (added at rev 1.1, 2026-08-22)** — unitless
+  scalars outside the solver: quanta-path coefficients (`ALLOY.md` §5), animation speed, attribute
+  modifiers, utility scores. Range ±32,768, resolution 1.5e-5. `lambda_t` is an alias of it (same
+  format, solver-facing name). Mixed ops: `scalar_t × any row → that row`, `scalar_t × scalar_t →
+  scalar_t`, enumerated in `fx_palette.h` like the rest. The palette is now nine rows + quanta.
 
 *Rev 1 — 2026-08-22. Rev 2 is written from Gate 0's CSVs.*

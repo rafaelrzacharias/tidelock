@@ -84,12 +84,12 @@ systems parallelize by `reads/writes` groups for free once the pool exists.
 
 ---
 
-## 5. Open
+## 5. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Grain selection: a constant per call site vs `n / (workers × 4)`. The latter makes chunk
-  *boundaries* depend on worker count — **forbidden**. Grain is a per-call-site constant (or a
-  pure function of `n`), stated in `chunk_count`.
-- **O-2** Whether the Pi's 4 cores get a smaller default pool (3 workers) or the same code path
-  with `core_count − 1`: the same path; no per-platform branch.
+- **R-1 Grain is a per-call-site constant** (or a pure function of `n` alone), stated at the call
+  and folded by `chunk_count(n, grain)`. Any grain derived from worker count makes chunk
+  *boundaries* worker-dependent and is forbidden — the debug shuffle mode (§3) would catch it.
+- **R-2 One pool policy on every platform:** `core_count − 1` workers, main thread participates.
+  No per-platform branch; the Pi simply runs 3 workers. Worker count never enters results.
 
 *Rev 1 — 2026-08-22.*

@@ -136,7 +136,7 @@ The subset — C-with-namespaces ("orthodox C++"):
 
 ---
 
-## 3. Determinism model: fixed point + det math + keyed RNG + pinned hash (DECIDED, palette rows OPEN)
+## 3. Determinism model: fixed point + det math + keyed RNG + pinned hash (DECIDED; rows decided in `FX-PALETTE.md` rev 1.1, verified by Gate 0)
 
 **No floats in authoritative state or on any sim path.** Floats remain legal render-side
 (interpolation, camera — D10's boundary is unchanged).
@@ -175,7 +175,7 @@ The subset — C-with-namespaces ("orthodox C++"):
 | Substeps/tick | **8** (60 Hz → h = 1/480 s) | XPBD default; h, h² are precomputed rounded fx constants (1/480 isn't dyadic; one shared constant is deterministic by construction) |
 | `MASS_RATIO_CLAMP` | **4096 : 1 (2¹²), applied as an effective clamp** | The ALLOY §10 feather→boulder counter-measure: per-solve, each pair's inv-mass spread saturates at the clamp rather than the validator rejecting table data — content is never refused, extreme pairs just behave as if 4096:1 (a documented approximation, invisible in practice: past ~1000:1 the light body reads as massless anyway). Statics are inv_mass = 0 exactly and cost no range |
 
-### 3.1b The palette rows (PROPOSED, pending Gate 0)
+### 3.1b The palette rows (DECIDED 2026-08-22 as written here plus `scalar_t = fx<i32,16>` — `FX-PALETTE.md` §3/§9 is the authority; Gate 0 verifies, the ladder is the pre-committed response)
 
 Derivation rule: integer bits ≥ ⌈log₂(range × margin)⌉, rest is FRAC; 32-bit wherever the
 solver should vectorize.
@@ -583,7 +583,7 @@ parallel Alloy code. INV-7 (worker-count invariance) is the requirement it exist
   blocking release gate; plus one mixed-pair run (peer A at 4 workers, peer B at 16, same
   inputs) once transport exists.
 
-## 12. OPEN — decisions still needed (ask, don't drift)
+## 12. Decisions ledger — all resolved (nothing open as of 2026-08-22)
 
 *(Resolved 2026-08-21 and folded into the sections above: Windows compiler → clang everywhere
 (§11) · Assay → repurposed (§10) · hidden information R1 → full visibility, closed (§8) ·
@@ -605,7 +605,11 @@ Remaining, in intended order of resolution:
 2. ~~Luau step-debugger scope~~ **RULED 2026-08-21 — ceiling = Tier 1** (§7): Tier 0
    (console + replay scrub) at v0; Tier 1 (break-and-inspect) when gameplay scripting
    starts; Tier 2 rejected. Details in §7's debugger bullet.
-3. **Doc estate sweep — deliberately LAST** *(ruled 2026-08-21)*: retire `FOUNDRY-ORE-GATE.md`
+3. ~~Doc estate sweep~~ **DONE 2026-08-22 — superseded by the tidelock doc set** (`docs/README.md`
+   is the map; every system has its own doc; a second veto pass the same day closed every open
+   item across them, incl. `CONFIRMATION_HORIZON_TICKS = 6`, NAT = LAN/direct-IP v1, the
+   `scalar_t` palette row, `i16` SDF distance, and the R6/R10/R11 netcode arguments). The
+   original item, for the record: retire `FOUNDRY-ORE-GATE.md`
    + Ore-asks blocks; amend ALLOY (§1.3/§10 mappings), NETCODE (§1.1/§5 rows), CLAUDE.md
    (principle 1, axes, build skill), TODO (queue rewrite); this doc is the ruling record. A
    dedicated session, one commit per doc. **Until it runs, this doc + `FX-PALETTE.md`

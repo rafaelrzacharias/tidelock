@@ -2,8 +2,11 @@
 
 > One home per concern. Every doc is **rev 1, 2026-08-22, best so far — not final**, pre-code.
 > `PIVOT-DESIGN.md` is the founding ruling; where any doc conflicts with it, PIVOT wins and the
-> conflict is a bug to file. Sections are marked **DECIDED** or **OPEN**; an OPEN item is a
-> question, not a default.
+> conflict is a bug to file. **Nothing is open** (second veto pass, 2026-08-22): every former
+> open item is a ruling in its doc's closing "Rulings" section; items a measurement verifies
+> (Gate 0 rows, T-A-01, T-A-03) state the decided default *and* the pre-committed response if the
+> measurement fails. A new question is filed as a ruling request in `TODO.md`, never as an
+> "open" line in a doc.
 
 ## Reading order
 

@@ -33,7 +33,7 @@ Persistent script state = a component (Luau-declared, `ECS.md` §6.1) or a singl
 
 | VM | Library set | Determinism | Allocator | Codegen |
 |---|---|---|---|---|
-| **sim** | `ipairs`, `sortedpairs` (ours), `table` (array ops), `string` (pure fns only), `fx` (det math bindings), engine bindings (§3). **Removed:** `math` (stock), `os`, `io`, `debug`, `pairs`/`next`, `coroutine` (no: allowed — see §9), `require` beyond the init phase, `loadstring` | inside the lockstep contract; bytecode in the fingerprint | own `mem_pool`, budgeted | **interpreter only** (native codegen is another codegen surface) |
+| **sim** | `ipairs`, `sortedpairs` (ours), `table` (array ops), `string` (pure fns only), `fx` (det math bindings), engine bindings (§3). **Removed:** `math` (stock), `os`, `io`, `debug`, `pairs`/`next`, `coroutine`, `string.rep`, `require` beyond the init phase, `loadstring` | inside the lockstep contract; bytecode in the fingerprint | own `mem_pool`, budgeted | **interpreter only** (native codegen is another codegen surface) |
 | **ui/editor** | stock Luau + ImGui/draw/text bindings + read-only world access; `pairs` allowed | free | own pool | NCG allowed |
 | **data** | stock Luau minus `os`/`io`; used once per table compile then destroyed (`ASSETS-AND-DATA.md` §3) | its *output* is hashed | throwaway | — |
 
@@ -121,9 +121,7 @@ order**, which is the same on every peer.
   reload without a save→load migration cycle (`ASSETS-AND-DATA.md` §5) — the reload command
   refuses a layout change and tells you to use "reload with migration". World state survives
   because it was never in Luau. Refused during a lockstep session (fingerprint change).
-- **Coroutines:** allowed in the sim VM *only* as a within-tick control-flow device (a coroutine
-  that yields across ticks would hold state in the heap); dev-tier check: no live coroutine at
-  tick end. See §9.
+- **Coroutines:** removed from the sim VM (§9 R-1); available in the UI VM.
 
 ---
 
@@ -160,14 +158,16 @@ order**, which is the same on every peer.
 
 ---
 
-## 9. Open
+## 9. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Coroutines in the sim VM: allow within-tick only (current lean) vs remove entirely
-  (simplest enforcement). Decide when the first gameplay script wants one; default is *removed*
-  until then.
-- **O-2** `string` in the sim VM: keep pure functions (`format`, `sub`, `byte`) for log messages
-  and ids, or remove and force `log.*` bindings. Lean: keep; strings never enter state anyway.
-- **O-3** Whether Luau-declared components can have custom inspector draw hooks (a Luau function
-  in the UI VM keyed by component name). Lean: yes, cheap, UI-VM only.
+- **R-1 `coroutine` is removed from the sim VM.** A coroutine that yields across ticks is heap
+  state by definition; "within-tick only" would need a runtime check for a convenience no sim
+  script needs (sequencing over ticks is a component state machine). The UI VM keeps coroutines.
+  §1's table and §5's coroutine bullet are superseded by this ruling.
+- **R-2 `string` stays in the sim VM, pure functions only** (`format`, `sub`, `byte`, `len`,
+  `find` without patterns that allocate unboundedly — the stock library is fine; `string.rep`
+  is removed as an allocation bomb). Strings never enter state; they feed `log.*` and ids.
+- **R-3 Luau-declared components may register a custom inspector draw** (`ui.inspect("Health",
+  fn)` in the UI VM). Dev only; the generic walker remains the mechanism and the fallback.
 
 *Rev 1 — 2026-08-22.*

@@ -142,14 +142,15 @@ trace; `InputFrame` static_asserts; fingerprint changes when the action list cha
 
 ---
 
-## 8. Open
+## 8. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Pointer quantization at capture: RNE to the `pos_t` quantum (3.8 µm) is far below any
-  gameplay need — should the capture quantize to a *coarser* grid (texel/4) to shrink the
-  pointer delta encoding? Lean: capture at `pos_t` precision (no second quantum to reason
-  about); the encoder's second-order delta absorbs the entropy. Revisit if the archive size
-  (NETCODE §13.4 target) misses because of pointer entropy.
-- **O-2** Whether `live_mask` and slot assignment live in the frame array (a singleton
-  component) so they are snapshotted. Lean: yes — they are sim-visible state.
+- **R-1 Pointer capture quantizes to the `pos_t` quantum** (RNE from the float projection). One
+  quantum in the system, not two; the wire's second-order delta absorbs the sub-texel entropy
+  (a few bytes per tick, NETCODE §12.2). If the archive target (NETCODE §13.4) is ever missed on
+  pointer entropy, the fix is a coarser *capture* grid declared here (a constant), never a lossy
+  wire — "sent == applied" stays by construction.
+- **R-2 `PeerSlots` is a singleton component** (`live_mask`, `local_slot`, `slot_player_id[8]`)
+  in a registered arena: snapshotted, hashed, restored with the world (`FRAME-LOOP.md` §7 R-1).
+  The frame array itself is per-tick input, recorded but not hashed.
 
 *Rev 1 — 2026-08-22.*

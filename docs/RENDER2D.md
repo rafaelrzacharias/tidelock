@@ -164,13 +164,15 @@ SDL software renderer), never PR-blocking.
 
 ---
 
-## 9. Open
+## 9. Rulings (closed 2026-08-22 — nothing open)
 
-- **O-1** Sim-view chunk texture granularity: one texture per chunk (many small uploads, trivial
-  dirty tracking) vs one large atlas texture with sub-rect uploads (fewer binds). Lean: per chunk
-  at Milestone 2; measure draw-call count at the real viewport (≈ 30–60 visible chunks).
-- **O-2** SDF anti-aliasing in the CPU writer (coverage from distance) vs plain sign test (crisper,
-  Noita-like). A Luau-tunable per material? Lean: sign test + a 1-texel edge tint; AA only if the
-  art direction asks.
+- **R-1 One streaming texture per chunk.** Dirty tracking is per chunk already; ~30–60 visible
+  chunks is ~60 draws, far below any SDL_Render concern; an atlas would couple upload granularity
+  to dirty granularity for a bind count nobody has measured as a problem. Per-chunk is also what
+  the chunk-parallel writer (`JOBS.md` §4) wants — one chunk, one output.
+- **R-2 Sign test + one-texel edge tint, no coverage AA.** The art direction is texel-crisp
+  (Noita-class); AA would blur the one thing the sim view must make legible — the carve edge.
+  The edge tint colour and width (0 or 1 texel) come from the Luau material palette LUT per
+  material, so "soft" materials can still read as such without an AA path.
 
 *Rev 1 — 2026-08-22.*
