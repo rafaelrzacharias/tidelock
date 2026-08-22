@@ -60,6 +60,10 @@ commit. Silence in the spec is not permission.
 ### Doc integrity protocol — how we stop drift (enforced every session, every commit)
 The foundry/ore program rotted because facts were restated in several docs and code was built one
 narrow slice at a time. Two rules, one tool:
+- **Model gate — before any lane or task starts, not after.** Look up the lane's model in
+  `docs/ROADMAP.md` §2, state it ("This lane is **Fable 5 high**; you are on <current model>"), and
+  **wait for Rafael to confirm he has switched** before writing the slice brief or touching a file.
+  Never start on a model lower than the lane's; if the current model is unknown, ask.
 - **Before implementing anything, write a slice brief** (in the reply, ≤12 lines, before any code):
   (1) the spec section being built; (2) the docs it consumes (its "Read first" list + `CANON.md`);
   (3) its **consumers** — open `docs/XREF.md` and read every section that cites the one you are
