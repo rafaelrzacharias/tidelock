@@ -232,10 +232,10 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `TOOLING.md` -> §2, §12
 
 ## ROADMAP.md
-- (no citations)
+- `BUILD.md` -> §0
 
 ## TESTING.md
-- `BUILD.md` -> §5, §8
+- `BUILD.md` -> §5, §8, §9.1
 - `DETERMINISM.md` -> §4
 - `FX-PALETTE.md` -> §4
 - `PLATFORM.md` -> §4

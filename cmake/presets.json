@@ -1,0 +1,73 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/${presetName}",
+      "cacheVariables": {
+        "TL_PRESET_NAME": "${presetName}",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "win",
+      "hidden": true,
+      "inherits": "base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl",
+        "CMAKE_LINKER_TYPE": "LLD"
+      }
+    },
+    {
+      "name": "linux",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_LINKER_TYPE": "LLD"
+      }
+    },
+    {
+      "name": "pi4",
+      "hidden": true,
+      "inherits": "base",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-pi4.cmake"
+    },
+    {
+      "name": "deck",
+      "hidden": true,
+      "inherits": "base",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-deck.cmake"
+    },
+
+    { "name": "debug-win",   "inherits": "win",   "displayName": "debug  / windows x86-64", "cacheVariables": { "TL_TIER": "debug" } },
+    { "name": "dev-win",     "inherits": "win",   "displayName": "dev    / windows x86-64", "cacheVariables": { "TL_TIER": "dev" } },
+    { "name": "netcode-win", "inherits": "win",   "displayName": "netcode/ windows x86-64", "cacheVariables": { "TL_TIER": "netcode" } },
+    { "name": "ship-win",    "inherits": "win",   "displayName": "ship   / windows x86-64", "cacheVariables": { "TL_TIER": "ship" } },
+
+    { "name": "dev-linux",     "inherits": "linux", "displayName": "dev    / linux x86-64",  "cacheVariables": { "TL_TIER": "dev" } },
+    { "name": "netcode-linux", "inherits": "linux", "displayName": "netcode/ linux x86-64",  "cacheVariables": { "TL_TIER": "netcode" } },
+    { "name": "sanitize-linux","inherits": "linux", "displayName": "dev+asan+ubsan / linux", "cacheVariables": { "TL_TIER": "dev", "TL_SANITIZE": "ON" } },
+
+    { "name": "netcode-deck",  "inherits": "deck",  "displayName": "netcode/ steam deck x86-64", "cacheVariables": { "TL_TIER": "netcode" } },
+    { "name": "netcode-pi4",   "inherits": "pi4",   "displayName": "netcode/ pi 4 aarch64",  "cacheVariables": { "TL_TIER": "netcode" } },
+    { "name": "ship-pi4",      "inherits": "pi4",   "displayName": "ship   / pi 4 aarch64",  "cacheVariables": { "TL_TIER": "ship" } }
+  ],
+  "buildPresets": [
+    { "name": "debug-win",   "configurePreset": "debug-win" },
+    { "name": "dev-win",     "configurePreset": "dev-win" },
+    { "name": "netcode-win", "configurePreset": "netcode-win" },
+    { "name": "ship-win",    "configurePreset": "ship-win" },
+    { "name": "dev-linux",     "configurePreset": "dev-linux" },
+    { "name": "netcode-linux", "configurePreset": "netcode-linux" },
+    { "name": "sanitize-linux","configurePreset": "sanitize-linux" },
+    { "name": "netcode-deck",  "configurePreset": "netcode-deck" },
+    { "name": "netcode-pi4",   "configurePreset": "netcode-pi4" },
+    { "name": "ship-pi4",      "configurePreset": "ship-pi4" }
+  ]
+}

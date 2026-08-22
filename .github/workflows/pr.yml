@@ -1,0 +1,124 @@
+# PR lane - blocking. Spec: docs/BUILD.md §10.4, docs/TESTING.md §5, §6 (budget < 10 min).
+# Jobs that need hardware or code this repo does not have yet are declared and gated, never
+# silently omitted: cross-pi4 needs the R-3 sysroot (docs/BUILD.md §9), the determinism harness
+# needs tl_driver (W1 runner+driver lane). Both are queued in TODO.md.
+name: pr
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  audits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - name: doc audit
+        run: python tools/docaudit/docaudit.py
+      - name: docs/XREF.md is regenerated and committed
+        run: git diff --exit-code -- docs/XREF.md
+      - name: include firewall + header contracts
+        run: python tools/audit/includes.py --root .
+      - name: a src/<module>/ change touches that module's doc (or says [docs:none])
+        run: python tools/audit/commit_docs.py --base "${{ github.event.pull_request.base.sha || github.event.before }}"
+
+  build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        tier: [dev, netcode]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - name: install clang + ninja (linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang lld llvm ninja-build
+      - name: install ninja (windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+      - name: preset name
+        shell: bash
+        run: echo "PRESET=${{ matrix.tier }}-$([ '${{ runner.os }}' = 'Windows' ] && echo win || echo linux)" >> $GITHUB_ENV
+      - name: configure
+        run: cmake --preset ${{ env.PRESET }}
+      - name: build
+        run: cmake --build --preset ${{ env.PRESET }}
+      - name: symbol audit
+        run: cmake --build --preset ${{ env.PRESET }} --target tl_audit_symbols
+      - name: unit tests
+        run: ./out/${{ env.PRESET }}/bin/tl_tests --isolate --tag '!slow' --junit tl_tests.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-${{ env.PRESET }}
+          path: tl_tests.xml
+
+  fingerprint-stability:
+    # Two clean builds of the same tree must produce the same build_id (docs/BUILD.md §10.5).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: sudo apt-get update && sudo apt-get install -y clang lld llvm ninja-build
+      - name: build twice, compare
+        run: |
+          set -eu
+          cmake --preset netcode-linux && cmake --build --preset netcode-linux
+          cp out/netcode-linux/build_id.txt first.txt
+          rm -rf out/netcode-linux
+          cmake --preset netcode-linux && cmake --build --preset netcode-linux
+          diff first.txt out/netcode-linux/build_id.txt
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: sudo apt-get update && sudo apt-get install -y clang lld llvm ninja-build
+      - run: cmake --preset sanitize-linux
+      - run: cmake --build --preset sanitize-linux
+      - run: ./out/sanitize-linux/bin/tl_tests --tag '!slow'
+
+  rebuild-budget:
+    # Cold, no compiler cache (docs/BUILD.md §9 R-1). The CI box has its own budget; the numbers
+    # in docs/BUILD.md §3 are the reference PC's.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: choco install ninja -y
+      - run: python tools/rebuild_budget.py --preset netcode-win
+
+  cross-pi4:
+    # Build-only aarch64 leg. Runs once the sysroot tarball of docs/BUILD.md §9 R-3 exists and
+    # its URL is set as the repository variable TL_SYSROOT_URL; until then it is skipped, not
+    # red. TODO.md carries the ruling request.
+    if: vars.TL_SYSROOT_URL != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: sudo apt-get update && sudo apt-get install -y clang lld llvm ninja-build
+      - name: fetch the pinned sysroot and verify its hash
+        run: |
+          set -eu
+          curl -fsSL "${{ vars.TL_SYSROOT_URL }}" -o sysroot.tar.gz
+          python tools/audit/sysroot_hash.py --tarball sysroot.tar.gz --versions toolchain/VERSIONS --key sysroot_pi4
+          mkdir -p out/sysroot/pi4 && tar -xzf sysroot.tar.gz -C out/sysroot/pi4
+      - run: cmake --preset netcode-pi4 -DTL_SYSROOT=$PWD/out/sysroot/pi4
+      - run: cmake --build --preset netcode-pi4
+      - run: file out/netcode-pi4/bin/tl_tests | grep -q aarch64

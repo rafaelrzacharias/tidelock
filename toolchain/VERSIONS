@@ -1,0 +1,11 @@
+# Pinned toolchain + sysroot versions. Hashes into build_id (docs/BUILD.md §5); a change here
+# changes every peer's fingerprint, so it is a ruling, not a bump.
+#
+# key                     value                                     note
+clang                     22.1.7                                    # dev PC (C:\Program Files\LLVM); clang-cl on win, clang++ elsewhere
+cmake                     4.3.2
+ninja                     1.13.2
+python                    3.13
+cxx_standard              c++20                                     # docs/CPP-SUBSET.md §7
+sysroot_pi4               unset                                     # tools/sysroot.sh <pi-host>; pin the blake2b it prints (docs/BUILD.md §9 R-3)
+sysroot_deck              unset                                     # same, for the Steam Deck x86-64 sysroot

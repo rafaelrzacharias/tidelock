@@ -128,19 +128,42 @@ Durable context lives in committed files only (`docs/`, `TODO.md`, `LESSONS.md`)
   `tools/sysroot.sh`**, stored in a release bucket (not git), its hash pinned in
   `toolchain/VERSIONS`. The Deck uses the same mechanism with an x86-64 Linux sysroot.
 
+- **R-4 The offline tools are Python, not C++, until one of them needs to link a vendored
+  library.** `fingerprint`, `audit/*` and `rebuild_budget` are `tools/*.py`; `luauc` (links the
+  Luau compiler) and `fxcheck` (links `fx.h` + MPFR) will be C++ in `tools/CMakeLists.txt`. This
+  answers what `build_id` gets BLAKE2b-256 from: `hashlib`, not a second copy of Monocypher
+  vendored a wave early — the fingerprint is computed offline and only its 32 bytes reach the
+  binary, so nothing links a hash implementation for it. Alternatives rejected: a C++ tool with a
+  reference BLAKE2b dropped into `tools/` (two implementations of one primitive in the repo, and
+  the tools project would need building before the engine can configure); vendoring Monocypher in
+  W0 (a lane editing another lane's module, `ROADMAP.md` §0 rule 2). Python is already a hard
+  build dependency — `docaudit` is a PR gate.
+- **R-5 Tiers replace CMake build types.** `CMAKE_BUILD_TYPE` is forced empty: `TL_TIER` owns
+  optimisation, debug info and defines, and a `CMAKE_CXX_FLAGS_<CONFIG>` set that CMake appends
+  behind our backs would silently change what peers compile. The tier flag string is a
+  `build_id` input, so it must have exactly one source.
+- **R-6 clang-cl takes the cl spellings of the subset's flags.** `/W4 /WX` for
+  `-Wall -Wextra -Werror` (in cl mode `-Wall` means MSVC's `/Wall`, which clang maps to
+  `-Weverything`), `/EHs-c-` for `-fno-exceptions`, `/GR-` for `-fno-rtti`,
+  `/Zc:threadSafeInit-` for `-fno-threadsafe-statics`, `/clang:-nostdinc++` for `-nostdinc++`.
+  The remaining `-W` and `-f` flags are identical in both driver modes. One warning set, two
+  spellings — `cmake/tier.cmake` is the only place that knows the difference.
+
 ## 10. Implementation specification
 
 ### 10.1 Repository tree (build-relevant)
 
 ```
 CMakeLists.txt                 project, options (TL_TIER, TL_SANITIZE), includes cmake/*.cmake, add_subdirectory per module
-cmake/presets.json             dev-win · debug-win · netcode-win · ship-win · dev-linux · netcode-linux · netcode-pi4 · ship-pi4; binaryDir = out/<preset>, binaries in out/<preset>/bin
+CMakePresets.json              the file CMake reads; two lines, `include`s cmake/presets.json (CMake only looks for presets at the repo root)
+cmake/presets.json             dev-win · debug-win · netcode-win · ship-win · dev-linux · netcode-linux · sanitize-linux · netcode-deck · netcode-pi4 · ship-pi4; binaryDir = out/<preset>, binaries in out/<preset>/bin
 .vscode/                       committed workspace config: CMake Tools on presets, clangd over .cache/compile_commands.json, LLDB launch configs, tasks (configure/build/test/audits); no solution files — VS Code + CMake presets is the IDE (ruled 2026-08-22)
 cmake/tier.cmake               flag sets per tier (CPP-SUBSET.md §7, BUILD.md §3) as interface targets tl_flags_common / tl_flags_sim
 cmake/toolchain-pi4.cmake      CMAKE_SYSTEM_NAME Linux, processor aarch64, clang --target=aarch64-linux-gnu, --sysroot=${TL_SYSROOT}
 cmake/toolchain-deck.cmake     x86-64 Linux sysroot variant
 cmake/audit.cmake              custom targets: tl_audit_symbols (llvm-nm), tl_audit_includes (grep), tl_audit_docs (tools/docaudit), tl_rebuild_budget
-cmake/fingerprint.cmake        generates build/generated/build_id.cpp from tools/fingerprint at configure+build
+cmake/fingerprint.cmake        generates out/<preset>/generated/build_id.cpp from tools/fingerprint.py at configure+build
+cmake/testlist.cmake           scans tests/**/*.test.cpp for TL_TEST( and generates test_list.inc (docs/TESTING.md §9.1)
 src/<module>/CMakeLists.txt    one static lib each; PRIVATE include dirs; PUBLIC only the module's public header dir
 vendor/CMakeLists.txt          SDL3 (subdir), SDL_ttf, imgui (sources listed), luau (VM + Compiler libs; LUA_USE_LONGJMP=1), enet, stb (one TU), monocypher, rapidhash (header)
 tools/CMakeLists.txt           separate project; fingerprint, luauc, audit helpers, fxcheck (may use the STL)
@@ -161,18 +184,25 @@ render/net when their tests are compiled in). `tl_sim` and `tl_foundation_det` c
 
 ### 10.3 Scripts and tools
 
-- `tools/fingerprint`: reads `toolchain/VERSIONS`, the tier's flag string (passed by CMake), `git
+- `tools/fingerprint.py`: reads `toolchain/VERSIONS`, the tier's flag string (passed by CMake), `git
   rev-parse HEAD:src HEAD:vendor HEAD:script/sim HEAD:toolchain/VERSIONS` (tree hashes — a dirty
-  tree appends the hash of `git diff` so a local build is still unique), `FX_PALETTE_REV` (parsed
-  from `fx_palette.h`), and the `.luac` manifest; emits `build_id.cpp` and `build_id.txt`.
+  tree appends the hash of `git diff` **and of every untracked file under those paths**, so a local
+  build is still unique), `FX_PALETTE_REV` (parsed from `fx_palette.h`), and the `.luac` manifest;
+  emits `build_id.cpp` and `build_id.txt`. A path that does not exist yet hashes in as an explicit
+  `absent:<path>` token, never as nothing. Both outputs are rewritten only when the value changes,
+  so a stable tree never relinks.
 - `tools/luauc <out_dir> <in files…>`: `luau_compile` with `-O2 -g1`, writes `.luac` + `manifest.tsv`
   (`path, bytes, blake2b`); `--docs <dir>` emits the Luau binding reference pages (`CPP-SUBSET.md` §6).
 - `tools/audit/symbols.py`: runs `llvm-nm --undefined-only -C` on each audited lib; allowlist in
   `tools/audit/allow.txt`; nonzero exit on any other symbol. `tools/audit/includes.py`: the grep
   rules of `CPP-SUBSET.md` §1/§4 + backend-header placement + the `float`/`double` token ban in
   sim TUs + `static` mutable + `thread_local` + `std::`.
-- `tools/rebuild_budget.sh/.ps1`: clean configure+build of `netcode` tier with timing; then touch
-  `src/sim/solver.cpp` and time the incremental build; compares to the budgets; CI artifact.
+- `tools/rebuild_budget.py`: clean configure+build of `netcode` tier with timing; then touch a sim
+  TU and time the incremental build; compares to the budgets; CI artifact (TSV on stdout).
+- `tools/audit/commit_docs.py`: the doc-touch gate — a commit changing `src/<module>/` must change
+  that module's doc or say `[docs:none]` (CLAUDE.md doc-integrity protocol).
+- `tools/audit/sysroot_hash.py`: verifies a downloaded sysroot tarball against the pin in
+  `toolchain/VERSIONS` before any cross build uses it (R-3).
 - `tools/sysroot.sh <host>`: rsyncs `/usr/include /usr/lib /lib /usr/lib/gcc` from the Pi (or
   Deck) into a tarball; prints its BLAKE2b for `toolchain/VERSIONS`.
 - `tools/deploy.sh <preset> <host>`: scp `out/<preset>/bin/*`, `script/`, `assets/`; prints the
@@ -186,9 +216,23 @@ sim tests) → rebuild budget. `nightly.yml`: slow tests, fuzz, self-hosted `pi4
 pulling the PR-built artifacts for cross-ISA replay-diff, save cross-build, pixel goldens.
 `weekly.yml`: Hovel scenarios (when present), Gate 0 re-run on palette/solver changes.
 
+Built so far: `pr.yml` with audits (doc, include firewall, header contracts, doc-touch, symbols),
+the {windows, ubuntu} × {dev, netcode} build+test matrix, fingerprint stability, the sanitizer job
+and the rebuild budget. Its `cross-pi4` job is gated on the repository variable `TL_SYSROOT_URL`
+(R-3) and the harness jobs wait on `tl_driver`; `nightly.yml`/`weekly.yml` land with the
+self-hosted Pi and Deck runners. `TODO.md` carries both.
+
 ### 10.5 Done criteria
 
 An empty-tree configure+build passes every audit; `build_id.txt` is stable across two clean builds;
 the pi4 preset produces an aarch64 ELF that runs `tl_tests --tag smoke` on the Pi via `deploy.sh`.
 
-*Rev 1 — 2026-08-22.*
+Met on Windows (2026-08-22, W0 skeleton): `debug/dev/netcode/ship-win` configure and build clean
+under `-Werror`; symbol, include-firewall, header-contract and doc audits green, each
+negative-tested against a planted violation; `tl_tests --tag smoke` passes in-process and under
+`--isolate`; `build_id.txt` identical across two clean `netcode-win` builds; rebuild budget 1.0 s
+full / 0.6 s incremental against the 10 s / 2 s ceilings. The pi4 leg is **unmet and blocked on
+hardware**: clang emits aarch64 ELF and the preset fails loudly without `TL_SYSROOT`, but the R-3
+sysroot tarball needs a live Pi. `TODO.md` carries it as a ruling request.
+
+*Rev 1 — 2026-08-22; §9 R-4..R-6 and §10.1/§10.3/§10.4/§10.5 reconciled with the W0 skeleton, 2026-08-22.*

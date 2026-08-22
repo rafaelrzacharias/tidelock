@@ -73,6 +73,8 @@ Three axes, three shapes, nothing else:
 | recoverable failure | `Result<T> { T value; ErrCode err; }` returned by value; `ErrCode` is a closed `enum : u16` per module, 0 = OK | the ONE sanctioned shape. Error-code out-params are banned. `value` is undefined when `err != 0` — never read it. Callers check `r.err` first; a `TL_CHECK(r.err == 0)` is the allowed "I know this can't fail" form |
 | absence | null handle (`bits == 0`) or a documented-nullable `T*` | generation 0 is never issued; zeroed memory is never a valid handle |
 
+`ErrCode`, `ERR_OK` and `Result<T>` live in `foundation/tl_types.h` (§1) — the leaf every module
+already includes; each module declares its own `enum : u16` over that width.
 `Result<void>` is spelled `ErrCode`. Errors carry no strings: a module's `ErrCode` enum has a
 `constexpr` name table for the log. Fail-loud is policy: validators reject at `init()`, loads fail
 with a named code, there are no partial states.
@@ -213,4 +215,4 @@ if (r.err) { TL_LOG_ERR(ERR_NAME(r.err)); return r.err; }
   `offsetof` static_assert per field generated from the list, and the little-endian write/read
   pair). Same table, same kinds, same inspector; nothing is declared twice.
 
-*Rev 1 — 2026-08-22.*
+*Rev 1 — 2026-08-22; §3 names the header owning `Result<T>` (W0 skeleton, 2026-08-22).*

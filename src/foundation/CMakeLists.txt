@@ -1,0 +1,26 @@
+# foundation - split into two libs (docs/BUILD.md §10.2):
+#   tl_foundation_det  fx, det_math, rng, hash, containers, vmem_arena, registry, scratch, handle
+#                      -> symbol-audited, compiled with tl_flags_sim
+#   tl_foundation      jobs, mem_pool, fmt, interner, atomic, alloc_shim -> links det
+# The split is by an explicit NON-det stem list, so anything a later lane adds defaults to the
+# audited half: a file that does not belong there fails the symbol audit loudly, whereas the
+# inverse default would let it escape the gate silently (docs/CPP-SUBSET.md §4).
+set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim)
+
+file(GLOB TL_FOUNDATION_SRC CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+set(TL_DET_SRC "")
+set(TL_HOST_SRC "")
+foreach(src IN LISTS TL_FOUNDATION_SRC)
+  get_filename_component(stem "${src}" NAME_WE)
+  if(stem IN_LIST TL_FOUNDATION_NONDET)
+    list(APPEND TL_HOST_SRC "${src}")
+  else()
+    list(APPEND TL_DET_SRC "${src}")
+  endif()
+endforeach()
+
+add_library(tl_foundation_det STATIC ${TL_DET_SRC})
+target_link_libraries(tl_foundation_det PRIVATE tl_flags_common tl_flags_sim)
+
+add_library(tl_foundation STATIC ${TL_HOST_SRC})
+target_link_libraries(tl_foundation PRIVATE tl_flags_common PUBLIC tl_foundation_det)

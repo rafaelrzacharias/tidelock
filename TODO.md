@@ -8,9 +8,6 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 `docs/ARCHITECTURE.md` §0/§4, test-infra-first.
 
 ## Gate 0 — the pivot gate (`docs/GATE0-BENCH.md`, `docs/FX-PALETTE.md`)
-- [ ] Repo skeleton: `CMakeLists.txt` + presets (`dev-win`, `netcode-win`, `netcode-pi4`), toolchain
-      pin file, `.clang-format`, `tools/audit/` stubs (symbol audit + include grep) running on an
-      empty tree. `docs/BUILD.md` §2–§5.
 - [ ] `src/foundation/fx.h` — `fx<Rep,FRAC>`, `mul<R>`/`div<R>` with RNE + widened intermediates,
       sat/wrap helpers, comparisons; exhaustive tests on small formats, property tests on 32-bit.
 - [ ] `fx_palette.h` — the rev-1 rows, derivation `static_assert`s, mixed-op instantiations, world
@@ -25,13 +22,32 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [ ] **Decision commit:** `FX-PALETTE.md` rev 2 (rows DECIDED, or the fallback recorded) +
       `PIVOT-DESIGN.md` §3.1b/§12 updated + `LESSONS.md` entries per rung climbed.
 
+## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **RR-1 Pi 4 sysroot (`docs/BUILD.md` §9 R-3).** The aarch64 leg of `BUILD.md` §10.5 cannot be
+      met without a tarball captured from a live Pi 4 (`tools/sysroot.sh <host>`), its BLAKE2b
+      pinned in `toolchain/VERSIONS` and its URL set as the repo variable `TL_SYSROOT_URL`.
+      Verified so far: clang emits aarch64 ELF, and `cmake --preset netcode-pi4` fails loudly
+      without `TL_SYSROOT`. Blocks: the pi4/deck done criterion, the `cross-pi4` PR job, the
+      cross-ISA nightly (`docs/TESTING.md` §4), Gate 0's G-06 run on the Pi. Decide: capture the
+      sysroot now, or defer the whole cross leg to the wave that first needs a Pi number.
+- [ ] **RR-2 `nightly.yml` / `weekly.yml` (`docs/BUILD.md` §10.4).** Both need self-hosted `pi4`
+      and `deck` runners; committing them before the runners exist buys a nightly red build.
+      Land them with RR-1.
+- [ ] The ubuntu-clang half of `pr.yml` is written against the non-MSVC flag path but has only
+      been exercised through the GNU driver locally (`clang++` on the real sources, clean under
+      `-Werror`); the first PR run is its real proof.
+
 ## Assay (repurposed shakedown of the new stack — timing flexible, shares no code with Gate 0)
 - [ ] A jam-scale C++/Luau/SDL probe, no engine; deliverable = one 15-second clip a stranger can
       read (the commercial-thesis gate). `PIVOT-DESIGN.md` §10.
 
 ## Foundation week(s) (`docs/MEMORY.md`, `CONTAINERS.md`, `DETERMINISM.md`, `TESTING.md`)
-- [ ] Test runner (`tests/runner`): generated test list, tags/filter, `--isolate`, assertions incl.
-      `NEAR_FX`, fatal-expected via child process, TSV report. **First.**
+- [ ] Finish the test runner (`tests/runner`; W0 shipped the stub — generated list, tags/filter,
+      `--isolate` one child per test, TSV + JUnit): `NEAR_FX`, `SPAN_EQ`/`MEM_EQ`,
+      `TL_TEST_EXPECT_FATAL` via child process, `TL_ASSERT_NO_ALLOC`, `TL_ASSERT_DETERMINISTIC`,
+      the parallel isolate pool, property generators. `docs/TESTING.md` §9.1. **First.**
+- [ ] Delete the W0 placeholder TUs as each module gets real sources (`src/*/…_unit`), and give
+      `tl_driver` / `tl_gate0` / `tl_hovel` real mains (they exit 70 today).
 - [ ] `platform/` contract + **headless impl** (file/clock/vmem/entropy/threads real; window/draw/
       events null). `docs/PLATFORM.md`.
 - [ ] `VMemArena` + scratch + `ArenaRegistry` (hash-all, snapshot/restore, ring) + arena-offset guard
