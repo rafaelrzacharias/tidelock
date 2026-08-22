@@ -1,0 +1,180 @@
+# The C++ subset — coding contract (tidelock, rev 1)
+
+> **Status:** design rev 1, 2026-08-22. Expands `PIVOT-DESIGN.md` §2 into the rules a code review
+> checks and CI enforces. PIVOT §2 is the ruling; this doc is its operational form.
+> **Scope:** every TU under `src/`. `vendor/` and `tools/` are exempt (they compile in their own
+> TUs with their own flags and must not leak includes into ours).
+
+---
+
+## 0. Why a subset at all
+
+The reasons Ore existed survive as rules: no hidden control flow, no hidden allocation, no hidden
+cost, fast compiles, and state that a memcpy can snapshot. C++ gives all of those *if* you refuse
+most of it. The subset is "C with namespaces, a handful of flat templates, and `static_assert`".
+
+---
+
+## 1. Banned (DECIDED)
+
+| Banned in `src/` | Why | Enforcement |
+|---|---|---|
+| STL containers, algorithms, streams, `<string>`, `<memory>` | RAII contract vs no-destructors; implementation-defined iteration/hash order; compile weight | include firewall (CI grep on `#include <` outside the allowlist) |
+| RTTI, exceptions | hidden control flow, codegen surface | `-fno-exceptions -fno-rtti` |
+| inheritance, virtual, polymorphism | hidden dispatch, vtables in POD | review + `-Wnon-virtual-dtor` as a tripwire (any hit = violation) |
+| destructors, RAII, copy/move ctors | POD everywhere; snapshot = memcpy | `static_assert(is_trivially_copyable)` at every registration door |
+| operator overloads beyond fx arithmetic | hidden cost | review |
+| `new`/`delete`/`malloc`/`free` outside arena backing | zero per-tick allocation | symbol audit (§4) + debug counting shim |
+| `<math.h>` in sim TUs | libm is the cross-platform determinism hole | include firewall + symbol audit |
+| static mutable state | two-worlds-one-process test; rollback restores only registered arenas | CI grep: `^static [^c]` / `static .* =` outside `constexpr`/`const` |
+| recursive/meta templates, SFINAE, concepts, expression templates | compile time + cognitive cost | review; the sanctioned list is closed |
+| `auto` for non-iterator locals, lambdas capturing by reference across a call | readability / hidden lifetime | review |
+| `thread_local` outside the job system's worker slot | hidden per-thread state the hash can't see | CI grep |
+
+**Allowed system includes in `src/`:** `<stdint.h>`, `<stddef.h>`, `<string.h>` (memcpy/memset/
+memcmp only), `<limits.h>`. `platform/` additionally includes its OS/SDL headers inside its own
+TUs. `<math.h>` is allowed ONLY in `render/`, `editor/`, `platform/` (float is legal there).
+
+---
+
+## 2. Sanctioned templates (DECIDED — closed list)
+
+Flat value templates with enumerated instantiation sets. Adding a row here is a design decision.
+
+| Template | Instantiation set | Doc |
+|---|---|---|
+| `fx<Rep, FRAC>` | the palette rows only (`fx_palette.h`) | `FX-PALETTE.md` |
+| `Array<T>`, `Span<T>` | any trivially-copyable T | `CONTAINERS.md` |
+| `SlotMap<T>` | per domain, with its `Handle` | `CONTAINERS.md` |
+| `Map<K,V>` | integer/hashed keys, POD values | `CONTAINERS.md` |
+| `SortedMap<K,V>` / `SortedSet<K>` | integer keys | `CONTAINERS.md` |
+| `RingBuffer<T>` | POD T | `CONTAINERS.md` |
+| `Handle<Tag, IDX_BITS, GEN_BITS>` | per domain | `MEMORY.md` §3 |
+| `EventQueue<T>` | POD event types | `ECS.md` §5 |
+| `Result<T>` | any T (see §3) | this doc |
+
+`constexpr` functions and `static_assert` are encouraged without limit — they are the enforcement
+tools. Function templates are allowed only as thin typed wrappers over type-erased calls
+(`world_get<T>` over `world_get(id)`), never as the mechanism.
+
+---
+
+## 3. Error model (DECIDED — PIVOT §2)
+
+Three axes, three shapes, nothing else:
+
+| Axis | Shape | Notes |
+|---|---|---|
+| programmer bug / invariant | assert tiers: `TL_ASSERT` (debug only), `TL_CHECK` (all tiers, slim), `TL_FATAL(msg)` (all tiers) | fatal prints file:line + message, writes the crash report (`TOOLING.md` §6), aborts. Never returned, never swallowed |
+| recoverable failure | `Result<T> { T value; ErrCode err; }` returned by value; `ErrCode` is a closed `enum : u16` per module, 0 = OK | the ONE sanctioned shape. Error-code out-params are banned. `value` is undefined when `err != 0` — never read it. Callers check `r.err` first; a `TL_CHECK(r.err == 0)` is the allowed "I know this can't fail" form |
+| absence | null handle (`bits == 0`) or a documented-nullable `T*` | generation 0 is never issued; zeroed memory is never a valid handle |
+
+`Result<void>` is spelled `ErrCode`. Errors carry no strings: a module's `ErrCode` enum has a
+`constexpr` name table for the log. Fail-loud is policy: validators reject at `init()`, loads fail
+with a named code, there are no partial states.
+
+---
+
+## 4. The symbol-audit gate — the `@deterministic` replacement (DECIDED)
+
+All sim code (`src/sim/`, plus the det halves of `src/foundation/`: fx, det math, rng, hash,
+containers, arenas) compiles into static libs. CI runs `llvm-nm --undefined-only` over each and
+**fails on any undefined symbol outside an allowlist**:
+
+```
+allowed:   memcpy memset memcmp  (and our own tl_* symbols from the same lib set)
+banned:    malloc free calloc realloc operator new/delete
+           sin cos tan sqrt pow exp log fmod floor ceil ... (all of libm)
+           time clock* gettimeofday QueryPerformanceCounter rand srand getrandom BCrypt*
+           fopen fread fwrite printf fprintf socket send recv ... (all io)
+```
+
+A grep line in the same job covers what never becomes a symbol: `__rdtsc`, `rdtsc`, `asm`,
+`__builtin_ia32_*`, `std::`, `thread_local`, `static` mutable. The sim-lib boundary this needs is
+the `ARCHITECTURE.md` §1 layout doing double duty. This is a callgraph effect ban at link
+granularity — about 90% of what the attribute gave.
+
+---
+
+## 5. UB discipline — the new thing that can silently break bit-exactness (DECIDED)
+
+With no floats, the only way two peers diverge is undefined behaviour. Rules:
+
+- **Sanctioned arithmetic helpers are the only arithmetic in quanta paths:** `wrap_add/sub/mul`
+  (two's-complement, explicit), `sat_add/sub/mul` (saturating), `mul_widen` (i32×i32→i64),
+  `mulhi`, and the fx `mul<R>/div<R>` helpers. Plain `+ - *` on signed ints is allowed only where
+  overflow is provably impossible by range (state the range in a comment or a `static_assert` on
+  the palette row).
+- **Shifts:** right shift of negative values is arithmetic on every supported compiler, but it is
+  implementation-defined in the standard until C++20 — we compile as C++20 (§7) so it is defined.
+  Left shift of negative values is UB: use `wrap_mul` by a power of two.
+- **Hashed state uses explicitly-padded structs** (every pad named `_pad0`, zeroed at construction)
+  and zero-filled arenas; the hash covers `[base, used)`, never capacity. Each pool's header states
+  its ruling ("this pool is hashed over used rows; padding is explicit").
+- **No reading uninitialized memory:** arenas hand out zeroed pages; scratch is poisoned `0xDD` in
+  debug so a read shows up as garbage, and ASan/MSan runs catch it.
+- **UBSan + ASan are part of the determinism CI**, not optional hygiene. A G-06 / S-01 hash
+  divergence is treated as UB until proven otherwise.
+- **No pointer comparisons except equality**, no pointer-to-integer keys (ordering by address is a
+  nondeterminism source — `DETERMINISM.md` §2).
+
+---
+
+## 6. Naming and file discipline (DECIDED)
+
+- `snake_case` for functions/variables/files, `PascalCase` for types, `UPPER_SNAKE` for constants
+  and macros, `tl_` prefix on exported C-ABI symbols, `TL_` on macros. Namespaces: one per module
+  (`fx`, `mem`, `ecs`, `alloy`, `net`, …), never nested more than one deep.
+- One module per folder, `module.h` is the public header; everything else in the folder is
+  private unless listed in `module.h`. Include with the module path: `#include "core/ecs.h"`.
+- Soft file cap ~800 lines. Split at seams, not arbitrarily.
+- Comments state constraints the code can't (ranges, hashing rulings, ordering invariants) — not
+  what the next line does.
+- Every public function has tests: happy + error + edges (zero/one/many, empty/full, min/max,
+  null handle, malformed). Property/fuzz for parsers and math. No commit without tests.
+
+---
+
+## 7. Language level and flags (DECIDED)
+
+- **C++20, clang only** (`BUILD.md` §1). Used from C++20: designated initializers, `constexpr`
+  improvements, defined signed-shift semantics, `<bit>`-free bit ops (we write our own to avoid the
+  header). **Not used:** modules, coroutines, concepts, ranges, `<format>`, three-way comparison.
+- Flags: `-std=c++20 -fno-exceptions -fno-rtti -fno-threadsafe-statics -Wall -Wextra -Werror
+  -Wconversion -Wsign-conversion -Wshadow -Wvla -fno-strict-aliasing` (we type-pun through memcpy;
+  strict aliasing buys nothing here and costs audit time). `-ffast-math` is banned everywhere, even
+  render-side (keeps one flag set; render doesn't need it).
+- Sim libs additionally: `-fno-builtin` (so a `sqrt` can't be silently inlined from a libm
+  builtin), `-ffreestanding`-style include firewall via `-nostdinc++`.
+
+---
+
+## 8. Templates of code that appear everywhere (reference shapes)
+
+```cpp
+// a registered component — the X-macro declares struct + field table (ECS.md §6)
+#define TL_FIELDS_Transform(X) \
+    X(pos_t, x) X(pos_t, y) X(angle_t, rot) X(u32, _pad0)
+TL_COMPONENT(Transform)
+
+// a system — stateless free function + descriptor
+void sys_move(World* w);
+static const SystemDesc SYS_MOVE = { sys_move, "move"_id, PHASE_UPDATE,
+                                     reads(COMP_Velocity), writes(COMP_Transform), {}, {} };
+
+// a recoverable call
+Result<TexHandle> r = asset_load_texture(w, "player.png"_id);
+if (r.err) { TL_LOG_ERR(ERR_NAME(r.err)); return r.err; }
+```
+
+---
+
+## 9. Open
+
+- **O-1** Whether to allow `[[nodiscard]]` on `Result<T>` returns (yes, lean: it costs nothing and
+  catches the unchecked-error class) — confirm clang-cl honours it under `-Werror`.
+- **O-2** A `TL_HASHED_STRUCT(Name)` macro that static_asserts trivial copyability, explicit
+  padding (sizeof == Σ field sizes), and registers the struct's field table for the desync dump —
+  shape decided with `ECS.md` §6's X-macro; whether it's the same macro or a sibling is open.
+
+*Rev 1 — 2026-08-22.*

@@ -1,0 +1,265 @@
+# The fx palette and det math (tidelock, rev 1)
+
+> **Status:** design rev 1, 2026-08-22. Mechanism and policy **DECIDED**; the palette rows are
+> **PROPOSED pending Gate 0** (`GATE0-BENCH.md`). After Gate 0 this doc gets rev 2 with measured
+> values and the DECIDED stamp; `fx_palette.h` is written from rev 2, not rev 1.
+> **Lineage:** expands `PIVOT-DESIGN.md` §3.1–§3.2. PIVOT is the ruling.
+> **Owns:** `src/foundation/fx.h`, `fx_palette.h`, `det_math.h`, `fx_float.h`.
+
+---
+
+## 0. The substitution this whole engine rests on
+
+Fixed-point sim arithmetic replaces compiler-enforced strict float with **determinism by
+construction**: integer add/sub/mul/shift are bit-exact on every ISA, compiler, and optimization
+level. The cost is range/resolution bookkeeping — which is why this is a *typed* palette with a
+*closed* set of rows and *no implicit conversions*, not a "fixed-point number" type. The bookkeeping
+is the compiler's job; the palette is how we hand it over.
+
+**No floats in authoritative state or on any sim path.** Floats remain legal render-side, in the
+editor, and in offline tools (`fx_float.h` is the only bridge, §6).
+
+---
+
+## 1. The mechanism — `fx<Rep, FRAC>` (DECIDED)
+
+```cpp
+template <typename Rep, int FRAC> struct fx { Rep v; };   // one ~300-line header, zero includes
+```
+
+- **`+`/`-` compile only between identical formats.** Saturating variants `sat_add/sat_sub` exist;
+  the plain operators wrap (two's complement, explicit) — quanta paths must use `sat_*`
+  (`CPP-SUBSET.md` §5).
+- **`*`/`/` are never operators.** They are named helpers taking the *result* format as a template
+  parameter, with a widened intermediate inside and the narrowing point visible at every call site:
+  ```cpp
+  template <typename R, typename A, typename B> R mul(A a, B b);   // i64 (or mulhi) intermediate
+  template <typename R, typename A, typename B> R div(A a, B b);   // i64 intermediate
+  ```
+  The shift `(A::FRAC + B::FRAC - R::FRAC)` is a compile-time constant folded into every op.
+- **Rounding is round-to-nearest-even in `mul<R>`/`div<R>`, day one** (precision ladder rung 2).
+  Truncation biases every op downward — systematic energy drain and convergence stall — and RNE
+  costs ~1 extra add per op. Conversions `to<R>(x)` also RNE when narrowing.
+- **No implicit conversions, ever.** Every constructor is `explicit`; `to<R>(x)` is the only
+  conversion and it is greppable. `fx` ↔ integer: `fx_from_int<R>(i)` / `fx_to_int_floor(x)`.
+- **Comparisons** between identical formats only. `abs`, `min`, `max`, `clamp`, `sign` per format.
+- **Width is a performance decision.** No usable 64-bit SIMD multiply exists on SSE2/AVX2/NEON, so
+  every column the solver should vectorize is a 32-bit format. `fx<i64,·>` rows exist only where
+  the derivation rule forces them.
+- **Runtime scale (shift stored in data) is REJECTED**: it deletes the compile-time mixed-scale
+  check, which is the main reason to do this in a typed language.
+- **Ad-hoc per-field formats are FORBIDDEN.** A new format is a new palette row is a design
+  decision recorded here. N² mixed-op decisions are exactly what the palette prevents.
+
+---
+
+## 2. World constants (CONFIRMED — veto pass 2026-08-21)
+
+| Constant | Value | Reasoning |
+|---|---|---|
+| world unit | **1 unit = 1 m** | human-scale side view; an agent capsule ≈ 1.8 units |
+| `TEXEL` | **1/16 m (6.25 cm)** | Noita-class carve legibility at gameplay zoom; an Alloy terrain chunk (128² texels) = 8 m, a sane streaming unit |
+| world extent | **±4,096 m (8 km span)** | ~1.6× a Terraria-large world; the freed bits go to position precision (4× the stacking headroom of the ±16 km draft). Raising it later is a palette-rev edit before saves exist, a migration after; beyond it is streaming (`ALLOY.md` §13), never coordinates |
+| `V_MAX_WORLD` | **512 m/s** | validator-enforced cap (T-A-02); faster effects are raycasts, not integrated bodies |
+| tick / substeps | **60 Hz, 8 substeps → h = 1/480 s** | h, h² are precomputed rounded fx constants (1/480 isn't dyadic; one shared constant is deterministic by construction) |
+| `MASS_RATIO_CLAMP` | **4096 : 1 (2¹²), applied as an effective per-pair clamp** | per solve, each pair's inv-mass spread saturates at the clamp; content is never refused, extreme pairs behave as 4096:1 (past ~1000:1 the light body reads massless anyway). Statics are `inv_mass = 0` exactly and cost no range |
+
+Changing any of these re-derives §3 mechanically (derivation rule below) — it is a constant
+change, not a redesign.
+
+---
+
+## 3. The palette rows (PROPOSED, pending Gate 0)
+
+**Derivation rule:** integer bits ≥ ⌈log₂(range × margin)⌉, the rest is FRAC; 32-bit wherever the
+solver should vectorize. Each row carries a range/resolution line; the `init()` table validator
+checks game data against these ranges (same slot as `v_max`).
+
+| Type | Format | Range | Resolution | Notes |
+|---|---|---|---|---|
+| `pos_t` | **fx<i32,18>** | ±8,192 m | 3.8 µm (1/16384 texel) | 2× margin over the extent. **The risk row**: the XPBD correction quantum is 3.8 µm; resting-contact jitter at this floor is what G-01 measures. Fallback if G-01 fails after the ladder: `fx<i64,32>` world pos + 32-bit chunk-local solve deltas (rung 4) |
+| `vel_t` | **fx<i32,20>** | ±2,048 m/s | ~1 µm/s | 4× margin over `V_MAX_WORLD` (solver transients overshoot) |
+| `invmass_t` | **fx<i32,18>** | ±8,192 | 3.8e-6 | unit mass = the reference particle; inv_mass ∈ [0,4096] under the clamp, 2× headroom — `w₁+w₂+α̃` cannot overflow by construction |
+| `stiff_t` (α̃ = α/h²) | **fx<i32,30>** | ±2 | 9.3e-10 | near zero for stiff constraints; precision matters, range doesn't. Tables store α (as `q_t`-scaled data), α̃ precomputed at init with an i64 divide |
+| `q_t` (normalized/unitless) | **fx<i32,30>** | ±2 | 9.3e-10 | **kernel strategy:** PBF/SDF kernels evaluate on q = r/h_kernel ∈ [0,1] — normalize once per pair, polynomial in `q_t`, scale back once; kernel precision becomes world-scale-independent. Also density ratio C = ρ/ρ₀−1, friction coefficients, restitution, blend weights |
+| `angle_t` | **fx<i32,30>** | ±2 turns | ~1e-9 turn | **turns, not radians** — wraps free at ±1 by masking; sin/cos index naturally |
+| `omega_t` | **fx<i32,20>** | ±2,048 turn/s | ~1e-6 turn/s | angular velocity |
+| `dt_t` | **fx<i32,30>** | ±2 s | 9.3e-10 s | h, and only h. h² is never a runtime operand (α̃ is precomputed); `inv_h` is the plain integer 480 |
+| `lambda_t` | **fx<i32,16>** (accumulated in i64) | ±32,768 m·mass | 1.5e-5 | XPBD Lagrange multiplier (length × mass units). Storage row is the least certain; it is an i64 accumulator within a substep (rung 1) and narrows once at writeback |
+| conserved quanta | **plain i32 / i64** | — | — | mass-quanta, moles, charge, load: integers, saturating ops only (`ALLOY.md` §10). Never an fx row |
+
+Stress-case mapping: the feather→boulder denominator is `invmass_t`'s clamp; the sub-texel
+correction vs world-extent spread is the `pos_t` vs `lambda_t`/delta split. **Gate 0 runs against
+these rows, so a failure names the row that is wrong.**
+
+### 3.1 The mixed-op table (the only sanctioned products)
+
+Enumerated in `fx_palette.h` next to the types; all through `mul<R>`/`div<R>`; no other
+combination compiles because no other helper is instantiated.
+
+| Product | Result | Where |
+|---|---|---|
+| `vel_t × dt_t` | `pos_t` (delta) | integrate / predict |
+| `(pos_t − pos_t) × inv_h (int 480)` | `vel_t` | implicit velocity `v = (x − x_prev)/h` |
+| `invmass_t × lambda_t` | `pos_t` (delta) | constraint projection Δx = λ·w·∇C |
+| `q_t × q_t`, `q_t × pos_t`, `q_t × vel_t` | same as the non-q operand | kernel weights, friction, damping, normals (`∇C` is a unit vector in `q_t`) |
+| `pos_t × pos_t` | `fx<i64,36>` (local, never stored) | squared distance before `sqrt<pos_t>` |
+| `omega_t × dt_t` | `angle_t` (delta) | rotate |
+| `angle_t` → `(sin, cos)` | `q_t`, `q_t` | det math |
+| `stiff_t + invmass_t (+ invmass_t)` | `invmass_t`-ranged `fx<i64,30>` local | the XPBD denominator, widened; `div<lambda_t>` once |
+| `invmass_t = div(unit, quanta·unit_mass)` | at creation only | i64 divide, not a per-tick op |
+
+Precomputed constants (rounded once, shared): `H = dt_t(1/480)`, `G_SUBSTEP = vel_t(9.81·h)`,
+`H_SQ_INV` used only inside the init-time α̃ computation.
+
+### 3.2 The precision ladder (DECIDED — mandated response order to a Gate 0 failure)
+
+Climb rung by rung; the float fallback fires only when the ladder is exhausted.
+
+1. **Widened accumulate + round-once-per-substep — the LEAD, day one.** Solver-local positions,
+   velocities and λ stay i64 across a substep's constraint sweep; rounded to storage format once.
+   Most of 64-bit's precision at zero storage/bandwidth cost.
+2. **RNE in `mul<R>`, day one** (§1).
+3. **Residual carry** — per-quantity rounding residual fed back next substep (error diffusion,
+   deterministic): a standing Gate 0 bench variant, adopted only if rungs 1–2 leave a stall.
+4. **Wide state, narrow math — the named fallback:** `fx<i64,32>` stored positions; constraint
+   math on 32-bit deltas against a local island/chunk origin. Width where error accumulates,
+   narrowness where throughput lives; SIMD and cache traffic survive.
+5. **Pipelined sim thread — throughput escape only, never a precision fix** (a G-05 miss, after
+   T-A-01 reports; +1 frame latency; complicates the netcode barriers).
+
+**Uniform 64-bit everywhere is REJECTED** (doubles cache-line traffic on the hot columns for
+precision that is only needed at accumulation points — rung 4 dominates on every axis).
+
+---
+
+## 4. Det math (sourcing RULED 2026-08-21: own core, ported kernels)
+
+### 4.1 What is ours and what is ported
+
+| Piece | Source | Why |
+|---|---|---|
+| core arithmetic, palette, `mul<R>`/`div<R>`, saturating tier, turns angles, mixed-op table | **ours** (~300 lines) | these are *policy*; no library ships policy, and adopting one means wrapping its whole surface anyway |
+| `sqrt`, `sin`/`cos`, `atan2`, (`exp`/`log`/`pow` when a consumer appears) | **ported from FixPointCS** (github.com/XMunkki/FixPointCS, MIT, attributed in the header) | built for deterministic lockstep sims, bit-identical across compilers by design, precision-documented polynomials; porting transfers the silent-bad-polynomial risk to code that has shipped in deterministic games for years |
+
+Survey verdict recorded so it isn't re-run: libfixmath (abandoned 2012, Q16.16 only) — rejected;
+fpm (drop-in-float philosophy, radians, no palette policy) — oracle only; CNL/SG14 (template-heavy)
+— banned by `CPP-SUBSET.md` §2.
+
+### 4.2 The API (DECIDED shape)
+
+```cpp
+// det_math.h — sim-safe, zero includes beyond fx.h
+template <typename R, typename A> R   sqrt(A x);           // i64 Newton/FixPointCS integer sqrt; x<0 → 0 (+ TL_ASSERT)
+template <typename R, typename A> R   rsqrt(A x);          // = div<R>(one, sqrt(x)); NEVER an estimate instruction
+q_t sin(angle_t a);  q_t cos(angle_t a);  void sincos(angle_t a, q_t* s, q_t* c);
+angle_t atan2(pos_t y, pos_t x);                           // also a q_t overload
+template <typename R, typename A> R   lerp(A a, A b, q_t t);
+template <typename R> R               isqrt(u64 x);        // plain integer sqrt for quanta paths (geometric-mean conductivity)
+```
+
+**One deliberate deviation from the references: turns make range reduction exact.** Radian APIs
+must reduce mod 2π (irrational — every fixed-point trig library's precision wart); `angle_t` in
+turns reduces by masking the fractional bits, exactly. Only the per-quadrant polynomial is ported;
+our `sin`/`cos` is simpler and tighter than the source.
+
+`normalize(vec2<pos_t>) → vec2<q_t>`: squared length in `fx<i64,36>`, `sqrt<pos_t>`, then two
+`div<q_t>`. Zero-length → `(0,0)` and a `TL_ASSERT` in debug (callers guard first; the contact and
+PBF code never normalizes a zero vector by construction).
+
+### 4.3 Vector/matrix types (DECIDED — thin, sim-side)
+
+`vec2<T>` for palette rows (`vec2<pos_t>`, `vec2<vel_t>`, `vec2<q_t>`), component-wise `+`/`-`,
+`dot<R>`, `cross<R>`, `rotate(vec2<pos_t>, q_t sin, q_t cos)`. No general matrix type on the sim
+side (2D rigid transforms are `(pos, sin, cos)`); `mat3` lives render-side in float
+(`RENDER2D.md`).
+
+### 4.4 Three-layer oracle (DECIDED — correctness is the risk; determinism is free)
+
+1. **Exhaustive** over all 2³² inputs for 32-bit unary functions (`sin`, `cos`, `sqrt` per row) —
+   minutes offline per function; no sampling.
+2. **Differential** vs vendored FixPointCS (tools-only, C#/C++ reference) on its native Q32.32 /
+   Q16.16 — proves the port.
+3. **Error-vs-MPFR/double bounds**, using fpm's published accuracy-test methodology as the template;
+   bounds recorded in the header next to each kernel.
+
+Plus the PC-vs-Pi cross-compiled bit-compare (`TESTING.md` §4). These run in `tools/fxcheck/`
+(exempt from the subset — may use doubles, MPFR, and C++ freely).
+
+---
+
+## 5. Keyed RNG on fx (DECIDED — `DETERMINISM.md` §3 owns the generator)
+
+Unit-interval draws derive directly into fx formats: `rng_q(key) → q_t` takes the top 30 bits of
+the 64-bit mix; `rng_range<R>(key, lo, hi)` is `lo + mul<R>(rng_q, hi − lo)`. Never through doubles.
+Bounded integers via Lemire multiply-shift (`rng_below(key, n)`).
+
+---
+
+## 6. The float bridge — `fx_float.h` (DECIDED)
+
+```cpp
+float  to_f32(pos_t x);    // x.v * 2^-18 — exact for |x| < 2^24 raw; render only
+double to_f64(...);        // editor/tools
+pos_t  from_f32_quantized(float x);  // RNE to the row quantum; INPUT capture and editor writes only
+```
+
+Rules: **this header is unreachable from sim TUs** — the symbol audit's grep bans the tokens
+`float`/`double` in `src/sim/` and the det halves of `src/foundation/` (`CPP-SUBSET.md` §4).
+Render-side, `to_f32` of a `pos_t` loses nothing visible (float has 24 bits of mantissa; world
+positions up to ±4,096 m at 3.8 µm need 31 — the loss is below a texel at the far edge and the
+render is interpolated anyway). Editor writes into sim state go through `from_f32_quantized` then
+the command channel, never direct pokes.
+
+Luau: fx values cross as raw integer bits (`v`), never as doubles of the scaled value. Every 32-bit
+row is exactly representable in a Luau number; `fx<i64,·>` rows (rung 4 fallback only) would not
+be — if rung 4 ever fires, `LUAU-LAYER.md` §3 gains a boxed-i64 rule.
+
+---
+
+## 7. Header layout (DECIDED)
+
+| File | Contents | Includes |
+|---|---|---|
+| `fx.h` | `fx<Rep,FRAC>`, `mul/div/to`, sat/wrap helpers, compare/abs/min/max/clamp | none |
+| `fx_palette.h` | the rows as named types, `static_assert`s on the derivation rule, the mixed-op instantiations, world constants, precomputed `H`, `G_SUBSTEP` | `fx.h` |
+| `det_math.h` | `sqrt/rsqrt/sincos/atan2/isqrt/lerp`, `vec2<T>`, normalize, rotate; FixPointCS attribution | `fx_palette.h` |
+| `fx_float.h` | the bridge (§6) | `fx_palette.h` — render/editor/tools only |
+
+`fx_palette.h` has a `FX_PALETTE_REV` constant; it is part of the build fingerprint
+(`BUILD.md` §5) — two peers on different palette revs cannot handshake.
+
+---
+
+## 8. Alternatives recorded (so they aren't re-proposed)
+
+| Alternative | Verdict |
+|---|---|
+| strict float + pinned toolchain (Ore's model by hand) | the **pre-committed Gate 0 fallback**, x86-64 only — never the default; it surrenders cross-ISA and makes every codegen flag a determinism variable |
+| one "fixed" type with runtime scale | rejected — deletes the compile-time mixed-scale check |
+| uniform `fx<i64,32>` | rejected — cache traffic + SIMD loss for precision needed only at accumulation points |
+| radians | rejected — irrational range reduction; turns reduce by masking |
+| a vendored fixed-point library as the core | rejected — no library ships our policy; kernels are ported, not the core |
+| floats render-side converted per draw | **accepted** (it's the D10 boundary); the extract step converts once per entity per frame |
+
+---
+
+## 9. Open
+
+- **O-1** Rows: every `fx<i32,·>` row above is pending Gate 0 (`GATE0-BENCH.md` §3 names which
+  scenario gates which row). `lambda_t`'s storage format is the least certain.
+- **O-2** SDF texel distance: `i8` vs `i16` quantized signed distance in texel units —
+  `ALLOY.md` §2.4 bench; it is a storage width, not a palette row (it never enters the solver
+  without being converted to `pos_t` through one multiply).
+- **O-3** Whether `exp`/`log` are needed at all before a chemistry consumer (rates are integer
+  quanta/tick; decay is keyed-RNG probability). Lean: no; port on pull.
+- **O-4** SIMD: the fx helpers are scalar at v0. A `fx4<Rep,FRAC>` lane type over SSE2/NEON
+  intrinsics (in `foundation/`, not `<immintrin.h>` leaking upward) is a performance item after
+  G-05 reports — the column layout is what matters now, and it is decided (32-bit rows).
+- **O-5** A unitless **`scalar_t = fx<i32,16>`** row (±32,768, 1.5e-5) is requested by three
+  consumers outside the solver: `ALLOY.md` §5's quanta-path coefficients (`coef_t`),
+  `RESERVED-SEAMS.md` §6's animation speed and §9's attribute modifiers / utility scores. `q_t`'s
+  ±2 range is too narrow for them; `lambda_t` already has this format. Lean: add the row at rev 2
+  as `scalar_t` and make `lambda_t` an alias of it — one format, two names, no ad-hoc rows.
+
+*Rev 1 — 2026-08-22. Rev 2 is written from Gate 0's CSVs.*

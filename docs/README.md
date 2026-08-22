@@ -1,0 +1,63 @@
+# tidelock — design docs (the map)
+
+> One home per concern. Every doc is **rev 1, 2026-08-22, best so far — not final**, pre-code.
+> `PIVOT-DESIGN.md` is the founding ruling; where any doc conflicts with it, PIVOT wins and the
+> conflict is a bug to file. Sections are marked **DECIDED** or **OPEN**; an OPEN item is a
+> question, not a default.
+
+## Reading order
+
+1. `PIVOT-DESIGN.md` — the ruling: stack, C++ subset, fixed point, Luau, gates, build order.
+2. `ARCHITECTURE.md` — the spine: layered DAG, three channels, seams, module policy, tiers.
+3. `FX-PALETTE.md` → `GATE0-BENCH.md` — the palette and the bench that decides it (next milestone).
+4. The foundation: `CPP-SUBSET.md` · `DETERMINISM.md` · `MEMORY.md` · `CONTAINERS.md` · `JOBS.md`.
+5. The core: `ECS.md` · `FRAME-LOOP.md` · `INPUT.md` · `ASSETS-AND-DATA.md` · `LUAU-LAYER.md`.
+6. The systems: `ALLOY.md` · `RENDER2D.md` · `NETCODE.md` · `PLATFORM.md` · `TOOLING.md`.
+7. Process: `TESTING.md` · `BUILD.md` · `RESERVED-SEAMS.md` · `../TODO.md` · `../LESSONS.md`.
+
+## The docs
+
+| Doc | Owns | Module |
+|---|---|---|
+| `PIVOT-DESIGN.md` | the founding ruling; supersedes the foundry docs where it says so | — |
+| `ARCHITECTURE.md` | DAG, channels, seams, module policy, binary shape, per-tick data flow | `app/`, layout |
+| `CPP-SUBSET.md` | the coding contract: bans, sanctioned templates, `Result<T>`, symbol audit, UB discipline, flags | all of `src/` |
+| `FX-PALETTE.md` | `fx<Rep,FRAC>`, world constants, the rows, mixed-op table, precision ladder, det math, the float bridge | `foundation/fx*`, `det_math` |
+| `GATE0-BENCH.md` | the frozen fixed-point XPBD+PBF bench: scenarios, thresholds, protocol, deliverables | `tests/gate0/` |
+| `DETERMINISM.md` | the contract, ordering rules, keyed RNG, pinned hash, snapshot/rollback, the harness, the desync workflow | cross-cutting |
+| `MEMORY.md` | VMemArena, the registered arena set + snapshot ring, scratch, vendor pools, handles, guards | `foundation/mem*` |
+| `CONTAINERS.md` | Array/Span/SlotMap/Map/Sorted/Ring/Bitset/radix, StrView/interner/fmt | `foundation/` |
+| `JOBS.md` | chunk-keyed `parallel_for`/levels, the atomic-counter pool, worker-invariance gates | `foundation/jobs` |
+| `ECS.md` | world, columns, systems/schedule, command buffer, `EventQueue<T>`, X-macro reflection, Luau-declared components | `core/world*` |
+| `FRAME-LOOP.md` | the loop, time, phases, the end-of-tick barrier, interpolation, lockstep hook points | `core/loop`, `app/` |
+| `INPUT.md` | action map, the integer `InputFrame` (76 B, `MAX_ACTIONS=32`), producers (Live/Script/Replay/Network) | `core/input` |
+| `ASSETS-AND-DATA.md` | asset handles + loaders, Luau-authored data tables → compiled POD, the reflection-encoded save format | `core/assets`, `data_tables`, `save` |
+| `LUAU-LAYER.md` | the state boundary, three VMs, numbers/fx, bindings, systems from Luau, reload, bytecode fingerprint, debugger tiers | `core/script`, `script/` |
+| `ALLOY.md` | the matter sim: substrate, solids, liquids, gases, fields, chemistry/fire, vegetation, mechanics/AgentBody, state/API, fixed-point determinism, data schema, world-gen, streaming, gates | `sim/` |
+| `RENDER2D.md` | coordinates, extract (fx→float), camera, submission + sort key, layers, the sim view, backends, text/debug draw | `render/` |
+| `NETCODE.md` | 8-peer lockstep over ENet: invariants, consensus, succession, sessions, wire/archive, hash exchange, versioning, budgets, risks, Hovel | `net/`, `tests/hovel/` |
+| `PLATFORM.md` | the porting seam (window/events/draw/file/clock/vmem/entropy/threads), sdl3 + headless impls, vendoring | `platform/` |
+| `TOOLING.md` | ImGui shell, inspector, console/cvars, logging, profiler/probes, crash, replay scrub, Luau debugger tiers | `editor/` |
+| `TESTING.md` | runner, headless driver, determinism harness, cross-ISA, static gates, CI lanes, the per-module rubric | `tests/`, `tools/audit` |
+| `BUILD.md` | clang toolchain, CMake+Ninja, tiers/flags, vendoring, the build fingerprint, Luau compile, cross-compile/deploy | `cmake/`, `tools/` |
+| `RESERVED-SEAMS.md` | designed-not-built: audio, game UI, spatial index, tilemap, nav/AI, frame animation, replay UI/cinematics, modding, game-logic substrate, streaming/cook, SDL_GPU, editor shell; explicitly-out list | — |
+
+## Conventions
+
+- **Axes for every trade-off table:** Determinism (bit-exact by construction, cross-ISA) ·
+  Performance (SoA/SIMD, cache, zero per-tick alloc) · LOC & cognitive cost · Compile-time /
+  rebuild budget · Correctness & test surface · Iteration cost (Luau reload / tuning).
+- **Compulsory alternatives:** a real design choice shows 2–3 options and the matrix, then the
+  pick. Rejected alternatives stay recorded so they are not re-proposed.
+- **Anti-rot:** at each commit the only files that should need touching are `TODO.md` (if the
+  next action moved), `LESSONS.md` (if a trap cost time), and the one doc whose decision changed.
+- **Lineage:** each doc names the foundry source it harvested once, at the top, and never cites
+  foundry files as live references elsewhere. The foundry repo is history after this sweep.
+
+## What is deliberately not migrated
+
+`STRATEGY.md` (the two-game program plan + fork gate) and the GridQuest / Time-Puzzler candidate
+docs are *program/game* documents, not engine systems; they stay in `../foundry` until a game
+repo exists to own them. `FOUNDRY-ORE-GATE.md`, `LAYR-ANALYSIS.md`, `FOUNDRY-EXTRACTION.md` and
+the Ore-specific halves of every doc are retired — their conclusions are folded into the docs
+above.

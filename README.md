@@ -21,25 +21,25 @@ A 2D game engine, a deterministic matter simulation (**Alloy**), and — later �
 - **Netcode**: deterministic lockstep, 8 peers, no dedicated server; ENet transport
   (inputs on unreliable + redundancy window, never reliable channels).
 - **Platform**: SDL3 (+ SDL_Render at v0, SDL_GPU reserved), SDL_ttf, Dear ImGui editor,
-  stb_image / stb_sprintf, Monocypher (crypto), own containers/arenas/ECS + X-macro
+  stb_image / stb_sprintf, Monocypher (crypto), rapidhash, own containers/arenas/ECS + X-macro
   reflection.
 
 ## Status
 
-**Design complete, pre-code.** The founding ruling — every decision, the fx palette, the
-frozen Gate 0 bench spec, and the recovery ledger — is **`docs/PIVOT-DESIGN.md`** (read it
-first). Next milestone: **Gate 0** — the headless fixed-point XPBD+PBF convergence and cost
-bench. Then foundation layer → ECS → v0 ("window + moving sprite + 60 Hz") → Hovel (the
-3-machine lockstep harness) → Alloy.
+**Design complete, pre-code.** The founding ruling is **`docs/PIVOT-DESIGN.md`**; every system
+now has its own design doc — start at **`docs/README.md`** (the map and reading order), then
+`CLAUDE.md` (how to work here) and `TODO.md` (the build queue). Next milestone: **Gate 0** —
+the headless fixed-point XPBD+PBF convergence and cost bench (`docs/GATE0-BENCH.md`). Then
+foundation layer → ECS → v0 ("window + moving sprite + 60 Hz") → Hovel (the 3-machine lockstep
+harness) → Alloy.
 
 ## Lineage
 
 Successor to the **ore / foundry** program (custom deterministic language + engine designs).
-The Ore language is retired; the design corpus is harvested, not abandoned — until the doc
-sweep migrates them, the surviving design docs live in the sibling **`../foundry`** repo:
-`ALLOY-DESIGN.md` (the sim — mechanisms survive whole), `NETCODE-DESIGN.md` (rev 3 —
-transport-agnostic, survives whole), `DETERMINISM-DESIGN.md` (ordering rules + test
-harness), `FOUNDRY-*.md` (architecture decisions, superseded where PIVOT-DESIGN says so).
+The Ore language is retired; the design corpus was harvested into `docs/` on 2026-08-22 — each
+doc names its foundry source once, at the top. The sibling `../foundry` repo is history (plus the
+program-strategy and game-candidate docs, which are not engine systems and stay there until a
+game repo owns them).
 
 ## Working rules (carried from the program)
 
@@ -52,15 +52,17 @@ harness), `FOUNDRY-*.md` (architecture decisions, superseded where PIVOT-DESIGN 
 ## Intended layout (created as built, not upfront)
 
 ```
-src/foundation/   fx palette + det math, arenas, containers, RNG/hash, StrView/interner
-src/core/         ECS + reflection, events, input, assets, time
-src/sim/          Alloy
+src/foundation/   fx palette + det math, arenas, containers, RNG/hash, StrView/interner, jobs
+src/core/         ECS + reflection, events, input, assets + data tables, loop/time, Luau glue
+src/sim/          Alloy (own static lib, symbol-audited)
+src/render/       render2d: camera, extract, sort key, sprite batch, the sim view
 src/net/          lockstep netcode (ENet)
-src/platform/     SDL3 seam
+src/platform/     SDL3 seam (+ headless impl)
 src/editor/       ImGui tooling (dev builds only)
+app/              main() + the one wiring file (module registration order)
 script/           Luau — game data + meaning
-vendor/           SDL3, imgui, luau, enet, stb, monocypher (compiled once, own TUs)
-tools/            offline-only (exempt from the C++ subset)
-tests/            runner + determinism harness + Gate 0 bench
-docs/             PIVOT-DESIGN.md (the founding ruling) + future design docs
+vendor/           SDL3, SDL_ttf, imgui, luau, enet, stb, monocypher, rapidhash (own TUs)
+tools/            offline only (audit, fingerprint, luauc, fxcheck) — exempt from the C++ subset
+tests/            runner + driver + determinism harness + Gate 0 bench + Hovel
+docs/             PIVOT-DESIGN.md (the founding ruling) + one design doc per system
 ```
