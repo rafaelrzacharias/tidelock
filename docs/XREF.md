@@ -17,6 +17,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `LUAU-LAYER.md` -> §1.1, §9.2
 - `MEMORY.md` -> §1.1
 - `RESERVED-SEAMS.md` -> §1.2, §2
+- `ROADMAP.md` -> §14.7
 
 ## ARCHITECTURE.md
 - `BUILD.md` -> §1
@@ -25,6 +26,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `LUAU-LAYER.md` -> §3
 - `README.md` -> §9
 - `RENDER2D.md` -> §5, §8
+- `ROADMAP.md` -> §9
 
 ## ASSETS-AND-DATA.md
 - `ALLOY.md` -> §3
@@ -35,6 +37,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `LUAU-LAYER.md` -> §3, §3.5, §5, §7
 - `NETCODE.md` -> §5
 - `RENDER2D.md` -> §2
+- `ROADMAP.md` -> §8.5
 
 ## BUILD.md
 - `ARCHITECTURE.md` -> §5, §10.5
@@ -45,6 +48,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `GATE0-BENCH.md` -> §2
 - `LUAU-LAYER.md` -> §5
 - `NETCODE.md` -> §5
+- `ROADMAP.md` -> §10.5
 - `TESTING.md` -> §2
 - `TOOLING.md` -> §3
 
@@ -58,6 +62,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `LUAU-LAYER.md` -> §4
 - `MEMORY.md` -> §2, §5
 - `RENDER2D.md` -> §1, §4
+- `ROADMAP.md` -> §8.7
 
 ## CPP-SUBSET.md
 - `ALLOY.md` -> §4, §5, §6
@@ -85,6 +90,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `INPUT.md` -> §9.2
 - `MEMORY.md` -> §4
 - `NETCODE.md` -> §4, §8
+- `ROADMAP.md` -> §9.5
 - `TESTING.md` -> §1, §6
 - `TOOLING.md` -> §7
 
@@ -99,6 +105,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `JOBS.md` -> §3
 - `LUAU-LAYER.md` -> §3, §4, §6.1, §9
 - `MEMORY.md` -> §6, §10.4
+- `ROADMAP.md` -> §10.8
 - `TOOLING.md` -> §4
 
 ## FRAME-LOOP.md
@@ -110,6 +117,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `JOBS.md` -> §3
 - `NETCODE.md` -> §1
 - `PLATFORM.md` -> §1
+- `ROADMAP.md` -> §8.4
 
 ## FX-PALETTE.md
 - `ALLOY.md` -> §1, §3, §3.1, §9
@@ -118,9 +126,11 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `FRAME-LOOP.md` -> §2
 - `GATE0-BENCH.md` -> §3, §3.2
 - `RENDER2D.md` -> §6
+- `ROADMAP.md` -> §10.6
 
 ## GATE0-BENCH.md
 - `ARCHITECTURE.md` -> §8.5
+- `ROADMAP.md` -> §8.5
 
 ## INPUT.md
 - `ARCHITECTURE.md` -> §4, §9.6
@@ -129,12 +139,14 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `LUAU-LAYER.md` -> §2
 - `NETCODE.md` -> §4, §8
 - `PLATFORM.md` -> §2, §4
+- `ROADMAP.md` -> §9.6
 - `TOOLING.md` -> §4, §5
 
 ## JOBS.md
 - `DETERMINISM.md` -> §4
 - `MEMORY.md` -> §1
 - `RENDER2D.md` -> §4
+- `ROADMAP.md` -> §3, §6.4
 - `TOOLING.md` -> §1
 
 ## LUAU-LAYER.md
@@ -146,6 +158,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `FX-PALETTE.md` -> §3
 - `INPUT.md` -> §6
 - `MEMORY.md` -> §2, §5
+- `ROADMAP.md` -> §10.12
 
 ## MEMORY.md
 - `ALLOY.md` -> §1.1, §1.2, §6
@@ -161,6 +174,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `LUAU-LAYER.md` -> §6, §7
 - `NETCODE.md` -> §5
 - `PLATFORM.md` -> §1.1, §1.5
+- `ROADMAP.md` -> §8.8
 - `TESTING.md` -> §2
 - `TOOLING.md` -> §1.3, §5
 
@@ -175,6 +189,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `FRAME-LOOP.md` -> §7.4, §20
 - `INPUT.md` -> §8.4, §12.2
 - `JOBS.md` -> §2
+- `ROADMAP.md` -> §19.5, §20.8
 - `TESTING.md` -> §19
 
 ## PIVOT-DESIGN.md
@@ -200,12 +215,14 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `MEMORY.md` -> §4
 - `NETCODE.md` -> §3, §5
 - `RENDER2D.md` -> §0, §9.2, §9.3
+- `ROADMAP.md` -> §9
 
 ## RENDER2D.md
 - `ASSETS-AND-DATA.md` -> §5
 - `FRAME-LOOP.md` -> §2, §4
 - `INPUT.md` -> §2
 - `PLATFORM.md` -> §2
+- `ROADMAP.md` -> §9
 
 ## RESERVED-SEAMS.md
 - `ARCHITECTURE.md` -> §11
@@ -214,11 +231,15 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `RENDER2D.md` -> §2
 - `TOOLING.md` -> §2, §12
 
+## ROADMAP.md
+- (no citations)
+
 ## TESTING.md
 - `BUILD.md` -> §5, §8
 - `DETERMINISM.md` -> §4
 - `FX-PALETTE.md` -> §4
 - `PLATFORM.md` -> §4
+- `ROADMAP.md` -> §9
 
 ## TOOLING.md
 - `ARCHITECTURE.md` -> §2
@@ -229,3 +250,4 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `LUAU-LAYER.md` -> §1, §7
 - `PLATFORM.md` -> §9.3.9
 - `RENDER2D.md` -> §2
+- `ROADMAP.md` -> §9

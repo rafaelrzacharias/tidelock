@@ -134,7 +134,8 @@ every doc and every line of code must agree with — grep it first. `docs/PIVOT-
 founding ruling and wins every conflict. One doc per system, each ending in an **Implementation
 specification** (the build contract: files, structs, signatures, algorithms, tests, done
 criterion); `ARCHITECTURE.md` §9 is the milestone order. `TODO.md` is the forward queue;
-`LESSONS.md` is one-line gotchas (read before build work); history → `git log`.
+`LESSONS.md` is one-line gotchas (read before build work); `docs/ROADMAP.md` is the wave/lane plan
+(what runs in parallel, the critical path, the header-first rule); history → `git log`.
 **Before building a module:** read its doc end-to-end, then CANON, then the docs it consumes
 (named in its spec's "Read first"/cross-refs). Build the tests in its test list alongside the
 code. Nothing is open — if the spec is silent on something, that is a bug to file in `TODO.md`

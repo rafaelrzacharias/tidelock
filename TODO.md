@@ -1,5 +1,8 @@
 # tidelock — TODO (the to-do list only)
 
+> **Parallelism:** this list is the serial queue inside each lane; which lanes run concurrently,
+> and the critical path, is `docs/ROADMAP.md`. Start a wave by opening one worktree per lane.
+
 Worked top to bottom; the first open `[ ]` is what to do next. History → `git log`; gotchas →
 `LESSONS.md`; rationale → the doc named on each line. Governing rules: `CLAUDE.md` principles,
 `docs/ARCHITECTURE.md` §0/§4, test-infra-first.
