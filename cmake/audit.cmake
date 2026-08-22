@@ -9,25 +9,34 @@ find_program(TL_LLVM_OBJDUMP NAMES llvm-objdump llvm-objdump-22 REQUIRED)
 find_program(TL_LLVM_AR NAMES llvm-ar llvm-ar-22 REQUIRED)
 find_program(TL_CLANGXX NAMES clang++ clang-cl REQUIRED)
 
-# --layer order is the module DAG bottom-up: a lib may only reference symbols from itself or
-# from a layer named before it (docs/ARCHITECTURE.md §1). The .data/.bss check runs on every
-# src/ lib, audited or not - docs/CPP-SUBSET.md §1 bans static mutable state in all of src/.
+# The audit's inputs come from the two global properties tl_register_lib fills, in
+# add_subdirectory order - which is the module DAG bottom-up (docs/ARCHITECTURE.md §1). A lane
+# that adds a lib is covered without editing this file; a lane that adds one and forgets to
+# register it fails configure below rather than silently escaping the gate.
+get_property(TL_AUDITED GLOBAL PROPERTY TL_AUDITED_LIBS)
+get_property(TL_MODULES GLOBAL PROPERTY TL_MODULE_LIBS)
+if(NOT TL_AUDITED)
+  message(FATAL_ERROR "no audited libs registered - tl_register_lib(<target> TRUE) is missing")
+endif()
+
+set(TL_SYMBOL_ARGS "")
+foreach(lib IN LISTS TL_AUDITED)
+  list(APPEND TL_SYMBOL_ARGS --layer "${lib}=$<TARGET_FILE:${lib}>")
+endforeach()
+foreach(lib IN LISTS TL_MODULES)
+  list(APPEND TL_SYMBOL_ARGS --data-only "${lib}=$<TARGET_FILE:${lib}>")
+endforeach()
+if(TL_SANITIZE)
+  list(APPEND TL_SYMBOL_ARGS --sanitized)   # the audit then refuses, loudly, instead of lying
+endif()
+
 add_custom_target(tl_audit_symbols
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/audit/symbols.py"
           --nm "${TL_LLVM_NM}" --objdump "${TL_LLVM_OBJDUMP}"
           --allow "${CMAKE_SOURCE_DIR}/tools/audit/allow.txt"
-          --layer tl_foundation_det=$<TARGET_FILE:tl_foundation_det>
-          --layer tl_sim=$<TARGET_FILE:tl_sim>
-          --data-only tl_foundation=$<TARGET_FILE:tl_foundation>
-          --data-only tl_core=$<TARGET_FILE:tl_core>
-          --data-only tl_render=$<TARGET_FILE:tl_render>
-          --data-only tl_net=$<TARGET_FILE:tl_net>
-          --data-only tl_script=$<TARGET_FILE:tl_script>
-          --data-only tl_platform_headless=$<TARGET_FILE:tl_platform_headless>
-          --data-only tl_platform_sdl3=$<TARGET_FILE:tl_platform_sdl3>
-  DEPENDS tl_foundation_det tl_sim tl_foundation tl_core tl_render tl_net tl_script
-          tl_platform_headless tl_platform_sdl3
-  COMMENT "audit: symbol layering + mutable-global sections"
+          ${TL_SYMBOL_ARGS}
+  DEPENDS ${TL_AUDITED} ${TL_MODULES}
+  COMMENT "audit: symbol layering + writable static storage"
   VERBATIM)
 
 add_custom_target(tl_audit_includes

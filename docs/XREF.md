@@ -58,6 +58,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 ## CONTAINERS.md
 - `ALLOY.md` -> §2
 - `ARCHITECTURE.md` -> §8.7
+- `CPP-SUBSET.md` -> §8
 - `DETERMINISM.md` -> §3, §5
 - `LUAU-LAYER.md` -> §4
 - `MEMORY.md` -> §2, §5

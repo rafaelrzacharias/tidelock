@@ -50,11 +50,13 @@ containers, arenas — audited), `tl_core`, `tl_sim` (audited), `tl_net`, `tl_re
 | `netcode` | `-O2 -g1`, slim fatal tier only, `TL_DEV=0` | what peers must match; Hovel and soaks run this |
 | `ship` | as netcode + `-DNDEBUG`-class stripping, LTO optional (LTO is *not* a determinism variable under fixed point, but it is a fingerprint input) | the shipped binary |
 
-`netcode` and `ship` produce the same fingerprint class only if their flag sets are identical
-except for symbol stripping — they are kept so by `cmake/tier.cmake` and **checked by
-`tools/audit/tier_parity.py`**, which diffs the resolved compile command of every TU between the
-two presets and allows only the tier markers and `NDEBUG` (a PR job). Before the W0 review this
-sentence named no tool and nothing enforced it.
+`netcode` and `ship` have **different `build_id`s by design** - the tier name and `NDEBUG` are
+both §5 inputs - so a session is homogeneous in tier and a `ship` peer cannot join a `netcode`
+one. What must hold is that they differ by *nothing else*: `cmake/tier.cmake` builds both from one
+set of variables and **`tools/audit/tier_parity.py` checks it** by diffing the resolved compile
+command of every TU between the two presets, allowing only the tier markers and `NDEBUG` (a PR
+job). Before the W0 review this paragraph claimed a parity the fingerprint tool "asserts", and
+nothing anywhere asserted it.
 
 **Compile time is a feature.** Budgets: full rebuild < 10 s, incremental < 2 s on the reference
 PC — CI-measured, a regression fails the PR (`TESTING.md` §5). Levers in order: unity builds per
@@ -167,14 +169,14 @@ Durable context lives in committed files only (`docs/`, `TODO.md`, `LESSONS.md`)
   The remaining `-W` and `-f` flags are identical in both driver modes. One warning set, two
   spellings — `cmake/tier.cmake` is the only place that knows the difference.
 
-- **R-7 The toolchain pin is loud, and fatal only under `TL_STRICT_TOOLCHAIN=ON`.** Configuring
-  with a clang whose major differs from `toolchain/VERSIONS` warns in every tier; a build whose
-  binaries other peers will run (release, soak, cross-ISA) sets `TL_STRICT_TOOLCHAIN=ON` and the
-  mismatch is fatal. Not fatal by default because `build_id` already carries the compiler string:
-  an off-pin peer cannot silently join a session, it is refused at the handshake. The alternative
-  — fatal always — was rejected because it would block the `netcode` tier on any runner without
-  the pinned LLVM, trading a real gate for a red lane. Ruled after the W0 review found the pin
-  compared against nothing.
+- **R-7 The toolchain pin is fatal in `netcode` and `ship`, a warning elsewhere.** Configuring
+  with a clang whose major differs from `toolchain/VERSIONS` fails the tiers peers actually run
+  and warns in the dev tiers. *Revised after R-8*: the original ruling made it a warning
+  everywhere on the grounds that `build_id` carried the compiler string, so an off-pin peer could
+  not silently join a session. R-8 removed the compiler from `build_id`, which voided that
+  argument in the same document - this check is now the only thing keeping peers on one compiler.
+  CI opts out explicitly with `-DTL_STRICT_TOOLCHAIN=OFF` because the runners carry stock clang;
+  that opt-out is visible in `pr.yml` and queued in `TODO.md`, not a silent default.
 
 - **R-8 `build_id` is target-independent; `build_env` carries the rest.** The W0 review found that
   putting the compiler string and the resolved compile commands into `build_id` made a mixed-target
@@ -186,7 +188,12 @@ Durable context lives in committed files only (`docs/`, `TODO.md`, `LESSONS.md`)
   palette rev, bytecode - and peers refuse on it. Compiler, triple, optimisation level, warning and
   debug flags move to `build_env`, which is reported in CSVs, crash reports and soak metadata and
   never compared. This is the same premise Gate 0 exists to prove: under fixed point, codegen
-  cannot change results except through UB. Alternatives rejected: keeping `build_id`
+  cannot change results except through UB **and except through target-variable language types** -
+  `char` is signed on x86-64 and unsigned on aarch64, `long` is 32-bit on Windows and 64-bit on
+  Linux, and either one diverges a PC peer from a Pi peer with no UB in sight. The second W0
+  review found the premise stated without that clause and unenforced; `tools/audit/includes.py`
+  now bans `char`, `long` and `wchar_t` in sim TUs (message literals keep `const char*`), and the
+  ban is a selftest fixture. R-8 is only sound with that gate in place. Alternatives rejected: keeping `build_id`
   target-specific (coherent, but it deletes PC + Deck + Pi peers from the product, which is a scope
   decision, not a build one); a thin `build_id` of source tree + palette + bytecode only (a `dev`
   peer could then join a `netcode` session and be caught only by the tick-30 checksum, which

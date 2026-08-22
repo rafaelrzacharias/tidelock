@@ -62,7 +62,10 @@ jobs:
           echo "pinned $pin | runner $have"
 
       - name: configure
-        run: cmake --preset ${{ env.PRESET }}
+        # TL_STRICT_TOOLCHAIN=OFF: the runners carry stock clang, not the pinned major
+        # (docs/BUILD.md §9 R-7). Turning this on is TODO.md's item once CI installs pinned LLVM;
+        # the opt-out is explicit and lives here rather than being a silent default.
+        run: cmake --preset ${{ env.PRESET }} -DTL_STRICT_TOOLCHAIN=OFF
       - name: build
         run: cmake --build --preset ${{ env.PRESET }}
       - name: symbol audit
@@ -87,6 +90,47 @@ jobs:
       - run: cmake --preset netcode-linux
       - run: cmake --preset ship-linux
       - run: python tools/audit/tier_parity.py --netcode out/netcode-linux --ship out/ship-linux
+
+  build-id-win:
+    # R-8 says build_id is identical on every target. The selftest can only compare two command
+    # lines someone typed; these three jobs compare two real builds of one checkout.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: choco install ninja -y
+      - run: cmake --preset netcode-win -DTL_STRICT_TOOLCHAIN=OFF
+      - run: cmake --build --preset netcode-win
+      - uses: actions/upload-artifact@v4
+        with: { name: build-id-win, path: out/netcode-win/build_id.txt }
+
+  build-id-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: sudo apt-get update && sudo apt-get install -y clang lld llvm ninja-build
+      - run: cmake --preset netcode-linux -DTL_STRICT_TOOLCHAIN=OFF
+      - run: cmake --build --preset netcode-linux
+      - uses: actions/upload-artifact@v4
+        with: { name: build-id-linux, path: out/netcode-linux/build_id.txt }
+
+  build-id-cross-target:
+    needs: [build-id-win, build-id-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: build-id-win, path: win }
+      - uses: actions/download-artifact@v4
+        with: { name: build-id-linux, path: linux }
+      - name: one build_id for every target (docs/BUILD.md §9 R-8)
+        run: |
+          set -eu
+          echo "win:   $(cat win/build_id.txt)"
+          echo "linux: $(cat linux/build_id.txt)"
+          diff win/build_id.txt linux/build_id.txt
 
   fingerprint-stability:
     # Two clean builds of the same tree must produce the same build_id (docs/BUILD.md §10.5).

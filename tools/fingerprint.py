@@ -8,9 +8,13 @@ things that can change a tick's bytes, and nothing else:
   1. the git tree hash of src/, cmake/, CMakeLists.txt, vendor/, script/sim/, script/lib/ and
      toolchain/VERSIONS, plus `git diff HEAD` over them and the content of every untracked-or-
      ignored source file under them (a .gitignore'd .cpp is still compiled by the glob)
-  2. the canonical compile tokens: every -D define seen by a TU under src/, minus the
-     platform-inherent drop-list, plus -std. Union over TUs, sorted - so it does not depend on
-     which files a given target happens to compile.
+  2. the canonical compile tokens of the TUs under src/: EVERY token except an explicit drop-list
+     of target-inherent and cosmetic ones (driver name, triple, include paths, output and
+     dependency paths, warning flags, optimisation and debug-info levels, and the two driver
+     spellings of the same switch). A drop-list, not a keep-list, on purpose: an unrecognised
+     flag is hashed, so a new one shows up as a loud peer mismatch instead of a silent hole -
+     `-include evil.h`, `-U TL_DEV`, `-funsigned-char`, `-fshort-enums` and `-fpack-struct` all
+     change layout or values and all used to be dropped.
   3. the tier name
   4. FX_PALETTE_REV, parsed from src/foundation/fx_palette.h
   5. the precompiled sim-script bytecode manifest, in load order
@@ -40,13 +44,39 @@ FINGERPRINTED = ["src", "cmake", "CMakeLists.txt", "CMakePresets.json",
 SOURCE_EXT = (".h", ".hpp", ".inc", ".c", ".cc", ".cpp", ".luau", ".cmake", ".txt", ".json",
               ".s", ".S")
 
-# Defines the platform or the CMake generator injects. Dropping them is what lets win/linux/pi4
-# agree. This is a DROP-list, not a keep-list, on purpose: an unrecognised define counts, so a new
-# one shows up as a peer mismatch (loud) rather than as an untracked input (silent).
+# Defines the platform or the CMake generator injects; dropping them is part of what lets
+# win/linux/pi4 agree.
 PLATFORM_DEFINES = {
     "WIN32", "_WINDOWS", "UNICODE", "_UNICODE", "_MT", "_DLL",
     "_HAS_EXCEPTIONS", "_CRT_SECURE_NO_WARNINGS", "_GNU_SOURCE",
 }
+
+# Tokens that are target-inherent or cosmetic. EVERYTHING ELSE IS HASHED. Two spellings of one
+# switch both appear here (e.g. -fno-exceptions and /EHs-c-) because the fact they encode is
+# already covered by the tier and by cmake/ being in the tree hash. If a token that matters ever
+# lands here the cross-target build_id job in pr.yml is what catches it: it builds netcode-win and
+# netcode-linux from one checkout and diffs build_id.txt.
+DROP_EXACT = {
+    "-c", "-nologo", "/nologo", "-TP", "-TC", "/TP", "/TC",
+    "-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics",
+    "/EHs-c-", "/EHsc", "/GR-", "/Zc:threadSafeInit-",
+    "/MD", "/MDd", "/MT", "/MTd", "/Z7", "/Zi", "/ZI",
+    "-nostdinc++", "/clang:-nostdinc++", "-fPIC", "-fPIE", "-fno-PIC", "-fno-PIE",
+    "-pipe", "-w", "/WX", "-Werror",
+}
+DROP_PREFIX = (
+    "-o", "/Fo", "/Fd", "/Fp", "-MD", "-MT", "-MF", "-MMD", "-clang:-M", "-M",
+    "-I", "/I", "-isystem", "-iquote", "-idirafter",
+    "-W", "/W", "-O", "/O", "-g", "/DEBUG",
+    "--target=", "-target", "--sysroot", "-fdiagnostics", "-fcolor-diagnostics",
+    "-fansi-escape-codes", "--driver-mode", "-x", "/std-",
+)
+
+
+def drop(token):
+    if token in DROP_EXACT:
+        return True
+    return token.startswith(DROP_PREFIX)
 
 SEP = b"\x00"
 
@@ -103,33 +133,63 @@ def canonical_tokens(rows):
     for f, cmd in rows or []:
         if "$REPO/src/" not in f:
             continue
-        for t in cmd.split():
+        tokens = cmd.split()
+        for i, t in enumerate(tokens):
+            if i == 0:
+                continue                          # the compiler executable
             if t[:2] in ("-D", "/D") and len(t) > 2:
                 define = t[2:]
                 if define.split("=", 1)[0] not in PLATFORM_DEFINES:
                     keep.add("D:" + define)
             elif t[:1] in ("-", "/") and t[1:5] in ("std=", "std:"):
                 # clang spells it -std=c++20, clang-cl spells it -std:c++20 or /std:c++20. Same
-                # fact; if the spellings are not normalised the two targets disagree on build_id.
+                # fact; unnormalised, the two targets disagree on build_id.
                 keep.add("std:" + t[5:])
+            elif t.endswith((".cpp", ".cc", ".c", ".obj", ".o")):
+                continue                          # the source and object of this TU
+            elif drop(t):
+                continue
+            else:
+                keep.add("tok:" + t)              # unknown -> hashed, and therefore loud
     return sorted(keep)
 
 
-def tree(h, repo):
-    """Input 1."""
+def tree(h, repo, allow_no_git):
+    """Input 1.
+
+    Without a git repository this function can see nothing: tree hashes come back empty, the diff
+    is empty and ls-files returns nothing, so every edit to src/ would produce the SAME build_id.
+    An exported or zip-copied tree therefore fails loudly here rather than fingerprinting air
+    (CLAUDE.md: fail loudly and explicitly). --allow-no-git exists for the selftest, which
+    fingerprints throwaway trees on purpose."""
+    if git(repo, "rev-parse", "--git-dir") is None:
+        if not allow_no_git:
+            sys.exit("fingerprint: %s is not a git repository - build_id would be blind to every "
+                     "source change. Clone the repo instead of copying it, or pass --allow-no-git "
+                     "if you know the id is meaningless (docs/BUILD.md §5)." % repo)
+        feed(h, "no-git")
+
     for path in FINGERPRINTED:
         if not os.path.exists(os.path.join(repo, path)):
             feed(h, "absent:" + path)
             continue
         out = git(repo, "rev-parse", "HEAD:" + path)
         feed(h, "tree:" + path, (out or b"uncommitted").strip())
-    feed(h, "diff", git(repo, "diff", "HEAD", "--", *FINGERPRINTED) or b"")
-    # No --exclude-standard: a .gitignore'd source under src/ is still compiled, and .gitignore
-    # itself is outside the fingerprinted paths, so skipping ignored files was a silent bypass.
-    others = git(repo, "ls-files", "--others", "--", *FINGERPRINTED)
-    for rel in sorted((others or b"").decode().splitlines()):
+
+    # Modified and untracked files are hashed by CONTENT, not through `git diff`: diff output
+    # depends on the peer's git config (diff.noprefix, diff.algorithm, core.abbrev each produced a
+    # different build_id for identical bytes). `--porcelain=v1 -z` is config-independent, and no
+    # --exclude-standard, because a .gitignore'd source under src/ is still compiled by the glob
+    # while being invisible to a standard-exclusion listing.
+    status = git(repo, "-c", "core.quotepath=false", "status", "--porcelain=v1", "-z",
+                 "--untracked-files=all", "--ignored=matching", "--", *FINGERPRINTED)
+    dirty = []
+    for entry in (status or b"").split(b"\x00"):
+        if len(entry) > 3:
+            dirty.append(entry[3:].decode("utf-8", "replace"))
+    for rel in sorted(set(dirty)):
         if rel.lower().endswith(SOURCE_EXT):
-            feed_file(h, "other:" + rel, os.path.join(repo, rel))
+            feed_file(h, "dirty:" + rel, os.path.join(repo, rel))
 
 
 def palette_rev(h, repo):
@@ -156,10 +216,10 @@ def bytecode(h, repo):
             feed(h, "luac", line.strip().encode())
 
 
-def compute_build_id(repo, tier, rows):
+def compute_build_id(repo, tier, rows, allow_no_git):
     h = hashlib.blake2b(digest_size=32)
     feed(h, "tier", tier.encode("utf-8"))
-    tree(h, repo)
+    tree(h, repo, allow_no_git)
     if rows is None:
         feed(h, "absent:compile_commands.json")
     else:
@@ -216,6 +276,9 @@ def main():
     ap.add_argument("--out-env", default=None)
     ap.add_argument("--out-flags", default=None)
     ap.add_argument("--print", action="store_true", help="print build_id to stdout (selftest)")
+    ap.add_argument("--allow-no-git", action="store_true",
+                    help="permit fingerprinting a tree with no git history; the id is then "
+                         "blind to source edits and is only meaningful to the selftest")
     a = ap.parse_args()
 
     if a.flags == "configure":
@@ -227,7 +290,7 @@ def main():
         return 0
 
     rows = load_commands(a.compile_commands, a.repo, a.binary_dir)
-    build_id = compute_build_id(a.repo, a.tier, rows)
+    build_id = compute_build_id(a.repo, a.tier, rows, a.allow_no_git)
     build_env = compute_build_env(a.compiler, a.flags, rows)
 
     emit(build_id, build_env, a.out_cpp, "tier=%s compiler=%s" % (a.tier, a.compiler))

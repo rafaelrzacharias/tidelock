@@ -13,12 +13,16 @@ set_property(CACHE TL_TIER PROPERTY STRINGS debug dev netcode ship)
 option(TL_SANITIZE "UBSan+ASan on the sim test set (docs/TESTING.md §5)" OFF)
 set(TL_PRESET_NAME "${TL_TIER}" CACHE STRING "the preset that configured this tree (audit reporting)")
 
-# The toolchain pin of docs/BUILD.md §1 is only real if something compares against it. Drift is
-# loud everywhere and fatal under TL_STRICT_TOOLCHAIN - which any build whose binaries other peers
-# will run must set (release, soak, cross-ISA). It is not fatal by default because build_id already
-# carries the compiler string: a peer built on the wrong clang cannot silently join a session, it
-# is refused at the handshake (docs/NETCODE.md §15.1). See docs/BUILD.md §9 R-7.
-option(TL_STRICT_TOOLCHAIN "fail configure when the compiler is not the pinned major" OFF)
+# The toolchain pin of docs/BUILD.md §1 is only real if something compares against it. Since R-8
+# took the compiler string OUT of build_id, this check is now the ONLY thing keeping peers on one
+# compiler - an off-pin peer would otherwise hand-shake cleanly and diverge only if the compiler
+# actually miscompiles. So it is fatal by default in the tiers peers run, and a warning in the dev
+# tiers where nobody ships the binary. See docs/BUILD.md §9 R-7.
+if(TL_TIER STREQUAL "netcode" OR TL_TIER STREQUAL "ship")
+  option(TL_STRICT_TOOLCHAIN "fail configure when the compiler is not the pinned major" ON)
+else()
+  option(TL_STRICT_TOOLCHAIN "fail configure when the compiler is not the pinned major" OFF)
+endif()
 file(STRINGS "${CMAKE_SOURCE_DIR}/toolchain/VERSIONS" TL_VERSIONS_LINES REGEX "^clang[ \t]+")
 if(TL_VERSIONS_LINES)
   string(REGEX REPLACE "^clang[ \t]+([0-9]+)\\..*" "\\1" TL_CLANG_PIN_MAJOR "${TL_VERSIONS_LINES}")
@@ -28,7 +32,8 @@ if(TL_VERSIONS_LINES)
     if(TL_STRICT_TOOLCHAIN)
       message(FATAL_ERROR "${TL_PIN_MSG}; install the pinned major or move the pin as a ruling")
     endif()
-    message(WARNING "${TL_PIN_MSG}; build_id differs from a pinned build, so peers will refuse it")
+    message(WARNING "${TL_PIN_MSG}; the compiler is NOT in build_id since R-8, so a peer would not "
+                    "notice - which is why netcode and ship refuse this outright")
   endif()
 endif()
 

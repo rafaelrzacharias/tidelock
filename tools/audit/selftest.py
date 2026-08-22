@@ -73,7 +73,23 @@ INCLUDE_CASES = [
      "static mutable state"),
     ("thread_local outside the job system", "src/core/f.cpp",
      "thread_local int slot = 0;\n",
-     "thread_local outside"),
+     "thread-local storage outside"),
+    ("__thread in a sim TU", "src/sim/tls1.cpp",
+     "__thread int slot;\n",
+     "thread-local storage outside"),
+    ("__declspec(thread) in a sim TU", "src/sim/tls2.cpp",
+     "__declspec(thread) int slot;\n",
+     "thread-local storage outside"),
+    ("long in a sim TU - 32-bit on Windows, 64-bit on Linux", "src/sim/abi1.cpp",
+     '#include "foundation/tl_types.h"\nlong abi1(void) { return 1; }\n',
+     "'long' in a sim TU"),
+    ("char in a sim TU - signed on x86-64, unsigned on aarch64", "src/sim/abi2.cpp",
+     '#include "foundation/tl_types.h"\nint abi2(char c) { return (int)c; }\n',
+     "'char' in a sim TU"),
+    ("a digit separator must not blind the rest of the file", "src/sim/sep.cpp",
+     '#include "foundation/tl_types.h"\nu32 a(void) { return 1\'000u; }\n'
+     "extern const f32 leaked;\nconst f32 leaked = 1.0f;\n",
+     "'f32' in a sim TU"),
     ("std:: in src/", "src/core/g.cpp",
      "void f(void) { std::abort(); }\n",
      "std:: in src/"),
@@ -115,11 +131,21 @@ INCLUDE_CASES = [
 INCLUDE_CLEAN = [
     ("prose about floats in a sim header is not a violation", "src/sim/ok1.h",
      '#pragma once\n// Spec: docs/ALLOY.md §1\n// No float or double may appear below this line.\n'
-     '#include "foundation/tl_types.h"\n\n// documented\nvoid ok1_step(void);\n'),
+     '#include "foundation/tl_types.h"\n\n'
+     "// Advances the fixture one step. No preconditions.\nvoid ok1_step(void);\n"),
     ("a string literal mentioning double is not a violation", "src/sim/ok2.cpp",
      '#include "foundation/tl_types.h"\nextern const char* k;\nconst char* k = "double trouble";\n'),
     ("a commented-out include is not a violation", "src/sim/ok3.cpp",
      '// #include "net/wire.h"\n#include "foundation/tl_types.h"\n'),
+    ("internal-linkage functions and constants are not mutable state", "src/sim/ok5.cpp",
+     '#include "foundation/tl_types.h"\n'
+     "static u32 helper(void) { return 1u; }\n"
+     "static u32 const K = 2u;\n"
+     "static constexpr u32 C = 3u;\n"
+     "u32 use(void) { return helper() + K + C; }\n"),
+    ("a message literal keeps const char*", "src/sim/ok6.cpp",
+     '#include "foundation/tl_types.h"\n'
+     "void fail(const char* msg);\nvoid f(void) { fail(\"bad\"); }\n"),
     # fx.h will be an all-inline, all-template header: the shape the gate must handle without
     # drowning the lane in false positives.
     ("documented inline and template definitions pass", "src/sim/ok4.h",
@@ -153,6 +179,11 @@ UPWARD_CPP = ("extern const unsigned tl_upper;\n"
               "extern const unsigned tl_ref;\nconst unsigned tl_ref = tl_upper;\n")
 MUTABLE_CPP = ("namespace { unsigned g_hidden = 0; }\n"
                "unsigned tl_bump(void) { g_hidden += 1u; return g_hidden; }\n")
+WEAK_CPP = ('extern "C" __attribute__((weak)) double sqrt(double);\n'
+            "double tl_w(double x) { return sqrt(x); }\n")
+RELRO_CPP = ('extern "C" int tl_a(void) { return 1; }\nextern "C" int tl_b(void) { return 2; }\n'
+             "using Fn = int (*)(void);\nextern const Fn table[2];\n"
+             "const Fn table[2] = { tl_a, tl_b };\n")
 LIBM_CPP = ('extern "C" double sqrt(double);\n'
             # Takes an argument on purpose: sqrt(2.0) is constant-folded and leaves no call to find.
             "double tl_m(double x) { return sqrt(x); }\n")
@@ -205,6 +236,34 @@ def test_symbols(tmp, nm, objdump, ar, cxx):
                rc == 1 and "sqrt" in out, out.strip()[:200])
     else:
         record("symbols: a libm call from an audited lib", False, err[:200])
+
+    # Weak undefined symbols are an ELF concept; the same source on COFF produces no `w` entry
+    # (and drags in _fltused), so this one is built for ELF explicitly.
+    weak_obj = os.path.join(root, "weak.o")
+    weak_src = write(root, "weak.cpp", WEAK_CPP)
+    rc, out = run([cxx, "--target=x86_64-linux-gnu", "-ffreestanding", "-nostdinc", "-fno-builtin",
+                   "-std=c++20", "-c", "-o", weak_obj, weak_src])
+    if rc == 0:
+        weak_lib = os.path.join(root, "libweak.a")
+        run([ar, "rcs", weak_lib, weak_obj])
+        rc, out = run(base + ["--layer", "weak=" + weak_lib])
+        record("symbols: a weak undefined libm symbol", rc == 1 and "sqrt" in out, out.strip()[:200])
+    else:
+        record("symbols: a weak undefined libm symbol", False, out[:200])
+
+    # PIE is the default on Linux and the Pi: a const function-pointer table lands in
+    # .data.rel.ro, which is read-only after relocation and must not read as mutable state.
+    relro_obj = os.path.join(root, "relro.o")
+    relro_src = write(root, "relro.cpp", RELRO_CPP)
+    rc, out = run([cxx, "--target=aarch64-linux-gnu", "-ffreestanding", "-nostdinc", "-fPIE",
+                   "-std=c++20", "-c", "-o", relro_obj, relro_src])
+    if rc == 0:
+        relro_lib = os.path.join(root, "librelro.a")
+        run([ar, "rcs", relro_lib, relro_obj])
+        rc, out = run(base + ["--layer", "relro=" + relro_lib])
+        record("symbols: .data.rel.ro under PIE is not mutable state", rc == 0, out.strip()[:200])
+    else:
+        record("symbols: .data.rel.ro under PIE is not mutable state", False, out[:200])
 
     clean, err = build_lib(cxx, ar, root, "clean", [LOWER_CPP])
     if clean:
@@ -276,6 +335,23 @@ def test_fingerprint(tmp):
 
     same = fingerprint_id(tmp, "same", NIX_CMD)
     record("fingerprint: identical inputs are stable", same == nix, same[:32])
+
+    for flag in ("-include evil.h", "-UTL_DEV", "-funsigned-char", "-fshort-enums",
+                 "-fpack-struct=1"):
+        tag = flag.split()[0].strip("-=").replace("-", "_")
+        got = fingerprint_id(tmp, "flag_" + tag, NIX_CMD + " " + flag)
+        record("fingerprint: %s changes build_id" % flag, got != nix, got[:32])
+
+    # A tree with no git history can see no source change at all; that must be an error, not a
+    # constant id (docs/BUILD.md §5).
+    nogit = os.path.join(tmp, "nogit", "src", "sim")
+    os.makedirs(nogit, exist_ok=True)
+    write(os.path.join(tmp, "nogit"), "src/sim/sim.cpp", "int f(void) { return 1; }\n")
+    rc, out = run([sys.executable, os.path.join(REPO, "tools", "fingerprint.py"),
+                   "--repo", os.path.join(tmp, "nogit"), "--tier", "netcode",
+                   "--out-cpp", os.path.join(tmp, "nogit", "build_id.cpp")])
+    record("fingerprint: a tree with no git history is refused, not fingerprinted blind",
+           rc != 0 and "not a git repository" in out, out.strip()[:160])
 
 
 def main():

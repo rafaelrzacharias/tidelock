@@ -9,4 +9,7 @@ target_link_libraries(tl_platform_headless PRIVATE tl_flags_common PUBLIC tl_fou
 
 add_library(tl_platform_sdl3 STATIC ${TL_PLATFORM_COMMON} ${TL_PLATFORM_SDL3})
 target_link_libraries(tl_platform_sdl3 PRIVATE tl_flags_common PUBLIC tl_foundation)
+tl_register_lib(tl_platform_headless FALSE)
+tl_register_lib(tl_platform_sdl3 FALSE)
+
 # SDL3 is vendored by the W1 platform lane; vendor/CMakeLists.txt then links it here.

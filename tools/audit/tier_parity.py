@@ -20,16 +20,28 @@ ALLOWED_DELTA = re.compile(
     r'|NDEBUG=1)$')                              # the stripping define
 
 
-def commands(path, preset):
+def commands(out_dir, preset):
+    """{tokenised source path: [tokens]} for one preset's compile database.
+
+    Keyed by full path, not basename: src/platform/platform.cpp is compiled into two libs and
+    three exes share tests/stub_main.cpp, so basenames silently merged 18 entries into 14 and hid
+    whatever the merged ones disagreed about. The preset's own binary directory is tokenised in
+    the key as well as in the command, because generated TUs (build_id.cpp) live inside it and
+    would otherwise read as "compiled in one tier and not the other"."""
+    path = os.path.join(out_dir, "compile_commands.json")
     if not os.path.exists(path):
         sys.exit("tier_parity: %s does not exist - configure the %s preset first" % (path, preset))
+    out_abs = os.path.abspath(out_dir).replace("\\", "/")
+    repo_abs = os.path.dirname(os.path.dirname(out_abs))
+
+    def tokenise(s):
+        s = s.replace("\\", "/").replace(out_abs, "$OUT")
+        return s.replace(repo_abs, "$REPO").replace("out/" + preset, "$OUT")
+
     out = {}
     for e in json.load(open(path, encoding="utf-8")):
-        cmd = e.get("command") or " ".join(e.get("arguments", []))
-        rel = os.path.relpath(e["file"], e.get("directory", ".")).replace("\\", "/")
-        # Tokenise the preset's own output directory so object/dep paths do not read as a delta.
-        cmd = cmd.replace("\\", "/").replace("out/" + preset, "$OUT")
-        out[os.path.basename(rel)] = [t for t in cmd.split() if "$OUT" not in t]
+        cmd = tokenise(e.get("command") or " ".join(e.get("arguments", [])))
+        out[tokenise(e["file"])] = [t for t in cmd.split() if "$OUT" not in t]
     return out
 
 
@@ -39,8 +51,8 @@ def main():
     ap.add_argument("--ship", required=True, help="out/<ship preset>")
     a = ap.parse_args()
 
-    n = commands(os.path.join(a.netcode, "compile_commands.json"), os.path.basename(a.netcode))
-    s = commands(os.path.join(a.ship, "compile_commands.json"), os.path.basename(a.ship))
+    n = commands(a.netcode, os.path.basename(os.path.normpath(a.netcode)))
+    s = commands(a.ship, os.path.basename(os.path.normpath(a.ship)))
 
     errors = []
     only = set(n) ^ set(s)

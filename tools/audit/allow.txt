@@ -11,12 +11,23 @@
 #   __aarch64_*        outline atomics - concurrency inside det code on the Pi (docs/JOBS.md)
 # If a legitimate build needs one of these, that is a ruling, recorded in docs/BUILD.md §9.
 
-# The three sanctioned libc calls (docs/CPP-SUBSET.md §1).
+# The sanctioned libc calls (docs/CPP-SUBSET.md §1).
 memcpy
 memset
 memcmp
+memmove
 __memcpy_chk
 __memset_chk
+__memmove_chk
+
+# The panic ABI (docs/CPP-SUBSET.md §9 R-3). TL_ASSERT/TL_CHECK/TL_FATAL in det code resolve to
+# these; they are defined in tl_foundation, above the audited layers, and they reach io. Bounded
+# on purpose: the panic path terminates the process, so it never runs inside a deterministic tick.
+# This list is closed - adding a name is a ruling. The W1 tooling-rt lane must declare all three
+# `extern "C"` in foundation/tl_assert.h: a C++-mangled name cannot be matched by name here.
+tl_fatal
+tl_check_failed
+tl_assert_failed
 
 # clang-cl / MSVC CRT codegen support: stack probes and the stack-cookie check. Emitted by the
 # backend for large frames; they are codegen, not calls we make, and touch no global state we

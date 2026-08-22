@@ -61,6 +61,11 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [ ] **RR-2 `nightly.yml` / `weekly.yml` (`docs/BUILD.md` §10.4).** Both need self-hosted `pi4`
       and `deck` runners; committing them before the runners exist buys a nightly red build.
       Land them with RR-1.
+- [ ] **Turn `TL_STRICT_TOOLCHAIN` back on in CI.** Since R-8 the compiler is not in `build_id`,
+      so the pin check is the only thing keeping peers on one clang (`docs/BUILD.md` §9 R-7). It is
+      fatal by default in `netcode`/`ship`, and `pr.yml` opts out with `-DTL_STRICT_TOOLCHAIN=OFF`
+      because the runners carry stock clang. Install the pinned LLVM major on the runners
+      (apt.llvm.org for ubuntu, choco/winget for windows) and delete the opt-out.
 - [ ] The ubuntu-clang half of `pr.yml` is written against the non-MSVC flag path but has only
       been exercised through the GNU driver locally (`clang++` on the real sources, clean under
       `-Werror`); the first PR run is its real proof. The runners also carry stock clang, not the

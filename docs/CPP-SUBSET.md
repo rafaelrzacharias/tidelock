@@ -26,13 +26,15 @@ most of it. The subset is "C with namespaces, a handful of flat templates, and `
 | operator overloads beyond fx arithmetic | hidden cost | review |
 | `new`/`delete`/`malloc`/`free` outside arena backing | zero per-tick allocation | symbol audit (§4) + debug counting shim |
 | `<math.h>` in sim TUs | libm is the cross-platform determinism hole | include firewall + symbol audit |
-| static mutable state | two-worlds-one-process test; rollback restores only registered arenas | CI grep: `^static [^c]` / `static .* =` outside `constexpr`/`const` |
+| static mutable state | two-worlds-one-process test; rollback restores only registered arenas | link gate: every object file in every `src/` lib must have zero bytes of `.data`/`.bss`/TLS (`tools/audit/symbols.py`). A grep cannot see anonymous-namespace globals, `inline static` or static locals; the earlier `^static [^c]` line also rejected every `static` *function*, which is internal linkage, not state |
 | recursive/meta templates, SFINAE, concepts, expression templates | compile time + cognitive cost | review; the sanctioned list is closed |
 | `auto` for non-iterator locals, lambdas capturing by reference across a call | readability / hidden lifetime | review |
 | `thread_local` outside the job system's worker slot | hidden per-thread state the hash can't see | CI grep |
 
 **Allowed system includes in `src/`:** `<stdint.h>`, `<stddef.h>`, `<string.h>` (memcpy/memset/
-memcmp only), `<limits.h>`. `platform/` additionally includes its OS/SDL headers inside its own
+memcmp/**memmove** only - `memmove` is sanctioned because `CONTAINERS.md` §8's erase/insert paths
+need an overlapping move and it is as deterministic as the other three; the earlier list omitted
+it and contradicted that doc), `<limits.h>`. `platform/` additionally includes its OS/SDL headers inside its own
 TUs. `<math.h>` is allowed ONLY in `render/`, `editor/`, `platform/` (float is legal there).
 Type traits come from clang builtins, never `<type_traits>`: `__is_trivially_copyable(T)`,
 `__is_same(A,B)`, `__is_enum(T)`, `alignof`, `sizeof`, `offsetof` (from `<stddef.h>`). `tl_types.h`
@@ -212,6 +214,16 @@ if (r.err) { TL_LOG_ERR(ERR_NAME(r.err)); return r.err; }
 - **R-1 `[[nodiscard]]` is mandatory** on `Result<T>` and `ErrCode`. clang and clang-cl both honour
   it under `-Werror`; an ignored result is a compile error. The sanctioned "I know this can't
   fail" form is `TL_CHECK(call().err == 0)`.
+- **R-3 The panic ABI is the one sanctioned callgraph out of sim code.** `TL_ASSERT`/`TL_CHECK`/
+  `TL_FATAL` in `src/sim/` and the det half of `src/foundation/` resolve to a closed set of
+  symbols - `tl_fatal`, `tl_check_failed`, `tl_assert_failed` - that the symbol audit allowlists
+  by name even though they are defined in `tl_foundation`, above the audited layers, and reach
+  io. This is deliberate and bounded: the panic path terminates the process, so it never executes
+  inside a deterministic tick, and if it ever does, determinism has already ended. Without it the
+  first `TL_CHECK` in `fx.h` would fail the audit either as a banned io callgraph or as an upward
+  layer reference, which the second W0 review found before the fx lane started. Alternative
+  rejected: a function pointer installed at boot - that is a byte of `.data`, which is exactly
+  what the same audit forbids.
 - **R-2 One field list, three doors.** Every reflected struct declares one `TL_FIELDS_Name(X,XA,XH)`
   list. Three macros consume it: `TL_COMPONENT(Name)` (ECS column + registration), `TL_POOL_ROW(Name)`
   (Alloy/engine pool rows: trivially-copyable + explicit-padding static_asserts + field table for the
@@ -219,4 +231,4 @@ if (r.err) { TL_LOG_ERR(ERR_NAME(r.err)); return r.err; }
   `offsetof` static_assert per field generated from the list, and the little-endian write/read
   pair). Same table, same kinds, same inspector; nothing is declared twice.
 
-*Rev 1 — 2026-08-22; §3 names the header owning `Result<T>` (W0 skeleton, 2026-08-22).*
+*Rev 1 — 2026-08-22; §3 names the header owning `Result<T>`, §1 corrects the static-mutable gate and adds `memmove`, §9 R-3 rules the panic ABI (W0 skeleton and its two adversarial reviews, 2026-08-22).*

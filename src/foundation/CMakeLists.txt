@@ -24,3 +24,6 @@ target_link_libraries(tl_foundation_det PRIVATE tl_flags_common tl_flags_sim)
 
 add_library(tl_foundation STATIC ${TL_HOST_SRC})
 target_link_libraries(tl_foundation PRIVATE tl_flags_common PUBLIC tl_foundation_det)
+
+tl_register_lib(tl_foundation_det TRUE)    # audited: symbol layering + writable-static
+tl_register_lib(tl_foundation FALSE)       # writable-static only

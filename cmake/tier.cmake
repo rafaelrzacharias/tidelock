@@ -100,6 +100,19 @@ function(tl_module target)
   target_link_libraries(${target} PRIVATE tl_flags_common)
   if(A_SIM)
     target_link_libraries(${target} PRIVATE tl_flags_sim)
+  endif()
+  tl_register_lib(${target} ${A_SIM})
+endfunction()
+
+# tl_register_lib(<target> <is_sim>) - put a lib into the audit's input list. Every module lib
+# calls this, including the two that cannot use tl_module() because their folder builds more than
+# one target (foundation, platform). cmake/audit.cmake reads the two global properties, so a lane
+# that adds a lib is audited automatically instead of silently escaping the gate - which is what
+# happened while TL_AUDITED_LIBS was written and never read.
+function(tl_register_lib target is_sim)
+  if(is_sim)
     set_property(GLOBAL APPEND PROPERTY TL_AUDITED_LIBS ${target})
+  else()
+    set_property(GLOBAL APPEND PROPERTY TL_MODULE_LIBS ${target})
   endif()
 endfunction()
