@@ -10,7 +10,7 @@
 |---|---|
 | `u8 u16 u32 u64 i8 i16 i32 i64` | fixed-width integers from `<stdint.h>` |
 | `f32 f64` | `float`/`double` — render/editor/tools/platform only; banned tokens in sim TUs |
-| `usize` | `size_t` |
+| `usize` | `u64` (same width as `size_t` on every supported target; a distinct *type* identity would make a `usize`-keyed template select differently per target - CPP-SUBSET §5) |
 | `uint_fit<N>` | `constexpr` selector: N≤8→u8, ≤16→u16, ≤32→u32, else u64 |
 | `StrView { const char* ptr; u32 len; }` | non-owning string |
 | `NameHash` = `u64` | `constexpr` FNV-1a 64 of a literal: `"player"_id` (offset 0xcbf29ce484222325, prime 0x100000001b3) |

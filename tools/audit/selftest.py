@@ -90,6 +90,45 @@ INCLUDE_CASES = [
      '#include "foundation/tl_types.h"\nu32 a(void) { return 1\'000u; }\n'
      "extern const f32 leaked;\nconst f32 leaked = 1.0f;\n",
      "'f32' in a sim TU"),
+    ("bit-field in a sim TU - layout differs windows-msvc vs linux/aarch64", "src/sim/bf.cpp",
+     '#include "foundation/tl_types.h"\nstruct Row { u8 a : 4; u16 c : 8; };\n',
+     "bit-field in a sim TU"),
+    ("platform macro in a sim TU", "src/sim/plat.cpp",
+     '#include "foundation/tl_types.h"\n#if defined(_WIN32)\nu32 k(void) { return 1u; }\n#endif\n',
+     "'_WIN32' in a sim TU"),
+    # A comment is not char data - the doc-citation style is full of section signs - so the rule
+    # is about literals, and so is the fixture.
+    ("non-ASCII byte in a sim-TU string literal", "src/sim/utf8.cpp",
+     '#include "foundation/tl_types.h"\n'
+     'extern const char* k;\nconst char* k = "café";\n',
+     "non-ASCII byte in a string literal"),
+    ("enum without a fixed underlying type in a sim TU", "src/sim/en.cpp",
+     '#include "foundation/tl_types.h"\nenum Phase { PHASE_A, PHASE_B };\n',
+     "fixed underlying type"),
+    ("custom section hides a global from the .data gate", "src/sim/sec.cpp",
+     '#include "foundation/tl_types.h"\n__attribute__((section(".tl_hidden"))) u32 g_x;\n',
+     "custom section attribute"),
+    ("undocumented operator in a header", "src/sim/op.h",
+     '#pragma once\n// Spec: docs/ALLOY.md §1\n#include "foundation/tl_types.h"\n\n'
+     "struct V { u32 x; };\n"
+     "inline V operator+(V a, V b) { return V{ a.x + b.x }; }\n",
+     "no contract comment"),
+    ("undocumented __attribute__-prefixed function", "src/sim/attr.h",
+     '#pragma once\n// Spec: docs/ALLOY.md §1\n#include "foundation/tl_types.h"\n\n'
+     "__attribute__((always_inline)) inline u32 attr_f(u32 a) { return a; }\n",
+     "no contract comment"),
+    ("a '(' inside a string literal must not swallow later declarations", "src/sim/paren.h",
+     '#pragma once\n// Spec: docs/ALLOY.md §1\n#include "foundation/tl_types.h"\n\n'
+     "// Reports a parse failure. Never returns.\n"
+     'inline void bad(void) { fail("expected ("); }\n'
+     "u32 hidden_one(u32 a);\n",
+     "no contract comment"),
+    ("a function under a one-line template definition needs its own comment", "src/sim/tdef.h",
+     '#pragma once\n// Spec: docs/ALLOY.md §1\n#include "foundation/tl_types.h"\n\n'
+     "// Identity. Returns its argument unchanged.\n"
+     "template <class T> T tdef_id(T x) { return x; }\n"
+     "u32 tdef_hidden(u32 a);\n",
+     "no contract comment"),
     ("std:: in src/", "src/core/g.cpp",
      "void f(void) { std::abort(); }\n",
      "std:: in src/"),
@@ -146,6 +185,26 @@ INCLUDE_CLEAN = [
     ("a message literal keeps const char*", "src/sim/ok6.cpp",
      '#include "foundation/tl_types.h"\n'
      "void fail(const char* msg);\nvoid f(void) { fail(\"bad\"); }\n"),
+    # The shapes fx.h will actually be written in. Every one of these was a false positive that
+    # would have stalled the critical-path lane on its first commit.
+    ("fx.h idioms do not false-positive", "src/sim/ok7.h",
+     '#pragma once\n// Spec: docs/FX-PALETTE.md §10.1\n#include "foundation/tl_types.h"\n\n'
+     "// Widening multiply of two palette rows. Precondition: FRAC_A + FRAC_B <= 62.\n"
+     "template <class A,\n          class B>\n"
+     "inline u64 ok7_mul(A a, B b) { return (u64)a * (u64)b; }\n\n"
+     "// Saturating add. Returns the clamped sum; never traps.\n"
+     "[[nodiscard]]\n"
+     "inline u32 ok7_sat(u32 a, u32 b) { return a + b; }\n\n"
+     "/* Divides two rows.\n"
+     " * Precondition: b is non-zero; division by zero is a caller bug.\n"
+     " */\n"
+     "inline u32 ok7_div(u32 a, u32 b) { return a / b; }\n\n"
+     "// Equality over the raw representation. Exact, never approximate.\n"
+     "inline bool operator==(u32 a, i32 b) { return a == (u32)b; }\n\n"
+     "// Compiled only in dev tiers; same contract either way.\n"
+     "#if TL_DEV\n"
+     "inline u32 ok7_probe(u32 a) { return a; }\n"
+     "#endif\n"),
     # fx.h will be an all-inline, all-template header: the shape the gate must handle without
     # drowning the lane in false positives.
     ("documented inline and template definitions pass", "src/sim/ok4.h",
@@ -354,6 +413,47 @@ def test_fingerprint(tmp):
            rc != 0 and "not a git repository" in out, out.strip()[:160])
 
 
+# --- commit_docs.py ---------------------------------------------------------------------------
+def git(repo, *args):
+    return run(["git", "-C", repo] + list(args))
+
+
+def test_commit_docs(tmp):
+    """A throwaway repo with two commits: one that changes a module without its doc, one that
+    says [docs:none]. The gate had no fixture at all until the third W0 review said so."""
+    repo = os.path.join(tmp, "cd")
+    os.makedirs(repo, exist_ok=True)
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "t@t")
+    git(repo, "config", "user.name", "t")
+    write(repo, "README.md", "seed\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "seed")
+    base = git(repo, "rev-parse", "HEAD")[1].strip()
+
+    write(repo, "src/sim/x.cpp", "int f(void) { return 1; }\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "touch sim without its doc")
+    rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"), "--base", base], cwd=repo)
+    record("commit_docs: a module change with no doc change is refused",
+           rc == 1 and "docs/ALLOY.md" in out, out.strip()[:200])
+
+    write(repo, "src/sim/y.cpp", "int g(void) { return 2; }\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "touch sim again\n\n[docs:none]")
+    rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"), "--base", base], cwd=repo)
+    record("commit_docs: [docs:none] is accepted", rc == 0 and "docs:none" in out, out.strip()[:200])
+
+    rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"),
+                   "--base", "0" * 40], cwd=repo)
+    record("commit_docs: an all-zero base skips instead of crashing", rc == 0, out.strip()[:200])
+
+    rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"),
+                   "--base", "deadbeef" * 5], cwd=repo)
+    record("commit_docs: an unreachable base skips loudly instead of crashing",
+           rc == 0 and "not in this clone" in out, out.strip()[:200])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--nm", default="llvm-nm")
@@ -371,6 +471,7 @@ def main():
         test_symbols(tmp, a.nm, a.objdump, a.ar, a.cxx)
         test_tier_parity(tmp)
         test_fingerprint(tmp)
+        test_commit_docs(tmp)
 
     failed = [r for r in results if not r[1]]
     print("selftest: %d checks, %d failed" % (len(results), len(failed)))

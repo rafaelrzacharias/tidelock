@@ -44,6 +44,11 @@ FINGERPRINTED = ["src", "cmake", "CMakeLists.txt", "CMakePresets.json",
 SOURCE_EXT = (".h", ".hpp", ".inc", ".c", ".cc", ".cpp", ".luau", ".cmake", ".txt", ".json",
               ".s", ".S")
 
+# -ffast-math is banned in every tier (docs/CPP-SUBSET.md §7). It is not a fingerprint question:
+# a build carrying it is not a tidelock build, so the fingerprint refuses rather than recording it.
+FAST_MATH = ("-ffast-math", "-Ofast", "/fp:fast", "-funsafe-math-optimizations",
+             "-ffinite-math-only", "-fassociative-math", "-freciprocal-math")
+
 # Defines the platform or the CMake generator injects; dropping them is part of what lets
 # win/linux/pi4 agree.
 PLATFORM_DEFINES = {
@@ -57,6 +62,11 @@ PLATFORM_DEFINES = {
 # lands here the cross-target build_id job in pr.yml is what catches it: it builds netcode-win and
 # netcode-linux from one checkout and diffs build_id.txt.
 DROP_EXACT = {
+    # `--` ends option parsing on the clang-cl command line CMake generates and does not appear on
+    # the GNU driver's. It is pure driver syntax, and leaving it hashed made build_id differ
+    # between netcode-win and netcode-linux - R-8 unmet in practice, found by the third review
+    # before pr.yml's cross-target job could go red.
+    "--",
     "-c", "-nologo", "/nologo", "-TP", "-TC", "/TP", "/TC",
     "-fno-exceptions", "-fno-rtti", "-fno-threadsafe-statics",
     "/EHs-c-", "/EHsc", "/GR-", "/Zc:threadSafeInit-",
@@ -130,14 +140,28 @@ def canonical_tokens(rows):
     Vendor TUs carry platform-specific defines of their own and are not sim code; their content is
     covered by the vendor/ tree hash instead."""
     keep = set()
+    matched = 0
     for f, cmd in rows or []:
         if "$REPO/src/" not in f:
             continue
-        tokens = cmd.split()
+        matched += 1
+        tokens = []
+        for t in cmd.split():
+            if t in FAST_MATH or t.startswith("-ffast-math"):
+                sys.exit("fingerprint: %s is on the compile line for %s - it is banned in every "
+                         "tier (docs/CPP-SUBSET.md §7)" % (t, f))
+            # A define smuggled through the preprocessor driver used to be swallowed whole by the
+            # -W prefix drop: `-Wp,-DTL_EVIL=1` left build_id unchanged.
+            if t.startswith("-Wp,") or t.startswith("-Xpreprocessor,"):
+                tokens.extend(t.split(",")[1:])
+            else:
+                tokens.append(t)
         for i, t in enumerate(tokens):
             if i == 0:
                 continue                          # the compiler executable
-            if t[:2] in ("-D", "/D") and len(t) > 2:
+            if t[:2] in ("-U", "/U") and len(t) > 2:
+                keep.add("U:" + t[2:])
+            elif t[:2] in ("-D", "/D") and len(t) > 2:
                 define = t[2:]
                 if define.split("=", 1)[0] not in PLATFORM_DEFINES:
                     keep.add("D:" + define)
@@ -151,6 +175,10 @@ def canonical_tokens(rows):
                 continue
             else:
                 keep.add("tok:" + t)              # unknown -> hashed, and therefore loud
+    if rows and not matched:
+        sys.exit("fingerprint: the compile database has %d entries and none of them is under "
+                 "src/ - the paths did not tokenise, so input 2 would be empty and build_id "
+                 "silently weaker. Check --repo against the database's paths." % len(rows))
     return sorted(keep)
 
 

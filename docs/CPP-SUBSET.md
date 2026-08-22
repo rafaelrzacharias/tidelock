@@ -129,6 +129,18 @@ With no floats, the only way two peers diverge is undefined behaviour. Rules:
   divergence is treated as UB until proven otherwise.
 - **No pointer comparisons except equality**, no pointer-to-integer keys (ordering by address is a
   nondeterminism source — `DETERMINISM.md` §2).
+- **Target-variable language constructs are banned in sim TUs** (enforced by
+  `tools/audit/includes.py`; each was measured to differ between windows-msvc and linux/aarch64
+  with no UB involved): `char` (signed on x86-64, unsigned on aarch64), `long` (32-bit on Windows,
+  64-bit on Linux) and `wchar_t`; **bit-fields** — `struct { u8 a:4; u16 c:8; }` is 4 B on
+  windows-msvc and 2 B on linux/pi, so the arena bytes differ; **enums without a fixed underlying
+  type**; **platform macros** (`_WIN32`, `_MSC_VER`, `__aarch64__`, …), since a sim TU that
+  branches on the target is two different programs; **custom section attributes**, which hide
+  storage from the `.data`/`.bss` gate; and **non-ASCII bytes in string literals**, because a
+  literal byte ≥ 0x80 hashes differently where `char` is signed — `const char*` message literals
+  stay legal, which is exactly why the byte rule is needed. `usize` is `u64` rather than `size_t`
+  for the same class of reason (`CANON.md`): same width everywhere, but not reliably the same
+  *type*, and a `usize`-keyed template would select differently per target.
 
 ---
 

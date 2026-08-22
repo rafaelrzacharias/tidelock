@@ -32,7 +32,12 @@ using i64 = int64_t;
 using f32 = float;
 using f64 = double;
 
-using usize = size_t;
+// `usize` is `u64`, NOT `size_t`. They are the same width on all three supported targets but not
+// reliably the same *type*, and a template or overload keyed on `usize` would then select a
+// different specialisation on Windows than on Linux - a per-target program with no UB and no
+// diagnostic (docs/CPP-SUBSET.md §5). One identity everywhere; the static_assert below ties it to
+// `size_t`'s width so a 32-bit target fails to compile rather than silently truncating.
+using usize = u64;
 
 // --- uint_fit<N>: the smallest unsigned type holding N bits (docs/CPP-SUBSET.md §1) ----------
 // Flat, non-recursive: a constexpr index function plus four explicit specialisations.
@@ -83,7 +88,9 @@ struct [[nodiscard]] Result {
 static_assert(sizeof(u8) == 1 && sizeof(u16) == 2 && sizeof(u32) == 4 && sizeof(u64) == 8, "");
 static_assert(sizeof(i8) == 1 && sizeof(i16) == 2 && sizeof(i32) == 4 && sizeof(i64) == 8, "");
 static_assert(sizeof(f32) == 4 && sizeof(f64) == 8, "IEEE-754 binary32/binary64 assumed");
-static_assert(sizeof(usize) == sizeof(void*), "");
+static_assert(sizeof(usize) == sizeof(void*), "64-bit targets only (docs/BUILD.md §1)");
+static_assert(sizeof(usize) == sizeof(sizeof(0)), "usize must match size_t's width");
+static_assert(__is_same(usize, u64), "one type identity on every target, not size_t's spelling");
 static_assert((u8)~(u8)0 == 255 && (i8)-1 == ~(i8)0, "two's complement, 8-bit bytes");
 static_assert(__is_same(uint_fit<1>, u8) && __is_same(uint_fit<8>, u8), "");
 static_assert(__is_same(uint_fit<9>, u16) && __is_same(uint_fit<16>, u16), "");

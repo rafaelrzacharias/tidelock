@@ -224,7 +224,10 @@ toolchain/VERSIONS             clang version, SDL3 commit, Luau commit, … , sy
 ### 10.2 Targets and link graph
 
 `tl_foundation_det` (fx, det_math, rng, hash, containers, vmem_arena, registry, scratch, handle)
-← nothing. `tl_foundation` (jobs, mem_pool, fmt, interner, atomic, alloc_shim) ← `det`.
+← nothing at compile time; at link time it references the panic ABI of `CPP-SUBSET.md` §9 R-3
+(`tl_fatal`, `tl_check_failed`, `tl_assert_failed`), which `tl_foundation` defines and whose stems
+are on the non-det list for that reason. The exe's link line resolves it; lld does so regardless
+of archive-member order, and a GNU-ld target would need the cycle declared to CMake. `tl_foundation` (jobs, mem_pool, fmt, interner, atomic, alloc_shim) ← `det`.
 `tl_sim` ← `tl_foundation_det` only. `tl_core` ← foundation, platform (headers). `tl_platform_sdl3`
 / `tl_platform_headless` ← foundation. `tl_render` ← core, `sim/views.h`. `tl_net` ← core,
 enet, monocypher. `tl_script` ← core, luau. `tl_editor` ← core, render, imgui (dev only).

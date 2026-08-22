@@ -5,7 +5,12 @@
 # The split is by an explicit NON-det stem list, so anything a later lane adds defaults to the
 # audited half: a file that does not belong there fails the symbol audit loudly, whereas the
 # inverse default would let it escape the gate silently (docs/CPP-SUBSET.md §4).
-set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim)
+# The non-det half of docs/BUILD.md §10.2, plus the tooling runtimes: tl_assert/tl_log/tl_prof/
+# tl_probe/crash all reach io, so the panic ABI of docs/CPP-SUBSET.md §9 R-3 is *defined* here and
+# only *referenced* from the audited half. Left off this list they would default into
+# tl_foundation_det and fail its own audit - which is what R-3 claimed was impossible.
+set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim
+                         tl_assert tl_log tl_prof tl_probe crash)
 
 file(GLOB TL_FOUNDATION_SRC CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 set(TL_DET_SRC "")

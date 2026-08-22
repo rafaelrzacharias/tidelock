@@ -36,6 +36,14 @@ __chkstk
 __security_check_cookie
 __security_cookie
 
+# The GNU/ELF half of the same story: ubuntu and Raspberry Pi OS clang default to
+# -fstack-protector-strong, so the first det function with a local array references these. Codegen
+# support, not a call we make; without them the W1 fx lane's first `u32 tab[64]` turns the Linux
+# and Pi lanes red while passing on Windows.
+__stack_chk_fail
+__stack_chk_guard
+__stack_chk_fail_local
+
 # compiler-rt integer routines the backend may emit for 128-bit integer math. Pure integer,
 # deterministic by definition. (No floating-point compiler-rt entry is listed, on purpose.)
 __udivti3

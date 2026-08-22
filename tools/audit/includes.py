@@ -86,6 +86,21 @@ ABI_TOKENS = re.compile(r'\b(long|char|wchar_t|char8_t|char16_t|char32_t)\b')
 # `const char*` / `const char[]` for message literals stays legal: TL_FATAL takes one.
 CHAR_LITERAL_USE = re.compile(r'\b(?:const\s+char|char\s+const)\s*(\*|\[|\(\s*&)')
 
+# Layout and target-selection hazards that are not types. Each was measured to differ between
+# windows-msvc and linux/aarch64 by the third W0 review, with no UB involved:
+#   bit-fields          `struct { u8 a:4; u16 c:8; }` is 4 B on windows-msvc, 2 B on linux/pi
+#   platform macros     a sim TU that branches on _WIN32 or __aarch64__ is two different programs
+#   custom sections     section(".x") hides a mutable global from the .data/.bss gate
+#   unfixed enum base   the underlying type is the compiler's choice; hashed state cannot have one
+BITFIELD = re.compile(r'\b\w+\s*:\s*\d+\s*[;,]')
+PLATFORM_MACRO = re.compile(
+    r'\b(_WIN32|_WIN64|_MSC_VER|_M_X64|_M_ARM64|__aarch64__|__x86_64__|__i386__|__arm__'
+    r'|__linux__|__APPLE__|__unix__|__ARM_ARCH|__SIZEOF_LONG__|__CHAR_BIT__)\b')
+# Checked on the strings-blanked text, so the section NAME is already gone - match the
+# attribute itself, not its argument.
+CUSTOM_SECTION = re.compile(r'section\s*\(|__declspec\s*\(\s*allocate')
+UNFIXED_ENUM = re.compile(r'\benum\s+(?:class\s+|struct\s+)?[A-Za-z_]\w*\s*\{')
+
 GREP_BANS = (
     (re.compile(r'\bstd::'), "std:: in src/ (docs/CPP-SUBSET.md §1)"),
     (re.compile(r'\b(asm|__asm|__asm__)\b'), "inline asm (docs/CPP-SUBSET.md §4)"),
@@ -101,8 +116,15 @@ NOT_A_DECL = re.compile(
     r'^\s*(#|//|/\*|\*|\}|\{|\)|template\s*<.*>\s*$|namespace\b|struct\b|class\b|enum\b|union\b'
     r'|using\b|typedef\b|static_assert\b|extern\s*"C"|public:|private:|protected:|return\b'
     r'|if\b|for\b|while\b|switch\b|do\b|else\b)')
-IDENT_CALL = re.compile(r'([A-Za-z_]\w*)\s*\(')
+# `operator+(`, `operator==(`, `operator bool(` and friends are functions too - fx.h is mostly
+# operators, and an identifier-only match made the whole set invisible to the contract rule.
+IDENT_CALL = re.compile(r'(operator\s*(?:[A-Za-z_]\w*|[^\w\s(]+)|[A-Za-z_]\w*)\s*\(')
+ATTRIBUTES = re.compile(r'__attribute__\s*\(\(.*?\)\)|__declspec\s*\(.*?\)|\[\[.*?\]\]')
+# A line that is only an attribute or a preprocessor directive sits between a contract comment
+# and the signature it documents; skip it when scanning back.
+SKIPPABLE_ABOVE = re.compile(r'^\s*(\[\[.*\]\]\s*$|__attribute__|__declspec|#)')
 ALNUM = re.compile(r'[A-Za-z0-9]')
+LITERAL = re.compile(r'"[^"]*"' + r"|'[^']*'")
 
 
 def nondet_stems(root):
@@ -196,32 +218,50 @@ def is_mutable_static(line):
     return not CONST_QUAL.search(rest.split("=", 1)[0])
 
 
-def declaration_sites(code_lines):
+def declaration_sites(code_lines, token_lines):
     """Yield (line index, joined text) for every declaration at namespace or struct scope.
 
     Function bodies are skipped by tracking what opened each brace: a `struct`/`namespace` brace
     keeps us in a scope where declarations live, any other brace is a body. Without this, every
-    member function of fx<> would be invisible to the contract-comment gate."""
+    member function of fx<> would be invisible to the contract-comment gate.
+
+    Brackets are counted on the STRINGS-BLANKED text and joined from the strings-kept text: a `(`
+    inside a literal - TL_CHECK(x, "expected (") - left the paren depth permanently unbalanced and
+    swallowed every later declaration in the header into one unit.
+    """
     scopes = []                                  # True = container scope, False = body
     i = 0
     while i < len(code_lines):
         line = code_lines[i]
+        counted = token_lines[i] if i < len(token_lines) else line
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             i += 1
             continue
         in_container = all(scopes)
         start = i
-        text = line
-        depth = text.count("(") - text.count(")")
+        text, count_text = line, counted
+        # A template head can wrap: `template <class A,` / `class B>`. Join until the angle
+        # brackets balance, then fall through to the parameter-list join below.
+        if TEMPLATE_HEAD.match(count_text):
+            while count_text.count("<") > count_text.count(">") and i + 1 < len(code_lines):
+                i += 1
+                text += " " + code_lines[i].strip()
+                count_text += " " + (token_lines[i] if i < len(token_lines) else "").strip()
+            if "(" not in count_text and i + 1 < len(code_lines):
+                i += 1                            # the head alone: pull in what it introduces
+                text += " " + code_lines[i].strip()
+                count_text += " " + (token_lines[i] if i < len(token_lines) else "").strip()
+        depth = count_text.count("(") - count_text.count(")")
         while depth > 0 and i + 1 < len(code_lines):
             i += 1
             text += " " + code_lines[i].strip()
-            depth = text.count("(") - text.count(")")
+            count_text += " " + (token_lines[i] if i < len(token_lines) else "").strip()
+            depth = count_text.count("(") - count_text.count(")")
         if in_container:
             yield start, text.strip()
         opened = CONTAINER_OPEN.match(text) is not None
-        for ch in text:
+        for ch in count_text:
             if ch == "{":
                 scopes.append(opened)
             elif ch == "}" and scopes:
@@ -234,7 +274,8 @@ def looks_like_function(unit):
 
     `constexpr u32 C = c_lit(1);` is a variable; `u32 f(u32 a);`, `inline u32 f(u32 a) { ... }`,
     `void f() = delete;` and `auto f(int) -> u32;` are functions."""
-    if NOT_A_DECL.match(unit):
+    unit = ATTRIBUTES.sub(" ", unit).strip()
+    if not unit or NOT_A_DECL.match(unit):
         return False
     m = IDENT_CALL.search(unit)
     if not m:
@@ -252,6 +293,26 @@ def looks_like_function(unit):
                 after = tail[j + 1:].strip()
                 return after.startswith(("{", ";", "const", "noexcept", "->", "=", ":"))
     return False
+
+
+def is_template_head(line):
+    """A `template <...>` line that introduces the declaration below it. A one-line template
+    *definition* is not a head - skipping it let the next function inherit its contract comment."""
+    if not TEMPLATE_HEAD.match(line):
+        return False
+    return "{" not in line and not line.rstrip().endswith(";")
+
+
+def comment_block_at(raw_lines, j):
+    """(text, first line index) of the comment ending at line j, joined across a block comment.
+    A `/* ... */` whose last line is a lone `*/` used to read as a two-character comment."""
+    line = raw_lines[j].strip()
+    if not line.startswith(("//", "*", "/*")):
+        return line, j
+    start = j
+    while start > 0 and raw_lines[start - 1].strip().startswith(("//", "*", "/*")):
+        start -= 1
+    return " ".join(raw_lines[k].strip() for k in range(start, j + 1)), start
 
 
 def is_contract_comment(text):
@@ -296,6 +357,20 @@ def check_file(root, path, nondet, errors):
         rel.startswith("src/foundation/") and stem not in nondet)
     if rel in TYPE_EXEMPT_PATHS:
         is_det_tu = False
+
+    # `const char*` stays legal for message literals, which re-opens the char hole one level
+    # down: `h ^= (u64)s[i]` over a literal byte >= 0x80 sign-extends where `char` is signed and
+    # not where it is unsigned, so a NameHash over a non-ASCII literal differs per target with no
+    # `char` token in sight. Only LITERALS matter - a comment never becomes char data, and the
+    # doc-citation style is full of section signs (docs/CPP-SUBSET.md 5).
+    if is_det_tu:
+        for i, line in enumerate(code_lines, 1):
+            for lit in LITERAL.findall(line):
+                if any(ord(ch) > 127 for ch in lit):
+                    errors.append("%s:%d: non-ASCII byte in a string literal in a sim TU - it "
+                                  "hashes differently where `char` is signed; keep sim literals "
+                                  "ASCII (docs/CPP-SUBSET.md §5)" % (rel, i))
+                    break
 
     allow = set(SYS_ALLOW)
     for prefix, extra in SYS_ALLOW_DIRS.items():
@@ -348,22 +423,39 @@ def check_file(root, path, nondet, errors):
                 errors.append("%s:%d: '%s' in a sim TU - its width or signedness differs between "
                               "x86-64 and aarch64; use the fixed-width types of docs/CANON.md: %s"
                               % (rel, i, m4.group(1), raw_lines[i - 1].strip()[:60]))
+            if BITFIELD.search(tline):
+                errors.append("%s:%d: bit-field in a sim TU - the layout differs between "
+                              "windows-msvc and linux/aarch64, so the arena bytes differ "
+                              "(docs/CPP-SUBSET.md §5): %s" % (rel, i, raw_lines[i - 1].strip()[:60]))
+            m5 = PLATFORM_MACRO.search(tline)
+            if m5:
+                errors.append("%s:%d: '%s' in a sim TU - a per-target branch makes two different "
+                              "programs (docs/CPP-SUBSET.md §5)" % (rel, i, m5.group(1)))
+            if CUSTOM_SECTION.search(tline):
+                errors.append("%s:%d: a custom section attribute hides storage from the .data/.bss "
+                              "gate (docs/CPP-SUBSET.md §1)" % (rel, i))
+            if UNFIXED_ENUM.search(tline):
+                errors.append("%s:%d: enum without a fixed underlying type in a sim TU - the width "
+                              "is the compiler's choice (docs/CANON.md): %s"
+                              % (rel, i, raw_lines[i - 1].strip()[:60]))
 
     if path.endswith((".h", ".hpp")):
         if not re.search(r'//.*Spec:\s*docs/[A-Z0-9-]+\.md\s*§', "\n".join(raw_lines[:30])):
             errors.append("%s:1: public header has no contract block naming its spec section "
                           "(docs/CPP-SUBSET.md §6)" % rel)
         body_start = contract_block_end(raw_lines)
-        for idx, unit in declaration_sites(code_lines):
+        for idx, unit in declaration_sites(code_lines, token_lines):
             if idx < body_start or not looks_like_function(unit):
                 continue
             # A template head belongs to the function below it, so the contract comment sits above
             # it, not between it and the signature.
             prev, prev_idx = "", -1
             for j in range(idx - 1, -1, -1):
-                if raw_lines[j].strip() and not TEMPLATE_HEAD.match(raw_lines[j]):
-                    prev, prev_idx = raw_lines[j].strip(), j
-                    break
+                line = raw_lines[j]
+                if not line.strip() or is_template_head(line) or SKIPPABLE_ABOVE.match(line):
+                    continue
+                prev, prev_idx = comment_block_at(raw_lines, j)
+                break
             if not (is_contract_comment(prev) and prev_idx >= body_start):
                 errors.append("%s:%d: public function has no contract comment "
                               "(docs/CPP-SUBSET.md §6): %s" % (rel, idx + 1, unit[:60]))

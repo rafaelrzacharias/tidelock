@@ -61,6 +61,18 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [ ] **RR-2 `nightly.yml` / `weekly.yml` (`docs/BUILD.md` §10.4).** Both need self-hosted `pi4`
       and `deck` runners; committing them before the runners exist buys a nightly red build.
       Land them with RR-1.
+- [ ] **The contract-comment rule is at the limit of a regex.** Three reviews have now found
+      false positives and false negatives in `tools/audit/includes.py`'s declaration scanner
+      (operators, attributes, template heads, a `(` inside a literal). The token bans are fine as
+      greps - they are line-local - but the contract rule wants a parser. If a fourth round finds
+      another case, replace it with `clang -Xclang -ast-dump=json -fsyntax-only` over each public
+      header, asking for `FunctionDecl`/`CXXMethodDecl` without an attached comment (the include
+      paths are already in `compile_commands.json`). Recorded as the escalation, not done on spec.
+- [ ] Assert the audited-layer ORDER equals the module DAG. `cmake/audit.cmake` gets the layers in
+      `add_subdirectory` order, which is correct only because the root `CMakeLists.txt` is hand-
+      ordered; nothing checks it. A one-line comparison against a declared list would.
+- [ ] `tools/audit/symbols.py` matches allowlist patterns with `fnmatch`, which is case-folding on
+      Windows hosts (`tl_fatal` also matches `TL_FATAL`). Harmless today; use `fnmatchcase`.
 - [ ] **Turn `TL_STRICT_TOOLCHAIN` back on in CI.** Since R-8 the compiler is not in `build_id`,
       so the pin check is the only thing keeping peers on one clang (`docs/BUILD.md` §9 R-7). It is
       fatal by default in `netcode`/`ship`, and `pr.yml` opts out with `-DTL_STRICT_TOOLCHAIN=OFF`
