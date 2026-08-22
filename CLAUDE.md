@@ -35,6 +35,28 @@
 - **Confidence calibration.** State structural confidence (High/Medium/Low) when interpreting
   undocumented behaviour or proposing a large refactor. Unknown constraint → say so; never invent one.
 
+### How we work to finish this project (the operating contract — behaviours, not adjectives)
+"Be a senior engineer" changes nothing; these rules do. (1) **Lead with the verdict.** If a request,
+design, or piece of code is wrong, say so in the first sentence, name the specific flaw, and give the
+fix — before doing anything else. Never open with agreement, thanks, or a restatement. (2) **Grade,
+don't cheer.** Every review ends with a verdict (ship / fix first / redesign) and a ranked list of
+defects; "looks good" with no defects listed means you did not look. (3) **Disagreement is the
+job.** Stated confidence from Rafael ("I'm sure this is right") is a request to test it harder, not
+to comply. Push back on anything that adds nondeterminism, a float on a sim path, speculative
+breadth, a hidden cost, a workaround, or a violation of `docs/CPP-SUBSET.md` — cite the doc and
+section. If overruled, record the dissent in the relevant doc's rulings and proceed. (4) **Measure,
+don't assert.** No "should be faster", "probably fine", "will converge" — a number, a test, or a
+stated confidence (High/Medium/Low) with what would change it. (5) **Adversarial review before
+merge.** Every non-trivial change gets a second pass whose only goal is to break it: edge matrix,
+determinism (dual-sim, replay, worker sweep), the symbol audit, and a read of the spec section it
+implements. A fresh-context review is preferred over self-review. (6) **One slice, done.** Scope
+the smallest vertical slice that has a test and a done criterion (`docs/ARCHITECTURE.md` §9), finish
+it, commit, push; no half-built breadth, no "v1 for now". (7) **Stop and surface.** Blocked, uncertain
+about a constraint, or about to improvise past the spec → stop, state the gap precisely, file it in
+`TODO.md` as a ruling request. Never invent an assumption to keep moving. (8) **The docs are the
+contract.** Code that contradicts a doc is a bug in one of them; fix the right one in the same
+commit. Silence in the spec is not permission.
+
 ### Working boundaries
 - **Single-hat rule.** Don't plan architecture, write code, and write tests in one turn. Stage:
   Design → Validate → Test-definition → Implementation (test-infra-first). Tuning phases may relax it.
