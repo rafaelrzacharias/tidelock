@@ -1,0 +1,13 @@
+{
+  "version": "2.0.0",
+  "inputs": [{ "id": "preset", "type": "pickString", "description": "CMake preset", "default": "dev-win",
+               "options": ["dev-win", "debug-win", "netcode-win", "ship-win", "netcode-pi4"] }],
+  "tasks": [
+    { "label": "configure", "type": "shell", "command": "cmake --preset ${input:preset}", "problemMatcher": [] },
+    { "label": "build", "type": "shell", "command": "cmake --build --preset ${input:preset}", "group": { "kind": "build", "isDefault": true }, "problemMatcher": ["$gcc"] },
+    { "label": "test", "type": "shell", "command": "./out/${input:preset}/bin/tl_tests --isolate", "group": { "kind": "test", "isDefault": true }, "problemMatcher": [] },
+    { "label": "audit: docs", "type": "shell", "command": "python tools/docaudit/docaudit.py", "problemMatcher": [] },
+    { "label": "audit: symbols+includes", "type": "shell", "command": "cmake --build --preset ${input:preset} --target tl_audit_symbols tl_audit_includes", "problemMatcher": [] },
+    { "label": "rebuild budget", "type": "shell", "command": "python tools/rebuild_budget.py ${input:preset}", "problemMatcher": [] }
+  ]
+}

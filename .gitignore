@@ -10,11 +10,12 @@ build/
 *.lib
 *.a
 
-# editor/tooling droppings
+# editor/tooling droppings (.vscode/ IS committed — shared workspace config; local overrides go in *.local.json)
 .vs/
-.vscode/
+.vscode/*.local.json
 .cache/
 compile_commands.json
+out/
 
 # OS
 Thumbs.db

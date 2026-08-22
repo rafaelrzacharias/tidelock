@@ -1,0 +1,9 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    { "name": "tidelock (dev-win)", "type": "lldb", "request": "launch", "program": "${workspaceFolder}/out/dev-win/bin/tidelock.exe", "cwd": "${workspaceFolder}", "args": [] },
+    { "name": "tl_tests (debug-win)", "type": "lldb", "request": "launch", "program": "${workspaceFolder}/out/debug-win/bin/tl_tests.exe", "cwd": "${workspaceFolder}", "args": ["--filter", "*"] },
+    { "name": "tl_driver (dev-win)", "type": "lldb", "request": "launch", "program": "${workspaceFolder}/out/dev-win/bin/tl_driver.exe", "cwd": "${workspaceFolder}", "args": ["--scene", "script/scenes/smoke.luau", "--seed", "1", "--ticks", "600"] },
+    { "name": "tl_gate0 (netcode-win)", "type": "lldb", "request": "launch", "program": "${workspaceFolder}/out/netcode-win/bin/tl_gate0.exe", "cwd": "${workspaceFolder}", "args": ["--scenario", "G01", "--out", "tests/gate0/results/local"] }
+  ]
+}

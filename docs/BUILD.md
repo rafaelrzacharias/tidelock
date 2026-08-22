@@ -134,7 +134,8 @@ Durable context lives in committed files only (`docs/`, `TODO.md`, `LESSONS.md`)
 
 ```
 CMakeLists.txt                 project, options (TL_TIER, TL_SANITIZE), includes cmake/*.cmake, add_subdirectory per module
-cmake/presets.json             dev-win · debug-win · netcode-win · ship-win · dev-linux · netcode-linux · netcode-pi4 · ship-pi4
+cmake/presets.json             dev-win · debug-win · netcode-win · ship-win · dev-linux · netcode-linux · netcode-pi4 · ship-pi4; binaryDir = out/<preset>, binaries in out/<preset>/bin
+.vscode/                       committed workspace config: CMake Tools on presets, clangd over .cache/compile_commands.json, LLDB launch configs, tasks (configure/build/test/audits); no solution files — VS Code + CMake presets is the IDE (ruled 2026-08-22)
 cmake/tier.cmake               flag sets per tier (CPP-SUBSET.md §7, BUILD.md §3) as interface targets tl_flags_common / tl_flags_sim
 cmake/toolchain-pi4.cmake      CMAKE_SYSTEM_NAME Linux, processor aarch64, clang --target=aarch64-linux-gnu, --sysroot=${TL_SYSROOT}
 cmake/toolchain-deck.cmake     x86-64 Linux sysroot variant

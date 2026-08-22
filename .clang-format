@@ -1,0 +1,12 @@
+# tidelock — CPP-SUBSET.md §6. Not run on save; `clang-format -i` by hand or in tools/audit.
+BasedOnStyle: LLVM
+ColumnLimit: 100
+IndentWidth: 4
+UseTab: Never
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+PointerAlignment: Left
+AlignConsecutiveAssignments: false
+SortIncludes: false
+IncludeBlocks: Preserve

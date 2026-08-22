@@ -1,0 +1,17 @@
+{
+  "cmake.useCMakePresets": "always",
+  "cmake.generator": "Ninja",
+  "cmake.configureOnOpen": false,
+  "cmake.copyCompileCommands": "${workspaceFolder}/.cache/compile_commands.json",
+  "cmake.options.statusBarVisibility": "visible",
+  "clangd.path": "C:/Program Files/LLVM/bin/clangd.exe",
+  "clangd.arguments": ["--compile-commands-dir=${workspaceFolder}/.cache", "--header-insertion=never", "--clang-tidy=false", "--background-index"],
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "editor.rulers": [100],
+  "editor.formatOnSave": false,
+  "files.associations": { "*.luau": "lua", "*.inc": "cpp" },
+  "search.exclude": { "out/**": true, ".cache/**": true, "vendor/**": true }
+}
