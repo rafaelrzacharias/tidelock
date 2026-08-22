@@ -1,0 +1,11 @@
+# Line-ending authority (per-clone: git config --local core.autocrlf false)
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# binary
+*.png binary
+*.jpg binary
+*.ttf binary
+*.wav binary
+*.ogg binary

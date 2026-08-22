@@ -1,0 +1,21 @@
+# build outputs
+bin/
+obj/
+build/
+*.o
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.lib
+*.a
+
+# editor/tooling droppings
+.vs/
+.vscode/
+.cache/
+compile_commands.json
+
+# OS
+Thumbs.db
+.DS_Store
