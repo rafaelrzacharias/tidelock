@@ -80,7 +80,7 @@ model here — the launch prompt names it.
 
 | Wave | Lane | Model | Builds | Depends on | Done (the doc's criterion) |
 |---|---|---|---|---|---|
-| W0 | **skeleton** | Sonnet 5 | CMake tree, presets, pi4 toolchain, `tl_types.h`, `tools/audit`, `tools/fingerprint`, runner stub, CI yaml | — | `BUILD.md` §10.5 |
+| W0 | **skeleton** | Opus 5 high | CMake tree, presets, pi4 toolchain, `tl_types.h`, `tools/audit`, `tools/fingerprint`, runner stub, CI yaml | — | `BUILD.md` §10.5 |
 | W1 | ★ **fx** | Fable 5 high | `fx.h`, `fx_palette.h`, `det_math.h`, `fx_float.h`, `tools/fxcheck` | skeleton | `FX-PALETTE.md` §10.6 |
 | W1 | **mem** | Fable 5 high | vmem arena, registry, snapshot ring, scratch, handle, `mem_pool`, alloc shim | skeleton | `MEMORY.md` §8.8 |
 | W1 | **containers** | Sonnet 5 | Array/Span/SlotMap/Map/Sorted/Ring/Bitset/sort, StrView/interner/fmt | mem (`vmem_arena.h` header) | `CONTAINERS.md` §8.7 |
