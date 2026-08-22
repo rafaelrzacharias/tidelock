@@ -23,13 +23,41 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `PIVOT-DESIGN.md` §3.1b/§12 updated + `LESSONS.md` entries per rung climbed.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
-- [ ] **RR-1 Pi 4 sysroot (`docs/BUILD.md` §9 R-3).** The aarch64 leg of `BUILD.md` §10.5 cannot be
-      met without a tarball captured from a live Pi 4 (`tools/sysroot.sh <host>`), its BLAKE2b
-      pinned in `toolchain/VERSIONS` and its URL set as the repo variable `TL_SYSROOT_URL`.
-      Verified so far: clang emits aarch64 ELF, and `cmake --preset netcode-pi4` fails loudly
-      without `TL_SYSROOT`. Blocks: the pi4/deck done criterion, the `cross-pi4` PR job, the
-      cross-ISA nightly (`docs/TESTING.md` §4), Gate 0's G-06 run on the Pi. Decide: capture the
-      sysroot now, or defer the whole cross leg to the wave that first needs a Pi number.
+- [ ] **RR-1 Pi 4 sysroot + the aarch64 leg of `BUILD.md` §10.5.** Rafael has a Pi 4 on the LAN,
+      so this is now an execution task, not a decision. Lane: W0 skeleton (**Opus 5 high**). It
+      touches only `toolchain/`, `cmake/toolchain-pi4.cmake`, `tools/sysroot.sh|deploy.sh` and this
+      file, so it does not collide with the audit/fingerprint code under adversarial review.
+
+      *Prerequisites, from Rafael, before anything runs:*
+      1. the host string (`user@host` or `user@ip`);
+      2. **key-based SSH already working** — the agent shell is non-interactive, so a password
+         prompt hangs rather than prompts. `id_ed25519` exists on the dev PC; if it is not on the
+         Pi yet: `ssh-copy-id -i ~/.ssh/id_ed25519.pub <user>@<host>` (needs a password once);
+      3. **confirmation the Pi runs a 64-bit OS** — paste
+         `ssh <user>@<host> "uname -m; head -2 /etc/os-release; df -h / | tail -1; which tar gcc"`.
+         `uname -m` must read **`aarch64`**. Many Pi 4s run 32-bit Raspberry Pi OS (`armv7l`), and
+         `cmake/toolchain-pi4.cmake`, `CANON.md` and `NETCODE.md` all specify `aarch64-linux-gnu`;
+         a 32-bit Pi is a different ABI and a different determinism target, so that outcome is a
+         **new ruling request, not a quiet retarget**.
+
+      *Known change required first:* `tools/sysroot.sh` uses `rsync`, which is **not installed on
+      the dev PC** (checked 2026-08-22: `ssh`, `scp`, `tar` present; `rsync` absent). Rewrite it as
+      tar-over-ssh — one stream, needs nothing on the Pi but `tar`, and it matches R-3's wording
+      exactly ("a tarball of the Pi's `/usr/include`, `/usr/lib`, `/lib`"). Expect ~200–600 MB.
+
+      *Then:* capture the tarball, pin its BLAKE2b in `toolchain/VERSIONS` (`sysroot_pi4`),
+      `cmake --preset netcode-pi4 -DTL_SYSROOT=...`, build, `tools/deploy.sh netcode-pi4 <host>`,
+      and run `tl_tests --tag smoke` on the Pi. Record the result in `BUILD.md` §10.5.
+
+      *What it closes and what it does not:* it closes the **local** half of §10.5 — cross-compile
+      against a pinned sysroot, deploy, smoke tests green on aarch64 hardware. It does **not**
+      un-gate the `cross-pi4` PR job, which needs the tarball at a URL CI can `GET` (R-3's "release
+      bucket"); no bucket exists. So RR-1 then shrinks to "publish the sysroot tarball somewhere
+      CI can fetch it, set `TL_SYSROOT_URL`", and RR-2 stays as written. The commit says exactly
+      that rather than marking §10.5 fully met.
+
+      *Still blocked on the above:* the cross-ISA nightly (`docs/TESTING.md` §4) and Gate 0's G-06
+      run on the Pi (`docs/GATE0-BENCH.md`) — G-06 is a Gate 0 scenario, not a nice-to-have.
 - [ ] **RR-2 `nightly.yml` / `weekly.yml` (`docs/BUILD.md` §10.4).** Both need self-hosted `pi4`
       and `deck` runners; committing them before the runners exist buys a nightly red build.
       Land them with RR-1.
