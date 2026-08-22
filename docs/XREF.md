@@ -62,15 +62,16 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 ## CPP-SUBSET.md
 - `ALLOY.md` -> §4, §5, §6
 - `ARCHITECTURE.md` -> §4
-- `BUILD.md` -> §1, §7
+- `BUILD.md` -> §1, §6, §7
 - `CANON.md` -> §4
 - `DETERMINISM.md` -> §4, §5
 - `ECS.md` -> §9
 - `FX-PALETTE.md` -> §2, §4, §5
+- `LUAU-LAYER.md` -> §6
 - `NETCODE.md` -> §9
 - `PLATFORM.md` -> §1, §4
 - `RENDER2D.md` -> §1, §7
-- `TESTING.md` -> §4
+- `TESTING.md` -> §4, §6
 - `TOOLING.md` -> §4
 
 ## DETERMINISM.md
@@ -91,7 +92,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ALLOY.md` -> §7
 - `ARCHITECTURE.md` -> §3, §4, §5, §10.8
 - `ASSETS-AND-DATA.md` -> §6.1
-- `CPP-SUBSET.md` -> §5, §6, §10.2
+- `CPP-SUBSET.md` -> §5, §6, §10.2, §10.3
 - `DETERMINISM.md` -> §3
 - `FRAME-LOOP.md` -> §3
 - `INPUT.md` -> §4
@@ -139,6 +140,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 ## LUAU-LAYER.md
 - `ASSETS-AND-DATA.md` -> §1, §10
 - `CANON.md` -> §10.2
+- `CPP-SUBSET.md` -> §10.9
 - `DETERMINISM.md` -> §2, §10.6
 - `ECS.md` -> §3, §4, §10.6
 - `FX-PALETTE.md` -> §3
@@ -151,7 +153,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ASSETS-AND-DATA.md` -> §3, §5
 - `BUILD.md` -> §1.5
 - `CONTAINERS.md` -> §3, §7
-- `CPP-SUBSET.md` -> §3
+- `CPP-SUBSET.md` -> §1.1, §3
 - `DETERMINISM.md` -> §2
 - `ECS.md` -> §2
 - `FRAME-LOOP.md` -> §5

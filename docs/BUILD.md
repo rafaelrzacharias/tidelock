@@ -165,7 +165,7 @@ render/net when their tests are compiled in). `tl_sim` and `tl_foundation_det` c
   tree appends the hash of `git diff` so a local build is still unique), `FX_PALETTE_REV` (parsed
   from `fx_palette.h`), and the `.luac` manifest; emits `build_id.cpp` and `build_id.txt`.
 - `tools/luauc <out_dir> <in files…>`: `luau_compile` with `-O2 -g1`, writes `.luac` + `manifest.tsv`
-  (`path, bytes, blake2b`).
+  (`path, bytes, blake2b`); `--docs <dir>` emits the Luau binding reference pages (`CPP-SUBSET.md` §6).
 - `tools/audit/symbols.py`: runs `llvm-nm --undefined-only -C` on each audited lib; allowlist in
   `tools/audit/allow.txt`; nonzero exit on any other symbol. `tools/audit/includes.py`: the grep
   rules of `CPP-SUBSET.md` §1/§4 + backend-header placement + the `float`/`double` token ban in

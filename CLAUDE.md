@@ -121,7 +121,8 @@ Developed on two PCs synced via git; per-machine auto-memory does not sync.
 4. **Determinism · completeness · speed.** Ordering is a pure function of input; ship the whole
    correct path with a positive end-to-end test; prefer the fast impl unless it costs correctness.
 5. **Extensive tests, no commit without them** (`docs/TESTING.md` §7 rubric). **Test infra lands
-   FIRST.**
+   FIRST.** Every `module.h` ships its contract block and per-function contract comments
+   (`docs/CPP-SUBSET.md` §6); Luau binding docs are generated, never hand-written.
 6. **One feature per commit, push every time.**
 7. **"Lock" = best so far, not final.** Docs say "best so far", never "final".
 8. **Large subsystem = stable interface + ONE impl now**, at the system boundary; the ≥2-impl A/B sits

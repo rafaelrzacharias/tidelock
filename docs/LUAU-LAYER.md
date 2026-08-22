@@ -530,6 +530,11 @@ manifest's BLAKE2b so a replay can refuse a mismatch). Applied at the end-of-tic
 
 ### 10.9 Bytecode pipeline
 
+`tools/luauc --docs <out_dir>` also emits the **Luau binding reference** (`script/docs/<table>.md`, one
+page per binding table: signature, argument checks, the C++ contract it maps to, VM availability)
+from the same binding descriptor tables the C++ registers — generated and committed, never hand-
+written, so the game-author docs cannot drift from the bindings (`CPP-SUBSET.md` §6).
+
 `tools/luauc`: `luauc -O2 -g1 --root script --out out/luac --manifest out/luac/manifest.tsv
 script/sim script/lib`. Inputs: the directories, walked recursively; file set = `*.luau`; **order
 = bytewise-sorted path relative to `--root` with `/` separators** — this is the load order the

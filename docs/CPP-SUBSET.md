@@ -134,6 +134,16 @@ With no floats, the only way two peers diverge is undefined behaviour. Rules:
 - Soft file cap ~800 lines. Split at seams, not arbitrarily.
 - Comments state constraints the code can't (ranges, hashing rulings, ordering invariants) — not
   what the next line does.
+- **Documentation standard (RULED 2026-08-22; `tools/audit/includes.py` checks the first two):**
+  (1) every `module.h` opens with a 10–20 line **contract block**: purpose, owning doc and section
+  (`// Spec: docs/ECS.md §10.3`), invariants, determinism notes (hashed? snapshotted? tick-scoped
+  pointers?), threading notes (which phase, chunk-keyed?); (2) every public function carries a
+  one-line contract comment — preconditions, postconditions, the `ErrCode`s it can return, and
+  whether it may run inside a tick; (3) pool/row headers state their hashing and reuse-zeroing
+  ruling (`MEMORY.md` §1.1); (4) **no Doxygen** and no generated C++ API reference — the public
+  headers are the reference and are kept readable for it; (5) the Luau binding reference
+  (`script/docs/*.md`) is generated from the binding tables by `tools/luauc --docs`
+  (`LUAU-LAYER.md` §10.9) and committed, so the game-author docs cannot drift from the bindings.
 - Every public function has tests: happy + error + edges (zero/one/many, empty/full, min/max,
   null handle, malformed). Property/fuzz for parsers and math. No commit without tests.
 
