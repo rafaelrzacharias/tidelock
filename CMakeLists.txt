@@ -13,6 +13,25 @@ set_property(CACHE TL_TIER PROPERTY STRINGS debug dev netcode ship)
 option(TL_SANITIZE "UBSan+ASan on the sim test set (docs/TESTING.md §5)" OFF)
 set(TL_PRESET_NAME "${TL_TIER}" CACHE STRING "the preset that configured this tree (audit reporting)")
 
+# The toolchain pin of docs/BUILD.md §1 is only real if something compares against it. Drift is
+# loud everywhere and fatal under TL_STRICT_TOOLCHAIN - which any build whose binaries other peers
+# will run must set (release, soak, cross-ISA). It is not fatal by default because build_id already
+# carries the compiler string: a peer built on the wrong clang cannot silently join a session, it
+# is refused at the handshake (docs/NETCODE.md §15.1). See docs/BUILD.md §9 R-7.
+option(TL_STRICT_TOOLCHAIN "fail configure when the compiler is not the pinned major" OFF)
+file(STRINGS "${CMAKE_SOURCE_DIR}/toolchain/VERSIONS" TL_VERSIONS_LINES REGEX "^clang[ \t]+")
+if(TL_VERSIONS_LINES)
+  string(REGEX REPLACE "^clang[ \t]+([0-9]+)\\..*" "\\1" TL_CLANG_PIN_MAJOR "${TL_VERSIONS_LINES}")
+  string(REGEX REPLACE "^([0-9]+)\\..*" "\\1" TL_CLANG_MAJOR "${CMAKE_CXX_COMPILER_VERSION}")
+  if(NOT TL_CLANG_MAJOR STREQUAL TL_CLANG_PIN_MAJOR)
+    set(TL_PIN_MSG "clang ${CMAKE_CXX_COMPILER_VERSION} != toolchain/VERSIONS pin (major ${TL_CLANG_PIN_MAJOR}) - docs/BUILD.md §1")
+    if(TL_STRICT_TOOLCHAIN)
+      message(FATAL_ERROR "${TL_PIN_MSG}; install the pinned major or move the pin as a ruling")
+    endif()
+    message(WARNING "${TL_PIN_MSG}; build_id differs from a pinned build, so peers will refuse it")
+  endif()
+endif()
+
 # Tiers replace CMake build types (docs/BUILD.md §3): TL_TIER owns optimisation, debug info and
 # defines, so no CMAKE_BUILD_TYPE flag set is allowed to fight it.
 set(CMAKE_BUILD_TYPE "" CACHE STRING "unused - tidelock uses TL_TIER (docs/BUILD.md §3)" FORCE)

@@ -27,6 +27,10 @@ def main():
     ap.add_argument("--preset", default="netcode-win")
     ap.add_argument("--repo", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     ap.add_argument("--touch", default="src/sim/sim.cpp")
+    ap.add_argument("--full-budget", type=float, default=FULL_BUDGET_S,
+                    help="seconds; the default is the reference PC's (docs/BUILD.md §3). A CI box "
+                         "has its own budget and must pass it explicitly rather than inherit ours.")
+    ap.add_argument("--incremental-budget", type=float, default=INCREMENTAL_BUDGET_S)
     a = ap.parse_args()
 
     out = os.path.join(a.repo, "out", a.preset)
@@ -43,12 +47,12 @@ def main():
     incremental = run(["cmake", "--build", "--preset", a.preset], a.repo)
 
     print("preset\tfull_s\tfull_budget_s\tincremental_s\tincremental_budget_s")
-    print("%s\t%.2f\t%.2f\t%.2f\t%.2f" % (a.preset, full, FULL_BUDGET_S, incremental, INCREMENTAL_BUDGET_S))
+    print("%s\t%.2f\t%.2f\t%.2f\t%.2f" % (a.preset, full, a.full_budget, incremental, a.incremental_budget))
     breach = []
-    if full > FULL_BUDGET_S:
-        breach.append("full rebuild %.2fs > %.2fs" % (full, FULL_BUDGET_S))
-    if incremental > INCREMENTAL_BUDGET_S:
-        breach.append("incremental %.2fs > %.2fs" % (incremental, INCREMENTAL_BUDGET_S))
+    if full > a.full_budget:
+        breach.append("full rebuild %.2fs > %.2fs" % (full, a.full_budget))
+    if incremental > a.incremental_budget:
+        breach.append("incremental %.2fs > %.2fs" % (incremental, a.incremental_budget))
     for b in breach:
         print("ERROR rebuild budget: " + b)
     return 1 if breach else 0

@@ -50,7 +50,9 @@
     { "name": "netcode-win", "inherits": "win",   "displayName": "netcode/ windows x86-64", "cacheVariables": { "TL_TIER": "netcode" } },
     { "name": "ship-win",    "inherits": "win",   "displayName": "ship   / windows x86-64", "cacheVariables": { "TL_TIER": "ship" } },
 
+    { "name": "debug-linux",   "inherits": "linux", "displayName": "debug  / linux x86-64",  "cacheVariables": { "TL_TIER": "debug" } },
     { "name": "dev-linux",     "inherits": "linux", "displayName": "dev    / linux x86-64",  "cacheVariables": { "TL_TIER": "dev" } },
+    { "name": "ship-linux",    "inherits": "linux", "displayName": "ship   / linux x86-64",  "cacheVariables": { "TL_TIER": "ship" } },
     { "name": "netcode-linux", "inherits": "linux", "displayName": "netcode/ linux x86-64",  "cacheVariables": { "TL_TIER": "netcode" } },
     { "name": "sanitize-linux","inherits": "linux", "displayName": "dev+asan+ubsan / linux", "cacheVariables": { "TL_TIER": "dev", "TL_SANITIZE": "ON" } },
 
@@ -63,7 +65,9 @@
     { "name": "dev-win",     "configurePreset": "dev-win" },
     { "name": "netcode-win", "configurePreset": "netcode-win" },
     { "name": "ship-win",    "configurePreset": "ship-win" },
+    { "name": "debug-linux",   "configurePreset": "debug-linux" },
     { "name": "dev-linux",     "configurePreset": "dev-linux" },
+    { "name": "ship-linux",    "configurePreset": "ship-linux" },
     { "name": "netcode-linux", "configurePreset": "netcode-linux" },
     { "name": "sanitize-linux","configurePreset": "sanitize-linux" },
     { "name": "netcode-deck",  "configurePreset": "netcode-deck" },

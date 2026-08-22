@@ -38,6 +38,13 @@ def main():
     if not a.base or set(a.base) == {"0"}:
         print("commit_docs: no base commit to diff against - skipped")
         return 0
+    probe = subprocess.run(["git", "rev-parse", "--verify", "--quiet", a.base + "^{commit}"],
+                           capture_output=True, text=True)
+    if probe.returncode != 0:
+        # A force-push or a shallow clone can leave the base unreachable. Say so; do not crash,
+        # and do not pretend the gate ran.
+        print("commit_docs: base %s is not in this clone - skipped (not a pass)" % a.base)
+        return 0
 
     changed = [p for p in run("git", "diff", "--name-only", a.base, "HEAD").splitlines() if p]
     message = run("git", "log", "--format=%B", a.base + "..HEAD")

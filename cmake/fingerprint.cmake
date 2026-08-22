@@ -10,8 +10,11 @@ set(TL_FINGERPRINT_CMD
   --repo "${CMAKE_SOURCE_DIR}"
   --tier "${TL_TIER}"
   --compiler "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} ${CMAKE_CXX_COMPILER_TARGET}"
+  --compile-commands "${CMAKE_BINARY_DIR}/compile_commands.json"
+  --binary-dir "${CMAKE_BINARY_DIR}"
   --out-cpp "${TL_BUILD_ID_CPP}"
-  --out-txt "${CMAKE_BINARY_DIR}/build_id.txt")
+  --out-txt "${CMAKE_BINARY_DIR}/build_id.txt"
+  --out-flags "${CMAKE_BINARY_DIR}/flags.txt")
 
 execute_process(COMMAND ${TL_FINGERPRINT_CMD} --flags "configure" RESULT_VARIABLE tl_fp_rc)
 if(NOT tl_fp_rc EQUAL 0)

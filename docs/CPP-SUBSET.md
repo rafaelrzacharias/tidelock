@@ -74,7 +74,11 @@ Three axes, three shapes, nothing else:
 | absence | null handle (`bits == 0`) or a documented-nullable `T*` | generation 0 is never issued; zeroed memory is never a valid handle |
 
 `ErrCode`, `ERR_OK` and `Result<T>` live in `foundation/tl_types.h` (§1) — the leaf every module
-already includes; each module declares its own `enum : u16` over that width.
+already includes. `ErrCode` is one `enum [[nodiscard]] : u16 { ERR_OK = 0 }`, **not** an alias of
+`u16`: R-1 makes `[[nodiscard]]` mandatory on it, and an alias cannot carry the attribute, which
+would leave every `Result<void>`-shaped call silently discardable. A module spells its own codes in
+its own range over that enum (`constexpr ErrCode ERR_MEM_OOM = (ErrCode)0x0101;`) — the width and
+the attribute are the shared fact, the values are the module's.
 `Result<void>` is spelled `ErrCode`. Errors carry no strings: a module's `ErrCode` enum has a
 `constexpr` name table for the log. Fail-loud is policy: validators reject at `init()`, loads fail
 with a named code, there are no partial states.

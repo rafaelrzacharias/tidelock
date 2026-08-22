@@ -1,8 +1,16 @@
-# Undefined-symbol allowlist for the audited libs (tl_foundation_det, tl_sim).
-# Spec: docs/CPP-SUBSET.md §4, docs/TESTING.md §5. One glob per line; '#' comments.
-# Symbols DEFINED anywhere in the audited set are allowed implicitly ("our own symbols from the
-# same lib set") - this file is only for what comes from outside it.
+# Undefined-symbol allowlist for the audited libs. Spec: docs/CPP-SUBSET.md §4, docs/TESTING.md §5.
+# One glob per line; '#' comments. Symbols DEFINED in this lib or in a lib BELOW it are allowed
+# implicitly - this file is only for what comes from outside the audited set.
 #
+# Adding a line here is a decision, not a convenience: every entry is a hole in the gate. In
+# particular the following are NOT allowlisted, deliberately, because each is the tripwire for a
+# class of bug the audit exists to catch, and each was removed after the W0 review found them
+# waved through:
+#   _fltused           floating point reached a sim TU (docs/CANON.md)
+#   __CxxFrameHandler* exceptions leaked back in (docs/CPP-SUBSET.md §1)
+#   __aarch64_*        outline atomics - concurrency inside det code on the Pi (docs/JOBS.md)
+# If a legitimate build needs one of these, that is a ruling, recorded in docs/BUILD.md §9.
+
 # The three sanctioned libc calls (docs/CPP-SUBSET.md §1).
 memcpy
 memset
@@ -10,20 +18,17 @@ memcmp
 __memcpy_chk
 __memset_chk
 
-# clang-cl / MSVC CRT codegen support: stack probes, cookie checks, and the marker object the
-# CRT uses to select the floating-point startup path. These are codegen, not calls we make.
+# clang-cl / MSVC CRT codegen support: stack probes and the stack-cookie check. Emitted by the
+# backend for large frames; they are codegen, not calls we make, and touch no global state we
+# hash.
 __chkstk
 __security_check_cookie
 __security_cookie
-_fltused
-__CxxFrameHandler*
-__GSHandlerCheck*
 
-# clang builtins the backend may emit for wide integer math on 32-bit-ish targets. They are
-# pure integer routines from compiler-rt, deterministic by definition.
+# compiler-rt integer routines the backend may emit for 128-bit integer math. Pure integer,
+# deterministic by definition. (No floating-point compiler-rt entry is listed, on purpose.)
 __udivti3
 __divti3
 __umodti3
 __modti3
 __muloti4
-__aarch64_*

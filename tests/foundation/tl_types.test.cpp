@@ -36,9 +36,16 @@ TL_TEST(tl_types_result_shape, "foundation,smoke,fast") {
     TL_EXPECT_EQ(ok.err, ERR_OK);
     TL_EXPECT_EQ(ok.value, 7u);
 
-    // Failure path: `value` is undefined and never read; only `err` is meaningful.
-    const ErrCode some_module_error = 3;
+    // Failure path: `value` is undefined and never read; only `err` is meaningful. A module
+    // spells its own codes in its own range over the shared width (docs/CPP-SUBSET.md §3).
+    const ErrCode some_module_error = (ErrCode)0x0101;
     Result<u32> bad = { 0u, some_module_error };
     TL_EXPECT_NE(bad.err, ERR_OK);
-    TL_EXPECT_TRUE(sizeof(bad) == 8);
+    TL_EXPECT_EQ(sizeof(bad), (usize)8);
+    TL_EXPECT_EQ(sizeof(ErrCode), (usize)2);
+
+    // The whole point of ErrCode being an enum: the attribute rides on the type, so a discarded
+    // ErrCode is a compile error under -Werror (docs/CPP-SUBSET.md §9 R-1). Compile-time only -
+    // the negative case lives in tools/audit, not here.
+    TL_EXPECT_TRUE(__is_enum(ErrCode));
 }

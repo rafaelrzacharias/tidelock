@@ -34,7 +34,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
-        tier: [dev, netcode]
+        tier: [debug, dev, netcode, ship]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +49,14 @@ jobs:
       - name: preset name
         shell: bash
         run: echo "PRESET=${{ matrix.tier }}-$([ '${{ runner.os }}' = 'Windows' ] && echo win || echo linux)" >> $GITHUB_ENV
+      - name: toolchain pin (warning only - see docs/BUILD.md §9 R-7)
+        shell: bash
+        run: |
+          set -eu
+          pin=$(awk '$1=="clang"{print $2}' toolchain/VERSIONS)
+          have=$(clang --version | head -1)
+          echo "pinned $pin | runner $have"
+
       - name: configure
         run: cmake --preset ${{ env.PRESET }}
       - name: build
@@ -62,6 +70,19 @@ jobs:
         with:
           name: junit-${{ env.PRESET }}
           path: tl_tests.xml
+
+  tier-parity:
+    # docs/BUILD.md §3: netcode and ship must differ only by the stripping defines. Enforced by
+    # comparing every resolved compile command, not the flag string a human wrote.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: sudo apt-get update && sudo apt-get install -y clang lld llvm ninja-build
+      - run: cmake --preset netcode-linux
+      - run: cmake --preset ship-linux
+      - run: python tools/audit/tier_parity.py --netcode out/netcode-linux --ship out/ship-linux
 
   fingerprint-stability:
     # Two clean builds of the same tree must produce the same build_id (docs/BUILD.md §10.5).

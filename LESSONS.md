@@ -9,3 +9,8 @@
 - In CMake regexes write parentheses as `[(]` / `[)]`: quoted-argument escaping and the regex engine disagree about backslashes, and a mis-escaped pattern silently matches nothing (it cost a build cycle in the test-list generator).
 - A static lib needs at least one TU: every empty module folder carries one placeholder `.cpp` until its lane lands. Module sources are globbed with `CONFIGURE_DEPENDS`, so a lane adds files without editing another lane's CMake.
 - `tl_foundation_det` vs `tl_foundation` is split by an explicit NON-det stem list — anything new defaults to the audited half, so a mistake fails the symbol audit loudly instead of escaping it.
+- An audit is worth what its **negative test** is worth. The W0 gates passed every obvious plant and let five adversarial ones through (`f32` instead of `float`, a basename collision across exempt lists, an anonymous-namespace global, an upward `#include`, an upward symbol reference). Plant the clever violation, not the obvious one.
+- Regexes cannot see mutable globals — anonymous namespaces, `inline static`, dynamic initialisers all evade them. `llvm-objdump -h` and a zero-`.data`/`.bss` rule can, and cost nothing.
+- `build_id` over a *flag string* is a lie: compile definitions, `-std`, `CXXFLAGS` from the environment, `cmake/` edits and git-ignored sources all bypass it. Hash the resolved compile commands (`compile_commands.json`) plus the content of the files they name.
+- `[[nodiscard]]` cannot attach to a typedef. An error code that must not be discarded has to be an `enum`, not `using ErrCode = u16`.
+- A doc sentence that names no tool ("the fingerprint tool asserts it") is a phantom gate; grep for the tool before believing it.

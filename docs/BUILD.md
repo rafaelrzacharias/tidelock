@@ -51,7 +51,10 @@ containers, arenas — audited), `tl_core`, `tl_sim` (audited), `tl_net`, `tl_re
 | `ship` | as netcode + `-DNDEBUG`-class stripping, LTO optional (LTO is *not* a determinism variable under fixed point, but it is a fingerprint input) | the shipped binary |
 
 `netcode` and `ship` produce the same fingerprint class only if their flag sets are identical
-except for symbol stripping — they are kept so, and the fingerprint tool asserts it.
+except for symbol stripping — they are kept so by `cmake/tier.cmake` and **checked by
+`tools/audit/tier_parity.py`**, which diffs the resolved compile command of every TU between the
+two presets and allows only the tier markers and `NDEBUG` (a PR job). Before the W0 review this
+sentence named no tool and nothing enforced it.
 
 **Compile time is a feature.** Budgets: full rebuild < 10 s, incremental < 2 s on the reference
 PC — CI-measured, a regression fails the PR (`TESTING.md` §5). Levers in order: unity builds per
@@ -76,8 +79,14 @@ Two 256-bit BLAKE2b values with fixed names used identically in every doc:
 
 | Name | Computed | Over |
 |---|---|---|
-| **`build_id`** | at build, by `tools/fingerprint`, embedded in a generated TU as `const u8 TL_BUILD_ID[32]` | compiler version string · the tier's full flag set · git tree hash of `src/` + `vendor/` + `script/sim/` + `script/lib/` + `toolchain/VERSIONS` · `FX_PALETTE_REV` · the precompiled sim-script bytecode bytes (`script/sim/**` + `script/lib/**`) in load order |
+| **`build_id`** | at build, by `tools/fingerprint.py`, embedded in a generated TU as `const u8 TL_BUILD_ID[32]` | compiler version string · the tier's flag set · **the resolved compile command of every TU (`compile_commands.json`, absolute paths tokenised) and the content of every source those commands name** · git tree hash of `src/` + `vendor/` + `script/sim/` + `script/lib/` + `toolchain/VERSIONS`, plus `git diff HEAD` and every untracked-**or-ignored** source under them · `FX_PALETTE_REV` · the precompiled sim-script bytecode bytes (`script/sim/**` + `script/lib/**`) in load order |
 | **`session_fingerprint`** | at init, once the world is built (`app/` after all registrations) | `build_id` ‖ reflection field tables in registration order (name-hash, kind, offset, size per field; component name-hash per table) ‖ arena registry order (ids) ‖ action map (name-hash, kind, class per action in order) ‖ `hash(DataTables)` ‖ every `SIM`-flagged cvar value |
+
+The compile-command input is what closes the bypasses the W0 review found: compile *definitions*,
+the language standard, a `CXXFLAGS` environment variable and edits to `cmake/` are all invisible to
+a flag string and to a git tree hash, and a `.gitignore`d `.cpp` is compiled by the
+`CONFIGURE_DEPENDS` glob while being invisible to `git ls-files --exclude-standard`. Each was
+verified to change `build_id` after the fix.
 
 **Rules.** The handshake carries both (`NETCODE.md` §15.1); a mismatch on either ends the session
 with a named diagnostic. Snapshots and the rollback ring are stamped with `session_fingerprint`;
@@ -149,6 +158,15 @@ Durable context lives in committed files only (`docs/`, `TODO.md`, `LESSONS.md`)
   The remaining `-W` and `-f` flags are identical in both driver modes. One warning set, two
   spellings — `cmake/tier.cmake` is the only place that knows the difference.
 
+- **R-7 The toolchain pin is loud, and fatal only under `TL_STRICT_TOOLCHAIN=ON`.** Configuring
+  with a clang whose major differs from `toolchain/VERSIONS` warns in every tier; a build whose
+  binaries other peers will run (release, soak, cross-ISA) sets `TL_STRICT_TOOLCHAIN=ON` and the
+  mismatch is fatal. Not fatal by default because `build_id` already carries the compiler string:
+  an off-pin peer cannot silently join a session, it is refused at the handshake. The alternative
+  — fatal always — was rejected because it would block the `netcode` tier on any runner without
+  the pinned LLVM, trading a real gate for a red lane. Ruled after the W0 review found the pin
+  compared against nothing.
+
 ## 10. Implementation specification
 
 ### 10.1 Repository tree (build-relevant)
@@ -203,6 +221,11 @@ render/net when their tests are compiled in). `tl_sim` and `tl_foundation_det` c
   that module's doc or say `[docs:none]` (CLAUDE.md doc-integrity protocol).
 - `tools/audit/sysroot_hash.py`: verifies a downloaded sysroot tarball against the pin in
   `toolchain/VERSIONS` before any cross build uses it (R-3).
+- `tools/audit/tier_parity.py`: the §3 netcode/ship flag-parity check, over `compile_commands.json`.
+- `tools/audit/symbols.py` takes `--layer NAME=PATH` **in DAG order** (a lib may reference only its
+  own symbols and those of layers named before it) and `--data-only NAME=PATH` for the rest of
+  `src/`; besides undefined symbols it fails on any object file with a non-empty `.data`/`.bss`,
+  which is the only reliable catch for anonymous-namespace and `inline static` mutable globals.
 - `tools/sysroot.sh <host>`: rsyncs `/usr/include /usr/lib /lib /usr/lib/gcc` from the Pi (or
   Deck) into a tarball; prints its BLAKE2b for `toolchain/VERSIONS`.
 - `tools/deploy.sh <preset> <host>`: scp `out/<preset>/bin/*`, `script/`, `assets/`; prints the
@@ -227,12 +250,21 @@ self-hosted Pi and Deck runners. `TODO.md` carries both.
 An empty-tree configure+build passes every audit; `build_id.txt` is stable across two clean builds;
 the pi4 preset produces an aarch64 ELF that runs `tl_tests --tag smoke` on the Pi via `deploy.sh`.
 
-Met on Windows (2026-08-22, W0 skeleton): `debug/dev/netcode/ship-win` configure and build clean
-under `-Werror`; symbol, include-firewall, header-contract and doc audits green, each
-negative-tested against a planted violation; `tl_tests --tag smoke` passes in-process and under
-`--isolate`; `build_id.txt` identical across two clean `netcode-win` builds; rebuild budget 1.0 s
-full / 0.6 s incremental against the 10 s / 2 s ceilings. The pi4 leg is **unmet and blocked on
-hardware**: clang emits aarch64 ELF and the preset fails loudly without `TL_SYSROOT`, but the R-3
-sysroot tarball needs a live Pi. `TODO.md` carries it as a ruling request.
+Met on Windows (2026-08-22, W0 skeleton, re-verified after the W0 adversarial review):
+`debug/dev/netcode/ship-win` configure and build clean under `-Werror`; `tl_tests --tag smoke`
+passes in-process and under `--isolate`; `build_id.txt` identical across two clean `netcode-win`
+builds; rebuild budget 1.0 s full / 0.6 s incremental against the 10 s / 2 s ceilings; netcode/ship
+compile-command parity clean.
 
-*Rev 1 — 2026-08-22; §9 R-4..R-6 and §10.1/§10.3/§10.4/§10.5 reconciled with the W0 skeleton, 2026-08-22.*
+Each gate is negative-tested against a planted violation, and the plants are the *adversarial* ones
+the review used, not the obvious ones: `f32` (not `float`) in a sim TU; `float` in `src/sim/fmt.cpp`
+(a basename that collides with a non-det foundation stem); an anonymous-namespace mutable global;
+a sim TU including `net/wire.h` and `foundation/jobs.h`; `tl_foundation_det` referencing a `tl_sim`
+symbol; a `/O1`-vs-`/O2` delta between netcode and ship; a `.gitignore`d `.cpp` under `src/`; a
+`CXXFLAGS` injection. All eight are caught.
+
+The pi4 leg is **unmet and blocked on hardware**: clang emits aarch64 ELF and the preset fails
+loudly without `TL_SYSROOT`, but the R-3 sysroot tarball needs a live Pi. `TODO.md` carries it as a
+ruling request.
+
+*Rev 1 — 2026-08-22; §9 R-4..R-7 and §3/§5/§10.1/§10.3/§10.4/§10.5 reconciled with the W0 skeleton and its adversarial review, 2026-08-22.*
