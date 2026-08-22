@@ -68,39 +68,47 @@ W5   +-* milestone-2      (render2d simview, alloy)                 dig / flood 
 ★ = critical path: `skeleton → fx → gate0 → alloy-solver → v0 → milestone-2`. Everything else
 is slack and is scheduled to finish *before* its wave's ★ lane needs it.
 
-## 2. Lanes — scope, inputs, done criterion, doc
+## 2. Lanes — scope, model, inputs, done criterion, doc
 
-| Wave | Lane | Builds | Depends on | Done (the doc's criterion) |
-|---|---|---|---|---|
-| W0 | **skeleton** | CMake tree, presets, pi4 toolchain, `tl_types.h`, `tools/audit`, `tools/fingerprint`, runner stub, CI yaml | — | `BUILD.md` §10.5 |
-| W1 | ★ **fx** | `fx.h`, `fx_palette.h`, `det_math.h`, `fx_float.h`, `tools/fxcheck` | skeleton | `FX-PALETTE.md` §10.6 |
-| W1 | **mem** | vmem arena, registry, snapshot ring, scratch, handle, `mem_pool`, alloc shim | skeleton | `MEMORY.md` §8.8 |
-| W1 | **containers** | Array/Span/SlotMap/Map/Sorted/Ring/Bitset/sort, StrView/interner/fmt | mem (`vmem_arena.h` header) | `CONTAINERS.md` §8.7 |
-| W1 | **rng/hash** | rapidhash vendored, `tl_hash64`, `NameHash`, `rng_for`, `rng_systems.h` | skeleton | `DETERMINISM.md` §9.5 |
-| W1 | **platform** | contract, headless impl, sdl3 impl (SDL3 + stb vendored) | skeleton | `PLATFORM.md` §9 |
-| W1 | **runner+driver** | `tl_tests` full, `tl_driver` skeleton, harness API stubs | skeleton | `TESTING.md` §9 |
-| W1 | **tooling-rt** | `tl_log/prof/probe/assert` headers + runtimes, crash writer | skeleton | `TOOLING.md` §9 (foundation half) |
-| W1 | **jobs** | atomics, pool, `parallel_for/levels`, shuffle mode | platform thread API header | `JOBS.md` §6.4 |
-| W2 | ★ **gate0** | `tests/gate0` solver + scenarios + shadow; run PC + Pi; rev-2 palette | fx, mem | `GATE0-BENCH.md` §8.5 |
-| W2 | **ecs** | reflect, columns, schedule, commands, events, encoder, diff | mem, containers, rng/hash | `ECS.md` §10.8 |
-| W2 | **luau-vm** | Luau vendored, three VMs, sandbox, `fx.*`, data VM | fx, mem | `LUAU-LAYER.md` §10.12 (VM half) |
-| W2 | **net-p1** | `wire.h`, encoder, archive, checkpoint writer, chain | containers, rng/hash, `TL_WIRE_STRUCT` | `NETCODE.md` §20.8 Phase 1 |
-| W2 | **alloy-substrate** | pools, broadphase, sdf + carve + redistance, cavity flood, topology/union-find, bond-graph heat flux (the first exact-conservation slice), edit intake | fx, mem, containers, rng/hash | `ALLOY.md` §14.7 steps 1, 3, 4 |
-| W2 | **vendor** | SDL_ttf, imgui, enet, monocypher builds; pool hooks; adaptors | mem, platform | links clean on the 3 targets |
-| W3 | ★ **alloy-solver** | pass 3 (from gate0), contacts, colouring, velocity pass | gate0 verdict, alloy-substrate | `ALLOY.md` §14.7 step 5 (solver) |
-| W3 | **loop+input** | loop, time, phases, interp, action map, Live/Script/Replay producers, recorder | ecs, platform | `FRAME-LOOP.md` §8.4, `INPUT.md` §9.6 |
-| W3 | **assets+data** | asset registry, loaders, data-table compiler, save v1 | ecs, luau-vm, platform | `ASSETS-AND-DATA.md` §8.5 |
-| W3 | **luau-bindings** | `ecs.*`, `alloy.*`, `input/events/data/log`, trampolines, proxies, reload, `luauc`, binding docs | ecs, alloy-substrate, luau-vm | `LUAU-LAYER.md` §10.12 |
-| W3 | **render2d** | camera, extract, queue/sort/batch, sprite, debug draw, sdl backend | ecs, platform, `sim/views.h` | `RENDER2D.md` §9 v0 criterion |
-| W3 | **editor** | ImGui shell, inspector, console/cvars, log, profiler, probes, replay panel | ecs, render2d, vendor | `TOOLING.md` §9 v0 panels |
-| W3 | **net-p2** | ENet transport, sequencer, `NetworkProducer`, hash exchange, 2-peer loopback | net-p1, platform, `InputProducer` seam | `NETCODE.md` §20.8 Phase 2 |
-| W3 | **alloy-fields** / **alloy-liquids-gases** / **alloy-chemistry** | passes 1, 2+PBF+cavities, 4+fire+transitions | alloy-substrate (+solver for liquids) | `ALLOY.md` §14.7 step 5 per pass |
-| W4 | ★ **v0-integration** | `app/wiring.cpp`, moving sprite, record→replay of a session | loop+input, render2d, luau-bindings, assets, editor | `ARCHITECTURE.md` §9 v0 |
-| W4 | **hovel-A** | `tl_hovel`, 3 machines, Milestone A | net-p2, loop, mem | `NETCODE.md` §19.5 A |
-| W4 | **alloy-plants / agents** | §7, §8.2 | alloy-solver | `ALLOY.md` tests |
-| W4 | **jobs-integration** | colouring on `parallel_levels`, ecs groups, chunk-keyed merges, the 1/2/8/16 gate | jobs, alloy-solver, ecs | `JOBS.md` §3 |
-| W5 | ★ **milestone-2** | sim view, toy dig/flood/melt slice | render2d, alloy | `ARCHITECTURE.md` §9 M2 |
-| W5 | **hovel B–E**, **net-p3…p8**, **T-A-01**, **soaks**, **game scripts** | per their docs | W4 | per their docs |
+**Model policy (ruled 2026-08-22).** *Fable 5 high* for the critical path and anything where a
+silent mistake is a desync found weeks later (integer/UB/ordering/hashing code). *Opus 5 high* for
+deep but well-specified systems. *Sonnet 5* for transcription-plus-tests lanes the specs fully
+pin down. **Never low effort on sim or netcode code.** Every lane's merge gets an adversarial
+review by a *different, higher-or-equal* model in a fresh context (`CLAUDE.md` rule 5): Sonnet
+lanes reviewed by Opus; Opus/Fable lanes reviewed by Fable. Before launching a lane, look up its
+model here — the launch prompt names it.
+
+| Wave | Lane | Model | Builds | Depends on | Done (the doc's criterion) |
+|---|---|---|---|---|---|
+| W0 | **skeleton** | Sonnet 5 | CMake tree, presets, pi4 toolchain, `tl_types.h`, `tools/audit`, `tools/fingerprint`, runner stub, CI yaml | — | `BUILD.md` §10.5 |
+| W1 | ★ **fx** | Fable 5 high | `fx.h`, `fx_palette.h`, `det_math.h`, `fx_float.h`, `tools/fxcheck` | skeleton | `FX-PALETTE.md` §10.6 |
+| W1 | **mem** | Fable 5 high | vmem arena, registry, snapshot ring, scratch, handle, `mem_pool`, alloc shim | skeleton | `MEMORY.md` §8.8 |
+| W1 | **containers** | Sonnet 5 | Array/Span/SlotMap/Map/Sorted/Ring/Bitset/sort, StrView/interner/fmt | mem (`vmem_arena.h` header) | `CONTAINERS.md` §8.7 |
+| W1 | **rng/hash** | Sonnet 5 | rapidhash vendored, `tl_hash64`, `NameHash`, `rng_for`, `rng_systems.h` | skeleton | `DETERMINISM.md` §9.5 |
+| W1 | **platform** | Sonnet 5 | contract, headless impl, sdl3 impl (SDL3 + stb vendored) | skeleton | `PLATFORM.md` §9 |
+| W1 | **runner+driver** | Sonnet 5 | `tl_tests` full, `tl_driver` skeleton, harness API stubs | skeleton | `TESTING.md` §9 |
+| W1 | **tooling-rt** | Sonnet 5 | `tl_log/prof/probe/assert` headers + runtimes, crash writer | skeleton | `TOOLING.md` §9 (foundation half) |
+| W1 | **jobs** | Opus 5 high | atomics, pool, `parallel_for/levels`, shuffle mode | platform thread API header | `JOBS.md` §6.4 |
+| W2 | ★ **gate0** | Fable 5 high | `tests/gate0` solver + scenarios + shadow; run PC + Pi; rev-2 palette | fx, mem | `GATE0-BENCH.md` §8.5 |
+| W2 | **ecs** | Fable 5 high | reflect, columns, schedule, commands, events, encoder, diff | mem, containers, rng/hash | `ECS.md` §10.8 |
+| W2 | **luau-vm** | Opus 5 high | Luau vendored, three VMs, sandbox, `fx.*`, data VM | fx, mem | `LUAU-LAYER.md` §10.12 (VM half) |
+| W2 | **net-p1** | Opus 5 high | `wire.h`, encoder, archive, checkpoint writer, chain | containers, rng/hash, `TL_WIRE_STRUCT` | `NETCODE.md` §20.8 Phase 1 |
+| W2 | **alloy-substrate** | Fable 5 high | pools, broadphase, sdf + carve + redistance, cavity flood, topology/union-find, bond-graph heat flux (the first exact-conservation slice), edit intake | fx, mem, containers, rng/hash | `ALLOY.md` §14.7 steps 1, 3, 4 |
+| W2 | **vendor** | Sonnet 5 | SDL_ttf, imgui, enet, monocypher builds; pool hooks; adaptors | mem, platform | links clean on the 3 targets |
+| W3 | ★ **alloy-solver** | Fable 5 high | pass 3 (from gate0), contacts, colouring, velocity pass | gate0 verdict, alloy-substrate | `ALLOY.md` §14.7 step 5 (solver) |
+| W3 | **loop+input** | Sonnet 5 | loop, time, phases, interp, action map, Live/Script/Replay producers, recorder | ecs, platform | `FRAME-LOOP.md` §8.4, `INPUT.md` §9.6 |
+| W3 | **assets+data** | Sonnet 5 | asset registry, loaders, data-table compiler, save v1 | ecs, luau-vm, platform | `ASSETS-AND-DATA.md` §8.5 |
+| W3 | **luau-bindings** | Opus 5 high | `ecs.*`, `alloy.*`, `input/events/data/log`, trampolines, proxies, reload, `luauc`, binding docs | ecs, alloy-substrate, luau-vm | `LUAU-LAYER.md` §10.12 |
+| W3 | **render2d** | Sonnet 5 | camera, extract, queue/sort/batch, sprite, debug draw, sdl backend | ecs, platform, `sim/views.h` | `RENDER2D.md` §9 v0 criterion |
+| W3 | **editor** | Sonnet 5 | ImGui shell, inspector, console/cvars, log, profiler, probes, replay panel | ecs, render2d, vendor | `TOOLING.md` §9 v0 panels |
+| W3 | **net-p2** | Fable 5 high | ENet transport, sequencer, `NetworkProducer`, hash exchange, 2-peer loopback | net-p1, platform, `InputProducer` seam | `NETCODE.md` §20.8 Phase 2 |
+| W3 | **alloy-fields** / **alloy-liquids-gases** / **alloy-chemistry** | Opus 5 high | passes 1, 2+PBF+cavities, 4+fire+transitions | alloy-substrate (+solver for liquids) | `ALLOY.md` §14.7 step 5 per pass |
+| W4 | ★ **v0-integration** | Opus 5 high | `app/wiring.cpp`, moving sprite, record→replay of a session | loop+input, render2d, luau-bindings, assets, editor | `ARCHITECTURE.md` §9 v0 |
+| W4 | **hovel-A** | Opus 5 high | `tl_hovel`, 3 machines, Milestone A | net-p2, loop, mem | `NETCODE.md` §19.5 A |
+| W4 | **alloy-plants / agents** | Opus 5 high | §7, §8.2 | alloy-solver | `ALLOY.md` tests |
+| W4 | **jobs-integration** | Fable 5 high | colouring on `parallel_levels`, ecs groups, chunk-keyed merges, the 1/2/8/16 gate | jobs, alloy-solver, ecs | `JOBS.md` §3 |
+| W5 | ★ **milestone-2** | Opus 5 high | sim view, toy dig/flood/melt slice | render2d, alloy | `ARCHITECTURE.md` §9 M2 |
+| W5 | **hovel B–E**, **net-p3…p8**, **T-A-01**, **soaks**, **game scripts** | per lane: net/T-A-01 Fable high, rest Opus/Sonnet | per their docs | W4 | per their docs |
 
 ## 3. What this changes versus the serial TODO
 
