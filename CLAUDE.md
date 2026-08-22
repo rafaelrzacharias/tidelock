@@ -86,9 +86,16 @@ Developed on two PCs synced via git; per-machine auto-memory does not sync.
    behind the seam, not paid upfront.
 
 ## Doc map — one home per concern; keep them from rotting
-`docs/README.md` is the map and reading order. `docs/PIVOT-DESIGN.md` is the founding ruling and
-wins every conflict. One doc per system; `TODO.md` is the forward queue; `LESSONS.md` is one-line
-gotchas (read before build work); history → `git log`.
+`docs/README.md` is the map and reading order. `docs/CANON.md` is the constants/names/types sheet
+every doc and every line of code must agree with — grep it first. `docs/PIVOT-DESIGN.md` is the
+founding ruling and wins every conflict. One doc per system, each ending in an **Implementation
+specification** (the build contract: files, structs, signatures, algorithms, tests, done
+criterion); `ARCHITECTURE.md` §9 is the milestone order. `TODO.md` is the forward queue;
+`LESSONS.md` is one-line gotchas (read before build work); history → `git log`.
+**Before building a module:** read its doc end-to-end, then CANON, then the docs it consumes
+(named in its spec's "Read first"/cross-refs). Build the tests in its test list alongside the
+code. Nothing is open — if the spec is silent on something, that is a bug to file in `TODO.md`
+as a ruling request, not a license to improvise.
 **Anti-rot trigger:** at each commit the only files that should need touching are `TODO.md`,
 `LESSONS.md`, and the one design doc whose decision changed.
 

@@ -54,6 +54,13 @@ registered singleton arena with the seed (it is state — saves and snapshots ca
 seconds for display is `tick / 60` computed render/Luau-side. There is no other clock anywhere
 in `src/core`/`src/sim` (symbol gate).
 
+**Tick width rule (applies to every doc):** the tick is `u64` in world state, snapshots, saves,
+checkpoints, the chain, the archive log and the recorder. `InputFrame.tick` is the **low 32 bits**
+of that `u64` (a 76-byte frame, `INPUT.md` §1); every container of frames (the packet header, the
+archive segment, `RecordedInput`) carries a `u64 base_tick`, and a frame's full tick is
+`base_tick + (frame.tick − u32(base_tick))` with the difference taken mod 2³². A `Persistent`
+world can therefore run past 828 simulated days without any wire or file format change.
+
 ---
 
 ## 2. Phases (DECIDED — position-named, closed)
@@ -62,7 +69,7 @@ in `src/core`/`src/sim` (symbol gate).
 |---|---|
 | `FIRST` | net receive (confirmed frames already in `world.input`), input drain + action-map (Luau sim VM), tick bookkeeping |
 | `PRE_UPDATE` | spawners, timers/cooldowns, game systems that produce MoveIntents + sim edit commands |
-| `UPDATE` | `alloy_step(world.sim, &edit_commands)` — the five passes; then bulk gameplay |
+| `UPDATE` | `alloy_step(world.sim, &edit_commands, world.tick)` — the five passes; then bulk gameplay |
 | `POST_UPDATE` | reactions to sim events (bridge Alloy ring → `EventQueue`s), damage/despawn marking, transform/hierarchy resolve into `current` |
 | `LAST` | determinism checkpoint: per-arena hash; net send; snapshot ring push; record→replay log |
 | `PRE_RENDER` | extract: fx → float, interpolation, camera, culling, sort-key prep |
@@ -146,5 +153,69 @@ is skipped entirely for sim-only tests), and the loop runs as fast as the CPU al
   pass boundary inside Alloy (the edit channel already has pass-boundary application semantics,
   `ALLOY.md` §0.4). Splitting the step into five systems would expose pass internals as a seam
   and is rejected, not deferred.
+
+## 8. Implementation specification
+
+### 8.1 Files
+
+`core/loop.h/.cpp` (`Engine`, `engine_init`, `engine_tick_once`, `engine_frame`, `engine_shutdown`),
+`core/time.h` (`Clock`), `core/phase.h` (the enum + names), `core/interp.cpp` (the `prev ← current`
+ping-pong + snap), `app/main.cpp` (wiring: module registration order, the loop call, CLI flags),
+`app/wiring.cpp` (the one registration file: arenas, components, systems, events, actions, in
+order).
+
+### 8.2 Init order (`app/wiring.cpp` — this order is the lockstep contract)
+
+1. `platform = platform_sdl3_init(cfg)` (or headless). Vendor allocator hooks are set *before* this
+   (`mem_pool` created first from a bootstrap `VMemArena`).
+2. Arenas: create every `VMemArena` from the reserve table; `registry_add` in this fixed order:
+   `world_singletons` (tick, seed, `PeerSlots`), `entities`, then one entry per component column as
+   registered in step 4, then Alloy's pools (`alloy_register_arenas`), then `data_tables`. Scratch
+   arenas and the event arena are created but not registered.
+3. Interner, cvars, log sinks, profiler.
+4. Components: engine components (`Transform`, `TransformPrev`, `Sprite`, `Camera2D`,
+   `PeerSlots`, …) then the Luau sim scripts' `ecs.component` declarations (script init phase runs
+   here, in the sim VM).
+5. Events: engine event types, then Luau-declared.
+6. Systems: engine systems per phase (input fold bookkeeping, `alloy_step`, Alloy→event bridge,
+   transform resolve, checkpoint, recorder, `net_receive`/`net_send` when present, render
+   systems), then Luau `ecs.system` registrations. `schedule_build`.
+7. Action map from the Luau input script; `input_set_producer`.
+8. Data tables compiled (`ASSETS-AND-DATA.md` §3); `alloy_init(tables, world_desc)`.
+9. `registry_seal`; `session_fingerprint` computed; `TL_LOG_INFO` both fingerprints.
+10. Snapshot ring allocated; `guard` armed; tick = 0; if `Origin::Restored`, `registry_restore`
+    from the checkpoint before the first tick.
+
+Shutdown is the reverse; nothing is "freed" — arenas are released wholesale.
+
+### 8.3 `engine_tick_once` (the function the loop, the driver and the rollback driver all call)
+
+```cpp
+void engine_tick_once(Engine* e, const InputFrame* frames /*[MAX_PEERS]*/) {
+    World* w = &e->world;
+    guard_tick_begin(&e->guard, w->registry);
+    w->input = frames;
+    for (Phase p = FIRST; p <= LAST; ++p) { run_phase(w, p); /* run_phase applies commands at its end */ }
+    // LAST has run: checkpoint hashed, recorder appended, net_send sent, snapshot ring pushed
+    events_swap(w);                  // barrier step 2
+    interp_pingpong(w);              // barrier step 3: prev ← current for Transform/Camera2D
+    scratch_reset_all(e);            // barrier step 4 (workers; main scratch resets after render)
+    w->tick += 1;
+    guard_tick_end(&e->guard, w->registry);
+}
+```
+
+`engine_frame` is the §0 loop body; `tl_driver` calls `engine_tick_once` directly with
+`accumulator` forced. Rollback (`NETCODE.md` §20) restores a ring slot (which sets `w->tick`),
+clears both event halves and the command chunks, snaps interpolation, then calls
+`engine_tick_once` for each tick up to the present with corrected frames — never from inside a
+system.
+
+### 8.4 Tests (`tests/core/loop.test.cpp`)
+
+Accumulator arithmetic with a fake clock (steps per frame, `MAX_STEPS` cap drops time, `alpha` in
+[0,1)); `PRODUCE_WAIT` renders without ticking; barrier order observable (a test system emits an
+event and a command in `LAST`; next tick sees both); headless forced-accumulator runs N ticks
+exactly; restore-then-retick reproduces the hash trace.
 
 *Rev 1 — 2026-08-22.*

@@ -94,15 +94,24 @@ harness was always the real safety net; it is now the only one, so it lands firs
 **Stateless keyed mixing, not a sequential generator.**
 
 ```cpp
-u64  rng_key(u64 seed, u64 tick, u32 system_id, u64 carrier_id, u32 draw);   // splitmix64-class mix
-u64  rng_u64(u64 key);
-u32  rng_below(u64 key, u32 n);      // Lemire multiply-shift, unbiased enough; no rejection loop
-q_t  rng_q(u64 key);                 // top 30 bits → fx<i32,30> in [0,1)
+// the one entry point — the name every doc uses
+u64  rng_for(u64 seed, u64 tick, u32 system_id, u64 carrier_id, u32 draw /* = 0 */);
+u32  rng_below(u64 r, u32 n);        // Lemire multiply-shift on a rng_for() result; no rejection loop
+q_t  rng_q(u64 r);                   // top 30 bits → fx<i32,30> in [0,1)
+template <typename R> R rng_range(u64 r, R lo, R hi);   // lo + mul<R>(rng_q, hi - lo)
+
+// rng_for = mix64(mix64(mix64(mix64(seed ^ K0) + tick) + (u64(system_id) << 32 | draw)) + carrier_id)
+// mix64   = the splitmix64 finalizer: x ^= x>>30; x *= 0xbf58476d1ce4e5b9; x ^= x>>27;
+//           x *= 0x94d049bb133111eb; x ^= x>>31.   K0 = 0x9e3779b97f4a7c15.
 ```
 
-- A draw's value is a pure function of `(seed, tick, system, carrier, draw#)`. Scheduling, worker
-  count, and iteration order cannot change it. `draw` is a per-carrier counter the caller owns
-  locally within the tick (never stored across ticks).
+- A draw's value is a pure function of `(seed, tick, system_id, carrier_id, draw)`. Scheduling,
+  worker count, and iteration order cannot change it. `draw` is a per-carrier counter the caller
+  owns locally within the tick (never stored across ticks). `system_id` values are a closed enum
+  in `rng_systems.h` (one per sim system/pass/rule family); adding one is a registration, and the
+  enum is part of `build_id` by being source. The enum reserves a 256-wide block
+  `RNG_SYS_LUAU_BASE .. +255` assigned to Luau-registered systems by registration ordinal
+  (`LUAU-LAYER.md` §10.6), so a script's draws are keyed without editing the header.
 - Render/UI/editor use their own separate sequential PRNG (`xoshiro256**`, render-side); it never
   touches sim state.
 - World-gen uses its own key family `hash(seed, cx, cy, channel)` — generating a chunk at tick 0 or
@@ -195,5 +204,66 @@ reflection field tables give a field-by-field diff of the diverging component (`
   budget; a dirty-range hash is a second correctness surface (a missed dirty mark is a silent
   hole) for a win G-05 has not asked for. If G-05 shows hashing binding, the lever is chunk-
   parallel hashing (`JOBS.md` §4), not incrementality.
+
+## 9. Implementation specification
+
+### 9.1 Files
+
+| File | Contents |
+|---|---|
+| `foundation/hash.h/.cpp` | `tl_hash64(const void*, usize, u64 seed)` = vendored rapidhash; `NameHash operator""_id`; `TL_HASH_SEED` |
+| `foundation/rng.h` | `rng_for`, `rng_below`, `rng_q`, `rng_range<R>`, `mix64`; `rng_systems.h` (the `system_id` enum) |
+| `core/record.h/.cpp` | `RecordedInput` writer/reader (format below); the `LAST`-phase recorder system |
+| `core/checkpoint_sys.cpp` | the `LAST`-phase determinism checkpoint system: `registry_hash_all` → `world.hash_trace` ring + optional per-tick log |
+| `tests/harness/` | `dual_sim.cpp`, `replay.cpp`, `worker_sweep.cpp`, `crossisa.cpp` (driver jobs), `hash_trace.h` (compare utility) |
+
+### 9.2 `RecordedInput` file format (shared by the recorder, the Replay producer, the Script producer's save, and Hovel)
+
+```
+Header (WIRE_STRUCT, 128 B): magic "TLRI", format_version u32, build_id[32], session_fingerprint[32],
+    seed u64, base_tick u64, peer_count u8, live_mask u8, flags u16 (HAS_ARENA_HASHES), frame_count u64, _pad
+Body: frame_count × { InputFrame[peer_count] (76 B each, tick = low 32 bits) ; u64 world_hash ; [u64 arena_hash[arena_count] if HAS_ARENA_HASHES] }
+Trailer: crc32 over body
+```
+
+Written by the recorder every tick in `dev` (ring-bounded in memory, flushed on "save replay"),
+and by the driver unconditionally when `--record` is given. The Replay producer refuses a file
+whose `session_fingerprint` differs (named error), supplies frames in order, and the harness
+compares the stored hashes against the live ones tick by tick.
+
+### 9.3 The checkpoint system (`LAST`, registered `before` `net_send` and the recorder)
+
+```cpp
+void sys_checkpoint(World* w) {
+    u64 per_arena[MAX_ARENAS];
+    u64 h = registry_hash_all(w->registry, per_arena);
+    w->hash_trace.push({w->tick, h});                 // RingBuffer of 64 in a non-registered arena
+    memcpy(w->last_arena_hashes, per_arena, ...);     // read by net_send and the recorder this tick
+}
+```
+
+### 9.4 Harness APIs (`tests/harness/`)
+
+```cpp
+// Build two worlds from the same scene script + seed, feed identical frames, compare every tick.
+ErrCode harness_dual_sim(const SceneDesc*, u64 ticks, const InputProducer* script, DualReport* out);   // out.first_divergent_tick, per-arena first-differing id
+ErrCode harness_replay   (const SceneDesc*, StrView recorded_file, ReplayReport* out);
+ErrCode harness_worker_sweep(const SceneDesc*, u64 ticks, const u32 workers[], u32 n, SweepReport* out);
+// diff: given two snapshots (or snapshot + live world), walk registry → tables → rows → FieldInfo; print first N differences as "arena/component/entity/field: a vs b"
+u32 desync_diff(const Snapshot* a, const Snapshot* b, const World* layout, Span<DiffLine> out);
+```
+
+The cross-ISA job is a driver invocation with `--record` on one machine and `--replay --verify`
+on the other (`TESTING.md` §4); no special API.
+
+### 9.5 Tests
+
+`hash.test.cpp` (rapidhash known-answer vectors from upstream; seed sensitivity; `"lit"_id`
+constexpr equals runtime FNV), `rng.test.cpp` (known-answer vectors for `rng_for` committed as
+goldens; `rng_below` uniformity over 2²⁴ draws within 0.5%; `rng_q` range; draw independence
+across `system_id`), `record.test.cpp` (write/read round trip; crc corruption refused; fingerprint
+mismatch refused), `checkpoint.test.cpp` (hash changes iff a hashed arena changed — the hash-
+region integrity test over every registered arena, automated: for each arena flip one byte inside
+`used`, assert hash changes; flip one byte above `used`, assert unchanged).
 
 *Rev 1 — 2026-08-22. Supersedes `../foundry/DETERMINISM-DESIGN.md` for this engine.*

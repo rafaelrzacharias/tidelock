@@ -70,30 +70,28 @@ ENet, stb_image, stb_sprintf, Monocypher, rapidhash. The vendored tree hashes in
 
 ---
 
-## 5. The build fingerprint (DECIDED — replaces build-hash + `@layout_hash` + `@fast_math` fingerprinting)
+## 5. The two fingerprints (DECIDED — replaces build-hash + `@layout_hash` + `@fast_math` fingerprinting)
 
-Two halves, one 64-bit + 256-bit pair:
+Two 256-bit BLAKE2b values with fixed names used identically in every doc:
 
-**Build-time (embedded by `tools/fingerprint` into a generated TU):**
-`BLAKE2b(compiler version string, full flag set per tier, git tree hash of src/ + vendor/ +
-script/ + toolchain/VERSIONS, FX_PALETTE_REV, the precompiled sim-script bytecode bytes in load
-order)`.
+| Name | Computed | Over |
+|---|---|---|
+| **`build_id`** | at build, by `tools/fingerprint`, embedded in a generated TU as `const u8 TL_BUILD_ID[32]` | compiler version string · the tier's full flag set · git tree hash of `src/` + `vendor/` + `script/sim/` + `script/lib/` + `toolchain/VERSIONS` · `FX_PALETTE_REV` · the precompiled sim-script bytecode bytes (`script/sim/**` + `script/lib/**`) in load order |
+| **`session_fingerprint`** | at init, once the world is built (`app/` after all registrations) | `build_id` ‖ reflection field tables in registration order (name-hash, kind, offset, size per field; component name-hash per table) ‖ arena registry order (ids) ‖ action map (name-hash, kind, class per action in order) ‖ `hash(DataTables)` ‖ every `SIM`-flagged cvar value |
 
-**Init-time extension (computed once the world is built):**
-`BLAKE2b(build_fingerprint, reflection field tables in registration order (name-hash + kind +
-offset), arena registry order, action map (names + kinds + classes), compiled data tables hash,
-SIM-flagged cvar values)`.
-
-The init-time value is what the handshake compares (`NETCODE.md` §15) and what snapshots and
-checkpoints are stamped with. Two peers that differ in *any* input cannot join a session; a
-snapshot from a different fingerprint cannot be restored. In dev, script reload and data reload
-recompute the extension and log the change; in a lockstep session they are refused.
+**Rules.** The handshake carries both (`NETCODE.md` §15.1); a mismatch on either ends the session
+with a named diagnostic. Snapshots and the rollback ring are stamped with `session_fingerprint`;
+saves and durable checkpoints are stamped with both (`ASSETS-AND-DATA.md` §5). In `dev`, script
+reload and data reload recompute `session_fingerprint` and log old→new; in a lockstep session
+both are refused. `tools/fingerprint` also emits `build_id` as text for CSV headers and soak
+metadata.
 
 ---
 
 ## 6. Luau compilation
 
-`tools/luauc` (links the vendored Luau compiler) compiles `script/sim/**/*.luau` into `.luac`
+`tools/luauc` (links the vendored Luau compiler) compiles `script/sim/**/*.luau` and
+`script/lib/**/*.luau` (library files reachable from sim scripts are fingerprinted) into `.luac`
 with pinned options for `netcode`/`ship`; `dev` compiles on load with the same vendored compiler
 (identical output). UI/editor scripts are always compiled on load (not in the fingerprint).
 
@@ -129,5 +127,67 @@ Durable context lives in committed files only (`docs/`, `TODO.md`, `LESSONS.md`)
 - **R-3 Pi sysroot = a tarball of the Pi's `/usr/include`, `/usr/lib`, `/lib` captured by
   `tools/sysroot.sh`**, stored in a release bucket (not git), its hash pinned in
   `toolchain/VERSIONS`. The Deck uses the same mechanism with an x86-64 Linux sysroot.
+
+## 10. Implementation specification
+
+### 10.1 Repository tree (build-relevant)
+
+```
+CMakeLists.txt                 project, options (TL_TIER, TL_SANITIZE), includes cmake/*.cmake, add_subdirectory per module
+cmake/presets.json             dev-win · debug-win · netcode-win · ship-win · dev-linux · netcode-linux · netcode-pi4 · ship-pi4
+cmake/tier.cmake               flag sets per tier (CPP-SUBSET.md §7, BUILD.md §3) as interface targets tl_flags_common / tl_flags_sim
+cmake/toolchain-pi4.cmake      CMAKE_SYSTEM_NAME Linux, processor aarch64, clang --target=aarch64-linux-gnu, --sysroot=${TL_SYSROOT}
+cmake/toolchain-deck.cmake     x86-64 Linux sysroot variant
+cmake/audit.cmake              custom targets: tl_audit_symbols (llvm-nm), tl_audit_includes (grep), tl_rebuild_budget
+cmake/fingerprint.cmake        generates build/generated/build_id.cpp from tools/fingerprint at configure+build
+src/<module>/CMakeLists.txt    one static lib each; PRIVATE include dirs; PUBLIC only the module's public header dir
+vendor/CMakeLists.txt          SDL3 (subdir), SDL_ttf, imgui (sources listed), luau (VM + Compiler libs; LUA_USE_LONGJMP=1), enet, stb (one TU), monocypher, rapidhash (header)
+tools/CMakeLists.txt           separate project; fingerprint, luauc, audit helpers, fxcheck (may use the STL)
+tests/CMakeLists.txt           tl_tests (glob *.test.cpp → generated test_list.inc), tl_driver, tl_gate0, tl_hovel
+toolchain/VERSIONS             clang version, SDL3 commit, Luau commit, … , sysroot hashes
+```
+
+### 10.2 Targets and link graph
+
+`tl_foundation_det` (fx, det_math, rng, hash, containers, vmem_arena, registry, scratch, handle)
+← nothing. `tl_foundation` (jobs, mem_pool, fmt, interner, atomic, alloc_shim) ← `det`.
+`tl_sim` ← `tl_foundation_det` only. `tl_core` ← foundation, platform (headers). `tl_platform_sdl3`
+/ `tl_platform_headless` ← foundation. `tl_render` ← core, `sim/views.h`. `tl_net` ← core,
+enet, monocypher. `tl_script` ← core, luau. `tl_editor` ← core, render, imgui (dev only).
+`tidelock` ← all. `tl_tests`/`tl_driver` ← foundation, core, sim, script, platform_headless (+
+render/net when their tests are compiled in). `tl_sim` and `tl_foundation_det` compile with
+`tl_flags_sim` (adds `-nostdinc++ -fno-builtin`, `-DTL_SIM_TU=1`), and are the symbol-audit inputs.
+
+### 10.3 Scripts and tools
+
+- `tools/fingerprint`: reads `toolchain/VERSIONS`, the tier's flag string (passed by CMake), `git
+  rev-parse HEAD:src HEAD:vendor HEAD:script/sim HEAD:toolchain/VERSIONS` (tree hashes — a dirty
+  tree appends the hash of `git diff` so a local build is still unique), `FX_PALETTE_REV` (parsed
+  from `fx_palette.h`), and the `.luac` manifest; emits `build_id.cpp` and `build_id.txt`.
+- `tools/luauc <out_dir> <in files…>`: `luau_compile` with `-O2 -g1`, writes `.luac` + `manifest.tsv`
+  (`path, bytes, blake2b`).
+- `tools/audit/symbols.py`: runs `llvm-nm --undefined-only -C` on each audited lib; allowlist in
+  `tools/audit/allow.txt`; nonzero exit on any other symbol. `tools/audit/includes.py`: the grep
+  rules of `CPP-SUBSET.md` §1/§4 + backend-header placement + the `float`/`double` token ban in
+  sim TUs + `static` mutable + `thread_local` + `std::`.
+- `tools/rebuild_budget.sh/.ps1`: clean configure+build of `netcode` tier with timing; then touch
+  `src/sim/solver.cpp` and time the incremental build; compares to the budgets; CI artifact.
+- `tools/sysroot.sh <host>`: rsyncs `/usr/include /usr/lib /lib /usr/lib/gcc` from the Pi (or
+  Deck) into a tarball; prints its BLAKE2b for `toolchain/VERSIONS`.
+- `tools/deploy.sh <preset> <host>`: scp `out/<preset>/bin/*`, `script/`, `assets/`; prints the
+  remote run line.
+
+### 10.4 CI (GitHub Actions — `TESTING.md` §8 R-1)
+
+`pr.yml`: matrix {windows-clang-cl, ubuntu-clang} × {dev, netcode} + ubuntu cross pi4 (build only)
+→ audits → `tl_tests --isolate --junit` → driver harness jobs → sanitizer job (ubuntu, `-DTL_SANITIZE=ON`,
+sim tests) → rebuild budget. `nightly.yml`: slow tests, fuzz, self-hosted `pi4` and `deck` runners
+pulling the PR-built artifacts for cross-ISA replay-diff, save cross-build, pixel goldens.
+`weekly.yml`: Hovel scenarios (when present), Gate 0 re-run on palette/solver changes.
+
+### 10.5 Done criteria
+
+An empty-tree configure+build passes every audit; `build_id.txt` is stable across two clean builds;
+the pi4 preset produces an aarch64 ELF that runs `tl_tests --tag smoke` on the Pi via `deploy.sh`.
 
 *Rev 1 — 2026-08-22.*

@@ -199,5 +199,18 @@ side is ever read back into the sim (D10, INV-6). The full loop and phase semant
   hashed, not snapshotted — none of it is authoritative. The snapshot ring (registered set) and
   the log ring are therefore sized independently.
 
+## 9. Milestones and done criteria (the build order, with what "done" means)
+
+| Milestone | Builds | Done when |
+|---|---|---|
+| **Skeleton** | CMake tree, presets, audits, `tl_types.h`, runner stub | empty tree passes every audit on Windows + Linux + pi4 cross; `build_id.txt` stable (`BUILD.md` §10.5) |
+| **Gate 0** | `fx.h`, `fx_palette.h`, `det_math.h`, `fxcheck`, `tl_gate0` | `GATE0-BENCH.md` §8.5; `FX-PALETTE.md` rev 2 committed |
+| **Foundation** | vmem/registry/scratch/handles/pools, containers, rng/hash, runner, headless platform, harness | `MEMORY.md` §8.8, `CONTAINERS.md` §8.7, `DETERMINISM.md` §9.5 green; dual-sim of an empty world passes |
+| **ECS** | reflection, columns, schedule, commands, events, encoder, loop, input producers, recorder, driver | `ECS.md` §10.8, `FRAME-LOOP.md` §8.4, `INPUT.md` §9.6 green; `tl_driver --record/--replay --verify` round-trips a scripted scene |
+| **v0** | SDL3 platform, assets, data compiler, Luau VMs + bindings, render2d sprite path, ImGui shell (inspector/console/log/profiler/replay) | window + a Luau-declared component moved by a Luau system at fixed 60 Hz; clean exit; `--record` of the session replays bit-exact headless; fingerprints logged |
+| **Hovel A** | ENet transport, encoder, sequencer, `NetworkProducer`, hash exchange, `tl_hovel` | `NETCODE.md` §19.5 A: 1 h, 3 machines, zero divergence |
+| **Milestone 2** | Alloy substrate → topology → solids → solver (promoted from Gate 0) → liquids; sim view | dig / flood / melt a toy slice on screen; `ALLOY.md` §14 build steps 1–5 green; G-05 numbers reproduced in-engine |
+| **Hovel B–E, Alloy rest, jobs, T-A-01** | per the per-doc queues | each doc's done criteria; the 10 h soak |
+
 *Rev 1 — written 2026-08-22 from the pivot ruling. Supersedes `FOUNDRY-CORE.md` §0/§1/§4/§7 and
 `ENGINE-DESIGN.md` A1 for this engine.*

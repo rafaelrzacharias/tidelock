@@ -133,4 +133,76 @@ constant change is a separate ruling); the 32-bit-vectorizable rule (rung 4 is t
   separate `solve_us` and `broadphase_us` columns so a miss is attributable. The threshold applies
   to the sum.
 
+## 8. Implementation specification
+
+### 8.1 Files (`tests/gate0/`)
+
+`main.cpp` (CLI, scenario dispatch, CSV), `solver.h/.cpp` (the disposable solver; written against
+the palette typedefs and `det_math.h`; `#ifdef GATE0_SHADOW` switches the typedefs to a `double`
+mirror — only this TU and `shadow.cpp` may include `<math.h>`), `scenes.cpp` (G-01..G-05 scene
+builders), `metrics.cpp` (jitter, penetration, density error, energy, hash), `shadow.cpp` (runs fx
+and double side by side, logs max error per constraint kind per pass). Links `tl_foundation_det`
++ a local fixed-capacity array helper. Allowed io: the CSV writer and `stb_sprintf`.
+
+CLI: `tl_gate0 --scenario G01|G02|G03|G04|G05|G06|all --substeps 4|8|16 --particles n --ticks n
+--ladder 1|2|3 --out dir [--shadow]`. Verdict lines: `VERDICT G-01 substeps=8 PASS|INVESTIGATE|FAIL
+<metric>=<value>`.
+
+### 8.2 Solver data (SoA, fixed capacity from the CLI)
+
+Bodies: `pos_t x, y; angle_t th; vel_t vx, vy; omega_t w; pos_t px, py; angle_t pth; invmass_t
+inv_m, inv_i; pos_t half_w, half_h; u8 flags /* static */`. Particles: `pos_t x, y, px, py;
+invmass_t inv_m; i32 mass_quanta`. Constraints: distance `{ a, b (indices), pos_t rest, stiff_t
+a_tilde, lambda_t lam }`; contact (transient per tick) `{ body a, body b or particle, vec2<pos_t>
+point, vec2<q_t> normal, pos_t depth, lambda_t lam_n, lam_t }`; density (PBF) per particle
+`lambda_t lam`. Broadphase: uniform grid of cell = kernel radius 4 texels for particles, cell = 1 m
+for bodies; `sort_u32_kv` on `(cell_key, index)`; neighbor lists built per tick into scratch.
+
+### 8.3 Substep (for each of `SUBSTEPS`)
+
+1. Predict: `v += G_SUBSTEP` (y); `p_prev = p`; `p += mul<pos_t>(v, H)` (bodies: `th += mul<angle_t>(w, H)`).
+2. Contacts: body–body by corner-vs-SDF (the box SDF is analytic here: `sd = max(|lx| − hw, |ly| −
+   hh)` in body space via `rotate` by `(−sin, cos)`), particle–body via the same SDF, particle–
+   particle density constraints from the neighbor lists.
+3. Project, colored GS: persistent constraints colored once (greedy, stable-id order); contacts
+   recolored per tick. For each color, for each constraint in stable-id order:
+   ```
+   C, gradients; wsum = Σ w_i·|∇C_i|² (i64, each w clamped by MASS_RATIO_CLAMP relative to the pair's min nonzero w)
+   den  = wsum + a_tilde  (i64 at FRAC 30 after aligning wsum's FRAC)
+   dlam = div<lambda_t>(−C − mul(a_tilde, lam), den)         // widened, one RNE
+   lam  = sat_add(lam, dlam)
+   Δp_i = mul<pos_t>(w_i, mul<lambda_t>(dlam, ∇C_i))          // rung 1: accumulated in an i64 per body/particle across the color sweep
+   ```
+   Solver-local `i64` position accumulators per body/particle are rounded to `pos_t` **once per
+   substep** after the last color (`rne_shr` by the accumulator's extra 16 bits).
+4. Velocity: `v = mul<vel_t>(p − p_prev, INV_H)` (via `mul_int`); then the velocity pass:
+   friction (clamp tangential Δv by `μ·λ_n`), restitution (`v_n' = −e·v_n` if `|v_n| > threshold`).
+5. Writeback.
+
+Rung 3 (`--ladder 3`): keep each quantity's rounding residual (the low 16 bits dropped in step 3)
+and add it back before the next substep's accumulation.
+
+### 8.4 Metrics (all integer/fx; the CSV prints raw and texel units)
+
+- **Jitter** (G-01): after settle (tick > 600), per body per tick `d = |p − p_prev_tick|` (i64
+  length via `isqrt64`); p95 over all (body, tick) samples in texels = `d / TEXEL.v`.
+- **Sink/pop**: the stack's top body `y` at tick 10k vs tick 600 must differ by < 0.1 texel; any
+  body with `d > 1 texel` in one tick after settle = pop.
+- **Penetration** (G-02): max over contacts of `−depth` sustained for > 3 ticks, in texels;
+  tunneling = any particle/body centre crossing a static box's interior between two ticks.
+- **Density error** (G-03): per particle `|ρ/ρ₀ − 1|` as `q_t`; p95 after settle; "boiling" =
+  Σ KE not monotone non-increasing over 1k-tick windows after settle.
+- **Energy** (G-04): `E = Σ m·(vx²+vy²)/2 + Σ m·g·y` with `m` in quanta, `v` raw `vel_t`, `y` raw
+  `pos_t`, all products in `i64` at fixed documented shifts (KE shifted right 40, PE right 18), summed
+  in `i64`; windowed max over 1k ticks must be non-increasing.
+- **Cost** (G-05): `solve_us`, `broadphase_us` via the platform clock around the phases (the bench
+  is not sim code), p50/p95/p99 over ticks 200..end.
+- **Hash** (G-06): `tl_hash64` over every SoA column's used extent each tick, written to the CSV;
+  the two-run and PC/Pi comparisons are `diff` of the hash columns.
+
+### 8.5 Done criteria
+
+All six verdict lines `PASS` at substeps 8 on PC and Pi (G-05's Pi half may be `INVESTIGATE`
+without blocking by the severity split); CSVs committed; `FX-PALETTE.md` rev 2 written.
+
 *Rev 1 — 2026-08-22.*

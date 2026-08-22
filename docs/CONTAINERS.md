@@ -131,4 +131,92 @@ null handle, wrap); **determinism:** two instances fed the same op sequence prod
 order and identical hash; **property:** random op sequences vs a naive reference; **zero-alloc:**
 arena-offset delta around every hot operation.
 
+## 8. Implementation specification
+
+### 8.1 `Array<T>` / `Span<T>` (`array.h`)
+
+```cpp
+template <typename T> struct Span  { T* data; u32 count; };
+template <typename T> struct Array { T* data; u32 count; u32 cap; VMemArena* grow_arena; /* null = fixed */ };
+template <typename T> void  array_init_vmem (Array<T>*, VMemArena* own_range);        // data = base; cap grows by arena_push of whole pages
+template <typename T> void  array_init_fixed(Array<T>*, VMemArena* arena, u32 cap);    // one arena_push(cap*sizeof T); grow_arena = null
+template <typename T> T*    array_push(Array<T>* a, T v);        // vmem: if count == cap → cap += page/sizeof(T) via arena_push; fixed: TL_FATAL on overflow
+template <typename T> T     array_pop(Array<T>*);  template <typename T> void array_swap_remove(Array<T>*, u32 i);
+template <typename T> T&    array_at(Array<T>*, u32 i);          // TL_CHECK(i < count) in all tiers
+template <typename T> Span<T> array_span(Array<T>*), array_slice(Array<T>*, u32 a, u32 b);
+template <typename T> void  array_clear(Array<T>*);              // count = 0; does NOT release; a hashed array's tail is re-zeroed by arena policy on reuse
+```
+
+`static_assert(__is_trivially_copyable(T))` in every function template. A vmem-backed array's
+range is its own `VMemArena` (`MEMORY.md` §7 R-1); the array stores nothing but `base/count/cap`.
+
+### 8.2 `SlotMap<T,H>` (`slotmap.h`)
+
+```cpp
+template <typename T, typename H> struct SlotMap {
+    Array<T>   slots;      // vmem range; dead slots are zeroed (hash is a function of state)
+    Array<u16> gen;        // parallel; starts at 1; 0 never issued
+    Array<u32> free_list;  // LIFO; vmem range
+    Bitset     live;       // one bit per slot
+    u32        live_count; u32 quarantined;
+};
+H    slotmap_insert(SlotMap*, const T* v);  // pop free_list (LIFO) else slots.count++; gen stays; live.set; memcpy; return handle_make(idx, gen[idx])
+T*   slotmap_get   (SlotMap*, H h);         // idx < slots.count && live.test(idx) && gen[idx] == handle_gen(h) ? &slots[idx] : null (TL_ASSERT in debug on stale)
+bool slotmap_remove(SlotMap*, H h);         // get → memset(slot, 0) → live.clear → if gen == GEN_MAX { quarantined++ /* never pushed to free_list */ } else { gen++; free_list push }
+// iteration: for (u32 i = 0; i < slots.count; ++i) if (live.test(i)) …   — never 0..live_count
+```
+
+### 8.3 `Map<K,V>` (`map.h`)
+
+Open addressing, linear probing, power-of-two capacity, load ≤ 0.75, backward-shift deletion.
+`K` is `u32`/`u64`/`NameHash` (static_assert integral); hash = `tl_hash64(&k, sizeof k, TL_HASH_SEED)`.
+Storage: parallel `Array<K> keys`, `Array<V> vals`, `Array<u8> state` (0 empty, 1 full) on the
+owning arena; grow by rehash into a fresh `arena_push` (registries and editor only — never in a
+tick; `TL_ASSERT(!in_tick)` in debug). API: `map_init(arena, cap)`, `map_put`, `map_get → V*`,
+`map_remove`, `map_count`, `map_iter(&it) → K,V*` (order-fragile by contract; `DETERMINISM.md`
+§2.7).
+
+### 8.4 `SortedMap<K,V>` / `SortedSet<K>` (`sorted.h`)
+
+`Array<K> keys` + `Array<V> vals` kept sorted; `lower_bound` binary search; insert = memmove;
+`sorted_iter` walks `0..count`. Integral `K` only.
+
+### 8.5 `RingBuffer<T>`, `Bitset`, sorting (`ring.h`, `bitset.h`, `sort.h`)
+
+```cpp
+template <typename T> struct RingBuffer { T* data; u32 cap /* pow2 */; u32 head, tail; u8 overwrite_oldest; };
+// push: if full → overwrite_oldest ? tail++ : return false; peek(i) from tail; pop from tail.
+struct Bitset { u64* words; u32 bit_count; };   // set/clear/test/find_first(from)/popcount/clear_all; words on the owning arena
+void sort_u32_kv(u32* keys, u32* vals, u32 n, Scratch* s);   // LSD radix base 256, 4 passes, stable
+void sort_u64_kv(u64* keys, u32* vals, u32 n, Scratch* s);   // 8 passes; early-out on a pass whose histogram has one bucket
+// pass: hist[256] over byte b of keys; prefix sum; scatter keys/vals into scratch copies; swap buffers. n ≤ 2^32-1.
+```
+
+### 8.6 Strings (`strview.h`, `interner.h`, `fmt.h`)
+
+```cpp
+struct StrView { const char* ptr; u32 len; };      // sv("lit") constexpr; sv_eq; sv_hash (FNV-1a 64, same as NameHash); sv_starts_with; sv_split_at
+struct Interner { VMemArena* chars; Array<u32> offsets; Array<u16> lens; Map<NameHash, StrId> by_hash; u32 count; };
+StrId   intern(Interner*, StrView s);      // by_hash get → return; else copy into chars, push offsets/lens, put; TL_FATAL on hash collision with a different string; count < 65535
+StrView intern_name(const Interner*, StrId);   // reverse lookup (debug/editor)
+NameHash intern_hash(const Interner*, StrId);
+u32  fmt_buf(Span<char> out, const char* fmt, ...);   // stb_sprintf; returns length; truncates, never overflows
+```
+
+`NameHash operator""_id(const char*, usize)` is `constexpr` FNV-1a 64 (`CANON.md`). The debug
+side-table (hash → literal) is the interner itself in dev tiers: every `"x"_id` that is also
+registered by name (components, actions, events, arenas) goes through `intern` at registration.
+
+### 8.7 Tests (`tests/foundation/containers/`)
+
+`array.test.cpp` (vmem growth across page boundary keeps `data` stable; fixed overflow fatal-
+expected; swap_remove order model), `slotmap.test.cpp` (LIFO reuse, stale handle null, gen wrap →
+quarantine, zeroed dead slot → hash equals a fresh map with the same live set), `map.test.cpp`
+(put/get/remove model vs a naive array; backward-shift correctness; two instances same op
+sequence → identical iteration), `sorted.test.cpp`, `ring.test.cpp` (wrap, overwrite flag),
+`bitset.test.cpp`, `sort.test.cpp` (stability with duplicate keys; 1M random keys vs a reference
+insertion sort on a sample; all-equal keys early-out), `strview_interner_fmt.test.cpp` (intern
+idempotence, collision fatal-expected with a crafted pair, `fmt_buf` truncation). Every file:
+`TL_ASSERT_NO_ALLOC` around the hot op.
+
 *Rev 1 — 2026-08-22.*

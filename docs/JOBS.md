@@ -92,4 +92,64 @@ systems parallelize by `reads/writes` groups for free once the pool exists.
 - **R-2 One pool policy on every platform:** `core_count − 1` workers, main thread participates.
   No per-platform branch; the Pi simply runs 3 workers. Worker count never enters results.
 
+## 6. Implementation specification
+
+### 6.1 Files
+
+`foundation/jobs.h/.cpp` (pool, `parallel_for`, `parallel_levels`, `chunk_count`),
+`foundation/atomic.h` (`tl_atomic_load/store/fetch_add/cas` over `__atomic_*` builtins with
+explicit `__ATOMIC_ACQUIRE/RELEASE/SEQ_CST`), worker threads via `PLATFORM.md` §6.
+
+### 6.2 Structures
+
+```cpp
+struct JobDesc { ChunkFn fn; void* ctx; u32 n; u32 grain; u32 chunks; };
+struct Jobs {
+    u32      worker_count;            // core_count - 1 (may be 0 → everything runs inline)
+    ThreadHandle threads[MAX_WORKERS /*31*/];
+    Scratch* scratch[MAX_WORKERS + 1];   // index 0 = main thread
+    // per job (one at a time — jobs never nest; a chunk fn calling parallel_for is TL_FATAL)
+    JobDesc  job;            u32 epoch;   // atomic; incremented to publish a job
+    u32      next_chunk;     // atomic counter
+    u32      done_chunks;    // atomic countdown
+    Semaphore wake;          Semaphore done;
+    u8       shutdown;
+};
+u32 chunk_count(u32 n, u32 grain) { return n == 0 ? 0 : (n + grain - 1) / grain; }   // pure function of (n, grain)
+```
+
+### 6.3 Algorithms
+
+```
+parallel_for(j, n, grain, fn, ctx):
+    c = chunk_count(n, grain)
+    if worker_count == 0 || c == 1: for k in 0..c: fn(ctx, k, k*grain, min(n,(k+1)*grain), scratch[0]); return
+    job = {fn, ctx, n, grain, c}; next_chunk = 0; done_chunks = c; atomic_fetch_add(epoch, 1, RELEASE)
+    wake.post(min(worker_count, c))                                  // wake only as many as there are chunks
+    run_chunks(j, /*worker*/ 0)                                      // main thread participates
+    while atomic_load(done_chunks, ACQUIRE) != 0: done.wait()        // done is posted by the worker that finished the last chunk
+run_chunks(j, w):
+    loop: k = atomic_fetch_add(next_chunk, 1, RELAXED); if k >= job.chunks: break
+          fn(job.ctx, k, k*grain, min(n,(k+1)*grain), scratch[w])
+          if atomic_fetch_sub(done_chunks, 1, ACQ_REL) == 1: done.post()
+worker_main(j, w):
+    seen = 0
+    loop: wake.wait(); if shutdown: return
+          e = atomic_load(epoch, ACQUIRE); if e == seen: continue; seen = e
+          run_chunks(j, w)
+parallel_levels(j, L, levels, fn, ctx): for l in 0..L: parallel_for(j, levels[l].count, levels[l].grain, fn, (ctx, l))
+```
+
+Scratch reset for workers happens at the barrier (`FRAME-LOOP.md` §3), never inside a job.
+`dev` tier "shuffle" mode: `run_chunks` draws chunk indices from a per-job permutation seeded by a
+non-sim PRNG instead of the counter; results must not change.
+
+### 6.4 Tests (`tests/foundation/jobs.test.cpp`)
+
+`chunk_count` table; `parallel_for` sum of chunk-keyed partials equals the serial sum for n in
+{0, 1, grain−1, grain, 10⁶} at workers {0, 1, 2, 8, 16}; shuffle mode → identical results;
+nested `parallel_for` → fatal-expected; levels run strictly in order (a chunk in level l+1 sees
+every level-l write — tested with a dependency array); worker scratch isolation (each chunk
+writes a marker in its worker scratch, no cross-talk); a 10⁵-job churn under TSan nightly.
+
 *Rev 1 — 2026-08-22.*

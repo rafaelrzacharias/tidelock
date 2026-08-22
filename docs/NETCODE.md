@@ -303,7 +303,8 @@ Analog 8-bit quantization is likewise done at capture, not by the encoder.
 ```
 
 The netcode registers two systems (`FRAME-LOOP.md`), one at `FIRST` and one at `LAST`, and touches
-nothing else. It replaces the `InputFrame` *producer*; it does not modify the loop.
+nothing else. It replaces the `InputFrame` *producer*; it does not modify the loop. (Exact call
+order inside both systems and the producer: §20.5.)
 
 ### 4.4 One tick rate — 60 Hz (DECIDED)
 
@@ -526,6 +527,7 @@ merge rate (b). §19.6 S-14 measures (b) on Hovel's region analogue before Alloy
 The laggy peer eats their own latency; everyone else's rollback depth is unaffected (removes the
 max-over-N order statistic); it inverts the lag-switch incentive. Adaptation is hysteretic (raise
 fast on sustained miss, lower slowly); the delay value is **sequenced into the log** (INV-2).
+(Thresholds, the sequencing record and the raise/lower frame rule: §20.3(d).)
 
 ### 7.5 Commitment windows — the second mechanism
 
@@ -544,7 +546,8 @@ Inside a window `p = 0` exactly. Two predictors: **predict actions, not buttons*
 action state machine to completion — a pure function of confirmed history); a **deterministic
 Markov predictor** over input transitions, run identically on every peer from the confirmed log,
 contexted on `(previous input, action state, hold-duration bucket)`. Hold-duration buckets are
-derived for 60 Hz. Integer-only, inside the boundary (INV-3).
+derived for 60 Hz. Integer-only, inside the boundary (INV-3). (Exact state, counts, tie-break and
+phantom mask: §20.3(j).)
 
 ### 7.6 Split by rollback tolerance
 
@@ -596,6 +599,7 @@ on a deterministic quorum fold over bitmaps everyone has.
 
 Total-order broadcast over a small log — well-trodden ground. **Slots are stable within a
 session**; the bitmap is slot-indexed. Under `Persistent`, slots re-seat *between* sessions.
+(Which bitmaps count, how they are broadcast, and the fold pseudocode: §20.3(b).)
 
 ### 8.3 Quorum over the sequenced-live set
 
@@ -682,7 +686,8 @@ where nondeterminism is free. This is the entire mitigation for R13, and it cost
 > **Succession order is a pure function of the confirmed log** (INV-3): initialized to slot order;
 > a peer is removed when it leaves or is evicted; a rejoining peer is **appended at the end**.
 
-Every peer computes the same successor with zero protocol. **Appended, not reinserted:** naive
+Every peer computes the same successor with zero protocol (list operations and the cyclic
+eligibility rule: §20.3(g)). **Appended, not reinserted:** naive
 lowest-live-slot would make slot 0 coordinator again the instant it rejoins, so a flaky link flaps
 the role on every blip. Appending makes flapping self-correcting with no measured quantity.
 
@@ -762,6 +767,8 @@ vulnerable** (the anti-rage-quit property). Alloy's `AgentBody` takes an externa
 **SUSPECT → EVICTED at a fixed tick count, never wall clock** (INV-2). `SUSPECT_TO_EVICT_TICKS =
 1800` (30 s). Every peer drops the avatar on the same tick; `QUORUM` recomputes at a known tick.
 **The sim never stalls** — substitution is a fold over shared bitmaps, not a local timeout.
+(Local suspicion thresholds and the sequenced `SUSPECT`/`RESUME`/`EVICT` records: §20.3(e); the
+full state × event table: §20.4.)
 
 ### 10.3 Graceful leave
 
@@ -790,7 +797,8 @@ The log stays trivial; replay CPU does not. **Crossover:** replaying `T` s costs
 transferring a 4 MB arena set at 10 Mbit/s costs 3.2 s. They cross at **T ≈ 7 s**.
 
 > **Rule:** rejoin = **nearest checkpoint + log tail**, always. Replay-only is a special case for
-> gaps under ~7 s. Cold and warm rejoin are the same path.
+> gaps under ~7 s. Cold and warm rejoin are the same path. (Checkpoint choice, `BULK` framing,
+> catch-up driver and hash verification: §20.3(h).)
 
 A mid-session join closes its gap at only ~1.08× net (rejoiner replays at 2.08× while the world
 advances at 1×) — without the snapshot path a late joiner may never catch up.
@@ -900,7 +908,7 @@ overwrites.
 | **Durable** | `CHECKPOINT_DURABLE_TICKS` = 18000 (5 min), plus on leave, quorum-loss, clean end | Kept | write-temp → `fsync` → rename, double-buffered | Bounds crash loss; anchors identity (§11.5) |
 
 `Match` collapses both into the hot ring. A durable checkpoint **bounds the log**: older segments
-may be discarded. **Torn-write asymmetry:** a corrupt checkpoint costs a replay under `Match` and
+may be discarded. (File format: §20.2.8; write procedure and chain append: §20.3(i).) **Torn-write asymmetry:** a corrupt checkpoint costs a replay under `Match` and
 the colony under `Persistent`; the write-temp/fsync/rename discipline is not optional there.
 
 ### 11.5 World identity — the hash chain
@@ -908,7 +916,7 @@ the colony under `Persistent`; the write-temp/fsync/rename discipline is not opt
 ```
   chain[0] = BLAKE2b(tick0_state_hash, world_seed, creation_nonce)
   chain[K] = BLAKE2b(chain[K-1], log_segment_hash[K-1 -> K], state_hash[K],
-                     build_fingerprint[K], custody[K])
+                     session_fingerprint[K], custody[K])
 ```
 
 32 B per durable checkpoint, computed from hashes already produced. Gives: **identity without log
@@ -994,8 +1002,9 @@ Per tick, per peer:
   pointer resolution question belongs to `INPUT.md`'s capture quantization, not to the wire.)
 - **`tick`** is implied by `base_tick` + index, never transmitted per frame.
 - **`ack_bitmap`** is 8 bits at N = 8.
-- **`last_confirmed_tick`** carries the §9.5 constraint: 4 B per packet, and it is what makes a
-  behind-successor detectable.
+- **`last_confirmed_tick`** carries the §9.5 constraint: 8 B per packet (a `u64`, per the tick
+  width rule in `FRAME-LOOP.md` §1), and it is what makes a behind-successor detectable.
+  Exact header and body layout: §20.2.1–§20.2.2; encoder: §20.3(a).
 
 ### 12.3 Sizes
 
@@ -1056,6 +1065,9 @@ axes separately. Mixing channels destroys each one's statistics.
 ```
   record: (delta_tick: varint, channel: u8, new_value: varint)
 ```
+
+(Byte layout: §20.2.9 — the channel byte is the stream header of the columnar block, each record
+inside a stream is `(delta_tick, new_value)`.)
 
 A 30-minute session is 108,000 ticks per peer and ~5,000–8,000 transitions — the count is set by
 the human, not the clock. `delta_tick` grows ~1.5 bits on average vs 20 Hz; that is the entire
@@ -1139,8 +1151,9 @@ condition. Hunt it with UBSan/ASan on the reproduction.
   1. Binary-search the divergence tick against the retained log.
   2. Pass x arena bisection localizes to a pass and an arena (then to a field, via the
      reflection tables' field-by-field diff).
-  3. Package: log segment (~28 KB) + last matching checkpoint + build_fingerprint
-     + reflection_table_hash + world chain entry + each peer's platform/ISA/opt-level/worker-count.
+  3. Package: log segment (~28 KB) + last matching checkpoint + `build_id` + `session_fingerprint`
+     (which covers the reflection tables) + world chain entry + each peer's
+     platform/ISA/opt-level/worker-count.
   4. Upload as telemetry.
 ```
 
@@ -1162,38 +1175,40 @@ The player never drops. Recovery is secondary; if it fires often, §14.4 is what
 | What | Mechanism | Frozen? |
 |---|---|---|
 | **Wire/archive syntax** | `format_version` leading every `WIRE_STRUCT` | Ours; append-only |
-| **Struct layout** | `WIRE_STRUCT` static_asserts (compile time) + `reflection_table_hash` (handshake) | Pinned by assert |
-| **Sim behaviour** | `build_fingerprint` in handshake, checkpoint header, chain entry; refuse on mismatch | Not frozen |
+| **Struct layout** | `WIRE_STRUCT` static_asserts (compile time) + the reflection tables inside `session_fingerprint` (handshake) | Pinned by assert |
+| **Sim behaviour** | `build_id` + `session_fingerprint` in handshake, checkpoint header, chain entry; refuse on mismatch | Not frozen |
 | **Session model** | `session_model` + `origin` in handshake; mismatch fails at handshake | Per world, at creation |
 
-**`build_fingerprint`** = hash(compiler version, flag set, source tree, **sim-script Luau
-bytecode**, compiled data tables). Anything that can change a tick's bytes is in it; clang is
-pinned per release (`BUILD.md`), so two peers on one release agree by construction.
-
-**`reflection_table_hash`** = hash over the ECS X-macro field tables (name-hash + kind + offset,
-in declaration order) for every registered component and every hashed pool. It is the cross-peer
-layout check for state that is hashed but not a hand-written `WIRE_STRUCT`.
+**`build_id`** (build-time) and **`session_fingerprint`** (init-time) are defined once, in
+`BUILD.md` §5, and used under those names everywhere. `build_id` covers compiler, flags, source
+tree, palette rev and sim-script bytecode; `session_fingerprint` covers `build_id` plus the
+reflection field tables (the cross-peer layout check for hashed state that is not a hand-written
+`WIRE_STRUCT`), the arena registry order, the action map, the compiled data tables and the
+`SIM` cvars. Anything that can change a tick's bytes is in one of them; clang is pinned per
+release, so two peers on one release agree by construction.
 
 **Handshake, concretely:**
 
 ```cpp
-struct Handshake {                      // WIRE_STRUCT, 104 B
+struct Handshake {                      // WIRE_STRUCT, 120 B
     u32 format_version;                 // 0
     u32 session_model;                  // 4   SessionModel
     u32 origin;                         // 8   Origin
     u32 max_actions;                    // 12  MAX_ACTIONS, belt and braces
-    u8  build_fingerprint[32];          // 16  BLAKE2b-256
-    u8  reflection_table_hash[32];      // 48  BLAKE2b-256
+    u8  build_id[32];                   // 16  BLAKE2b-256 (BUILD.md §5)
+    u8  session_fingerprint[32];        // 48  BLAKE2b-256 (BUILD.md §5)
     u64 tick0_state_hash;               // 80  fold of per-arena rapidhash
-    u8  world_chain_head[16];           // 88  truncated chain[K]; full 32 B follows on BULK
+    u8  world_chain_head[32];           // 88  chain[K] in full
 };
-static_assert(sizeof(Handshake) == 104);
-static_assert(offsetof(Handshake, build_fingerprint) == 16);
+static_assert(sizeof(Handshake) == 120);
+static_assert(offsetof(Handshake, build_id) == 16);
+static_assert(offsetof(Handshake, session_fingerprint) == 48);
 static_assert(offsetof(Handshake, world_chain_head) == 88);
 ```
 
 Sent before any input flows. Any mismatch ends the session with a named diagnostic. A peer with a
-**different world chain head** is told it holds a fork (§11.5), not silently joined.
+**different world chain head** is told it holds a fork (§11.5), not silently joined. (Identity and
+slot assignment ride alongside it in `JoinChallenge`/`JoinRequest`/`JoinReply`, §20.2.7.)
 
 ### 15.2 Why predictor-driven archive coding is deferred
 
@@ -1489,7 +1504,8 @@ Hovel is under the same contract as the real sim:
 - **Milestone B adds the fx heat field and nothing else.** A desync at B and not at A is in the fx
   helpers or the global-resim path, localized by construction.
 - Sorting and keying on integers only (§14.1).
-- Per-arena rapidhash every `CHECKSUM_INTERVAL_TICKS` over used extents.
+- Per-arena rapidhash over used extents computed every tick at `LAST` (`DETERMINISM.md` §8 R-1),
+  exchanged on the mesh every `CHECKSUM_INTERVAL_TICKS`.
 - `WIRE_STRUCT` on every wire, checkpoint, and chain struct.
 - **Gameplay mapping runs in a Luau sim VM** with the stock `math` library removed, so the
   bytecode-in-fingerprint mechanism (§15.1) is exercised before Alloy depends on it.
@@ -1571,7 +1587,7 @@ Impairment lives **in the transport layer, outside the determinism boundary**, a
 between the `src/net/` protocol code and the ENet wrapper:
 
 ```cpp
-struct Impair { u8 drop_pct; u16 delay_ms; u16 jitter_ms; u8 reorder_pct; u8 pad[2]; };
+struct Impair { u16 delay_ms; u16 jitter_ms; u8 drop_pct; u8 reorder_pct; u8 _pad0[2]; };  // 8 B, explicit pad (§20.3(k))
 struct ImpairmentShim {
     u64    seed;                   // its own PRNG stream; NEVER the sim's keyed RNG
     Impair per_peer[MAX_PEERS];    // asymmetric impairment
@@ -1583,7 +1599,8 @@ struct ImpairmentShim {
 3. **Legally nondeterministic.** Transport side of INV-2; own PRNG stream; **compiled out of
    release builds** and `static_assert`ed absent there.
 
-Per-peer asymmetry matters: the interesting case is one bad peer among good ones.
+Per-peer asymmetry matters: the interesting case is one bad peer among good ones. (Receive-side
+placement, PRNG stream and the delay queue: §20.3(k).)
 
 ### 19.8 Metrics and instrumentation
 
@@ -1662,6 +1679,813 @@ Any of 1, 3, 4 changes the design. Only 2 threatens the thesis.
 
 ---
 
+## 20. Implementation specification
+
+Binding for `src/net/`. Where §1–§19 left a detail open, this section decides it; the earlier
+section carries a "(see §20.x)" pointer. Every tick value is `u64`; `InputFrame.tick` is the low
+32 bits; every container carries `u64 base_tick` (`FRAME-LOOP.md` §1). `net` is outside the sim
+boundary: it may read the wall clock and entropy, may not include sim internals, and every value
+it feeds the sim is sequenced. `f32`/`f64` are not used in `net` either (`CANON.md` types table);
+every measured quantity is an integer in microseconds, bytes, or Q8.
+
+Constants decided here (App. B holds the rest): `NET_FORMAT_VERSION 1` · `SLOT_RING_TICKS 32`
+(per-slot frame ring, power of two; ≥ `REDUNDANCY_TICKS + CONFIRMATION_HORIZON_TICKS + 6`,
+`static_assert`ed) · `NET_HASH_RING 64` · `PHI_SUSPECT_Q8 2048` (φ = 8.0) · `SUSPECT_FLOOR_US
+500000` · `SUSPICION_GOSSIP_TICKS 6` · `SUSPICION_TTL_US 1000000` · `DELAY_RAISE_MISSES 2` in
+`DELAY_WINDOW_TICKS 60` · `DELAY_LOWER_CLEAN_TICKS 600` · `DELAY_COOLDOWN_TICKS 60` ·
+`CLAIM_RETRY_US 500000` · `SNAPSHOT_CHUNK_BYTES 32768` · `CATCHUP_BATCH_TICKS 16` ·
+`REPLAY_ONLY_MAX_TICKS 420` · `MAX_LOG_RECORDS_PER_PACKET 8` · `INPUT_PACER_BPS 262144` (reserved)
+· `BULK_PACER_BPS 1048576` (default; subordinate) · `ErrCode` range `ERR_NET_* = 0x0400..0x04FF`.
+
+### 20.1 File layout of `src/net/`
+
+| File | Contents | Tier |
+|---|---|---|
+| `net/net.h` | Public API to `app/`: `net_create_session`, `net_join`, `net_leave`, `net_set_tick_fn`, `net_producer()` → `InputProducer`, `net_register_systems(World*)`, `net_phantom_allow`, `net_slot_delay`, `net_stats` | all |
+| `net/net_internal.h` | `NetState` (one struct, lives in a **non-registered** arena), slot/peer tables, rings, the `LogRecord` store; included only by `net/*.cpp` | all |
+| `net/producer.cpp` | `NetworkProducer`: `INPUT.md` §4 `InputProducer` fn-ptr; local capture via the core fold, READY/WAIT, speculation, correction detection, catch-up batches (§20.3(c)) | all |
+| `net/transport.cpp` | **The only TU that includes ENet headers.** Host create/connect, channel map `INPUT=0 CONTROL=1 BULK=2`, per-channel token-bucket pacers, receive dispatch; the receive path calls the shim hook under `#if TL_DEV` (`static_assert(!TL_IMPAIR_ENABLED)` in `netcode`/`ship`) | all |
+| `net/wire.h` | Every `TL_WIRE_STRUCT` of §20.2 + LE read/write pairs + varint/zigzag helpers | all |
+| `net/encode.cpp` | `InputFrame` column encoder/decoder, §20.3(a) | all |
+| `net/sequencer.cpp` | Coordinator role: per-slot rings, bitmap sequencing, `finalize(T)`, substitution, `LogRecord` assignment, downstream assembly; follower side: apply seq sections, confirmation advance | all |
+| `net/peer.cpp` | Per-slot LIVE/SUSPECT/EVICTED/DEPARTED machine (sequenced half) + integer φ-accrual (measured half), suspicion gossip | all |
+| `net/succession.cpp` | Epochs, claim/ack, log-completeness check, succession list ops, shadow selection | all |
+| `net/session.cpp` | Lobby probing + seating, challenge/handshake, `SessionModel`/`Origin` validation, join/rejoin orchestration, quorum-loss termination, session state machine (§20.4) | all |
+| `net/checkpoint.cpp` | Hot ring (2) + durable writer (temp→fsync→rename), checkpoint file image, chain file append/verify/fork-point | all |
+| `net/archive.cpp` | Columnar + transition encoder/decoder, segment writer/reader, crc32, retention, `RecordedInput` adapter | all |
+| `net/predictor.cpp` | Markov predictor (trained from the confirmed log only), phantom intents | all |
+| `net/rollback.cpp` | Ring restore + resim driver; the only caller of the tick fn outside the loop | all |
+| `net/systems.cpp` | `sys_net_receive` (`FIRST`) and `sys_net_send` (`LAST`) descriptors and bodies (§20.5) | all |
+| `net/impair.cpp` | `ImpairmentShim` implementation (§20.3(k)); compiled only when `TL_DEV=1` | `dev`/`debug` only |
+| `net/telemetry.cpp` | Per-tick CSV row buffer (§19.8) and event stream; flushed off the hot path | `dev`/`netcode` (stub in `ship`) |
+
+`tl_net` links `tl_core`, `tl_foundation`, `tl_platform_*`, vendored ENet and Monocypher. It
+never links `tl_sim`. Nothing in `net/` is in the symbol-audited lib set; `platform/entropy.h` is
+reachable only from `net/session.cpp`, `net/checkpoint.cpp` (custody signing) and `app/`.
+
+### 20.2 Wire structs
+
+All are `TL_WIRE_STRUCT` (`CPP-SUBSET.md` §9 R-2): concrete, non-template, explicitly padded,
+leading `u32 format_version` (`= NET_FORMAT_VERSION`), `static_assert` on `sizeof` and every
+`offsetof`, written/read through the little-endian byte pair, never `memcpy`. Readers refuse a
+newer `format_version`, assert every `_padN` is zero, and reject any message whose declared
+`payload_bytes` disagrees with the datagram length (`ERR_NET_MALFORMED`; the whole packet is
+dropped, nothing partially applied). Offsets are natural-alignment offsets; every struct is
+listed with the number the `static_assert` pins.
+
+#### 20.2.1 `PacketHeader` (`INPUT` channel, every packet)
+
+```cpp
+struct PacketHeader {            // 40 B
+    u32 format_version;          //  0
+    u8  kind;                    //  4  PK_UPSTREAM=1 PK_DOWNSTREAM=2 PK_MIRROR=3 PK_KEEPALIVE=4
+    u8  slot;                    //  5  sender slot
+    u8  frame_count;             //  6  frames per column, 0..MAX_TICKS_PER_PACKET
+    u8  slot_mask;               //  7  bit s set ⇒ a column for slot s follows (ascending s)
+    u64 base_tick;               //  8  tick of frame index 0 of every column
+    u64 last_confirmed_tick;     // 16  sender's confirmed frontier (§9.5)
+    u64 hold_base_tick;          // 24  tick of hold[0]
+    u32 epoch;                   // 32
+    u8  hold_count;              // 36  0..MAX_TICKS_PER_PACKET
+    u8  delay_ticks;             // 37  sender's current delay, informational copy (sequenced value is LR_DELAY)
+    u16 payload_bytes;           // 38  bytes after the header
+};
+static_assert(sizeof(PacketHeader) == 40);
+static_assert(offsetof(PacketHeader, base_tick) == 8 && offsetof(PacketHeader, hold_base_tick) == 24
+           && offsetof(PacketHeader, epoch) == 32 && offsetof(PacketHeader, payload_bytes) == 38);
+```
+
+#### 20.2.2 `INPUT` packet body
+
+```
+  u8  hold[hold_count]                      hold[i] = "frames I hold for tick hold_base_tick+i", bit s = slot s
+                                            (this is §12.2's ack_bitmap; MAX_PEERS = 8 ⇒ one byte)
+  for s in ascending set bits of slot_mask:
+      Column                                frame_count frames, self-contained delta chain, §20.3(a)
+  if kind == PK_DOWNSTREAM:
+      for i in 0..hold_count:               SeqSection for tick hold_base_tick+i
+          u8  reported_mask                 0 ⇒ tick not finalized yet; else the slots whose bitmaps were sequenced
+          u8  bitmaps[popcount(reported_mask)]   ascending slot order — THE fold inputs (§20.3(b))
+          u8  record_count                  LogRecords effective at this tick (confirmed set)
+          LogRecord[record_count]           §20.2.3, ascending (origin_slot, seq)
+      u8  pending_count                     ≤ MAX_LOG_RECORDS_PER_PACKET; records announced ahead of their tick
+      LogRecord[pending_count]
+```
+
+Upstream: `slot_mask = 1 << own_slot`, `frame_count = min(MAX_TICKS_PER_PACKET, frames held)`.
+Downstream to slot `r`: `slot_mask = live_mask & ~(1 << r)`. `PK_MIRROR` is the upstream packet
+re-addressed to the two shadows, byte-identical. `PK_KEEPALIVE` has `frame_count = 0` and carries
+only `hold[]`.
+
+**Column byte layout** (byte-aligned; no bit packing across fields). Frame 0 is encoded against
+`ZERO_FRAME` (every `ActionState {0,0}`, pointer `(0,0)`, prior velocity `(0,0)`); frame `i` against
+decoded frame `i-1`:
+
+```
+  changed    : uvarint(u32)    bit a set ⇔ actions[a] != prev.actions[a]  (1 B when 0)
+  for a in ascending set bits of changed:
+      u8 rec = (flags & 7) | (value_follows << 3)        bits 4..7 must be 0
+               value_follows = (value != (i8)(flags & 1))  — 0 for every digital action by construction
+      [i8 value]  present iff value_follows
+  svarint(dvx), svarint(dvy)   where v_i = p_i - p_{i-1}, dv_i = v_i - v_{i-1}  (p_{-1} = v_{-1} = 0)
+```
+
+`uvarint` = LEB128, 7 bits per byte, `0x80` continuation, ≤ 5 bytes for a `u32`; `svarint(v)` =
+`uvarint(zigzag32(v))`, `zigzag32(v) = (u32(v) << 1) ^ u32(v >> 31)`. Decoder arithmetic is
+`wrap_add` on `i32`. Steady state: `1 + 1 + 1 = 3 B`; an idle peer's column of 9 frames is 27 B;
+frame 0's absolute pointer costs ≤ 10 B per column per packet. A decoded frame's `tick` field is
+set to `u32(base_tick + i)` by the decoder, never transmitted.
+
+#### 20.2.3 `LogRecord` — every sequenced one-shot (R6 stable id = `(origin_slot, seq)`)
+
+```cpp
+struct LogRecord {               // 24 B
+    u32 format_version;          //  0
+    u8  kind;                    //  4  LR_JOIN=1 LR_LEAVE=2 LR_SUSPECT=3 LR_RESUME=4 LR_EVICT=5 LR_DELAY=6 LR_EPOCH=7 LR_CUSTODY=8 LR_END=9
+    u8  slot;                    //  5  subject slot
+    u8  origin_slot;             //  6  creator (coordinator for SUSPECT/RESUME/EVICT/DELAY/EPOCH; the peer itself for LEAVE/CUSTODY)
+    u8  _pad0;                   //  7
+    u32 seq;                     //  8  creator-local counter, assigned at creation, never at sequencing
+    u32 payload;                 // 12  LR_DELAY: new delay · LR_EPOCH: epoch · LR_CUSTODY: handoff_seq · LR_SUSPECT: suspicion count · LR_END: reason
+    u64 effective_tick;          // 16
+};
+static_assert(sizeof(LogRecord) == 24 && offsetof(LogRecord, seq) == 8 && offsetof(LogRecord, effective_tick) == 16);
+```
+
+Effective tick rule: the coordinator assigns `effective_tick = max(requested, frontier + 1)` where
+`frontier` is the highest tick it has sent in any downstream column; a record is announced in
+`pending` from creation until its tick is finalized, then travels in that tick's `SeqSection`.
+`LR_EVICT.effective_tick` **must** equal `LR_SUSPECT.effective_tick + SUSPECT_TO_EVICT_TICKS` for the
+same slot; a follower that receives any other value treats the coordinator as faulty (raises local
+suspicion of it) and ignores the record. Duplicate ids are no-ops (R6).
+
+#### 20.2.4 `CONTROL` channel (mesh, unreliable)
+
+```cpp
+struct ControlHeader {           // 24 B
+    u32 format_version;          //  0
+    u8  kind;                    //  4  CK_SUSPICION=1 CK_EPOCH_CLAIM=2 CK_EPOCH_ACK=3 CK_HASH_DIGEST=4
+                                 //     CK_MEASUREMENT=5 CK_CUSTODY=6 CK_LEAVE=7 CK_LOBBY_PROBE=8
+    u8  slot;                    //  5  sender
+    u16 payload_bytes;           //  6
+    u64 tick;                    //  8  sender's world.tick at send (measured, informational)
+    u32 epoch;                   // 16
+    u32 _pad0;                   // 20
+};
+struct Suspicion {               // 16 B   gossip; idempotent; re-sent every SUSPICION_GOSSIP_TICKS while nonzero
+    u32 format_version;          //  0
+    u8  suspect_mask;            //  4  bit s ⇒ sender locally suspects slot s (§20.3(e))
+    u8  _pad0[3];                //  5
+    u32 seq;                     //  8  sender-local; receivers keep the highest
+    u32 _pad1;                   // 12
+};
+struct EpochClaim {              // 24 B
+    u32 format_version;          //  0
+    u32 epoch;                   //  4  claimed (current + 1)
+    u64 last_confirmed_tick;     //  8  claimant's, for the log-completeness check
+    u32 claim_seq;               // 16
+    u8  candidate_slot;          // 20
+    u8  _pad0[3];                // 21
+};
+struct EpochAck {                // 24 B
+    u32 format_version;          //  0
+    u32 epoch;                   //  4
+    u64 my_last_confirmed_tick;  //  8
+    u32 claim_seq;               // 16
+    u8  granted;                 // 20  0/1
+    u8  refuse_reason;           // 21  0 none · 1 behind (claimant < mine) · 2 not eligible · 3 stale epoch · 4 coordinator not suspected
+    u8  _pad0[2];                // 22
+};
+struct HashDigest {              // 24 B + 8·arena_count
+    u32 format_version;          //  0
+    u32 arena_count;             //  4  0 ⇒ fold only; else per-arena vector follows, registry order
+    u64 tick;                    //  8  a CONFIRMED tick, multiple of CHECKSUM_INTERVAL_TICKS (or a tail end, §20.3(h))
+    u64 fold;                    // 16  world hash (DETERMINISM.md §4)
+    // u64 arenas[arena_count] follows
+};
+struct MeasurementVector {       // 48 B   lobby seating input; measured, never sequenced
+    u32 format_version;          //  0
+    u32 upstream_kbps;           //  4  measured upstream headroom
+    u16 rtt_p50_ms[MAX_PEERS];   //  8
+    u16 rtt_p95_ms[MAX_PEERS];   // 24
+    u8  loss_pct[MAX_PEERS];     // 40
+};
+struct CustodyHandoff {          // 184 B   signed over bytes [0,120)
+    u32 format_version;          //  0
+    u32 handoff_seq;             //  4
+    u8  from_pubkey[32];         //  8
+    u8  to_pubkey[32];           // 40
+    u8  chain_head[32];          // 72  chain[K] the handoff is made against
+    u64 effective_tick;          // 104 requested
+    u8  forced;                  // 112 1 ⇒ signed by `to` (forced takeover, §11.6)
+    u8  _pad0[7];                // 113
+    u8  signature[64];           // 120 Ed25519 by `from` (or `to` when forced)
+};
+struct Leave {                   // 16 B   to the coordinator; coordinator sequences LR_LEAVE
+    u32 format_version;          //  0
+    u32 leave_seq;               //  4
+    u64 requested_effective_tick;//  8
+};
+struct LobbyProbe {              // 32 B
+    u32 format_version;          //  0
+    u32 probe_seq;               //  4
+    u64 send_time_us;            //  8  originator's clock (echoed back verbatim)
+    u64 echo_time_us;            // 16  responder's clock, 0 in the request
+    u8  is_reply;                // 24
+    u8  _pad0[7];                // 25
+};
+static_assert(sizeof(ControlHeader) == 24 && sizeof(Suspicion) == 16 && sizeof(EpochClaim) == 24
+           && sizeof(EpochAck) == 24 && sizeof(HashDigest) == 24 && sizeof(MeasurementVector) == 48
+           && sizeof(CustodyHandoff) == 184 && offsetof(CustodyHandoff, signature) == 120
+           && sizeof(Leave) == 16 && sizeof(LobbyProbe) == 32);
+```
+
+#### 20.2.5 `BULK` channel (reliable + fragmented, point-to-point)
+
+```cpp
+struct BulkHeader {              // 32 B
+    u32 format_version;          //  0
+    u8  kind;                    //  4  BK_JOIN_CHALLENGE=1 BK_JOIN_REQUEST=2 BK_HANDSHAKE=3 BK_JOIN_REPLY=4
+                                 //     BK_SNAPSHOT_CHUNK=5 BK_LOG_SEGMENT=6 BK_LOG_REQUEST=7 BK_ACK=8
+    u8  slot;                    //  5  sender
+    u16 _pad0;                   //  6
+    u64 transfer_id;             //  8  one per snapshot/tail transfer; chunks of one transfer share it
+    u32 chunk_index;             // 16
+    u32 chunk_count;             // 20
+    u32 offset;                  // 24  byte offset into the transfer image (SnapshotChunk: the checkpoint file image)
+    u32 len;                     // 28  payload bytes after this header
+};
+struct LogRequest {              // 24 B   "send me the confirmed log for [from, to]"
+    u32 format_version;          //  0
+    u32 _pad0;                   //  4
+    u64 from_tick;               //  8
+    u64 to_tick;                 // 16
+};
+struct BulkAck {                 // 24 B   the §5.4 epilogue [final_tick][final_ref_hash][all_agree]
+    u32 format_version;          //  0
+    u8  all_agree;               //  4
+    u8  _pad0[3];                //  5
+    u64 final_tick;              //  8
+    u64 final_ref_hash;          // 16
+};
+static_assert(sizeof(BulkHeader) == 32 && offsetof(BulkHeader, offset) == 24
+           && sizeof(LogRequest) == 24 && sizeof(BulkAck) == 24);
+```
+
+`BK_SNAPSHOT_CHUNK` payload = `len ≤ SNAPSHOT_CHUNK_BYTES` bytes of the checkpoint file image
+(§20.2.8) starting at `offset`; chunk 0 therefore begins with `CheckpointHeader`. `BK_LOG_SEGMENT`
+payload = one `ArchiveSegment` (§20.2.9) followed by a `HashDigest` with `arena_count > 0` for the
+segment's last tick. `BK_ACK` closes every transfer and every leave/custody/end phase.
+
+#### 20.2.6 `Handshake` — §15.1, reused verbatim (120 B)
+
+#### 20.2.7 Join: `JoinChallenge`, `JoinRequest`, `JoinReply`
+
+```cpp
+struct JoinChallenge {           // 40 B   server → joiner, first message on connect
+    u32 format_version;          //  0
+    u32 _pad0;                   //  4
+    u8  nonce[32];               //  8  OS entropy (PLATFORM.md §5)
+};
+struct JoinRequest {             // 144 B  joiner → server, immediately followed by its Handshake
+    u32 format_version;          //  0
+    u32 requested_slot;          //  4  0xFFFFFFFF = any; under Persistent the seat owned by identity_pubkey
+    u8  identity_pubkey[32];     //  8  Ed25519
+    u8  held_chain_head[32];     // 40  zero if none
+    u64 held_durable_tick;       // 72  tick of the newest durable checkpoint the joiner holds (0 if none)
+    u8  signature[64];           // 80  Ed25519 over nonce ‖ Handshake bytes ‖ JoinRequest bytes [0,80)
+};
+struct JoinReply {               // 48 B
+    u32 format_version;          //  0
+    u32 epoch;                   //  4
+    u64 join_effective_tick;     //  8  LR_JOIN.effective_tick (0 if refused)
+    u64 checkpoint_tick;         // 16  tick of the checkpoint that will be streamed; == held_durable_tick ⇒ tail only
+    u64 confirmed_tick;          // 24  server's confirmed frontier at reply
+    u8  succession[MAX_PEERS];   // 32  current list, 0xFF-terminated
+    u8  accepted;                // 40
+    u8  slot;                    // 41
+    u8  reason;                  // 42  0 ok · 1 build_id · 2 session_fingerprint · 3 model/origin · 4 fork (chain head) · 5 seat owned · 6 full · 7 bad signature
+    u8  coordinator_slot;        // 43
+    u8  live_mask;               // 44
+    u8  _pad0[3];                // 45
+};
+static_assert(sizeof(JoinChallenge) == 40 && sizeof(JoinRequest) == 144 && offsetof(JoinRequest, signature) == 80
+           && sizeof(JoinReply) == 48 && offsetof(JoinReply, succession) == 32);
+```
+
+`PeerSlots.slot_player_id[s]` (`INPUT.md` §8 R-2) = low 64 bits of `BLAKE2b-256(identity_pubkey)`.
+
+#### 20.2.8 Checkpoint file image
+
+```cpp
+struct CheckpointHeader {        // 192 B
+    u32 format_version;          //  0
+    u32 session_model;           //  4  SessionModel
+    u32 origin;                  //  8  Origin
+    u32 arena_count;             // 12
+    u8  build_id[32];            // 16  BUILD.md §5
+    u8  session_fingerprint[32]; // 48  BUILD.md §5
+    u64 tick;                    // 80  a confirmed tick
+    u64 seed;                    // 88  world seed
+    u64 state_hash;              // 96  world fold at `tick`
+    u8  custody_pubkey[32];      // 104 current holder (zero under Match)
+    u8  chain_entry[32];         // 136 chain[K] this checkpoint produced (zero for hot tier)
+    u32 chain_index;             // 168 K (0 for hot tier)
+    u32 tier;                    // 172 0 hot · 1 durable
+    u64 payload_bytes;           // 176 bytes after the header (entries + arenas)
+    u32 payload_crc32;           // 184 crc32 over the payload
+    u32 header_crc32;            // 188 crc32 over bytes [0,188)
+};
+struct CheckpointArenaEntry {    // 16 B, one per registered SNAPSHOT arena, registry order
+    u64 id;                      //  0  NameHash
+    u64 used;                    //  8  bytes of [base, used)
+};
+static_assert(sizeof(CheckpointHeader) == 192 && offsetof(CheckpointHeader, tick) == 80
+           && offsetof(CheckpointHeader, custody_pubkey) == 104 && offsetof(CheckpointHeader, chain_entry) == 136
+           && offsetof(CheckpointHeader, header_crc32) == 188 && sizeof(CheckpointArenaEntry) == 16);
+// Image = CheckpointHeader + CheckpointArenaEntry[arena_count] + arena bytes in the same order, packed.
+```
+
+The image is produced from one snapshot-ring slot (`registry_snapshot` layout: per-arena used
+extents) and is the exact byte stream both written to disk and streamed in `SnapshotChunk`s. It
+is the within-build snapshot path of `ASSETS-AND-DATA.md` §5; across builds the reflection-encoded
+save is the migration unit (§15.3) and is not this format.
+
+**Chain:**
+
+```cpp
+struct ChainGenesis {            // 56 B   chain[0] = BLAKE2b-256(le_bytes(ChainGenesis))
+    u32 format_version;          //  0
+    u32 _pad0;                   //  4
+    u64 tick0_state_hash;        //  8
+    u64 world_seed;              // 16
+    u8  creation_nonce[32];      // 24  OS entropy at world creation
+};
+struct ChainEntry {              // 152 B  chain[K] = BLAKE2b-256(le_bytes(ChainEntry)), K ≥ 1
+    u32 format_version;          //  0
+    u32 chain_index;             //  4  K
+    u8  prev[32];                //  8  chain[K-1]
+    u8  log_segment_hash[32];    // 40  BLAKE2b-256 over the ArchiveSegments covering (tick[K-1], tick[K]]
+    u64 state_hash;              // 72  world fold at tick[K]
+    u64 tick;                    // 80  tick[K]
+    u8  session_fingerprint[32]; // 88
+    u8  custody_pubkey[32];      // 120
+};
+struct ChainRecord {             // 184 B  one line of the chain file
+    ChainEntry entry;            //  0
+    u8  hash[32];                // 152 chain[K]
+};
+static_assert(sizeof(ChainGenesis) == 56 && sizeof(ChainEntry) == 152 && offsetof(ChainEntry, custody_pubkey) == 120
+           && sizeof(ChainRecord) == 184 && offsetof(ChainRecord, hash) == 152);
+// chain file = ChainGenesis + ChainRecord[K]; verify: recompute every hash, each prev == previous hash.
+```
+
+Paths (under `pref_path`): `worlds/<chain0_hex16>/chain.tlc`, `worlds/<…>/ckpt/<tick:020>.tlck`,
+`worlds/<…>/hot/{0,1}.tlck`, `worlds/<…>/log/<base_tick:020>.tla`. Under `Match`, the same tree
+under `matches/<session_nonce_hex16>/` with only `hot/` and `log/`.
+
+#### 20.2.9 Archive segment
+
+```cpp
+struct ArchiveSegmentHeader {    // 112 B
+    u32 format_version;          //  0
+    u32 max_actions;             //  4  MAX_ACTIONS at write
+    u64 base_tick;               //  8
+    u32 tick_count;              // 16
+    u8  slot_mask;               // 20  slots sequenced-live at any tick of the segment
+    u8  _pad0[3];                // 21
+    u32 record_count;            // 24  total transition records over all streams
+    u32 log_record_count;        // 28
+    u8  build_id[32];            // 32
+    u8  session_fingerprint[32]; // 64
+    u32 payload_bytes;           // 96
+    u32 payload_crc32;           // 100
+    u32 segment_seq;             // 104 monotonic per world/session
+    u32 header_crc32;            // 108 over bytes [0,108)
+};
+struct ArchiveStreamHeader {     // 8 B
+    u32 record_count;            //  0
+    u8  channel;                 //  4  0..31 action · 32 pointer_x · 33 pointer_y · 34 flag escape
+    u8  slot;                    //  5
+    u16 _pad0;                   //  6
+};
+static_assert(sizeof(ArchiveSegmentHeader) == 112 && offsetof(ArchiveSegmentHeader, build_id) == 32
+           && offsetof(ArchiveSegmentHeader, header_crc32) == 108 && sizeof(ArchiveStreamHeader) == 8);
+// Segment = header + for s ascending in slot_mask: for ch in 0..35: ArchiveStreamHeader + records
+//         + LogRecord[log_record_count] sorted by (effective_tick, origin_slot, seq)
+```
+
+Records are `(uvarint delta_tick, value)`; `delta_tick` counts from `base_tick` for the first
+record and from the previous record otherwise. Channel values: actions `uvarint(u16(u8(value)) << 1
+| (flags & 1))`; pointer channels `svarint`, first record mandatory at `delta_tick = 0` carrying
+the **absolute position** at `base_tick`, later records carrying the new **velocity** (held constant
+between records, `p += v` each tick); flag escape `uvarint(action << 3 | flags)` for a frame whose
+`pressed/released` differ from the derived edges (`pressed = down && !down_prev`, `released = !down
+&& down_prev`). Every stream is self-contained: a non-`ZERO` state at `base_tick` is emitted as a
+`delta_tick = 0` record. The segment stores the **confirmed applied** frame of every live slot
+(substituted and phantom frames literally, §10.6); a slot outside `slot_mask` decodes as `ZERO`.
+Segments close every `CHECKPOINT_HOT_TICKS` ticks and at every `LR_*` boundary that ends the session.
+
+**`RecordedInput` sharing (decided):** `INPUT.md` §4's recorder file is
+`ArchiveSegment + HashTraceHeader + u64 fold[tick_count] [+ u64 arenas[tick_count][arena_count]]`
+with `HashTraceHeader { u32 format_version; u32 arena_count; u64 base_tick; u32 tick_count; u32 _pad0; }`
+(24 B). One codec serves the recorder, the replay producer, the rejoin tail and the desync package.
+
+### 20.3 Algorithms
+
+Each item states its ordering and which values are **sequenced** (deterministic, in the log) vs
+**measured** (local, never enters the sim).
+
+**(a) Column encode/decode and the redundancy window.** Sender keeps `own_ring: RingBuffer<InputFrame>`
+(`SLOT_RING_TICKS`). `encode_column(out, frames[n])`: `prev = ZERO_FRAME; v_prev = (0,0); for i in
+0..n: changed = Σ_a (frames[i].actions[a] != prev.actions[a]) << a; write uvarint(changed); for a
+ascending in changed: write rec(+value); v = p_i - p_prev; write svarint(v.x - v_prev.x),
+svarint(v.y - v_prev.y); prev = frames[i]; v_prev = v`. Decoder mirrors it; it rejects `rec & 0xF0
+!= 0`, a `changed` bit ≥ `MAX_ACTIONS`, or a truncated column. The window is the last
+`min(MAX_TICKS_PER_PACKET, held)` frames ending at the newest captured tick; `base_tick = newest -
+frame_count + 1`. **Backoff (T-N-07):** if the assembled packet exceeds 1200 B, drop `frame_count`
+by one and re-encode, floor 3; below the floor send anyway and count `oversize_packets`. Receiver:
+for each decoded frame, `tick = base_tick + i`; discard if `tick ≤ slot.last_finalized` or already
+held; else store in the slot ring. Lossless by construction (every operation is an integer
+identity). Test: §20.6 T1.
+
+**(b) Sequencer.** State per slot `s`: `ring[s]` (frames by tick), `held[s]` bitset over the ring,
+`bitmaps[T][s]` (received hold bitmap for tick `T`, with `reported[T]` mask), `last_present_tick[s]`,
+`last_present_frame[s]`. Ordering: packets are processed in arrival order (measured); everything
+the coordinator derives from them is then broadcast, so the derived values are sequenced.
+
+```
+  on upstream packet from slot s (epoch == mine, else drop):
+     for i in 0..frame_count: place frame (base_tick+i) into ring[s] if not held
+     for i in 0..hold_count:  T = hold_base_tick+i; if T > confirmed and !reported[T].has(s):
+                                 bitmaps[T][s] = hold[i]; reported[T] |= 1<<s        // sequenced by broadcast
+     peer_note_arrival(s, now_us)                                                     // measured
+
+  finalize_step():  T = confirmed + 1
+     while popcount(reported[T] & live_mask(T)) >= QUORUM(live_mask(T)):
+         present = 0
+         for x in 0..MAX_PEERS: if popcount over r in reported[T] of (bitmaps[T][r] >> x & 1) >= QUORUM(live_mask(T)): present |= 1<<x
+         for s in live_mask(T):
+             if present has s: frame[T][s] = ring[s][T]; last_present_tick[s] = T; last_present_frame[s] = frame
+             else              frame[T][s] = substitute(s, T)
+         records[T] = every LogRecord with effective_tick == T (announced earlier, else none)
+         confirmed = T; T += 1
+```
+
+`live_mask(T)` is a pure function of the confirmed records with `effective_tick ≤ T` (`LR_JOIN`
+adds, `LR_LEAVE`/`LR_EVICT` remove; `LR_SUSPECT` does not change it). `QUORUM(m) = popcount(m)/2 + 1`.
+Bitmaps arriving for `T` after `reported[T]` reached quorum are dropped — the sequenced set is
+exactly the first-quorum set. The coordinator's own bitmap is sequenced like any other. The
+finalize loop is run once per `sys_net_receive` and once per WAIT-path pump.
+
+`substitute(s, T)` with `k = T - last_present_tick[s]` (k ≥ 1), `last = last_present_frame[s]`
+(`ZERO_FRAME` if none), per action class from the action map:
+
+```
+  LATCHED: value = last.value; flags = last.flags & 1                            // hold, edges cleared
+  AXIS:    d = SUB_DECAY_TICKS; v0 = i32(last.value)
+           value = i8( k >= d ? 0 : (v0 * (d - k)) / d )  // i32 arithmetic, truncation toward zero; |v0| ≤ 127 so no overflow
+           flags = value != 0 ? 1 : 0
+  EDGE:    value = 0; flags = (k == 1 && (last.flags & 1)) ? 4 /*released*/ : 0
+  pointer: p = last.p + k * last.v clamped to ±(1<<30)  where last.v = velocity of the last two present frames (0 if one)
+  tick   = u32(T)
+```
+
+Followers apply `SeqSection`s in tick order; a follower advances `confirmed` to `T` only when it
+holds every frame `present` marks for `T` (redundancy supplies them; a follower whose `confirmed`
+falls more than `REDUNDANCY_TICKS` behind the coordinator's `last_confirmed_tick` sends a
+`LogRequest` on `BULK`). Downstream assembly per recipient `r` at `LAST`: columns for every slot in
+`live_mask & ~(1<<r)` over `[frontier - frame_count + 1, frontier]`, `hold[]` = the coordinator's own
+hold bitmaps, `SeqSection`s for `[confirmed - hold_count + 1, confirmed]` (re-sent for the whole
+window, so a lost packet costs nothing), `pending` = announced records not yet finalized.
+
+**(c) `NetworkProducer.produce(ctx, tick, out, live_mask)`.** Let `C = confirmed`, `N = tick`.
+
+```
+  1. if state != RUNNING:  if SYNCING: run_catchup_batch(); return WAIT          // §20.3(h)
+                           else return WAIT
+  2. capture: fold the platform raw-event ring through the core Live fold → f; f.tick = u32(N + delay)
+     apply the raise/lower rule of (d); push f into own_ring (ZERO frames for ticks < first capture)
+  3. correction check: for t in (C_prev_seen, C]: if applied[t] != frame[t] (any live slot) → T = first such t;
+        rollback_run(T, N) (§20.3(c)-ii); applied[t] = frame[t] for re-run ticks
+  4. if N <= C:          speculative = false                                          // frames confirmed
+     else if !speculation_enabled || N - C > CONFIRMATION_HORIZON_TICKS: pump(); keepalive(); return WAIT
+     else                speculative = true
+  5. for s in 0..MAX_PEERS: if !live_mask(N) has s: out[s] = ZERO_FRAME; continue
+        out[s] = confirmed ? frame[N][s]
+               : s == own ? own_ring[N]
+               : held(ring[s][N]) ? ring[s][N]                                        // received, unconfirmed
+               : predictor_predict(s, N)                                               // §20.3(j)
+     applied[N] = out; *live_mask = live_mask(N)
+  6. return READY
+```
+
+`speculation_enabled` is a `SIM` cvar (`net.speculation`, in `session_fingerprint`); off = delay-only
+lockstep (R3's fallback): step 4 returns WAIT whenever `N > C`. WAIT never deadlocks: the WAIT path
+pumps the transport, runs `finalize_step`, and re-sends the last upstream/downstream windows as
+`PK_KEEPALIVE`/full packets at most once per 16,667 µs (measured clock).
+
+(c)-ii **`rollback_run(T, N)`** (`rollback.cpp`): precondition `N - T ≤ CONFIRMATION_HORIZON_TICKS`
+and `T ≥ 1`; ring slot `(T-1) mod CONFIRMATION_HORIZON_TICKS` holds the post-tick snapshot of `T-1`
+(pushed in `LAST`; invariant from step 4: the slot of `C` is never overwritten while `N - C ≤
+HORIZON`). `registry_restore(slot)`; `post_restore` barrier (`MEMORY.md` §5); `world.tick = T`;
+`net.resim_depth = N - T`; `for t in T..N-1: frames = (t ≤ C) ? frame[t] : speculative set per step 5;
+tick_fn(world, frames, live_mask(t))` — `tick_fn` is the loop's tick body (`run_phases_sim +
+barrier_end_of_tick + tick++`), handed to `net_set_tick_fn` by `app/` at init; `net.resim_depth = 0`.
+Whole-arena restore until T-A-01 lands; `rollback_restore(tick, closure)` is the seam where
+closure-scoped restore replaces it with no caller change. Telemetry: `rollback_fired`,
+`rollback_depth`. Re-entrancy rule: §20.5.
+
+**(d) Adaptive delay.** Sequenced and a pure function of the log: a *miss* for slot `s` at tick `T`
+is `present(T)` lacking `s` while `s ∈ live_mask(T)`. The coordinator, at `finalize(T)`: `misses[s]`
+over the last `DELAY_WINDOW_TICKS` confirmed ticks; if `misses ≥ DELAY_RAISE_MISSES` and `delay[s] <
+6` and `T - last_change[s] ≥ DELAY_COOLDOWN_TICKS` → create `LR_DELAY{slot s, payload delay+1}`; if
+zero misses over the last `DELAY_LOWER_CLEAN_TICKS` and `delay[s] > 3` and cooldown elapsed →
+`LR_DELAY{payload delay-1}`. Followers recompute the same rule from the confirmed log and raise local
+suspicion of a coordinator whose records disagree with it. `delay[s]` (sequenced) is the value the
+peer uses for captures whose target tick `≥ effective_tick`. Frame rule at the peer: raise `d→d+1`
+at capture tick `t` leaves tick `t+d` without a capture → send a copy of frame `t+d-1` with edges
+cleared as `t+d`; lower `d→d-1` at capture `t` collides with `t+d-1` → discard capture `t`. Initial
+`delay = 3`; measured RTT plays no part (INV-2). Exported read-only via `net_slot_delay(slot)`.
+
+**(e) Suspicion — integer φ-accrual.** Measured, per remote slot, from inter-arrival times of any
+`INPUT`/`CONTROL` packet: `x = now - last_rx_us; mean += (x - mean) >> 4; dev += (|x - mean| - dev)
+>> 4; last_rx_us = now` (init `mean = 16667`, `dev = 4000`). `phi_q8 = ((now - last_rx_us) - mean) *
+256 / max(dev, 1000)`; local suspicion ⇔ `phi_q8 ≥ PHI_SUSPECT_Q8 && now - last_rx_us ≥
+SUSPECT_FLOOR_US`; cleared on the next packet. Gossip: `Suspicion{suspect_mask}` to every peer every
+`SUSPICION_GOSSIP_TICKS` while nonzero and immediately on change; a received message is valid for
+`SUSPICION_TTL_US`. Sequenced half (coordinator, at `finalize_step`): for slot `s ≠ coordinator`, if
+the valid messages (own included) from `≥ QUORUM(live_mask)` distinct slots set bit `s` and `s` is
+LIVE → `LR_SUSPECT{s, payload = count}`; if `s` is SUSPECT and a frame from `s` for a tick `>
+suspect.effective_tick` arrives → `LR_RESUME{s}`; if `s` is SUSPECT and `frontier + 1 ≥
+suspect.effective_tick + SUSPECT_TO_EVICT_TICKS` → `LR_EVICT{s, effective_tick =
+suspect.effective_tick + SUSPECT_TO_EVICT_TICKS}`. The counter is `effective_tick` arithmetic, never
+a clock. Suspicion of the coordinator itself feeds (f) only.
+
+**(f) Epoch claim/ack.** Candidate `c` (per (g), eligible) with local quorum-suspicion of the
+coordinator sends `EpochClaim{epoch+1, last_confirmed_tick, claim_seq}` to every peer. A receiver
+grants iff: `claim.epoch == my_epoch + 1` (else 3), `c` is the next eligible entry in my list given
+my local suspect set (else 2), I locally suspect the coordinator (else 4), and **`claim.last_confirmed_tick
+≥ my confirmed`** (else 1 — the §9.5 log-completeness constraint). `granted` acks from `≥
+QUORUM(live_mask)` slots (self included) → `c` sets `epoch += 1`, role COORDINATOR, sequences
+`LR_EPOCH{slot c, payload epoch, effective_tick = confirmed + 1}` as its first record, re-sequences
+from `confirmed + 1` using its rings (mirrored as a shadow plus the first packet each peer sends it).
+No quorum within `CLAIM_RETRY_US` → `claim_seq += 1`, retry; a refusal with reason 1 ends the
+candidacy (a caught-up peer will claim). Any peer that sees `epoch' > epoch` on a downstream packet
+from a sequenced-live slot adopts it, redirects upstream, and rolls back to its `confirmed` (a
+correction at `confirmed + 1`, depth ≤ horizon). An old coordinator seeing a higher epoch steps down
+to FOLLOWER (§8.6). Measured: suspicion, timing. Sequenced: the epoch, via `LR_EPOCH`.
+
+**(g) Succession list.** `u8 list[MAX_PEERS]; u8 count` in the confirmed log state. `init`: seated
+slot order. `remove(s)` on `LR_LEAVE`/`LR_EVICT` at `effective_tick`. `append(s)` on `LR_JOIN` (a
+rejoining ex-member is removed at its leave/evict and appended at its join). `coordinator_index` =
+position of the current coordinator. Eligibility for a claim is **cyclic from
+`coordinator_index + 1`**: entry `list[(coordinator_index + j) mod count]`, `j ≥ 1`, is eligible iff
+every entry with smaller `j` is in the acker's local suspect set. Shadows = the first two eligible
+entries by the same walk with an empty suspect set (positions `j = 1, 2`). All pure functions of
+the log; the suspect set only affects acks.
+
+**(h) Rejoin.** Joiner connects to any live peer (the *server*) over `BULK`: `JoinChallenge` ←;
+`JoinRequest` + `Handshake` →; server verifies signature, `build_id`, `session_fingerprint`,
+model/origin, seat ownership (Persistent: pubkey ↔ slot from the last session's seat table), chain
+head (a mismatch with a common prefix is reason 4 with the fork point in the event log). Checkpoint
+choice: `H` = newest hot checkpoint (always confirmed by construction); if
+`joiner.held_chain_head == chain record hash at joiner.held_durable_tick` on the server and
+`confirmed - held_durable_tick ≤ REPLAY_ONLY_MAX_TICKS` → tail only from `held_durable_tick`;
+else stream `H`'s image in `SnapshotChunk`s. Then stream `LogSegment`s for `(checkpoint_tick,
+confirmed]`, each with its trailing `HashDigest`; the server forwards the `JoinReply` after asking
+the coordinator to sequence `LR_JOIN{slot, effective_tick}`. Joiner: `registry_restore` from the image
+(fail-loud on fingerprint), session state SYNCING; `run_catchup_batch()` inside `produce` runs ≤
+`CATCHUP_BATCH_TICKS` ticks per call through `tick_fn` with the decoded tail frames (the rollback
+driver's path, same re-entrancy rule), verifying at every segment end that its per-arena vector
+equals the segment's `HashDigest` (mismatch → `ERR_NET_DESYNC_ON_REJOIN`, P0 telemetry package,
+abort join). When `world.tick > confirmed` from live downstream, state RUNNING. A joiner's frames for
+ticks `< join_effective_tick + delay` are absent → substituted by (b). `Restored` session start is
+this procedure with every peer as joiner against the custody holder, followed by a `BulkAck` round
+(`final_tick = tick0`, `final_ref_hash = tick0_state_hash`) before any `INPUT` flows (§11.3).
+
+**(i) Checkpoint write and chain append.** Hot: at `finalize` of `T` with `T % CHECKPOINT_HOT_TICKS ==
+0`, copy ring slot `T mod HORIZON` into `hot[(T / CHECKPOINT_HOT_TICKS) & 1]` (in-memory image,
+§20.2.8) and `write_all` it to `hot/<i>.tlck` (best effort). Durable (`Persistent` only): at
+`finalize` of `T` with `T % CHECKPOINT_DURABLE_TICKS == 0`, on `LR_LEAVE` of the local slot, on
+quorum-loss termination, on `LR_END`: (1) close the open archive segment; `log_segment_hash` =
+BLAKE2b-256 over the segment images `(tick[K-1], T]`; (2) build `ChainEntry{K, prev = chain[K-1],
+log_segment_hash, state_hash = fold(T), T, session_fingerprint, custody}`; `chain[K] = BLAKE2b(entry)`;
+(3) fill `CheckpointHeader` (tier 1, `chain_entry = chain[K]`), compute `payload_crc32` then
+`header_crc32`; (4) `write_atomic(ckpt/<T>.tlck)` (`PLATFORM.md` §3: temp → fsync → rename); (5) only
+after (4) returns OK: `write_atomic(chain.tlc)` with `ChainRecord[K]` appended (whole-file rewrite;
+≤ 2.3 KB / 6 h); (6) retention: delete checkpoints older than the newest `DURABLE_KEEP` and segments
+older than the oldest kept. A crash between (4) and (5) leaves a checkpoint without a chain record;
+on load a checkpoint whose `chain_index` exceeds the chain's length is discarded (the previous one
+is canonical). Readers verify both crc32s, the fingerprints, then the chain. Ordering: all of this
+runs in `sys_net_send` after the hash read, off the sim's critical path only by being cheap
+(Hovel measures it: §19.8 `checkpoint writes`).
+
+**(j) Markov predictor.** State per slot, per action `a`, in the net arena (rebuilt from the log,
+never hashed): `u16 n[32][2]` where context `ctx = down[t-1] | (changed[t-1] << 1) | (bucket << 2)`,
+`changed[t-1] = (state[t-1] != state[t-2])`, `bucket` = log2 bucket of ticks since the last change of
+`a` clamped to 0..7 (`{0},{1},{2-3},{4-7},{8-15},{16-31},{32-63},{64+}`), `n[ctx][next_down]`.
+Training: at every confirmation of `T`, for every live slot, from the **confirmed applied** frame
+(substituted frames included): `n[ctx][down[T]] += 1`; when either count reaches `0xFFFF`, halve
+both. Prediction of digital `down[t]`: `n[ctx][1] > n[ctx][0] ? 1 : n[ctx][1] < n[ctx][0] ? 0 :
+down[t-1]` (tie → no transition); `value = down`; edges derived. Analog (`AXIS`): `value[t] =
+value[t-1]` (hold). Pointer: constant velocity from the last two confirmed frames. Multi-tick
+prediction iterates from the last confirmed frame, updating the context with its own output.
+**Phantom intents** (§10.2): the phantom frame for a SUSPECT slot = predicted frame with every action
+outside the phantom mask zeroed, pointer held; mask = actions of class `AXIS` ∪ the set registered
+by `net_phantom_allow(ActionId)` at init, stored as the `SIM` cvar `net.phantom_mask` (so it is in
+`session_fingerprint`). The coordinator substitutes SUSPECT slots with the phantom frame instead of
+(b)'s class rule (both are pure functions of the log; the phantom is the §10.2 choice) and stores it
+literally (§10.6). Determinism test: §20.6 T9.
+
+**(k) Impairment shim.** Receive side of `transport.cpp`, per source slot, between ENet and
+dispatch: `r = splitmix64_next(&stream[slot])` (stream seeded `seed ^ (slot + 1) *
+0x9E3779B97F4A7C15`); drop if `r % 100 < drop_pct`; else `deliver_at = now + delay_ms*1000 +
+(jitter_ms ? (r >> 8) % (2*jitter_ms*1000) - jitter_ms*1000 : 0)`; if `reorder_pct` and `(r >> 32) %
+100 < reorder_pct` swap `deliver_at` with the previously queued packet's; push into a fixed
+`Array<QueuedPacket>` (cap 4096, `TL_FATAL` on overflow); dispatch every queued packet with
+`deliver_at ≤ now` in `deliver_at` order (stable). Reproducible given the same packet sequence and
+clock sequence — the test (§20.6 T10) drives both. `BULK` is impaired too (it is reliable; ENet
+retransmits).
+
+**(l) Quorum-loss termination.** Measured wall clock, decided locally and identically: if
+`confirmed` has not advanced for `QUORUM_LOSS_TICKS × 16,667 µs` while `produce` is returning WAIT
+(or, on the coordinator, while `popcount(reported[confirmed+1] & live_mask) < QUORUM` persists)
+→ session state TERMINATING: write a durable checkpoint of `confirmed` via (i) (its ring slot is
+intact by the (c) invariant) under `Persistent`, a hot image under `Match`; emit `LR_END` locally to
+the archive with `effective_tick = confirmed + 1`; close the host; state ENDED with
+`ERR_NET_QUORUM_LOST`. Every survivor holds the same confirmed log, so the checkpoints are
+bit-identical (§8.3, R10).
+
+### 20.4 State machines
+
+**Peer (per slot, sequenced; the transition tick is the record's `effective_tick`):**
+
+| State | Event (sequenced record) | Action | Next |
+|---|---|---|---|
+| — | `LR_JOIN` | add to `live_mask`; `append` to succession; predictor reset for slot | LIVE |
+| LIVE | `LR_SUSPECT` | frames → phantom (§20.3(j)); start evict counter at `effective_tick` | SUSPECT |
+| LIVE | `LR_LEAVE` | remove from `live_mask` and succession; `QUORUM` recomputes; `Persistent`: durable checkpoint if local | DEPARTED |
+| SUSPECT | `LR_RESUME` | frames → received/substituted as normal | LIVE |
+| SUSPECT | `LR_EVICT` (tick = suspect + 1800) | remove from `live_mask` and succession; avatar dropped by the game on this tick | EVICTED |
+| SUSPECT | `LR_LEAVE` | as LIVE → DEPARTED (a late leave beats the counter) | DEPARTED |
+| EVICTED / DEPARTED | `LR_JOIN` | as — → LIVE (slot appended, not reinserted) | LIVE |
+| any | `LR_END` | session terminates | — |
+
+Measured inputs (`phi`, gossip) never move this machine; they only cause the coordinator to
+*create* records, and the coordinator's role to move below.
+
+**Coordinator role (per peer, local view of a sequenced fact):**
+
+| Role | Event | Action | Next |
+|---|---|---|---|
+| FOLLOWER | local quorum-suspicion of coordinator ∧ self eligible (§20.3(g)) | send `EpochClaim`; start `CLAIM_RETRY_US` | CANDIDATE |
+| FOLLOWER | downstream with `epoch' > epoch` from a sequenced-live slot | adopt; redirect upstream; rollback to `confirmed` | FOLLOWER |
+| FOLLOWER | self in shadow positions (§20.3(g)) | receive `PK_MIRROR`, fill rings, never finalize | SHADOW (a FOLLOWER sub-state) |
+| CANDIDATE | `granted` acks ≥ `QUORUM` | `epoch += 1`; sequence `LR_EPOCH`; re-sequence from `confirmed + 1` | COORDINATOR |
+| CANDIDATE | refusal reason 1, or `epoch' > claimed` observed | drop candidacy | FOLLOWER |
+| CANDIDATE | retry timer | `claim_seq += 1`; resend | CANDIDATE |
+| COORDINATOR | downstream observed with `epoch' > epoch` | step down; redirect | FOLLOWER |
+| COORDINATOR | own `LR_LEAVE` reaches `effective_tick` | last downstream carries the record; successor claims with no gap | — (DEPARTED) |
+| any | `LR_END` / quorum loss | terminate (§20.3(l)) | — |
+
+**Session:**
+
+| State | Event | Action | Next |
+|---|---|---|---|
+| IDLE | `net_create_session(model, origin)` | validate §11.2 table; open host; `Seeded`: compute `tick0_state_hash`; `Persistent`+`Restored`: load newest valid durable checkpoint + chain | LOBBY |
+| IDLE | `net_join(addr)` | connect | JOINING |
+| LOBBY | probes for `≥ 3 s` at `LOBBY_PROBE_HZ` from every peer | seat by p95 RTT + headroom (one sort); exchange `Handshake`s | HANDSHAKE |
+| HANDSHAKE | all match | `Seeded`: tick 0 locally; `Restored`: custody holder streams to all (§20.3(h)); `BulkAck` round | RESTORING → RUNNING |
+| HANDSHAKE | any mismatch | end with named `ErrCode` (`ERR_NET_BUILD_ID`, `_FINGERPRINT`, `_MODEL`, `_FORK`) | ENDED |
+| JOINING | `JoinChallenge` | send `JoinRequest` + `Handshake` | JOINING |
+| JOINING | `JoinReply.accepted` | receive image (if any) then tail | RESTORING |
+| JOINING | `JoinReply` refused | end with reason code | ENDED |
+| RESTORING | image complete, `registry_restore` OK | start catch-up | SYNCING |
+| SYNCING | catch-up reaches live frontier, every segment hash verified | `produce` returns READY | RUNNING |
+| SYNCING | segment hash mismatch | P0 package; abort | ENDED |
+| RUNNING | `net_leave()` | send `Leave`; wait for `LR_LEAVE` effective; durable checkpoint (`Persistent`); `BulkAck` epilogue | ENDED |
+| RUNNING | quorum loss (§20.3(l)) | checkpoint; `LR_END` | TERMINATING → ENDED |
+| RUNNING | `LR_END` received | checkpoint; epilogue | ENDED |
+
+### 20.5 Integration contract with the frame loop
+
+Registration (`net_register_systems`, called by `app/` after the core registers its `LAST` hash
+system): `SYS_NET_RECEIVE = { sys_net_receive, "net_receive"_id, PHASE_FIRST, reads {}, writes {},
+before { "input_drain"_id } }` and `SYS_NET_SEND = { sys_net_send, "net_send"_id, PHASE_LAST, reads
+{}, writes {}, after { "hash_checkpoint"_id } }`. `hash_checkpoint` is the core `LAST` system that
+computes `world.hash_vec[MAX_ARENAS]` + `world.hash_fold` and pushes ring slot `tick mod HORIZON`.
+
+`sys_net_receive` (`FIRST`), in order: (1) `transport_pump()` — `enet_host_service(host, 0)` until
+empty, every event through the shim, dispatched by channel: `INPUT` → sequencer (§20.3(b)) or
+follower apply; `CONTROL` → peer/succession/session handlers; `BULK` → session/checkpoint stream
+handlers; (2) `finalize_step()` if coordinator; (3) peer φ update for every slot with no packet
+this tick; (4) telemetry: `tick_start_us`. It touches **no sim state**: not `world.input`, not
+`PeerSlots`, no registered arena. The only sim-visible effects of the netcode are the frames and
+`live_mask` returned by `produce` (the loop stores them). When `net.resim_depth > 0` it returns at
+step 0.
+
+`sys_net_send` (`LAST`), in order: (1) copy `world.hash_vec`/`hash_fold` for `world.tick` into
+`hash_ring[tick mod NET_HASH_RING]`; if `resim_depth > 0` return here; (2) if `tick` is confirmed
+and `tick % CHECKSUM_INTERVAL_TICKS == 0`: queue `HashDigest{tick, fold}` to every peer on `CONTROL`;
+compare incoming digests for `tick` against the ring, a disagreement where `≥ QUORUM` agree on a
+different fold → `desync` event + P0 package (§14.4); (3) checkpoint cadence (§20.3(i)) for any tick
+confirmed since the last call; (4) append confirmed ticks to the open archive segment; (5) predictor
+training for confirmed ticks; (6) adaptive-delay rule (§20.3(d)) if coordinator; (7) assemble and
+send: upstream `INPUT` to coordinator + `PK_MIRROR` to the two shadows; if coordinator, downstream
+to every live slot; due `CONTROL` gossip (suspicion, measurement every 60 ticks); (8) `BULK` pacer
+step (token bucket: `INPUT` bucket refilled first and never borrowed from; `BULK` sends only from its
+own bucket); (9) telemetry row flush to the off-thread buffer. Reads sim state only through
+`world.hash_vec`/`hash_fold`/`world.tick`; writes none.
+
+**Rollback driver re-entrancy rule.** `rollback_run` and `run_catchup_batch` call `tick_fn`, which
+runs every phase including both net systems. They are therefore called **only from inside
+`produce()`**, which the loop invokes between ticks with no phase active and no jobs in flight (v0
+is single-threaded; when `JOBS.md` lands, the loop guarantees the worker pool is idle at the
+`produce` call). They are never called from a system, a transport callback, or a `CONTROL` handler
+— those set a pending-correction flag that `produce` consumes. `TL_CHECK(!net.in_phase)` guards the
+entry. Both net systems early-out while `resim_depth > 0` except for the hash-ring write, so a
+re-run tick neither sends nor receives.
+
+### 20.6 Tests (`tests/net/`, run by `tl_tests`; every test fresh-state, headless platform)
+
+| ID | File | Phase | What it proves |
+|---|---|---|---|
+| T0 | `test_wire_layout.cpp` | 1 | every §20.2 struct: `sizeof`/`offsetof` pins, LE round-trip, pad-nonzero refusal, newer-version refusal, truncated-buffer refusal |
+| T1 | `test_encode.cpp` | 1 | column round-trip for 1..9 frames; idle column is 3 B/frame; every action changing; pointer at ±(1<<30); `rec & 0xF0` refusal |
+| T1f | `test_encode_fuzz.cpp` | 1 | seeded random frame sequences (10⁶) encode→decode equality; random byte mutation never crashes and is refused or decodes to something re-encodable identically |
+| T2 | `test_archive.cpp` | 1 | segment round-trip; self-contained decode from a `delta_tick = 0` state; flag-escape path; crc32 detection of every single-byte corruption; 30-min synthetic 3-peer input → size < 80 KB; `RecordedInput` adapter replays through the `Replay` producer with identical hash trace |
+| T3 | `test_sequencer_fold.cpp` | 2 | property test: for N ∈ 1..8, every `live_mask`, every subset of reporting slots and every bitmap assignment on a 3-tick window: fold is order-independent over arrival permutation, `present ⊆ live`, quorum threshold exact; substitution per class (hold/decay table for k = 1..7 in `i8`/edge-null-released) against a hand-written table |
+| T4 | `test_loopback_lockstep.cpp` | 2 | two processes (`tl_tests --child`) over loopback ENet, Hovel sim, 3,600 ticks, 1% shim loss: identical hash traces, `confirmed` never regresses, no WAIT longer than 2 horizons |
+| T5 | `test_succession.cpp` | 5 | list ops: init/remove/append/cyclic eligibility; two instances fed the same records → identical lists and shadows |
+| T6 | `test_epoch_claim.cpp` | 5 | S-08 shape in-process with 3 simulated peers: a claimant with `last_confirmed < peer's` is refused with reason 1; a caught-up claimant is granted; a granted claimant's `LR_EPOCH` is the first record at `confirmed + 1`; a stale-epoch downstream is dropped |
+| T7 | `test_peer_fsm.cpp` | 5/6 | every row of §20.4's peer table; `LR_EVICT` at the wrong tick is rejected and raises suspicion; φ: synthetic arrival series crosses `PHI_SUSPECT_Q8` at the expected microsecond and clears on arrival |
+| T8 | `test_quorum_loss.cpp` | 6 | S-09 in-process at N = 8: drop 4 at once → no eviction ever sequenced, termination after `QUORUM_LOSS_TICKS`, both halves' checkpoints byte-identical; drop 3 → evictions proceed |
+| T9 | `test_predictor_det.cpp` | 3/6 | two predictor instances trained from the same confirmed log predict identical frames for 10⁴ ticks; phantom mask zeroes every non-`AXIS` action; counts halve at `0xFFFF` |
+| T10 | `test_impair_repro.cpp` | 2 | same seed + same packet/clock sequence → identical drop/delay/reorder decisions; different seed differs; `static_assert` absent in `netcode` tier (compile-test target) |
+| T11 | `test_checkpoint_torn.cpp` | 7 | write image; truncate/corrupt at every 4 KB boundary of the temp file before rename → loader refuses with a named code and the previous checkpoint loads; checkpoint without chain record is discarded |
+| T12 | `test_chain_fork.cpp` | 7 | two chains sharing K entries then diverging: verify passes on each, `fork_point` returns K; tampered `prev` fails verify; forced-takeover entry is identified as a fork |
+| T13 | `test_rejoin_verify.cpp` | 6 | in-process server + joiner: image + tail → post-catch-up per-arena vector equals the live one; an injected single-bit arena corruption is detected at the first segment boundary |
+| T14 | `test_adaptive_delay.cpp` | 3 | synthetic miss patterns: raise at 2 misses/60, no second raise inside cooldown, lower after 600 clean; raise/lower frame rule produces a gap-free tick sequence |
+
+### 20.7 Hovel exe (`tests/hovel/`)
+
+Files: `hovel_main.cpp` (loop via the engine's headless platform, CLI, wiring), `hovel_cli.cpp`
+(argument parser; tested by `test_hovel_cli.cpp`), `hovel_sim.cpp/.h` (the §19.2 sim; compiled into
+the audited sim lib target `tl_hovel_sim`), `hovel_actions.luau` (action map + verb mapping in the
+sim VM), `hovel_scenario.cpp` (S-01…S-15 scripted drivers: scripted inputs, kill/pull/leave/rejoin
+actions by tick), `hovel_csv.cpp` (§19.8 row writer over stb_sprintf), `hovel_ballast.cpp`
+(`BALLAST_ARENA_BYTES` fill, deterministic from seed), `runbook.md`.
+
+CLI (every flag required unless a default is shown):
+
+```
+tl_hovel --name <node> --slot <0..7> --role {peer|coordinator|headless}
+         --listen <port> --peers <host:port>[,<host:port>...]
+         --model {match|persistent} --origin {seeded|restored} --world <dir> --seed <u64>
+         --sim-load <n> --ballast-mb {0|1|4|16} --workers <n=1>
+         --shim-seed <u64=0> --shim "<slot>:<drop_pct>/<delay_ms>/<jitter_ms>/<reorder_pct>[;...]"
+         --csv <path> --events <path> --scenario <S-xx|none> --ticks <n|0=until ended>
+         --speculation {on|off=on}
+```
+
+`--role coordinator` only asserts the node is seated at slot 0 for Milestone A (seating is otherwise
+by §9.2). Exit code 0 = ended cleanly with zero divergence; 2 = divergence (the event log names the
+tick and arena); 3 = quorum loss; 4 = CLI/handshake error.
+
+**Runbook — Milestone A, three machines:** (1) `cmake --preset netcode-win`, `netcode-linux`,
+`netcode-pi4`; build once; `tools/fingerprint` prints one `build_id` for all three — record it.
+(2) `tools/deploy.sh deck <host>`, `tools/deploy.sh pi4 <host>`. (3) Smoke on the PC alone:
+`tl_hovel --name pc --slot 0 --role coordinator --listen 7000 --peers "" --model match --origin
+seeded --world out/w --seed 1 --sim-load 1 --ballast-mb 0 --csv out/pc.csv --events out/pc.ev
+--ticks 3600 --scenario none`; exit 0 required. (4) Start in slot order within 30 s: PC (slot 0,
+coordinator, `--peers deck:7000,pi:7000`), Deck (slot 1, `--peers pc:7000,pi:7000`), Pi (slot 2,
+`--peers pc:7000,deck:7000`); common `--seed 20260822 --sim-load <L> --ticks 216000 --scenario S-01`.
+(5) Watch each node's stderr for `handshake ok`, `session running`, then `digest ok tick=…` every
+30 ticks; adjudicate progress against the CSV's `wall_us`. (6) At exit, pull the three CSVs and
+event logs; `tools/hovel_compare <csv...>` asserts identical `state_hash_lo64` per tick and reports
+p50/p95/p99 `sim_us` per machine, the heterogeneity ratio, and coordinator `bytes_out`. (7) Sweep
+`--sim-load` until the Pi's p99 `sim_us` ≈ 4,000; record the load at 4/8/16.7 ms per machine
+(§19.4). Gate: 1 h, zero divergence, exit 0 on all three.
+
+### 20.8 Build order and "done" criteria
+
+| Phase | Files created | Done when |
+|---|---|---|
+| 1 Encoder + archive | `wire.h`, `encode.cpp`, `archive.cpp`, `net_internal.h` (rings, `LogRecord` store), `tests/net/` T0–T2 | T0–T2 green incl. fuzz for 10 min under ASan/UBSan; `RecordedInput` adapter replays a core recording with identical trace; 30-min synthetic archive < 80 KB recorded in `LESSONS.md` |
+| 2 Two-peer ENet | `transport.cpp`, `impair.cpp`, `sequencer.cpp`, `producer.cpp` (delay-only path), `systems.cpp`, `net.h`, `hovel_main/cli/sim/csv` | T3, T4, T10 green; two Hovel processes over loopback 1 h at 1% loss, zero divergence; measured upstream per peer ≤ 6 KB/s recorded |
+| 3 Scale + adaptive delay + speculation | `rollback.cpp`, `predictor.cpp` (prediction only), delay rule in `sequencer.cpp`, speculative path in `producer.cpp`, `hovel_scenario.cpp` S-01/S-13 | T9, T14 green; 8 loopback peers 30 min zero divergence; S-13 shows impaired peer's delay rises and others' `rollback_depth` distribution unchanged; rollback tick cost p95 recorded |
+| 4 Shadows | mirror send/receive in `transport.cpp`/`sequencer.cpp`, shadow selection in `succession.cpp` | shadow rings hold every frame the coordinator holds (asserted per tick in `dev`); coordinator upstream measured against 1.40 Mbit/s at 8 loopback peers |
+| 5 Failure + epochs | `peer.cpp` (φ, gossip), `succession.cpp` (claim/ack), `LR_EPOCH`/`LR_SUSPECT` in `sequencer.cpp`, S-07/S-08 drivers | T5, T6, T7 green; S-07: successor within 1 tick + ≤ 6-tick rollback, no peer accepts a tick below its `confirmed`; S-08: behind claimant refused (reason 1 in the event log) |
+| 6 Phantoms, leave, eviction, rejoin, quorum loss | phantom path in `predictor.cpp`, `LR_LEAVE/RESUME/EVICT/JOIN/END`, `session.cpp` (join flow, termination), `checkpoint.cpp` hot tier, S-04/05/06/09/10 | T8, T13 green; S-04…S-06, S-09, S-10 pass per §19.6; rejoin at 4 MB ballast < 10 s recorded |
+| 7 Persistent | durable tier + chain + custody in `checkpoint.cpp`, seat table + signatures in `session.cpp`, `Restored` start, S-11/S-12 | T11, T12 green; S-11/S-12 pass; a world survives three real days and a rebuild (chain crosses a `build_id`); torn-write test run on all three machines' filesystems |
+| 8 Product | NAT ruling (§5.5: none for v1), spectator (a slot with `live_mask` bit but no frames: substitution only), commit/reveal (`CK_COMMIT` record kind + `BLAKE2b` compare via `crypto_verify32`) | spectator runs a full S-01 with identical trace; commit/reveal round-trips with `k = 2` and a mismatched reveal substitutes; Milestone E (10 h, three machines) zero divergence with §19.9 thresholds recorded |
+
+A phase ends on the full green gate (every earlier phase's tests included) plus the measurement
+recorded in `LESSONS.md` with the `build_id`.
+
+---
+
 ## Appendix A — Rejected alternatives
 
 | Alternative | Rejected because |
@@ -1712,7 +2536,7 @@ All tick counts are **sim ticks at 60 Hz**. One unit (§4.4).
 |---|---|---|
 | `MAX_PEERS` | **8** | 16 feasible, untargeted (App. A) |
 | `MAX_ACTIONS` | **32** | Compile-time, in the input header (`INPUT.md`). **Changing it is a wire-format version bump.** Every payload figure assumes it |
-| `SIM_TICK_RATE` | 60 Hz | Network tick is the same tick |
+| `TICK_HZ` | 60 Hz | Network tick is the same tick (`CANON.md`; `FIXED_DT_SECONDS` is render-side only) |
 | `LOCAL_INPUT_DELAY_TICKS` | 3–6 (50–100 ms) | Adaptive per peer (§7.4), sequenced |
 | `REDUNDANCY_TICKS` | 9 (150 ms) | **≥ `CONFIRMATION_HORIZON_TICKS`**, `static_assert`ed. Raise to 16 under measured loss |
 | `CONFIRMATION_HORIZON_TICKS` | **6 (100 ms)** | **Speculation depth = failover cost = irreversible display delay** (§9.5); = max `LOCAL_INPUT_DELAY_TICKS`; ≤ `REDUNDANCY_TICKS` |

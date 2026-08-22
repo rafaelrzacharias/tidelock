@@ -10,6 +10,8 @@
 
 ## Reading order
 
+0. `CANON.md` — every cross-cutting constant, name and type on one page. A doc that disagrees
+   with it has a bug. Grep it before touching anything.
 1. `PIVOT-DESIGN.md` — the ruling: stack, C++ subset, fixed point, Luau, gates, build order.
 2. `ARCHITECTURE.md` — the spine: layered DAG, three channels, seams, module policy, tiers.
 3. `FX-PALETTE.md` → `GATE0-BENCH.md` — the palette and the bench that decides it (next milestone).
@@ -22,6 +24,7 @@
 
 | Doc | Owns | Module |
 |---|---|---|
+| `CANON.md` | the constants/names/types sheet every doc must agree with | — |
 | `PIVOT-DESIGN.md` | the founding ruling; supersedes the foundry docs where it says so | — |
 | `ARCHITECTURE.md` | DAG, channels, seams, module policy, binary shape, per-tick data flow | `app/`, layout |
 | `CPP-SUBSET.md` | the coding contract: bans, sanctioned templates, `Result<T>`, symbol audit, UB discipline, flags | all of `src/` |
@@ -44,6 +47,13 @@
 | `TESTING.md` | runner, headless driver, determinism harness, cross-ISA, static gates, CI lanes, the per-module rubric | `tests/`, `tools/audit` |
 | `BUILD.md` | clang toolchain, CMake+Ninja, tiers/flags, vendoring, the build fingerprint, Luau compile, cross-compile/deploy | `cmake/`, `tools/` |
 | `RESERVED-SEAMS.md` | designed-not-built: audio, game UI, spatial index, tilemap, nav/AI, frame animation, replay UI/cinematics, modding, game-logic substrate, streaming/cook, SDL_GPU, editor shell; explicitly-out list | — |
+
+## Implementation specifications
+
+Every system doc ends with an **Implementation specification** section (file layout, concrete
+structs with explicit padding, full signatures, algorithms in pseudocode with their iteration
+order, the test files, and a done criterion). That section is the build contract; the design
+sections above it are the why. `ARCHITECTURE.md` §9 is the milestone order with done criteria.
 
 ## Conventions
 

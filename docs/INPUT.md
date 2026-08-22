@@ -25,7 +25,7 @@ enum { MAX_ACTIONS = 32 };                       // compile-time; changing it is
 struct InputFrame {                              // 76 B, explicitly laid out, static_assert sizeof + every offsetof
     ActionState actions[MAX_ACTIONS];            // 64 B, indexed by ActionId (dense u16 < 32)
     i32 pointer_x, pointer_y;                    // world-space pos_t raw bits, quantized at capture
-    u32 tick;                                    // the tick this frame is for (replay/lockstep alignment)
+    u32 tick;                                    // low 32 bits of the u64 world tick (FRAME-LOOP.md §1 tick width rule)
 };
 ```
 
@@ -152,5 +152,75 @@ trace; `InputFrame` static_asserts; fingerprint changes when the action list cha
 - **R-2 `PeerSlots` is a singleton component** (`live_mask`, `local_slot`, `slot_player_id[8]`)
   in a registered arena: snapshotted, hashed, restored with the world (`FRAME-LOOP.md` §7 R-1).
   The frame array itself is per-tick input, recorded but not hashed.
+
+## 9. Implementation specification
+
+### 9.1 Files
+
+`core/input.h/.cpp` (frame types, `InputProducer`, `input_set_producer`, per-tick frame storage),
+`core/action_map.h/.cpp` (actions, bindings, resolution), `core/producers/live.cpp`,
+`core/producers/script.cpp`, `core/producers/replay.cpp` (over `RecordedInput`,
+`DETERMINISM.md` §9.2), `core/recorder.cpp` (the `LAST` recorder system). `net/producer.cpp` is
+the fourth producer.
+
+### 9.2 Action map structures
+
+```cpp
+enum ActionKind : u8 { ACT_DIGITAL, ACT_ANALOG };  enum ActionClass : u8 { CLS_LATCHED, CLS_AXIS, CLS_EDGE };
+struct Action  { NameHash name; StrId sid; ActionKind kind; ActionClass cls; u16 _pad; };
+enum BindDevice : u8 { DEV_KEY, DEV_MOUSE_BUTTON, DEV_MOUSE_AXIS, DEV_KEYS_AXIS, DEV_PAD_BUTTON, DEV_PAD_AXIS };
+enum Deadzone : u8 { DZ_NONE, DZ_AXIAL, DZ_RADIAL, DZ_TRIGGER };  enum Socd : u8 { SOCD_NEUTRAL, SOCD_LAST_WINS, SOCD_FIRST_WINS };
+struct Binding { ActionId action; BindDevice dev; u8 modifiers /* ctrl/shift/alt bits */; u16 code_neg, code_pos /* keys-axis: two keys */; Deadzone dz; Socd socd; f32 dz_radius; f32 sensitivity; u8 context; u8 _pad[3]; };
+struct ActionMap { Action actions[MAX_ACTIONS]; u32 action_count; Array<Binding> bindings; u8 active_context; };
+```
+
+The action map hash (for `session_fingerprint`): `tl_hash64` over `(name, kind, cls)` per action
+in order. Bindings are **not** fingerprinted (they are local preference; they never affect what
+is transmitted, only how this peer produces it).
+
+### 9.3 Live producer — `fold_tick`
+
+```
+state: prev_down[32] (bool), axis_raw[32] (f32 accumulated this tick), key_down[], mouse_pos, pad state
+for each RawEvent in the platform ring this tick (in arrival order, after the ImGui mask in dev):
+    update device state (key_down/mouse/pad); text/window events ignored here
+for each action a:
+    resolve bindings for the active context, most-specific (most modifier bits) first; SOCD per keys-axis binding:
+      digital: down = any bound input down → value = down ? 1 : 0
+      analog : raw = Σ bound axis values after deadzone + sensitivity, keys-axis = (pos - neg), clamped to [-1, 1]
+               value = i8(lrintf(raw * 127))         // the ONLY quantization; render-side float is legal here
+    flags = (down) | (down && !prev_down[a]) << 1 | (!down && prev_down[a]) << 2 ; prev_down[a] = down
+pointer: screen → world via the render camera (RENDER2D.md §2), then from_f32_quantized<pos_t>
+frame.tick = u32(world.tick); frames[local_slot] = frame; live_mask = 1 << local_slot; return READY
+```
+
+Context switch (§3): processed at the top of the fold; every action whose binding set changed and
+was `down` emits a synthetic `released` edge this tick.
+
+### 9.4 Script and Replay producers
+
+```cpp
+struct ScriptedEvent { u64 tick; ActionId action; i8 value; u8 op /* SET, PRESS(1-tick), HOLD_START, HOLD_END */; u8 slot; };
+struct ScriptProducer { Array<ScriptedEvent> events /* sorted by tick */; u32 cursor; ActionState cur[MAX_PEERS][MAX_ACTIONS]; };
+```
+
+`produce(tick)`: apply all events with `event.tick == tick` (in array order) to `cur`, derive edges
+as in the fold, fill frames, `READY`. Tests build these with helpers `press(a, tick)`, `hold(a, v,
+from, to)`. `ReplayProducer` reads `RecordedInput` frames sequentially; `READY` until
+`frame_count`, then `WAIT` (the driver stops); it also exposes the recorded hashes to the harness.
+
+### 9.5 Recorder system (`LAST`, after checkpoint)
+
+Appends `frames[peer_count]` + `world.last_hash` (+ per-arena hashes if enabled) to the in-memory
+`RecordedInput` ring (dev: 2 min ring; driver: unbounded into the output file via buffered
+`file.write_all` at the end or every N ticks).
+
+### 9.6 Tests (`tests/core/input/`)
+
+`fold.test.cpp` (edge table over 3 ticks; analog quantization ±127 and symmetry; deadzone shapes;
+SOCD modes; modifier specificity; synthetic release on context switch), `script.test.cpp` (exact
+tick delivery), `replay.test.cpp` (record → replay → frames identical, hashes identical;
+fingerprint mismatch refused), `frame.test.cpp` (`static_assert`s; action-map hash changes when
+an action is added; bindings do not change it).
 
 *Rev 1 — 2026-08-22.*

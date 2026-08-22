@@ -22,7 +22,7 @@ most of it. The subset is "C with namespaces, a handful of flat templates, and `
 | STL containers, algorithms, streams, `<string>`, `<memory>` | RAII contract vs no-destructors; implementation-defined iteration/hash order; compile weight | include firewall (CI grep on `#include <` outside the allowlist) |
 | RTTI, exceptions | hidden control flow, codegen surface | `-fno-exceptions -fno-rtti` |
 | inheritance, virtual, polymorphism | hidden dispatch, vtables in POD | review + `-Wnon-virtual-dtor` as a tripwire (any hit = violation) |
-| destructors, RAII, copy/move ctors | POD everywhere; snapshot = memcpy | `static_assert(is_trivially_copyable)` at every registration door |
+| destructors, RAII, copy/move ctors | POD everywhere; snapshot = memcpy | `static_assert(__is_trivially_copyable(T))` (the clang builtin — `<type_traits>` is banned) at every registration door |
 | operator overloads beyond fx arithmetic | hidden cost | review |
 | `new`/`delete`/`malloc`/`free` outside arena backing | zero per-tick allocation | symbol audit (§4) + debug counting shim |
 | `<math.h>` in sim TUs | libm is the cross-platform determinism hole | include firewall + symbol audit |
@@ -34,6 +34,10 @@ most of it. The subset is "C with namespaces, a handful of flat templates, and `
 **Allowed system includes in `src/`:** `<stdint.h>`, `<stddef.h>`, `<string.h>` (memcpy/memset/
 memcmp only), `<limits.h>`. `platform/` additionally includes its OS/SDL headers inside its own
 TUs. `<math.h>` is allowed ONLY in `render/`, `editor/`, `platform/` (float is legal there).
+Type traits come from clang builtins, never `<type_traits>`: `__is_trivially_copyable(T)`,
+`__is_same(A,B)`, `__is_enum(T)`, `alignof`, `sizeof`, `offsetof` (from `<stddef.h>`). `tl_types.h`
+defines `u8..u64`, `i8..i64`, `f32`, `f64`, `usize` and `uint_fit<N>` (a `constexpr` width
+selector: ≤8→u8, ≤16→u16, ≤32→u32, else u64) — the only place a "type chooser" template exists.
 
 ---
 
@@ -149,12 +153,30 @@ With no floats, the only way two peers diverge is undefined behaviour. Rules:
 
 ---
 
+## 7b. The macro catalogue (every macro in the codebase, its owner, its tier behaviour)
+
+| Macro | Header | debug/dev | netcode/ship |
+|---|---|---|---|
+| `TL_ASSERT(c)` | `foundation/tl_assert.h` | check → fatal | compiled out |
+| `TL_CHECK(c)` | same | check → fatal | check → fatal (slim tier) |
+| `TL_FATAL(fmt, …)` | same | crash pipeline + abort | same |
+| `TL_FIELDS_X(X,XA,XH)`, `TL_COMPONENT`, `TL_POOL_ROW`, `TL_WIRE_STRUCT` | `core/reflect.h` | as `ECS.md` §10.2 | same |
+| `TL_LOG_{TRACE,DEBUG,INFO,WARN,ERR}` | `foundation/tl_log.h` | all levels | `INFO+` (ship: `WARN+`) |
+| `TL_PROF_SCOPE(name)`, `TL_PROF_COUNTER(name, v)` | `foundation/tl_prof.h` | active | compiled out |
+| `TL_PROBE_*` | `foundation/tl_probe.h` | active | compiled out |
+| `TL_CVAR(type, name, default, flags, help)` | `core/cvar.h` | registered + console | `SIM` cvars registered (fingerprinted); others constant-folded |
+| `TL_TEST(name, tags)`, `TL_EXPECT_*`, `TL_ASSERT_*` | `tests/runner/tl_test.h` | tests only | — |
+| `TL_SCRATCH_SCOPE(s)` | `foundation/scratch.h` | mark/reset pair (explicit begin/end macros, no RAII) | same |
+| `"lit"_id` | `foundation/hash.h` | constexpr FNV-1a | same |
+
+No other macros are introduced without a row here.
+
 ## 8. Templates of code that appear everywhere (reference shapes)
 
 ```cpp
 // a registered component — the X-macro declares struct + field table (ECS.md §6)
-#define TL_FIELDS_Transform(X) \
-    X(pos_t, x) X(pos_t, y) X(angle_t, rot) X(u32, _pad0)
+#define TL_FIELDS_Transform(X, XA, XH) \
+    X(pos_t, x) X(pos_t, y) X(angle_t, rot) X(u32, flags)   /* bit 0 = snap (FRAME-LOOP.md §4); bits 1..31 zero */
 TL_COMPONENT(Transform)
 
 // a system — stateless free function + descriptor

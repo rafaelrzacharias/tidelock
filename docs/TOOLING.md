@@ -1,9 +1,11 @@
 # Tooling — editor shell, inspector, console, profiler, probes, logging, crash (tidelock, rev 1)
 
-> **Status:** design rev 1, 2026-08-22. **DECIDED** except §9. Harvests Layr's born-instrumented
+> **Status:** design rev 1, 2026-08-22. **DECIDED** except §10. Harvests Layr's born-instrumented
 > discipline (`FOUNDRY-EXTRACTION.md`, `LAYR-ANALYSIS.md` §4) and ENGINE-DESIGN F1's dev-tooling
 > half, on Dear ImGui. Built **right after v0** (dev surface early, not at "layer 10").
-> **Owns:** `src/editor/` (dev tiers only; compiled out of `netcode`/`ship` by absence).
+> **Owns:** `src/editor/` (dev tiers only; compiled out of `netcode`/`ship` by absence) and the
+> macro headers `foundation/tl_{assert,log,prof,probe}.h` (all tiers; tier-gated expansions).
+> Implementation spec: §9.
 
 ---
 
@@ -117,7 +119,304 @@ arena-offset guard's last report. Luau VM panel: pool usage, GC step time, instr
 
 ---
 
-## 9. Rulings (closed 2026-08-22 — nothing open)
+## 9. Implementation specification
+
+Scope: the four macro headers, the runtimes behind them, `src/editor/`, the crash and replay
+pipelines, tests. `f32`/`f64` are legal in `editor/` and in the non-det foundation runtimes
+(`log.cpp`, `prof.cpp`, `probe.cpp`); the macro *headers* contain no float token so a sim TU may
+include them (`CPP-SUBSET.md` §4 grep). Tier gates: `TL_DEV` (1 in `dev`/`debug`, 0 otherwise,
+`BUILD.md` §3) and `TL_LOG_MIN` (`debug`/`dev` 0, `netcode` 2, `ship` 3). Nothing here is hashed;
+every mutation of sim state is a command (§0).
+
+### 9.1 File layout
+
+| File | Contents | Tiers |
+|---|---|---|
+| `foundation/tl_assert.h` | `TL_ASSERT` (debug/dev), `TL_CHECK` (all), `TL_FATAL` (all) → `tl_fatal(file, line, msg)` → crash writer (§9.3.9) → `platform.crash.raise_fatal` | all |
+| `foundation/tl_log.h` + `log.cpp` | `TL_LOG_{TRACE,DEBUG,INFO,WARN,ERR}` → `tl_log_write`; ring + stderr + file sinks | all (levels gated) |
+| `foundation/tl_prof.h` + `prof.cpp` | `TL_PROF_SCOPE/BEGIN/END/SCOPE_W`, `TL_PROF_COUNTER_SET/ADD`; per-worker node buffers, frame ring | `TL_DEV` only (`prof.cpp` not built otherwise) |
+| `foundation/tl_probe.h` + `probe.cpp` | `TL_PROBE_LOG/ON_CHANGE/MARK/ASSERT` (+ `_FX` variants); key table, TSV sink, summary | `TL_DEV` only |
+| `core/cvar.h/.cpp` | `TL_CVAR`, `CvarTable` in `World`, `cvar_get_*`, `cvar_set` (command-routed when `SIM`) | all |
+| `core/crash_report.cpp` | the writer: assembles the report into the crash arena, registered with `platform.crash.install` | all |
+| `core/desync_diff.cpp` | the reflection diff walker (§9.3.8); CLI via `tl_driver --diff` | all |
+| `editor/editor.h` | `Editor` (panel table, selection, capture mask, dev arena), `editor_init/frame/shutdown` | dev |
+| `editor/shell.cpp` | ImGui context, dockspace, panel registry, `imgui.ini` in `pref_path`, capture-mask publish | dev |
+| `editor/inspector.cpp` | the walker (§9.3.4), custom-draw hooks, `debug_draw` dispatch | dev |
+| `editor/console.cpp` | registry, tokenizer, completion, history, cvar UI, Luau REPL hand-off | dev |
+| `editor/dotpath.cpp` + `watch.cpp` | path resolution (§9.3.6), watch overlay | dev |
+| `editor/log_panel.cpp` `profiler_panel.cpp` `trace_export.cpp` `probes_panel.cpp` `world_panel.cpp` `sim_panel.cpp` `net_panel.cpp` `scripts_panel.cpp` | one panel each; `net_panel` builds only when `tl_net` is linked | dev |
+| `editor/replay_panel.cpp` + `keyframes.cpp` | keyframe ring, scrub (§9.3.10) | dev |
+
+Macro expansions (the gate is the preprocessor, so arguments are never evaluated when off):
+```cpp
+// tl_log.h
+enum LogLevel : u8 { LOG_TRACE = 0, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERR, LOG_FATAL };
+void tl_log_write(u8 level, const char* file, u32 line, const char* fmt, ...) __attribute__((format(printf, 4, 5)));
+#if TL_LOG_MIN <= 0
+#  define TL_LOG_TRACE(...) tl_log_write(LOG_TRACE, __FILE__, __LINE__, __VA_ARGS__)
+#else
+#  define TL_LOG_TRACE(...) ((void)0)
+#endif                                   // same pattern per level; TL_LOG_ERR always on; TL_LOG(level, ...) dispatches by constant level
+// tl_prof.h
+#if TL_DEV
+#  define TL_PROF_BEGIN(lit)            tl_prof_begin(0, lit##_id, lit, 0xFFFFFFFFu)          // worker 0 = main thread, by contract
+#  define TL_PROF_END()                 tl_prof_end(0)
+#  define TL_PROF_SCOPE(lit)            for (u32 _tl_ps = (TL_PROF_BEGIN(lit), 0u); _tl_ps == 0u; TL_PROF_END(), _tl_ps = 1u)   // a block, no RAII; `return` inside is a review error (debug asserts depth == 0 at frame end)
+#  define TL_PROF_SCOPE_W(scr, lit, job) for (u32 _tl_ps = (tl_prof_begin((scr)->worker, lit##_id, lit, (job)), 0u); _tl_ps == 0u; tl_prof_end((scr)->worker), _tl_ps = 1u)
+#  define TL_PROF_COUNTER_SET(lit, v)   tl_prof_counter(lit##_id, lit, (i64)(v), 0)
+#  define TL_PROF_COUNTER_ADD(lit, v)   tl_prof_counter(lit##_id, lit, (i64)(v), 1)
+#else
+#  define TL_PROF_BEGIN(lit) ((void)0)  /* …every macro → ((void)0); TL_PROF_SCOPE(lit) → nothing (the block still compiles as a plain block) */
+#endif
+// tl_probe.h — integer-only at the call site so sim TUs stay float-free; conversion happens in probe.cpp
+#if TL_DEV
+#  define TL_PROBE_LOG(lit, v, n)        tl_probe_log(lit##_id, lit, (i64)(v), 0, (u32)(n))
+#  define TL_PROBE_LOG_FX(lit, fx, n)    tl_probe_log(lit##_id, lit, (i64)(fx).v, (u8)decltype(fx)::FRAC, (u32)(n))
+#  define TL_PROBE_ON_CHANGE(lit, v, eps) tl_probe_on_change(lit##_id, lit, (i64)(v), (i64)(eps))
+#  define TL_PROBE_MARK(lit)             tl_probe_mark(lit##_id, lit)
+#  define TL_PROBE_ASSERT(lit, v, lo, hi) tl_probe_assert(lit##_id, lit, (i64)(v), (i64)(lo), (i64)(hi))
+#else
+#  define TL_PROBE_LOG(lit, v, n) ((void)0)   /* … */
+#endif
+// tl_assert.h
+#define TL_FATAL(msg)        tl_fatal(__FILE__, __LINE__, (msg))                       // all tiers, [[noreturn]]
+#define TL_CHECK(c)          ((c) ? (void)0 : tl_fatal(__FILE__, __LINE__, "check: " #c)) // all tiers
+#if TL_DEV
+#  define TL_ASSERT(c)       TL_CHECK(c)
+#else
+#  define TL_ASSERT(c)       ((void)0)
+#endif
+```
+`Scratch` carries `u8 worker` (expected from `MEMORY.md` §1.3 / `JOBS.md` §1) so worker code
+names its buffer without `thread_local`. The probe/prof runtimes are `tl_*` symbols in the
+non-det `tl_foundation` lib — the symbol audit's "own `tl_*` symbols" allowance covers the sim
+lib's references to them in `dev`; in `netcode` the macros are empty and no symbol exists.
+
+### 9.2 Structs
+
+```cpp
+// log.cpp
+struct LogRecord { u64 tick; u64 wall_ms; const char* file; u32 line; u8 level; u8 len; u16 _pad0; char msg[224]; };  // 256 B
+struct LogState  { RingBuffer<LogRecord> ring /*4096 slots, overwrite-oldest, dev arena*/; u8 min_level[3] /*ring, stderr, file*/;
+                   u8 file_enabled; u16 _pad0; u32 staging_used; char staging[65536]; const u64* tick_ptr; ClockApi clock; FileApi file; StrView file_path; };
+// prof.cpp
+struct ProfNode  { u64 t_begin, t_end; NameHash key; const char* name; u32 parent; u32 job_id; u16 depth; u8 worker; u8 _pad0; u32 _pad1; };  // 48 B
+struct ProfWorker { ProfNode nodes[8192]; u32 count; u32 stack[64]; u32 depth; u32 overflow; };          // per worker, 393 KB; overflow counts dropped scopes
+struct ProfFrame { u64 frame; u64 tick; u64 t_start, t_end; u32 node_count; u32 dropped; i64 counters[256]; ProfNode nodes[16384]; };  // merged in worker order; nodes past 16384 are dropped and counted; 788,520 B
+struct ProfState { ProfFrame ring[60]; u32 head; u32 count; ProfWorker workers[16]; ProfCounter counters[256]; u32 counter_count; u8 paused; u8 _pad0[3]; };  // ring ≈ 47.3 MB + workers ≈ 6.3 MB, dev arena; static_assert(sizeof(ProfFrame) == 788520)
+struct ProfCounter { NameHash key; const char* name; i64 value; };                                   // 24 B
+// probe.cpp
+struct ProbeKey  { NameHash key; const char* name; u64 count, changes; f64 min, max, sum, first, last; i64 last_raw; u64 last_tick; u8 enabled, frac_bits, kind; u8 _pad0[5]; };  // 96 B
+struct ProbeState { ProbeKey keys[1024]; Map<NameHash, u16> index; u32 count; u8 profile_mask; u8 _pad0[3]; char staging[65536]; u32 staging_used; StrView tsv_path; const u64* tick_ptr; };
+// TSV row: "<tick>\t<key>\t<value>\n"   value = raw (frac 0) or "%.9g" of raw·2^-frac; MARK → empty value field
+// summary (at shutdown, after a "#summary" line): "<key>\t<count>\t<changes>\t<min>\t<max>\t<mean>\t<first>\t<last>\n", keys in registration order
+// cvar.h
+enum CvarKind : u8 { CVAR_I32, CVAR_U32, CVAR_F32, CVAR_BOOL, CVAR_FX_RAW };
+enum : u8 { CVAR_ARCHIVE = 1, CVAR_CHEAT = 2, CVAR_READONLY = 4, CVAR_SIM = 8 };
+struct CvarDesc  { NameHash key; const char* name; const char* help; u32 default_bits; u8 kind; u8 flags; u8 frac_bits; u8 _pad0; };  // 32 B, constexpr
+struct CvarTable { const CvarDesc* desc[256]; u32 bits[256]; u16 sorted[256] /*by key, built at init*/; u32 count; u32 _pad0; };   // in World (non-registered arena)
+#define TL_CVAR(type, name, def, help) constexpr CvarDesc CVAR_##name = { #name##_id, #name, help, cvar_bits_of<type>(def), cvar_kind_of<type>(), 0, 0, 0 };
+// modules list their CvarDesc* in a constexpr array; app/ registers the arrays in wiring order; lookup = binary search on key
+// console.cpp
+typedef Result<u32> (*ConsoleFn)(World*, u32 argc, const StrView* argv, Span<char> reply);   // value = bytes written to reply
+struct ConsoleCmd { NameHash key; const char* name; const char* usage; ConsoleFn fn; const char* arg_hints[4]; u8 flags /*bit0 SIM_AFFECTING*/; u8 argc_min, argc_max, from_luau; u32 lua_ref; };  // 72 B; table 512, name-sorted u16 index for completion
+// crash (core/crash_report.cpp) — written into a dedicated 16 MB crash arena committed at init; no allocation on the crash path
+struct CrashHeader { u32 format_version; u32 section_count; u8 build_id[32]; u8 session_fingerprint[32]; u64 tick; u64 wall_ms;
+                     u32 os, isa, reason /*1 FATAL · 2 SEH · 3 SIGNAL*/, code; u64 fault_addr; char msg[256]; };   // 368 B, TL_WIRE_STRUCT
+struct CrashSection { u32 kind; u32 byte_len; };   // followed by payload, 8-aligned
+// kinds / budget (16 MB total): 1 LOG_TAIL last 256 records (64 KB) · 2 SYSINFO ≤ 1 KB · 3 CENSUS ≤ 16 KB (entity count, per-component counts, particle/body/cavity/basin counts)
+// · 4 PROF_FRAMES last 4 frames (≤ 3 MB) · 5 SNAPSHOT latest ring slot (≤ 12 MB, else omitted + flag bit in header.code) · 6 INPUTS_SINCE InputFrame[MAX_PEERS] per tick since the snapshot (608 B/tick)
+// · 7 CALLSTACK 64 × u64 + module table (≤ 4 KB) · 8 DUMP_PATH (Windows .dmp path). File: <pref_path>/crash/<build_id hex8>_<wall_ms>.tlcrash
+// keyframes.cpp
+struct Keyframe { u64 tick; u64 world_hash; u32 slot; u32 input_offset; };                       // 24 B
+struct KeyframeRing { Keyframe frames[64]; u32 head, count; u32 interval_ticks /*cvar replay_keyframe_ticks = 60*/; u32 _pad0; Snapshot* slots /*64, dev arena, sized as the rollback ring*/;
+                      RingBuffer<InputFrame> inputs /*MAX_PEERS × 36000 ticks*/; u64 input_base_tick; };
+```
+
+### 9.3 Algorithms
+
+**9.3.1 Profiler.** `tl_prof_begin(worker, key, name, job)`: `w = workers[worker]`; if
+`w.count == 8192` → `w.overflow++`, push sentinel `0xFFFFFFFF` on the stack, return; else
+`n = w.count++`; `nodes[n] = { ticks(), 0, key, name, parent = depth ? stack[depth−1] : NONE, job, depth, worker }`;
+`stack[depth++] = n`. `tl_prof_end(worker)`: `n = stack[--depth]`; if `n != sentinel`:
+`nodes[n].t_end = ticks()`. Frame end (`render_present` step 7 calls `tl_prof_frame_end(tick)`):
+merge every worker's nodes into `ring[head]` in worker order, rebasing `parent` by the worker's
+offset; sample counters; `head = (head+1) % 60`; reset worker counts; `TL_ASSERT(workers[0].depth == 0)`.
+Every system is scoped by the scheduler (`tl_prof_begin(0, desc.label, name, 0)`), every Alloy
+pass by `alloy_step`, every `parallel_for` chunk by the job system (`job = chunk`). Steady state:
+zero allocation (fixed buffers), two `ticks()` reads per scope.
+
+**9.3.2 Chrome trace export** (`trace_export.cpp`, `profiler dump <path> [frames]`): for each ring
+frame oldest→newest, for each node: one complete event; `ts`/`dur` in microseconds (`f64`),
+`ts = (t_begin − ring_t0) · 1e6 / frequency`:
+```
+{"traceEvents":[
+ {"name":"frame","cat":"loop","ph":"X","ts":0.0,"dur":16612.3,"pid":1,"tid":0,"args":{"frame":1234,"tick":4567}},
+ {"name":"alloy.pass3","cat":"sim","ph":"X","ts":812.4,"dur":3901.0,"pid":1,"tid":3,"args":{"job":17,"tick":4567}},
+ {"name":"draw_calls","cat":"counter","ph":"C","ts":0.0,"pid":1,"args":{"draw_calls":61}},
+ {"name":"thread_name","ph":"M","pid":1,"tid":0,"args":{"name":"main"}}   // one per worker: "worker N"
+],"displayTimeUnit":"ms"}
+```
+`cat` = the key's prefix before the first `.`; `tid` = worker. Written with `fmt_buf` into a 1 MB
+staging buffer, flushed by `file.append`; loads in Perfetto and speedscope unchanged.
+
+**9.3.3 Probe throttle.** `tl_probe_log(key, name, raw, frac, n)`: `k = lookup-or-insert(key)`
+(insert: fatal at 1024); if `!k.enabled` return (a disabled probe is this one branch);
+`tick = *tick_ptr`; if `k.count == 0 || tick − k.last_tick >= n` → row + stats update
+(`v = frac ? raw·2^-frac : raw`; `min/max/sum/first/last`, `changes += (raw != last_raw)`, `count++`,
+`last_tick = tick`). `ON_CHANGE`: row when `|raw − last_raw| > eps` or first. `MARK`: row
+every call. `ASSERT`: if `raw < lo || raw > hi` → row + `TL_LOG_ERR`, and `TL_FATAL` when cvar
+`probe_assert_fatal` (default 0 in dev, 1 in the driver). Tick-throttled only — never wall-clock.
+`--dump-probes <path>` (§10 R-3) sets `tsv_path`; the panel reads the same `ProbeKey` table.
+
+**9.3.4 Inspector walker** (`inspector.cpp`, per frame, single selection):
+```
+for c in 0..w->comp_count: p = world_get(w, c, sel); if !p: continue; info = comps[c].info
+  if !CollapsingHeader(name(info)): continue
+  if info.custom_draw: info.custom_draw(w, sel, p); continue                // the override; the walker is the mechanism
+  for fi in 0..info.field_count: f = info.fields[fi]; elems = f.count ? f.count : 1; esz = f.size / elems
+    for k in 0..elems: addr = p + f.offset + k*esz; PushID(fi*256+k); label = elems > 1 ? "name[k]" : name
+      switch f.kind:
+        FK_I8..FK_I64, FK_U8..FK_U64: tmp = load; if InputScalar(ImGuiDataType per kind, &tmp) and deactivated-after-edit: set_field(tmp, esz)
+        FK_BOOL: Checkbox
+        FK_POS..FK_SCALAR (the nine rows): raw = load i32; shown = raw * 2^-FRAC(kind) as f64; InputDouble(&shown) + SameLine Text("0x%08x", raw)
+                 on edit: raw' = from_f64_quantized(kind, shown) (RNE; out of range → clamp + TL_LOG_WARN); set_field(raw', 4)
+        FK_H_ENTITY / FK_H_* : Text("%s #%u g%u", domain, idx, gen) (+ "null"); SmallButton("go") → selection = handle (entity) or sim panel focus (Alloy handles); no edit
+        FK_STRID: Text(interner_name(id)); read-only at v0
+      PopID
+set_field(bytes, size) → world_set_field(w, sel, c, fi, k, bytes, size)   // ECS §4 command kind CMD_SET_FIELD: payload { u16 field; u16 elem; u32 size; u8 bytes[] }; applied at the barrier by memcpy at offset + elem*esz; recorded in the replay log; refused with ERR_EDITOR_LOCKSTEP in a lockstep session
+singletons: same loop with p = world_singleton_ptr(w, c), entity = null; Luau-declared components are identical (runtime FieldInfo)
+after the walk: for each registered system with debug_draw: debug_draw(w) → debugdraw.h (RENDER2D §9.3.8)
+```
+`CMD_SET_FIELD` is expected from `core/commands.h` (add it there if absent; `ECS.md` §4 lists
+the shape). `TransformPrev`/`CameraPrev` carry `HIDDEN` and are skipped.
+
+**9.3.5 Console.** Tokenizer: split on ASCII space/tab; a `"`-quoted token keeps spaces and
+honours `\"` and `\\`; `#` starts a comment; max 16 tokens (`ERR_CONSOLE_TOO_MANY_ARGS`);
+unterminated quote → `ERR_CONSOLE_SYNTAX`. Dispatch: `key = hash(argv[0])` → `SortedMap` lookup;
+`argc` checked against `argc_min/max`; `SIM_AFFECTING` commands in a lockstep session → refused;
+otherwise `fn(w, argc−1, argv+1, reply)`; reply and `ERR_NAME(err)` go to the console log.
+Completion: the name-sorted `u16` index, `lower_bound` on the typed prefix (bytewise), walk
+while prefix matches (≤ 32 shown); for argument `i`, `arg_hints[i]` selects a source:
+`"entity"` (names from the `Name` component via the interner), `"cvar"`, `"cmd"`,
+`"file:<dir>"` (`file.enumerate`), `"enum:a|b|c"` (literal list), `null` (none). History: a
+64-line ring in the dev arena, ↑/↓ walks it. Luau: `console.command(name, fn, usage)` registers
+a `ConsoleCmd` with `from_luau = 1`, `lua_ref` the registry ref; the trampoline marshals `argv`
+as strings. Cvars: `set <name> <value>` parses per kind (`FX_RAW` accepts `raw:<i32>` or a
+decimal literal quantized RNE); `READONLY` refused; `SIM` → a sealed command (`CMD_SET_CVAR`,
+tick-stamped, fingerprint recomputed in dev, refused in lockstep); `ARCHIVE` → persisted to
+`pref_path/cvars.txt` on shutdown as `name value` lines.
+
+**9.3.6 Dot paths.** `player.Transform.x[0]` → split on `.`; token 0: `#<index>` (entity index, any
+generation → current), `@<singleton>` or a name (`Name` component StrId via the interner —
+`ERR_PATH_NO_ENTITY` if unknown or ambiguous); token 1: component by name hash; token 2: field
+by name hash with optional `[k]`; result `{ Entity e; ComponentId c; u16 field; u16 elem; }`.
+Reads go through `world_get` + `FieldInfo`; writes through `world_set_field`. A watch stores the
+resolved tuple and re-resolves only when `world_get` returns null (stale handle) — never the
+string per frame.
+
+**9.3.7 Capture mask.** After ImGui's `NewFrame`, the shell publishes
+`input_set_capture_mask(w, (io.WantCaptureMouse ? 1 : 0) | (io.WantCaptureKeyboard ? 2 : 0))`
+(`core/input.h`, expected); the Live producer applies it at the next fold (`INPUT.md` §5) —
+one frame of latency, ImGui's own model.
+
+**9.3.8 Desync diff** (`desync_diff(const Snapshot* a, const Snapshot* b, u32 max_n, DiffFn out, void* ctx) → u32`;
+`b` may be the live registry wrapped as a snapshot view):
+```
+if a.fingerprint != b.fingerprint: out(FINGERPRINT_MISMATCH); return 1
+for i in registry order:   // the lockstep contract order
+  if used_a[i] != used_b[i]: out({arena i, USED, used_a, used_b}); n++ ; continue-after-report
+  if memcmp(base_a, base_b, used) == 0: continue
+  table = component info (ECS column) | TL_POOL_ROW table (Alloy pool) | null
+  if table: rows = dense_count (from the column header at base); for r in 0..rows: if memcmp(row_a, row_b, size) != 0:
+      for f in fields (declaration order): if memcmp(field bytes): out({arena, entity_a[r] or row r, comp, f.name, elem, fmt(kind, a), fmt(kind, b)}); if ++n == max_n return n
+      then the sparse pages / entity map as STRUCTURE entries (first differing u32)
+  else: out({arena, BYTES, first differing offset, 16-byte hex of each}); n++
+return n
+```
+Order: registry order → row → field, so the first report is the earliest difference in the
+contract order. CLI: `tl_driver --diff a.snap b.snap [--max 50]` prints TSV
+`arena\trow\tcomponent\tfield\ta\tb`; the Net/World panel calls the same function.
+
+**9.3.9 Crash pipeline.** `core/crash_report.cpp` registers `crash_write(ctx, reason, code, addr, os_ctx)`
+with `platform.crash.install` at init; the 16 MB crash arena is committed then, and every
+pointer the writer needs (log ring, profiler ring, registry, snapshot ring, input ring, census
+counters) is captured into a `CrashCtx` at init — the handler touches no allocator and no lock
+it does not own.
+- *Writer (both OSes):* reentry guard (`atomic_cas32`); fill `CrashHeader`; sections 1–7 by
+  `memcpy` into the arena (snapshot = the newest ring slot's `[base, used)` per arena, inputs =
+  frames since that slot's tick); one `os_crash_write_file(path, span)` (raw `CreateFileW`/
+  `WriteFile` / `open`/`write`/`fsync` — not the `FileApi`); then the OS tail below.
+- *Windows (`os_crash_win.cpp`):* `SetUnhandledExceptionFilter(tl_seh_filter)`; `TL_FATAL` raises
+  `0xE0544C46`. Filter: call the writer; then `CreateProcessW(self, "--dump <pid> <tid> <EXCEPTION_POINTERS*> <event> <path.dmp>")`
+  with an inherited event, wait ≤ 10 s; `tidelock --dump` (the same exe, `app/dumper.cpp`, no
+  new exe — CANON exe list) does `OpenProcess` + `MiniDumpWriteDump(WithIndirectlyReferencedMemory | WithThreadInfo | WithUnloadedModules)`
+  and sets the event; the filter appends section 8 and returns `EXCEPTION_EXECUTE_HANDLER` →
+  `TerminateProcess(3)`. Out-of-process because in-process `MiniDumpWriteDump` on a corrupt heap
+  or exhausted stack is unreliable (MS guidance).
+- *Linux (`os_crash_posix.cpp`):* `sigaction` SEGV/BUS/ILL/FPE/ABRT, `SA_SIGINFO | SA_ONSTACK |
+  SA_NODEFER` off, 64 KB `sigaltstack` from the crash arena; handler: guard; frame-pointer walk
+  (`-fno-omit-frame-pointer` in dev/netcode) ≤ 64 frames → section 7; writer; `signal(sig, SIG_DFL); raise(sig)`
+  so the OS core dump (`ulimit -c`) still happens. `backtrace()` and `dladdr` are not
+  async-signal-safe and are not called; module bases come from `dl_iterate_phdr` at init.
+- `TL_FATAL` → `tl_fatal` → `TL_LOG_ERR` → `crash.raise_fatal(msg)` → the same path with `reason = 1`.
+
+**9.3.10 Replay scrub.** Record (always on in dev): at `LAST`, the recorder appends
+`InputFrame[MAX_PEERS]` + world hash to `inputs`; every `interval_ticks` it copies the `LAST`
+snapshot into `slots[head]` and pushes a `Keyframe`. Seek to `T`: `kf = max{frames.tick ≤ T}`
+(none → the oldest); `registry_restore(kf.slot)` → `post_restore` barrier (`MEMORY.md` §5);
+set the `Replay` producer cursor to `kf.input_offset`; run `T − kf.tick` ticks with
+`run_phases_sim` + `barrier_end_of_tick` and no render (≤ 59 ticks ≈ 0.5 s at 8 ms/tick); then
+the next frame renders at `T`. `TL_CHECK(world_hash(T) == recorded hash)` — bit-exact by
+construction, so a mismatch is a determinism bug surfaced by the scrub bar. Play/pause/speed:
+speed ∈ {0, ¼, ½, 1, 2, 4} ticks per frame applied as an accumulator override while the panel
+owns the producer. "Save replay" writes `RecordedInput` (`INPUT.md` §4) + the keyframe slots
+with `write_atomic`.
+
+### 9.4 Panels
+
+| Panel | Data source | Refresh |
+|---|---|---|
+| Inspector | selection (`Editor.sel`), `World.comps[].info`, `world_get` | every frame (read); edits → commands at the next barrier |
+| Console | `ConsoleCmd` table, `CvarTable`, history ring, Luau UI VM | on input; log lines appended as they arrive |
+| Log | `LogState.ring` | every frame; filter by level/tick range; follows tail unless scrolled |
+| Profiler | `ProfState.ring`, counters | every frame (flame graph of `ring[head−1]`), pause button freezes `head`; `dump` → §9.3.2 |
+| Probes | `ProbeState.keys` | every frame; enable/disable per key, profile masks; summary table |
+| Replay | `KeyframeRing`, the `Replay` producer | scrub events only; per-frame tick readout |
+| Scripts | Luau VM file list, ImGuiColorTextEdit buffers, Tier 0/1 debugger state (`LUAU-LAYER.md`) | on edit / breakpoint events |
+| World | `World.entities` (slot walk), singleton list, `ArenaRegistry` + last per-arena hashes | every frame; entity list virtualized (`ImGuiListClipper`) |
+| Sim | `sim/views.h`: chunk dirty serials, island list, cavity graph, per-pass `ProfNode` times, float-shadow error column (§8) | every frame; the chunk map draws from dirty serials, not rasters |
+| Net | `net/` state (`tl_net` only): peers, RTT, quorum, epoch, log ring, impairment cvars | every frame; desync diff on demand (§9.3.8) |
+
+### 9.5 Tests — `tests/editor/` (in `tl_tests`; panel tests run ImGui headless via a null backend)
+
+| Test | Asserts |
+|---|---|
+| `log_levels_and_compile_out` | each sink filters by its level; a `TL_LOG_TRACE` call site under `TL_LOG_MIN=2` leaves no symbol and does not evaluate its argument (a counter inside the args stays 0); records carry the sim tick; 4097th record overwrites the oldest; `msg` truncation at 223 bytes + NUL |
+| `prof_zero_alloc_and_tree` | 1000 frames of nested scopes: arena-offset delta 0 after the first frame; tree `parent`/`depth` match a known nesting; `t_end ≥ t_begin`; overflow at 8193 scopes counted, not crashed; two workers merge in worker order; `depth == 0` at frame end else fatal (child) |
+| `trace_json_golden` | a fixed 3-frame tree exports byte-identical to `tests/golden/trace_3frames.json` (clock stubbed) |
+| `probe_tsv_golden` | `LOG` every 3 ticks, `ON_CHANGE`, `MARK`, `ASSERT` over 20 ticks → `TL_GOLDEN_TSV("probe_basic")`; summary line values (count/changes/min/max/mean) exact; disabled key emits nothing; a `pos_t` probe prints `%.9g` of raw·2^-18 |
+| `inspector_roundtrip_per_kind` | a test component with one field of every `FieldKind`: the walker (driven through the headless ImGui test engine) edits each field → a `CMD_SET_FIELD` per edit → after the barrier the column holds the value; fx edit of `1.5` into `pos_t` yields raw `0x60000`; handle kinds produce no command |
+| `console_parse` | tokenizer table (quotes, escapes, comment, 17 tokens → error, unterminated quote → error); dispatch with `argc` bounds; completion returns sorted prefix matches; `SIM` cvar set is refused under a lockstep flag and accepted otherwise (as a command) |
+| `dotpath_resolve` | `player.Transform.x`, `#12.Health.hp`, `@PeerSlots.local_slot`, `a.Flags.bits[3]`; unknown entity/component/field → named errors |
+| `desync_diff_known_pair` | two worlds, identical until tick 100, then one receives a poked `Health.hp` (test hook): the diff reports exactly `{arena Health, entity e, field hp, 10, 11}` first; `max_n = 1` returns 1; fingerprint mismatch short-circuits |
+| `crash_report_layout` | `sizeof(CrashHeader) == 368`; a forced `TL_FATAL` in a child writes a `.tlcrash` whose header parses, sections 1/2/3/6 present, total ≤ 16 MB; the log tail's last record is the fatal message |
+| `replay_scrub_exact` | record 300 ticks with keyframes every 60; seek to 175 → restore kf 120 + 55 re-sim ticks; `world_hash(175)` equals the recorded hash; seek to 0 and to 299 likewise |
+
+### 9.6 Build order and done criteria
+
+1. `tl_assert.h`, `tl_log.h` + `log.cpp` (ring + stderr; file sink once `FileApi.append` exists) → `log_levels_and_compile_out`. Needed by every other module's tests — first.
+2. `core/cvar`, `core/crash_report.cpp` + `os_crash_*` → `crash_report_layout` (Windows dumper = `--dump` path in `app/`).
+3. `tl_prof.h` + `prof.cpp`, `trace_export.cpp` → `prof_zero_alloc_and_tree`, `trace_json_golden`; scheduler auto-scopes.
+4. `tl_probe.h` + `probe.cpp` + `--dump-probes` → `probe_tsv_golden`. (Steps 1–4 are what the Alloy harness needs; they precede any sim code.)
+5. `editor/shell.cpp` + `PlatformDevApi` wiring + capture mask; panels **Log**, **Console** (+ cvars), **Inspector** → `inspector_roundtrip_per_kind`, `console_parse`, `dotpath_resolve`; **Profiler**, **Probes**, **World**.
+   **v0 editor done:** those six panels exist; an edit in the inspector appears in the replay log; zero heap allocation per frame outside `pool_vendor` (ImGui's own); `imgui.ini` persists in `pref_path`.
+6. `core/desync_diff.cpp` + `tl_driver --diff` → `desync_diff_known_pair` (lands with the determinism harness, before netcode).
+7. `keyframes.cpp` + **Replay** panel → `replay_scrub_exact`; **Scripts** panel with the Luau layer; **Sim** panel with Milestone 2 views; **Net** panel with Hovel.
+
+---
+
+## 10. Rulings (closed 2026-08-22 — nothing open)
 
 - **R-1 The Inspector is single-select through v0.** Multi-select edit is part of the editor-shell
   seam (`RESERVED-SEAMS.md` §12 — the selection service) and lands with it, not before.

@@ -71,8 +71,10 @@ ErrCode registry_restore(ArenaRegistry*, const Snapshot*);                 // fa
 ### 1.3 Frame/scratch arenas — one per worker thread
 
 `Scratch { VMemArena a; }` with push/pop markers as the everyday API; `reset()` at frame end
-(the main thread's) or at the barrier (workers'). Command buffers, event write buffers,
-broadphase transients, neighbor lists, coarse-sampling grids, and the draw command list live here.
+(the main thread's) or at the barrier (workers'). Command buffers, broadphase transients,
+neighbor lists, coarse-sampling grids, the render packet and the draw command list live here.
+(Event queues do **not** — their read half must outlive the frame; they have a two-half arena of
+their own, `ECS.md` §10.4.)
 Debug: poison `0xDD` on reset. Per-worker scratch is for *allocation locality*; nothing keyed by
 worker identity may be read back into results (`JOBS.md` §1).
 
@@ -182,5 +184,142 @@ render interpolation is snapped. That is the only hook; nothing else may observe
   fingerprinted via the reserve table). `dev` tier: `TL_LOG_WARN` once and grow the ring at the
   next barrier, so a tuning session is not killed by a guess in the reserve table; the warning is
   the signal to raise the budget in `app/`.
+
+## 8. Implementation specification
+
+### 8.1 Files (`src/foundation/`)
+
+| File | Contents |
+|---|---|
+| `vmem_arena.h/.cpp` | `VMemArena`, push/mark/reset/decommit; takes a `const VMemApi*` at init |
+| `arena_registry.h/.cpp` | `ArenaRegistry`, `registry_add/hash_all/snapshot/restore`, `ArenaGuard` |
+| `snapshot.h/.cpp` | `Snapshot`, `SnapshotRing` |
+| `scratch.h` | `Scratch` (a `VMemArena` + marker stack), `TL_SCRATCH_SCOPE` |
+| `handle.h` | `Handle<Tag,IDX,GEN>`, `handle_make/index/gen/is_null` |
+| `mem_pool.h/.cpp` | the vendor-heap pool (§1.5) + the adaptor functions for each vendored lib |
+| `alloc_shim.cpp` | `dev`/`netcode` tiers: global `operator new/delete` → `TL_FATAL`; `malloc` hook counters via the CRT debug hook (Windows) / `__malloc_hook`-free approach: a link-time wrapper (`-Wl,--wrap=malloc` on Linux, detours in the CRT debug heap on Windows) that counts calls per frame |
+
+### 8.2 `VMemArena`
+
+```cpp
+struct VMemArena {
+    u8*  base;        // reserved range start, page aligned
+    u64  reserved;    // bytes reserved
+    u64  committed;   // bytes committed, multiple of COMMIT_GRANULE
+    u64  used;        // bump pointer
+    u64  high_water;  // max(used) ever — memory in [used, high_water) is dirty; [high_water, committed) is OS-zero
+    u32  page;        // OS page size (queried)
+    u32  flags;       // ARENA_POISON (debug), ARENA_ZERO_ON_PUSH
+    NameHash id;
+    const VMemApi* os;
+};
+enum { COMMIT_GRANULE = 64 * 1024 };
+
+ErrCode vmem_arena_init(VMemArena* a, NameHash id, u64 reserve_bytes, u32 flags, const VMemApi* os);
+// reserve_bytes rounded up to page; os->reserve; committed = used = high_water = 0.
+void* arena_push(VMemArena* a, u64 bytes, u32 align) {
+    u64 start = align_up(a->used, align);           // align is a power of two, ≤ page
+    u64 end   = start + bytes;
+    if (end > a->committed) {                        // commit in COMMIT_GRANULE multiples
+        u64 want = align_up(end, COMMIT_GRANULE);
+        if (want > a->reserved) TL_FATAL("arena %s over reserve", name);
+        os->commit(a->base + a->committed, want - a->committed);   // fresh pages are zero (PLATFORM.md §4)
+        a->committed = want;
+    }
+    u8* p = a->base + start;
+    if ((a->flags & ARENA_ZERO_ON_PUSH) && start < a->high_water)  // reused region: not zero
+        memset(p, 0, bytes);                                      // only the dirty part needs it: memset(p, 0, min(bytes, high_water - start))
+    a->used = end; if (end > a->high_water) a->high_water = end;
+    return p;
+}
+u64  arena_mark(const VMemArena* a) { return a->used; }
+void arena_reset_to(VMemArena* a, u64 mark) { TL_ASSERT(mark <= a->used); #if TL_DEBUG memset(base+mark, 0xDD, used-mark); #endif a->used = mark; }
+void arena_decommit_above(VMemArena* a, u64 mark) { u64 p = align_up(mark, COMMIT_GRANULE); if (p < committed) { os->decommit(base+p, committed-p); committed = p; high_water = min(high_water, p); } used = min(used, mark); }
+```
+
+Registered arenas use `ARENA_ZERO_ON_PUSH` (hashed memory must be a pure function of state, so a
+reused byte range is re-zeroed before use); scratch arenas do not (speed; debug poison instead).
+
+### 8.3 `ArenaRegistry`, hashing, snapshots
+
+```cpp
+struct ArenaEntry { NameHash id; VMemArena* arena; u32 flags; u32 _pad0; };
+struct ArenaRegistry { ArenaEntry e[MAX_ARENAS]; u32 count; u8 sealed; u8 _pad[3]; };
+void registry_add(ArenaRegistry* r, NameHash id, VMemArena* a, u32 flags);   // TL_FATAL if sealed or count == MAX_ARENAS
+void registry_seal(ArenaRegistry* r);                                       // after init; registration order frozen; its ids fold into session_fingerprint
+u64  registry_hash_all(const ArenaRegistry* r, u64 out_per_arena[MAX_ARENAS]) {
+    for i in 0..count: out[i] = (e[i].flags & HASHED) ? tl_hash64(e[i].arena->base, e[i].arena->used, TL_HASH_SEED) : 0;
+    return tl_hash64(out, count * 8, TL_HASH_SEED);
+}
+struct Snapshot { u8 session_fingerprint[32]; u64 tick; u32 count; u32 _pad0; u64 used[MAX_ARENAS]; u8* blob; u64 blob_cap; };
+// blob layout: arena 0 [base, used) ‖ arena 1 ‖ … in registry order, each 64-byte aligned
+ErrCode registry_snapshot(const ArenaRegistry* r, Snapshot* s, u64 tick);   // TL_FATAL if Σ used > blob_cap (budget violation, §7 R-2)
+ErrCode registry_restore(ArenaRegistry* r, const Snapshot* s);              // fingerprint + count + ids must match → else ERR_SNAPSHOT_MISMATCH; memcpy back; set used; high_water = max(high_water, used)
+struct SnapshotRing { Snapshot slot[CONFIRMATION_HORIZON_TICKS]; u32 head; u32 count; };
+Snapshot* ring_push(SnapshotRing*, u64 tick);  const Snapshot* ring_find(const SnapshotRing*, u64 tick);
+```
+
+`tl_hash64` = rapidhash (vendored, `foundation/hash.h`) with the pinned seed; `TL_HASH_SEED` from
+`CANON.md`.
+
+### 8.4 The guards
+
+```cpp
+struct ArenaGuard { u64 used_at_start[MAX_ARENAS]; u8 in_barrier; };
+void guard_tick_begin(ArenaGuard*, const ArenaRegistry*);
+void guard_barrier_begin/end(ArenaGuard*);            // the GROWS_AT_BARRIER window
+void guard_tick_end(ArenaGuard*, const ArenaRegistry*);   // for each arena: if used != used_at_start and !(flags & GROWS_AT_BARRIER) → TL_FATAL(name)
+```
+
+`dev`/`debug` only; compiled out elsewhere. The CRT-malloc counter is read at `guard_tick_end`:
+nonzero → `TL_FATAL` in `dev` (vendor libs allocate only through pools, so a CRT malloc during a
+tick is a leak of discipline somewhere).
+
+### 8.5 `Handle`
+
+```cpp
+template <typename Tag, int IDX_BITS, int GEN_BITS> struct Handle {
+    uint_fit<IDX_BITS + GEN_BITS> bits;
+    static constexpr u32 IDX_MASK = (1u << IDX_BITS) - 1, GEN_MAX = (1u << GEN_BITS) - 1;
+};
+template <typename H> constexpr H handle_make(u32 idx, u32 gen);     // gen in [1, GEN_MAX]; TL_ASSERT
+template <typename H> constexpr u32 handle_index(H h), handle_gen(H h);
+template <typename H> constexpr bool handle_is_null(H h) { return h.bits == 0; }
+```
+
+### 8.6 `mem_pool` — the vendor heap
+
+Size classes `16, 32, 64, 128, 256, 512, 1K, 2K, 4K, 8K, 16K, 32K, 64K` (13). Each class owns a
+freelist; class pages are 64 KB carved from the pool's `VMemArena` (`arena_push` on demand, never
+returned). A block has no header — the class is recovered from the 64 KB page's header (first 16
+bytes: `{u16 class; u16 _pad; u32 live; u64 _pad}`; blocks start at offset 64). Allocations
+> 64 KB: a dedicated `arena_push` of `align_up(size + 64, page)` with a 64-byte header `{u64 size;
+u8 large = 1}`; freed by `decommit` of exactly that range (the bump pointer is not moved —
+fragmentation of the *address* space is accepted, pages are returned). `pool_realloc`: same class
+→ return the same pointer; else alloc + memcpy(min) + free. Budget: `pool.budget_bytes` checked
+at page carve; exceeding it returns `NULL` (Luau raises its own memory error; ImGui/SDL assert).
+Stats (`live_bytes`, `peak`, per-class counts) are read by the profiler.
+
+Adaptors (one per vendored lib, in `vendor_glue/`): `tl_luau_alloc(void* ud, void* p, size_t
+osize, size_t nsize)`, `tl_imgui_alloc/free`, `tl_sdl_malloc/calloc/realloc/free`
+(`SDL_SetMemoryFunctions` before `SDL_Init`), `tl_enet_malloc/free` (`ENetCallbacks`),
+`STBI_MALLOC/REALLOC/FREE` macros pointing at the shared pool. Grep rule: `pool_alloc` appears
+only in `mem_pool.cpp` and `vendor_glue/`.
+
+### 8.7 Tests (`tests/foundation/`)
+
+`vmem_arena.test.cpp`: push/align/commit growth, over-reserve fatal-expected, reset poison (debug),
+decommit then re-push is zero, `high_water` re-zero rule; `registry.test.cpp`: hash changes iff
+a registered byte changes (hash-region integrity), snapshot/restore round-trip equality per arena,
+fingerprint mismatch refused, ring push/find/wrap; `guard.test.cpp`: growth outside the barrier →
+fatal-expected, inside → ok; `handle.test.cpp`: make/index/gen, null, gen 0 refused;
+`mem_pool.test.cpp`: every class alloc/free/reuse, large path, realloc same/different class,
+budget → NULL, stats; a Luau VM lifecycle under the pool (in `tests/script/`).
+
+### 8.8 Done criteria
+
+Two worlds' registries in one process hash identically under the dual-sim harness; the
+arena-offset guard passes a 10k-tick headless run; a snapshot restore mid-run reproduces the
+original hash trace from that tick onward.
 
 *Rev 1 — 2026-08-22.*

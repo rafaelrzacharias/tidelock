@@ -98,7 +98,7 @@ Distinct from the snapshot (`MEMORY.md` §5), which is a raw memcpy valid only f
 A **save** must survive a rebuild and a schema edit:
 
 ```
-SaveFile = Header { magic, format_version, build_fingerprint, fx_palette_rev, seed, tick,
+SaveFile = Header { magic, format_version, build_id[32], session_fingerprint[32], seed, tick u64,
                     name_table (interned names used by handles/ids), arena_count }
          + per registered arena: ArenaBlock { arena_name_hash, encoder_kind, byte_len, payload }
 ```
@@ -144,5 +144,93 @@ cross-build load of a fixture saved by the previous commit (a nightly job).
   representable at the row quantum); anything else is a named compile error naming table/row/
   field. Decimal strings are rejected (a second parser for no gain). Computed values must be
   built from integer arithmetic and `fx.raw(bits)` — the data author sees the quantum explicitly.
+
+## 8. Implementation specification
+
+### 8.1 Files
+
+`core/assets.h/.cpp` (registry, `asset_load_*`, `asset_release`, `asset_get`), `core/loaders/image.cpp`
+(stb_image → `DrawApi` texture), `core/loaders/font.cpp` (SDL_ttf face handle; glyph atlas lives in
+`render/text.cpp`), `core/data_tables.h/.cpp` (the compiler/validator + `DataTables`),
+`core/save.h/.cpp` (the save writer/reader over `core/encoder.cpp`).
+
+### 8.2 Asset registry
+
+```cpp
+struct AssetRec { NameHash name; u32 refcount; u32 kind_specific /* texture: DrawApi texture id; font: face index */; u16 w, h; u8 kind; u8 state; u16 _pad; };
+struct AssetRegistry { SlotMap<AssetRec, TexHandle> textures; SlotMap<AssetRec, FontHandle> fonts; Map<NameHash, u32> by_name; VMemArena arena; };
+Result<TexHandle> asset_load_texture(World* w, NameHash name) {
+    if (u32* h = map_get(by_name, name)) { rec.refcount++; return handle; }
+    path = resolve(name)                                   // content root + interned name → StrView; ERR_ASSET_NOT_FOUND
+    bytes = platform->file.read_all(path, main_scratch)    // ERR_FILE_*
+    pixels = stbi_load_from_memory(...)                    // ERR_IMAGE_DECODE; 4 channels forced
+    tex = draw.texture_create(w, h, FMT_RGBA8, /*streaming*/ false); draw.texture_upload(tex, pixels)
+    stbi_image_free → pool; insert rec; map_put; return handle
+}
+```
+
+`asset_release` decrements; at 0 destroys the texture and removes from both maps. `asset_get`
+returns the record pointer or null (stale generation). Streaming textures (§2) are created through
+the same registry with `kind = STREAMING` and no name.
+
+### 8.3 Data-table compiler
+
+```cpp
+struct TableSchema { const ComponentInfo* row; NameHash table_name; u32 max_rows; u32 flags; };   // Alloy registers its schemas in C++; Luau via ecs.component-style declaration
+struct DataTable  { const TableSchema* schema; u8* rows; u32 count; SortedMap<NameHash, u16> by_name; };
+struct DataTables { VMemArena arena /* registered: HASHED|SNAPSHOT */; DataTable t[MAX_TABLES /*64*/]; u32 count; u64 hash; };
+```
+
+`data_compile(World*, Span<StrView> script_paths) → Result<DataTables*>`:
+
+1. Create the data VM (`LUAU-LAYER.md` §1); run each script; each returns a table
+   `{ <table_name> = { {name="granite", ...}, ... }, ... }`.
+2. For each schema in registration order: fetch the Luau array by `table_name`; rows in array
+   order; `count ≤ max_rows` else `ERR_DATA_TOO_MANY_ROWS`.
+3. For each row: allocate `schema->row->size` zeroed bytes; for each `FieldInfo` (declaration
+   order): look up the key by name; missing → the declared default (a per-field default table
+   registered alongside the schema; no default → `ERR_DATA_MISSING_FIELD`); convert by kind:
+   integer kinds require `x == floor(x)` and range; fx kinds accept only the `fx.<row>(literal)`
+   userdata (carrying the raw bits, §7 R-2) or `fx.raw(bits)`; handle/ref kinds accept a string
+   name resolved **after** all tables are loaded (pass 2) → dense id; `StrId` kinds intern.
+   Errors name `table/row-name/field`.
+4. Pass 2: resolve name references across tables (`melt_into = "lava"`), `ERR_DATA_DANGLING_REF`.
+5. Cross-table validators registered by Alloy (`ALLOY.md` §11.1) and by the game run in order;
+   any `ErrCode` aborts with table/row/field.
+6. `hash = tl_hash64` over every table's rows in order (the rows are POD; names are not in the
+   hash — only their resolved ids). Destroy the data VM.
+
+`data.*` Luau bindings read rows by dense id through `FieldInfo` (`LUAU-LAYER.md` §10).
+
+### 8.4 Save format (byte layout)
+
+```
+SaveHeader (WIRE_STRUCT, 160 B): magic "TLSV", format_version u32, build_id[32], session_fingerprint[32],
+    seed u64, tick u64, session_model u32, origin u32, name_table_len u32, arena_count u32, flags u32, _pad
+NameTable: name_table_len × { NameHash h; u16 len; char[len] }        // every interned name referenced by a StrId field
+ArenaBlock × arena_count (registry order):
+    { NameHash arena_id; u8 encoder_kind /* 0 = raw pool rows, 1 = reflected rows, 2 = ECS column, 3 = chunk store */; u8 _pad[3]; u32 byte_len; payload }
+    reflected payload: { u32 field_count; field_count × { NameHash name; u8 kind; u8 _pad; u16 count; u32 size } ; u32 row_count; rows (packed per the field list, little-endian) }
+    ECS column payload: reflected payload + entity list (u32 bits per row)
+    chunk store payload (Alloy terrain): { u32 dirty_chunk_count; per chunk { i32 cx, cy; i16 sdf[128*128]; u8 material[128*128] } }
+Trailer: crc32 over everything after the header
+```
+
+Reader: header checks (magic, version ≤ known, `build_id` differences allowed, `session_fingerprint`
+differences allowed — this is the cross-build path; data-script hash must match after recompiling
+the tables, else `ERR_SAVE_DATA_MISMATCH`); per block, decode by name: for each stored field find
+the live field by `name` (then by alias table `{old_hash → new_hash}` registered per component);
+kind mismatch → `ERR_SAVE_FIELD_KIND` (a versioned migration function may be registered for
+`(component, format_version)` and runs instead); missing live field → skipped; missing stored field
+→ default. Row-level copy is field-by-field through offsets, never memcpy of the row.
+
+### 8.5 Tests (`tests/core/assets/`, `tests/core/data/`, `tests/core/save/`)
+
+Assets: load/dedup/refcount/free/stale; missing file and malformed PNG → named errors (fuzz the
+decoder path under ASan nightly). Data: every error code has a fixture; two compiles of the same
+scripts hash identically in two processes; fx literal acceptance/rejection table; reference
+resolution incl. forward refs; reload emits the sealed command. Save: round-trip equality per
+arena; rename via alias; added field via default; kind change → refusal and → migration fn path;
+truncated/corrupt file refused; nightly cross-build load of the previous commit's fixture.
 
 *Rev 1 — 2026-08-22.*
