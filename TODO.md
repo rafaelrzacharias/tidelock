@@ -40,7 +40,7 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [ ] Containers: `Array/Span`, `SlotMap+Handle` (gen-wrap quarantine), `Map`, `SortedMap/Set`,
       `RingBuffer`, `Bitset`, radix `sort_u32_kv/u64_kv`; `StrView`, interner, `fmt`. Rubric tests
       + two-instance determinism tests.
-- [ ] Keyed RNG (`rng_key/u64/below/q`) + pinned rapidhash + `constexpr` FNV-1a `NameHash` with the
+- [ ] Keyed RNG (`rng_for/below/q/range`) + pinned rapidhash + `constexpr` FNV-1a `NameHash` with the
       debug side-table. Vendor rapidhash.
 - [ ] Determinism harness in the runner: `TL_ASSERT_DETERMINISTIC`, per-arena hash trace compare.
 - [ ] Symbol audit + include firewall wired into CI against the det libs.
@@ -82,10 +82,10 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [ ] `tests/hovel/` throwaway sim (tile grid, pawns, regions via union-find, fx heat field),
       impairment shim, ballast, CSV metrics. Milestone A (PC + Deck + Pi, 1 h, zero divergence).
 - [ ] Milestones B–E per `NETCODE.md` §19.5; S-01..S-15 scenarios; Milestone E = the 10 h soak.
-- [ ] Netcode decisions needing rulings: NAT/signalling (§5.5); combat-design constraints
-      (`AOE_ISLAND_LIMIT`, commitment windows) handed to the game design.
+- [ ] Hand the combat-design constraints (`AOE_ISLAND_LIMIT` = 4, min telegraph 6 ticks, `commit_ticks`)
+      to the game design docs when a game repo exists (NAT is ruled: LAN/direct-IP v1, `NETCODE.md` §5.5).
 
-## Alloy (`docs/ALLOY.md` — headless-first; its own build queue in "Open items & gates")
+## Alloy (`docs/ALLOY.md` — headless-first; its own build queue in "Gates & rulings ledger")
 - [ ] **T-A-01 closure-scoped arena restore prototype — THE GATE for speculation.** Before any
       netcode Phase 3 work.
 - [ ] Alloy test infra: conservation oracles, per-arena hash, run-twice, worker sweep, perf harness.
