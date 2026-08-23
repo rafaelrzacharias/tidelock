@@ -90,6 +90,10 @@ ABI_TOKENS = re.compile(r'\b(long|char|wchar_t|char8_t|char16_t|char32_t'
 # Compile-time wall clock. __FILE__/__LINE__ are deliberately NOT here: they are deterministic
 # given the tree, TL_CHECK expands them into every sim TU, and they never feed sim state.
 BUILD_CLOCK = re.compile(r'\b(__DATE__|__TIME__|__TIMESTAMP__)\b')
+# A wide or unicode literal carries the target's wchar_t/char16_t width with no `wchar_t` token in
+# sight: sizeof(L"x") is 4 on windows-msvc and 8 on linux/aarch64. Text and record layouts are
+# identical, so only a token ban sees it (docs/CPP-SUBSET.md §5).
+WIDE_LITERAL = re.compile(r'(?<![A-Za-z0-9_])(L|u8|u|U)["\']')
 # A hex or octal escape >= 0x80 is a non-ASCII byte the source-character scan cannot see:
 # `"\xE9"[0]` sign-extends where `char` is signed and does not where it is unsigned.
 HIGH_ESCAPE = re.compile(r'\\x[89a-fA-F][0-9a-fA-F]|\\[2-3][0-7][0-7]')
@@ -449,6 +453,10 @@ def check_file(root, path, nondet, errors):
                               "x86-64 and aarch64; use the fixed-width types of docs/CANON.md: %s"
                               % (rel, i, m4.group(1), raw_lines[i - 1].strip()[:60]))
         if is_det_tu:
+            if WIDE_LITERAL.search(code_lines[i - 1] if i - 1 < len(code_lines) else ""):
+                errors.append("%s:%d: wide or unicode literal in a sim TU - it carries the "
+                              "target's wchar_t/char16_t width (docs/CPP-SUBSET.md §5): %s"
+                              % (rel, i, raw_lines[i - 1].strip()[:60]))
             if BITFIELD.search(tline):
                 errors.append("%s:%d: bit-field in a sim TU - the layout differs between "
                               "windows-msvc and linux/aarch64, so the arena bytes differ "

@@ -61,38 +61,17 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [ ] **RR-2 `nightly.yml` / `weekly.yml` (`docs/BUILD.md` §10.4).** Both need self-hosted `pi4`
       and `deck` runners; committing them before the runners exist buys a nightly red build.
       Land them with RR-1.
-- [ ] **RR-4 Replace the source gates with measurement, or keep patching regexes? RULING NEEDED
-      BEFORE THE fx LANE.** Four adversarial reviews have now each found holes in
-      `tools/audit/includes.py`. The fourth measured **14 target-variable constructs that still
-      pass** it - `#pragma pack`, `alignas`, `[[no_unique_address]]`, `#pragma data_seg`, hex
-      escapes (`"é"`), `sizeof(L"x")`, a `size_t`-keyed template, four bit-field spellings,
-      and any platform macro outside a 16-name denylist. The pattern is structural: a regex cannot
-      enumerate this space, and each round the denylist grows by whatever the reviewer thought of.
-      **The proposal survived its own adversarial attack (measured), with one correction that
-      makes it cheaper: it replaces the scanner's LAYOUT/MACRO half, not the scanner.** Token bans
-      and discipline checks stay under every option, so the choice is narrower than "regex or
-      parser". Measured on this tree: preprocess diff 0 lines and layout diff 0 records for the
-      real TUs; 4/4 planted violations caught; false positives 0 after two deterministic
-      normalisations (integer-literal suffixes, and the dump's ABI-specific dsize/nvsize plus
-      resource-dir records). ~90 ms per triple per TU. The Windows leg runs the clang driver with
-      `--target=x86_64-pc-windows-msvc` and a 4-line `<string.h>` stub, so it needs **no sysroot**
-      and does not wait on RR-1 - the claim holds exactly as long as the include allowlist stays
-      freestanding, which the firewall enforces.
-      The reviewer's costed proposal, which I judge correct:
-        (a) **Contract scanning** (the part patched three times, ~150 LOC): replace with libclang -
-            walk `FunctionDecl`/`CXXMethod` cursors at namespace/record scope with
-            `-fparse-all-comments` and check `raw_comment`. ~60 LOC, one wheel in CI, ~1 day.
-        (b) **Target-variable bans**: no scanner of any kind can enumerate them. Replace with
-            *measurement*: per sim TU, `clang -E -P` for the three triples and diff (kills every
-            macro and `#if` hole outright), plus `-Xclang -fdump-record-layouts-complete` for the
-            three triples and diff sizeof/align/offsets (kills every layout hole in any spelling).
-            ~120 LOC, ~150 ms per TU, no sysroot needed.
-        (c) Keep the regex only for line-local token bans (`char`/`long`/`std::`/`asm`/TLS).
-      Decide before fx.h exists: (b) is strictly stronger than the current ruleset and gets cheaper
-      the earlier it lands, while (a)'s failure mode is false positives on exactly the operator and
-      template shapes fx.h is made of. Alternative: accept the 14 holes for W1, ship the regex, and
-      revisit when Alloy's hashed pools make layout drift expensive - record that as the dissent if
-      chosen.
+- [ ] **RR-4 (b) is BUILT** (`tools/audit/targets.py`, `tl_audit_targets`, PR lane). Every sim TU
+      is preprocessed and its record layouts dumped for `x86_64-pc-windows-msvc`,
+      `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`, then diffed. Measured: 0
+      divergences on the real tree, ~75 ms per triple per TU, no sysroot (freestanding headers come
+      from clang's resource dir; `<string.h>` is stubbed with the four declarations `CPP-SUBSET.md`
+      §1 allows). Selftest fixtures prove it catches `[[no_unique_address]]`, `#pragma pack` +
+      `alignas`, bit-fields and a `#ifdef __GNUC__` branch - four constructs no regex caught - and
+      does not fire on ordinary sim code. **Remaining from RR-4: (a)**, the libclang contract
+      scanner, still open below; and the value-divergence classes stay with the token bans by
+      design (`char` signedness, `long`/`size_t` in an expression, wide literals, high escape
+      bytes), which is the split the review's own attack recommended.
 - [ ] **The contract-comment rule is at the limit of a regex.** Three reviews have now found
       false positives and false negatives in `tools/audit/includes.py`'s declaration scanner
       (operators, attributes, template heads, a `(` inside a literal). The token bans are fine as

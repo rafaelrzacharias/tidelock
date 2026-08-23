@@ -7,7 +7,7 @@
 find_program(TL_LLVM_NM NAMES llvm-nm llvm-nm-22 REQUIRED)
 find_program(TL_LLVM_OBJDUMP NAMES llvm-objdump llvm-objdump-22 REQUIRED)
 find_program(TL_LLVM_AR NAMES llvm-ar llvm-ar-22 REQUIRED)
-find_program(TL_CLANGXX NAMES clang++ clang-cl REQUIRED)
+find_program(TL_CLANGXX NAMES clang++ REQUIRED)   # the GNU driver: --target= per triple
 
 # The audit's inputs come from the two global properties tl_register_lib fills, in
 # add_subdirectory order - which is the module DAG bottom-up (docs/ARCHITECTURE.md §1). A lane
@@ -83,6 +83,14 @@ add_custom_target(tl_audit_includes
   COMMENT "audit: include firewall, module DAG, float ban, header contracts"
   VERBATIM)
 
+# Cross-target divergence, measured rather than pattern-matched (docs/CPP-SUBSET.md 5). Needs
+# no sysroot: freestanding headers come from clang's resource dir and <string.h> is stubbed.
+add_custom_target(tl_audit_targets
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/audit/targets.py"
+          --root "${CMAKE_SOURCE_DIR}" --clang "${TL_CLANGXX}"
+  COMMENT "audit: preprocess + record layouts on all three triples"
+  VERBATIM)
+
 add_custom_target(tl_audit_docs
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/docaudit/docaudit.py"
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
@@ -104,4 +112,5 @@ add_custom_target(tl_audit_selftest
   COMMENT "audit: selftest (the gates' planted violations)"
   VERBATIM)
 
-add_custom_target(tl_audit DEPENDS tl_audit_symbols tl_audit_includes tl_audit_docs tl_audit_selftest)
+add_custom_target(tl_audit DEPENDS tl_audit_symbols tl_audit_includes tl_audit_targets
+                                   tl_audit_docs tl_audit_selftest)

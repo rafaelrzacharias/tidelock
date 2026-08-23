@@ -30,6 +30,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang lld llvm
       - name: audit selftest - the gates' own planted violations
         run: python tools/audit/selftest.py
+      - name: cross-target divergence (preprocess + record layouts, three triples)
+        run: python tools/audit/targets.py --root . --clang clang++
       - name: a src/<module>/ change touches that module's doc (or says [docs:none])
         run: python tools/audit/commit_docs.py --base "${{ github.event.pull_request.base.sha || github.event.before }}"
 

@@ -448,6 +448,58 @@ def test_fingerprint(tmp):
            rc != 0 and "not a git repository" in out, out.strip()[:160])
 
 
+# --- targets.py -------------------------------------------------------------------------------
+# The constructs four reviews found and no regex caught. Each is measured on all three triples,
+# so these fixtures are the evidence that measurement beats enumeration - and the clean ones are
+# the evidence it does not cry wolf on ordinary sim code.
+TARGET_CASES = [
+    ("[[no_unique_address]] changes sizeof", "nua",
+     "struct E {};\nstruct V { [[no_unique_address]] E e; u32 x; };\n", "different layout"),
+    ("#pragma pack + alignas changes layout", "pack",
+     "#pragma pack(1)\nstruct P { u8 a; alignas(8) u64 b; };\n#pragma pack()\n", "different layout"),
+    ("a bit-field changes layout", "bits",
+     "struct R { u8 a : 4; u16 c : 8; };\n", "different layout"),
+    ("a compiler-macro branch is two programs", "gnuc",
+     "#ifdef __GNUC__\nu32 k(void) { return 1u; }\n#else\nu32 k(void) { return 2u; }\n#endif\n",
+     "preprocessed source differs"),
+]
+TARGET_CLEAN = ("struct OK { u32 a; u64 b; };\n"
+                "// Ordinary sim code must not read as a divergence.\n"
+                "inline u32 ok_sum(u32 a, u32 b) { return a + b; }\n"
+                "static const u64 MASK = 0xFFFFFFFFULL;\n"
+                "inline u64 ok_mask(u64 v) { return v & MASK; }\n")
+
+
+def test_targets(tmp, cxx):
+    root = fixture_root(tmp, "tgt")
+    tool = os.path.join(AUDIT, "targets.py")
+
+    def run_one(name, body):
+        write(root, "src/sim/%s.cpp" % name,
+              '#include "foundation/tl_types.h"\n' + body)
+        rc, out = run([sys.executable, tool, "--root", root, "--clang", cxx,
+                       "--only", "src/sim/%s.cpp" % name])
+        os.remove(os.path.join(root, "src", "sim", "%s.cpp" % name))
+        return rc, out
+
+    for label, name, body, expect in TARGET_CASES:
+        rc, out = run_one(name, body)
+        record("targets: " + label, rc == 1 and expect in out, out.strip()[:200])
+
+    rc, out = run_one("clean", TARGET_CLEAN)
+    record("targets: ordinary sim code is not a divergence", rc == 0, out.strip()[:300])
+
+    # The filter that reads our own lines out of the preprocessor output is the whole gate: when it
+    # was wrong, every comparison was between two empty lists and everything passed.
+    write(root, "src/sim/marker.cpp",
+          '#include "foundation/tl_types.h"\nu32 marker(void) { return 7u; }\n')
+    rc, out = run([sys.executable, tool, "--root", root, "--clang", cxx,
+                   "--only", "src/sim/marker.cpp"])
+    os.remove(os.path.join(root, "src", "sim", "marker.cpp"))
+    record("targets: our own source reaches the comparison", rc == 0 and "line-marker" not in out,
+           out.strip()[:200])
+
+
 # --- commit_docs.py ---------------------------------------------------------------------------
 def git(repo, *args):
     return run(["git", "-C", repo] + list(args))
@@ -520,6 +572,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="tl_selftest_") as tmp:
         test_includes(tmp)
         test_symbols(tmp, a.nm, a.objdump, a.ar, a.cxx)
+        test_targets(tmp, a.cxx)
         test_tier_parity(tmp)
         test_fingerprint(tmp)
         test_commit_docs(tmp)

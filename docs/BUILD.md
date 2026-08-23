@@ -257,6 +257,14 @@ render/net when their tests are compiled in). `tl_sim` and `tl_foundation_det` c
 - `tools/audit/sysroot_hash.py`: verifies a downloaded sysroot tarball against the pin in
   `toolchain/VERSIONS` before any cross build uses it (R-3).
 - `tools/audit/tier_parity.py`: the §3 netcode/ship flag-parity check, over `compile_commands.json`.
+- `tools/audit/targets.py`: the cross-target divergence gate - `clang -E` and
+  `-Xclang -fdump-record-layouts-complete` for `x86_64-pc-windows-msvc`,
+  `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`, diffed per sim TU. Resource-dir
+  headers are filtered out by following the `# N "file"` markers, integer-literal suffixes are
+  normalised, and the dump's `dsize`/`nvsize` bookkeeping is stripped; measured 0 false
+  positives on this tree. `-nostdlibinc` keeps clang's freestanding headers and `<string.h>` is
+  stubbed with the four declarations `CPP-SUBSET.md` §1 allows, so it needs **no sysroot** and
+  does not wait on R-3. ~75 ms per triple per TU.
 - `tools/audit/selftest.py`: the audits' own negative tests - every gate is run against a planted
   violation in a throwaway tree, plus the no-false-positive fixtures (prose about floats, a
   commented-out include, an all-inline template header) and the win/linux `build_id` equality

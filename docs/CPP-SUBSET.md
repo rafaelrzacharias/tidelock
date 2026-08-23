@@ -136,9 +136,12 @@ anywhere. Rules:
   divergence is treated as UB until proven otherwise.
 - **No pointer comparisons except equality**, no pointer-to-integer keys (ordering by address is a
   nondeterminism source — `DETERMINISM.md` §2).
-- **Target-variable language constructs are banned in sim TUs** (enforced by
-  `tools/audit/includes.py`; each was measured to differ between windows-msvc and linux/aarch64
-  with no UB involved): `char` (signed on x86-64, unsigned on aarch64), `long` (32-bit on Windows,
+- **Target-variable language constructs are banned in sim TUs.** Two gates, split by what each
+  can actually see. **`tools/audit/targets.py` measures** the layout and preprocessor classes -
+  it preprocesses every sim TU and dumps its record layouts for all three triples and diffs, so
+  a `#pragma pack`, an `alignas`, a `[[no_unique_address]]`, a bit-field or any per-target `#if`
+  is caught in *any* spelling rather than by whichever spelling someone listed. **`tools/audit/includes.py` bans the tokens** whose divergence is in the VALUE, over identical
+  text and identical layouts, which no diff can see: `char` (signed on x86-64, unsigned on aarch64), `long` (32-bit on Windows,
   64-bit on Linux), `wchar_t`, and `size_t`/`ptrdiff_t`/`intptr_t`/`max_align_t`; **bit-fields** —
   `struct { u8 a:4; u16 c:8; }` is 4 B on windows-msvc and 2 B on linux/pi, so the arena bytes
   differ; **enums without a fixed underlying type** (measured: in-range enumerators promote to
