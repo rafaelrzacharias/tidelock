@@ -26,12 +26,25 @@ jobs:
         run: git diff --exit-code -- docs/XREF.md
       - name: include firewall + header contracts
         run: python tools/audit/includes.py --root .
-      - name: install clang + llvm (the selftest compiles its fixtures)
-        run: sudo apt-get update && sudo apt-get install -y clang lld llvm
+      - name: install the pinned clang major (the selftest and the cross-target gate need it)
+        # clang 18 - ubuntu-24.04's default - CRASHES dumping record layouts for the
+        # x86_64-pc-windows-msvc triple, which is half of the cross-target gate. This compiler is
+        # not the one that produces binaries, so pinning it here is about capability, not about
+        # docs/BUILD.md §9 R-7.
+        run: |
+          set -eu
+          major=$(awk '$1=="clang"{split($2,v,"."); print v[1]}' toolchain/VERSIONS)
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh "$major"
+          sudo apt-get install -y "llvm-$major" "lld-$major"
+          echo "TL_CXX=clang++-$major" >> $GITHUB_ENV
+          echo "TL_LLVM_BIN=/usr/lib/llvm-$major/bin" >> $GITHUB_ENV
       - name: audit selftest - the gates' own planted violations
-        run: python tools/audit/selftest.py
+        run: |
+          python tools/audit/selftest.py --cxx "$TL_CXX"             --nm "$TL_LLVM_BIN/llvm-nm" --objdump "$TL_LLVM_BIN/llvm-objdump"             --ar "$TL_LLVM_BIN/llvm-ar"
       - name: cross-target divergence (preprocess + record layouts, three triples)
-        run: python tools/audit/targets.py --root . --clang clang++
+        run: python tools/audit/targets.py --root . --clang "$TL_CXX"
       - name: a src/<module>/ change touches that module's doc (or says [docs:none])
         run: python tools/audit/commit_docs.py --base "${{ github.event.pull_request.base.sha || github.event.before }}"
 

@@ -214,22 +214,27 @@ def main():
     if not shutil.which(a.clang):
         sys.exit("targets: %s is not on PATH - the cross-target gate cannot run" % a.clang)
 
-    # The record-layout dump is the half of this gate that no other check replaces, and the flag is
-    # not in every clang. Probe it once, by name, so an unsupported compiler is a named failure
-    # rather than a per-TU mystery. This clang need NOT be the pinned one (docs/BUILD.md §1): the
-    # gate compares targets against each other, it does not produce a shipped binary.
+    # The record-layout dump is the half of this gate that nothing else replaces, and it has to
+    # work FOR EVERY TRIPLE, not just the host's: clang 18 crashes dumping layouts for
+    # x86_64-pc-windows-msvc from Linux, which a host-only probe passed straight over. Probe each
+    # triple by name so an unusable compiler is one named failure instead of one per TU. This
+    # clang need NOT be the pinned major (docs/BUILD.md 1): the gate compares targets against each
+    # other, it does not produce a shipped binary.
     probe = os.path.join(tempfile.gettempdir(), "tl_targets_probe.cpp")
-    open(probe, "w", encoding="utf-8").write("struct S { int a; };\n")
-    rc, _out, err = run([a.clang, "-fsyntax-only", "-std=c++20", "-ffreestanding", "-nostdlibinc",
-                         "-Xclang", "-fdump-record-layouts-complete", probe])
-    if rc != 0:
-        _rc2, ver, _e2 = run([a.clang, "--version"])
-        detail = err.strip().splitlines()[0] if err.strip() else "(no diagnostic)"
-        vline = ver.strip().splitlines()[0] if ver.strip() else "?"
-        sys.exit("targets: %s does not accept -fdump-record-layouts-complete, which this gate "
-                 "depends on.\n    compiler: %s\n    said: %s\n"
-                 "Install a clang that supports it - any recent one will do, it need not be the "
-                 "pinned major." % (a.clang, vline, detail))
+    with open(probe, "w", encoding="utf-8", newline="\n") as f:
+        f.write("struct S { int a; };\n")
+    _rc, ver, _e = run([a.clang, "--version"])
+    vline = ver.strip().splitlines()[0] if ver.strip() else "?"
+    for _tag, triple in TRIPLES:
+        rc, _out, err = run([a.clang, "--target=" + triple, "-fsyntax-only", "-std=c++20",
+                             "-ffreestanding", "-nostdlibinc", "-nostdinc++",
+                             "-Xclang", "-fdump-record-layouts-complete", probe])
+        if rc != 0:
+            detail = [l for l in err.strip().splitlines() if l.strip()]
+            sys.exit("targets: %s cannot dump record layouts for %s, which this gate depends on.\n"
+                     "    compiler: %s\n    said: %s\n"
+                     "Install a clang that can - any recent one will do, it need not be the pinned "
+                     "major." % (a.clang, triple, vline, detail[0] if detail else "(no diagnostic)"))
 
     root = os.path.abspath(a.root)
     sources = [a.only] if a.only else det_sources(root, nondet_stems(root))
