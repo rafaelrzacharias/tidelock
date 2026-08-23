@@ -115,41 +115,46 @@ TL_TEST(fx_div_exhaustive_small_operands, "foundation,fx,fast") {
     TL_EXPECT_EQ(tested, 512u * 511u);
 }
 
+// The skip rate is asserted PER ROW (an aggregate over 16 rows let one vacuous row hide behind
+// fifteen full ones - W1 fx review 3). b is scaled to the shift, so 7 of every 8 pairs fit by
+// construction; the floor is 3/4.
+#define FX_PROPERTY_ROW(FN, R, A, B, SEED, N)                                      \
+    do {                                                                            \
+        u32 tested = 0;                                                             \
+        TL_EXPECT_EQ((FN<R, A, B>(SEED, N, &tested)), 0u);                          \
+        TL_EXPECT_GE(tested, (N) / 4u * 3u);                                        \
+    } while (0)
+
 TL_TEST(fx_mul_property_every_table_row, "foundation,fx,fast") {
     // One million seeded pairs per distinct (format) product of docs/FX-PALETTE.md §3.1.
     const u32 N = 1000000u;
-    u32 tested = 0;
-    TL_EXPECT_EQ((property_mul<pos_t, vel_t, dt_t>(1, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<angle_t, omega_t, dt_t>(2, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<pos_t, invmass_t, lambda_t>(3, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<pos_t, lambda_t, invmass_t>(4, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<pos_t, q_t, pos_t>(5, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<pos_t, pos_t, q_t>(6, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<vel_t, q_t, vel_t>(7, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<vel_t, vel_t, q_t>(8, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<q_t, q_t, q_t>(9, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<scalar_t, q_t, scalar_t>(10, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<scalar_t, scalar_t, q_t>(11, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<vel_t, scalar_t, vel_t>(12, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<vel_t, vel_t, scalar_t>(13, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<q_t, scalar_t, q_t>(14, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<q_t, q_t, scalar_t>(15, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_mul<scalar_t, scalar_t, scalar_t>(16, N, &tested)), 0u);
-    // the skip rate must leave the test meaningful: at least half the pairs were in range
-    TL_EXPECT_GT(tested, 8u * N);
+    FX_PROPERTY_ROW(property_mul, pos_t, vel_t, dt_t, 1, N);
+    FX_PROPERTY_ROW(property_mul, angle_t, omega_t, dt_t, 2, N);
+    FX_PROPERTY_ROW(property_mul, pos_t, invmass_t, lambda_t, 3, N);
+    FX_PROPERTY_ROW(property_mul, pos_t, lambda_t, invmass_t, 4, N);
+    FX_PROPERTY_ROW(property_mul, pos_t, q_t, pos_t, 5, N);
+    FX_PROPERTY_ROW(property_mul, pos_t, pos_t, q_t, 6, N);
+    FX_PROPERTY_ROW(property_mul, vel_t, q_t, vel_t, 7, N);
+    FX_PROPERTY_ROW(property_mul, vel_t, vel_t, q_t, 8, N);
+    FX_PROPERTY_ROW(property_mul, q_t, q_t, q_t, 9, N);
+    FX_PROPERTY_ROW(property_mul, scalar_t, q_t, scalar_t, 10, N);
+    FX_PROPERTY_ROW(property_mul, scalar_t, scalar_t, q_t, 11, N);
+    FX_PROPERTY_ROW(property_mul, vel_t, scalar_t, vel_t, 12, N);
+    FX_PROPERTY_ROW(property_mul, vel_t, vel_t, scalar_t, 13, N);
+    FX_PROPERTY_ROW(property_mul, q_t, scalar_t, q_t, 14, N);
+    FX_PROPERTY_ROW(property_mul, q_t, q_t, scalar_t, 15, N);
+    FX_PROPERTY_ROW(property_mul, scalar_t, scalar_t, scalar_t, 16, N);
 }
 
 TL_TEST(fx_div_property_every_table_row, "foundation,fx,fast") {
     const u32 N = 1000000u;
-    u32 tested = 0;
-    TL_EXPECT_EQ((property_div<q_t, pos_t, pos_t>(21, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_div<q_t, vel_t, vel_t>(22, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_div<q_t, q_t, q_t>(23, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_div<q_t, scalar_t, scalar_t>(24, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_div<pos_t, pos_t, pos_t>(25, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_div<vel_t, vel_t, vel_t>(26, N, &tested)), 0u);
-    TL_EXPECT_EQ((property_div<scalar_t, scalar_t, scalar_t>(27, N, &tested)), 0u);
-    TL_EXPECT_GT(tested, 3u * N);
+    FX_PROPERTY_ROW(property_div, q_t, pos_t, pos_t, 21, N);
+    FX_PROPERTY_ROW(property_div, q_t, vel_t, vel_t, 22, N);
+    FX_PROPERTY_ROW(property_div, q_t, q_t, q_t, 23, N);
+    FX_PROPERTY_ROW(property_div, q_t, scalar_t, scalar_t, 24, N);
+    FX_PROPERTY_ROW(property_div, pos_t, pos_t, pos_t, 25, N);
+    FX_PROPERTY_ROW(property_div, vel_t, vel_t, vel_t, 26, N);
+    FX_PROPERTY_ROW(property_div, scalar_t, scalar_t, scalar_t, 27, N);
     // div ties need a 2^31 divisor, i.e. INT32_MIN: 3*2^30/-2^31 = -1.5 -> -2 (even);
     // 5 -> -2.5 -> -2; -3 -> 1.5 -> 2; -1 -> 0.5 -> 0. Unit quotients are exact.
     TL_EXPECT_EQ(div<q_t>(fx_raw<pos_t>(3), fx_raw<pos_t>(INT32_MIN)).v, -2);

@@ -123,3 +123,36 @@ TL_TEST(fx_review_edge_matrix_in_contract, "foundation,fx,det,fast") {
     TL_EXPECT_EQ(atan2q(fx_raw<q_t>(INT32_MIN), fx_raw<q_t>(INT32_MIN)).v, atan2(fx_raw<pos_t>(INT32_MIN), fx_raw<pos_t>(INT32_MIN)).v);
     TL_EXPECT_EQ(atan2q(fx_raw<q_t>(INT32_MIN), fx_raw<q_t>(1)).v, -QUARTER_TURN.v);
 }
+
+TL_TEST(fx_review_release_error_values, "foundation,fx,det,fast") {
+    // Every documented "with asserts compiled out, returns X" value (fx.h, det_math.h,
+    // fx_float.h). In dev these paths trap (the runner lane's fatal-expected tests, TODO.md);
+    // netcode/ship run this body - before W1 fx review 3 none of them had a test anywhere.
+    // (The generated test list registers every TL_TEST, so the #if is inside the body.)
+#if TL_DEV
+    TL_EXPECT_TRUE(true);                                                               // dev: the trap tier, see TODO.md
+#else
+    TL_EXPECT_EQ(div<q_t>(fx_raw<pos_t>(5), fx_raw<pos_t>(0)).v, INT32_MAX);           // sign(a) * INT32_MAX
+    TL_EXPECT_EQ(div<q_t>(fx_raw<pos_t>(-5), fx_raw<pos_t>(0)).v, -INT32_MAX);
+    TL_EXPECT_EQ(div<q_t>(fx_raw<pos_t>(0), fx_raw<pos_t>(0)).v, 0);
+    TL_EXPECT_EQ(sqrt<pos_t>(fx_raw<pos_t>(-1)).v, 0);                                  // x < 0 -> 0
+    TL_EXPECT_EQ(sqrt<pos_t>(fx_raw<pos2_wide_t>(INT64_MIN)).v, 0);
+    TL_EXPECT_EQ(rsqrt<q_t>(fx_raw<q_t>(0)).v, INT32_MAX);                              // div<R>(1, 0) saturated
+    TL_EXPECT_EQ(atan2q(fx_raw<q_t>(0), fx_raw<q_t>(0)).v, 0);
+    TL_EXPECT_EQ(atan2(fx_raw<pos_t>(0), fx_raw<pos_t>(0)).v, 0);
+    TL_EXPECT_TRUE(normalize(vec2<pos_t>{ fx_raw<pos_t>(0), fx_raw<pos_t>(0) }) == (vec2<q_t>{ fx_raw<q_t>(0), fx_raw<q_t>(0) }));
+    volatile f32 z32 = 0.0f;
+    volatile f64 z64 = 0.0;
+    const f32 nan32 = z32 / z32, inf32 = 1.0f / z32;
+    const f64 nan64 = z64 / z64, inf64 = 1.0 / z64;
+    TL_EXPECT_EQ(from_f32_quantized<pos_t>(nan32).v, 0);                                // NaN -> 0
+    TL_EXPECT_EQ(from_f32_quantized<pos_t>(inf32).v, INT32_MAX);                        // +inf -> clamp
+    TL_EXPECT_EQ(from_f32_quantized<pos_t>(-inf32).v, INT32_MIN);
+    TL_EXPECT_EQ(from_f64_quantized<q_t>(nan64).v, 0);
+    TL_EXPECT_EQ(from_f64_quantized<q_t>(inf64).v, INT32_MAX);
+    TL_EXPECT_EQ(from_f64_quantized<q_t>(-inf64).v, INT32_MIN);
+    // clamp with lo > hi is documented as asserted only: it returns lo for x < lo, else hi for
+    // x > hi, else x - stated here so a change shows up
+    TL_EXPECT_EQ(clamp(fx_int<pos_t>(0), fx_int<pos_t>(5), fx_int<pos_t>(-5)).v, fx_int<pos_t>(5).v);
+#endif
+}
