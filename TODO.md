@@ -144,34 +144,47 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       read (the commercial-thesis gate). `PIVOT-DESIGN.md` §10.
 
 ## W1 fx - NEXT: the adversarial review, then what the other lanes inherit (2026-08-23)
-- [ ] **Adversarial review of W1 fx (`3a35976`..`a45ae57`) - the next thing on the critical
-      path.** `ROADMAP.md` §2: a Fable-lane merge is reviewed by **Fable 5 high in a fresh
-      context**; nothing in W2 ★ gate0 starts on an unreviewed fx. The review's only goal is to
-      break it; the brief the reviewer starts from (`CLAUDE.md` rule 5):
-      1. *Spec read:* `FX-PALETTE.md` §1, §3.1, §10.1-§10.5 against `fx.h`/`fx_palette.h`/
-         `det_math.h`/`det_math.cpp`. Every deviation the lane recorded (RNE Horner steps, the
-         `+-ONE` clamp, the exact-division atan ratio, format-keyed op table, `mul_int`
-         rescale, `fx_float.h` without libm) is a claim to test, not a fact.
-      2. *Edge matrix:* `INT32_MIN` through every helper (`abs`, `sat_neg`, `div` with an
-         `INT32_MIN` divisor, `atan2` with `INT32_MIN` components, `to<R>` at the widen
-         overflow edge, `fx_int`/`fx_lit` at the exact range limits, `rne_shr(x, 62)`,
-         `rne_div` with `d = -1`); `mul_int` at `|k| = INT32_MAX`; `dot`/`len2_wide` at the
-         2^63 saturation edge; `sqrt<R>` where `y + 1` lands on `INT32_MAX + 1`.
-      3. *UB hunt:* run the fx tests under the sanitize-linux preset by hand (CI did, but
-         read the UBSan configuration first); look for any signed left shift, any
-         implementation-defined conversion the subset doc does not sanction, any unsigned
-         wrap the code relies on without saying so.
-      4. *Determinism:* the pinned trace hash `0x1a1803512f224fad` reproduces on clang-cl and
-         ubuntu clang at O0/O1/O2 - attack it on the Pi the moment RR-1 lands; until then,
-         attack the TRACE: does it exercise every helper on every sign/magnitude class?
-      5. *The gates:* three audits passed on the first real code. Plant the clever violation
-         (LESSONS.md): a `§` in a `static_assert` message is caught, but is `u8"..."`? a
-         `char` hidden in a template argument? an `enum class` without a base in a sim TU?
-         `[[no_unique_address]]` inside `vec2`?
-      6. *Tests:* which public function has no test for its error path? (`rsqrt` of 0,
-         `normalize` of 0 and `atan2(0,0)` wait for the runner - everything else must be
-         covered now.) Are the seeded property tests' skip rates reported, not hidden?
-      Verdict + ranked defect list goes into this file; fixes land as `W1 fx review N` commits.
+- [x] **Adversarial review of W1 fx (`3a35976`..`a45ae57`) - DONE 2026-08-23 (Fable 5, fresh
+      context), fixes in `cc104f2` (review 1), `a470abb`+`b83d9af` (review 2), `ad38ed6` (review 3).
+      **Verdict: fix first -> shipped.** The arithmetic core (`rne_shr`/`rne_div`/`mul`/`div`/
+      `mul_int`/`to`, `isqrt`, `sincos`, `atan2`, the vec2 helpers) survived every attack: the
+      executed INT32_MIN / 2^62 / 2^63 edge matrix, the sanitized run (ubuntu clang 18, ASan+UBSan
+      no-recover: zero findings in `src/`), both trace pins on dev/debug/netcode/ship-win + Linux,
+      and every recorded deviation re-derived (RNE Horner steps are sign-symmetric by
+      construction and measured; the `+-ONE` clamp is forced by `sum(SIN_POLY4) == 2^30 + 1`,
+      checked by hand; the exact-division atan ratio is determinism-neutral and atan2 is off the
+      hot path; the format-keyed op table is RR-5; `mul_int`'s rescale is an exact 2-bit widen /
+      RNE 10-bit narrow, tested; the three R-3 symbols match `TOOLING.md` §9). The defects were
+      around it. Ranked (all fixed unless marked):
+      1. **High** `fx_float.h`: the `1.5*2^23` rint magic is exact only for `|s| <= 2^22`; every
+         odd quantum in `[2^22, 2^23)` (pos_t 16..32 m, q_t 2^-8..2^-7) quantised to the even
+         neighbour, and the round-trip test's tolerance of 1 ulp hid exactly that. Non-sim, but
+         `from_f32_quantized` is the INPUT/editor write path.
+      2. **High (gate)** the `sanitize-linux` lane could not fail: UBSan recovers by default, and
+         run 32645441509 printed `det_atan2.test.cpp:78: signed integer overflow` and went green.
+         `-fno-sanitize-recover=all` (`cmake/tier.cmake` - outside the review's file list, edited
+         because the brief named the UBSan configuration; one line, CI-proven).
+      3. **High (gate)** `includes.py` passed `decltype(1.0) x`, `auto y = 0x1p3`, `k * 1e3`,
+         `_Float16`, `decltype(1L) x` in a sim TU - floats and longs with no banned token, and a
+         local never reaches the layout gate. Floating literals, the `_Float*`/`__fp16` family and
+         `L`/`UL` suffixes are banned now (7 negative + 1 clean fixture; 0 hits on the tree).
+      4. **Medium** `atan2` contract `(-1/2, 1/2]` was false: `y < 0, |y|/|x| < ~2^-31` returns
+         `-HALF_TURN` (the lane's own test pinned it). Header + §10.3 now say closed `[-1/2, 1/2]`.
+      5. **Medium** `to<R>` / `mul_int` widening precondition `2^(62-D)` rejected the top bit that
+         fits (`2^(63-D)`): the identity `to<fx<i64,F>>` on INT64_MIN asserted.
+      6. **Medium** no test anywhere for the documented release-tier error values (div by 0,
+         sqrt < 0, rsqrt(0), atan2(0,0), NaN/inf quantisation) - now `fx_review.test.cpp`.
+      7. **Medium** trace A exercised half the helpers (no `to` widening, no `sqrt` at S=18/30, no
+         `rsqrt`/`lerp`/`dot`/`cross`/`len`, no narrowing `mul_int`, no sat tier, div only below
+         1/2): its pin proved less than its name. Trace B (own pin `0x14179b6d064d0ca6`) covers them.
+      8. **Low** property skip counts summed across 16 rows (a vacuous row could hide). Per row now.
+      9. **Low** `det_atan2.test.cpp:78` `INT32_MAX - 1 + 3` (test-code UB; the item-2 report).
+      10. **Low** `FX-PALETTE.md` §4.2 still spelled `isqrt<R>(u64)`; §10.3 is the home.
+      11. **Low, OPEN -> ruling (b) below** §3.1's `div<lambda_t>` over the `fx<i64,30>` XPBD
+          denominator contradicts §10.1's 32-bit-only `div` - the same class as the magnetism line.
+      Not attacked (waits for its lane): the Pi leg of both pins (RR-1); the fatal-expected halves
+      (runner lane). Wart, not a defect: `fx_int<R>(-2^INT_BITS)` is representable but asserts
+      (the contract says `|i| < 2^INT_BITS`; symmetric and documented, left as is).
 - [ ] **Cross-ISA half of `FX-PALETTE.md` §10.6 is open until RR-1**: `fx_trace_hash_pinned`
       reproduces `0x1a1803512f224fad` on clang-cl (dev/debug/netcode/ship) and is in the PR lane
       for ubuntu clang; the Pi leg runs the same test the day a Pi build exists. A mismatch
@@ -190,9 +203,12 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `ALLOY.md` §14.3, but a debug `len2` over an arbitrary pair (ray queries, far-field
       magnetism) must not call it.
       (b) `ALLOY.md` §14.4 magnetism writes `div<q_t>(K_MAG*qi*qj as fx<i64,36>, den)` - an i64
-      quotient. `div<R>` is 32-bit-only at rev 1 (`FX-PALETTE.md` §10.1); that line is either a
-      raw `rne_div` on i64 like the XPBD denominator, or a new op-table row. Decide in the
-      alloy-fields lane, record it in `FX-PALETTE.md` §3.1 first.
+      quotient - and `FX-PALETTE.md` §3.1 itself writes `div<lambda_t>` once over the widened
+      `fx<i64,30>` XPBD denominator (the W1 fx review, defect 11). `div<R>` is 32-bit-only at
+      rev 1 (`FX-PALETTE.md` §10.1), so BOTH lines are today either a raw `rne_div` on the i64
+      bits (the caller spells the shift) or a new `div<R>(A32, B64)` overload listed in the op
+      table. Decide once, in the alloy-solver lane (the first consumer), record it in
+      `FX-PALETTE.md` §3.1 + §10.1 first, then `ALLOY.md` §14.4 cites it.
       (c) `normalize(vec2<pos_t>)` is bounded by the INPUT's quantisation: `|u|^2 - 1` is
       within `2^30/|d| + 4` ulp, so a contact normal from a 4-quantum difference is a 25%
       vector. The SDF gradient path (`ALLOY.md` §3.2, R-2 of `FX-PALETTE.md` §9) normalises
