@@ -87,7 +87,9 @@ q_t sin(angle_t a);
 // cos(a) alone; same contract as sincos.
 q_t cos(angle_t a);
 
-// Angle of the vector (x, y) in turns, in (-HALF_TURN, HALF_TURN]. Octant reduction on
+// Angle of the vector (x, y) in turns, in [-HALF_TURN, HALF_TURN] - CLOSED at both ends: y < 0
+// with |y| / |x| below ~2^-31 rounds to -HALF_TURN, the same angle as +HALF_TURN mod one turn
+// (mask with TURN.v - 1 before comparing angles; never test == HALF_TURN). Octant reduction on
 // (|y|, |x|), one exact RNE ratio, the FixPointCS polynomial (coefficients pre-scaled to turns),
 // unfold. Max |err|: FX_ATAN2_MAX_ERR_ULP. Axes and diagonals are exact; atan2(-y, x) ==
 // -atan2(y, x) and atan2(x, y) == 1/4 - atan2(y, x) (mod 1) bit-exactly. atan2(0, 0) asserts

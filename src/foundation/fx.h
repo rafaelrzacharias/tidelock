@@ -267,9 +267,13 @@ constexpr bool is_zero(fx<Rep, F> a) { return a.v == 0; }
 template <typename R, typename A>
 constexpr R to(A x) {
     constexpr int D = R::FRAC_BITS - A::FRAC_BITS;
-    if constexpr (D >= 0) {
+    if constexpr (D == 0) {
+        return fx_raw<R>(typename R::rep(x.v));                    // same point: the identity, any rep
+    } else if constexpr (D > 0) {
         static_assert(D <= 62, "");
-        TL_ASSERT(i64(x.v) > -(i64(1) << (62 - D)) && i64(x.v) < (i64(1) << (62 - D)));
+        // |x.v| * 2^D must fit i64, i.e. |x.v| < 2^(63 - D). (62 - D rejected the top bit of the
+        // i64 locals: the identity on a fx<i64,F> holding INT64_MIN asserted - W1 fx review 1.)
+        TL_ASSERT(i64(x.v) > -(i64(1) << (63 - D)) && i64(x.v) < (i64(1) << (63 - D)));
         const i64 w = i64(x.v) * (i64(1) << D);
         TL_ASSERT(fx_fits<R>(w));
         return fx_raw<R>(typename R::rep(w));
@@ -335,9 +339,11 @@ constexpr R mul_int(A a, i32 k) {
     constexpr int D = R::FRAC_BITS - A::FRAC_BITS;
     const i64 p = i64(a.v) * i64(k);                      // |p| <= 2^62: exact
     i64 q = 0;
-    if constexpr (D >= 0) {
+    if constexpr (D == 0) {
+        q = p;
+    } else if constexpr (D > 0) {
         static_assert(D <= 31, "");
-        TL_ASSERT(p > -(i64(1) << (62 - D)) && p < (i64(1) << (62 - D)));
+        TL_ASSERT(p > -(i64(1) << (63 - D)) && p < (i64(1) << (63 - D)));   // p * 2^D fits i64
         q = p * (i64(1) << D);
     } else {
         q = rne_shr(p, -D);

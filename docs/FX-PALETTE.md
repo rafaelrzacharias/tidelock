@@ -164,7 +164,7 @@ template <typename R, typename A> R   rsqrt(A x);          // = div<R>(one, sqrt
 q_t sin(angle_t a);  q_t cos(angle_t a);  void sincos(angle_t a, q_t* s, q_t* c);
 angle_t atan2(pos_t y, pos_t x);                           // also a q_t overload
 template <typename R, typename A> R   lerp(A a, A b, q_t t);
-template <typename R> R               isqrt(u64 x);        // plain integer sqrt for quanta paths (geometric-mean conductivity)
+u32 isqrt32(u32 x);  u64 isqrt64(u64 x);                  // plain integer floor sqrt for quanta paths (§10.3 is the signature's home)
 ```
 
 **One deliberate deviation from the references: turns make range reduction exact.** Radian APIs
@@ -420,8 +420,10 @@ overshoots by one ulp at `±1` (`P(1) = ONE + 1` with the verbatim coefficients)
 not), the FixPointCS `AtanPoly5Lut8` polynomial on `z ∈ [0, 1]` (eight segments by `z >> 27`
 plus the `atan(1)` row; coefficients pre-scaled by `1/(2π)` at 60 digits by
 `tools/fxcheck/oracle.py`, so the result is in turns directly — no runtime radian conversion),
-then octant unfold (`quarter − r`, `half − r`, negate for `y < 0`), result in `(−½, ½]`.
-`atan2(0, 0)` returns 0 with a `TL_ASSERT`. Axes and diagonals are exact.
+then octant unfold (`quarter − r`, `half − r`, negate for `y < 0`), result in `[−½, ½]` —
+closed at both ends (`y < 0` with `|y|/|x|` below ~2⁻³¹ rounds to `−½`, the same angle as `+½`
+mod one turn; compare angles masked, never `== HALF_TURN`). `atan2(0, 0)` returns 0 with a
+`TL_ASSERT`. Axes and diagonals are exact.
 
 Vectors: `template <typename T> struct vec2 { T x, y; }` with `+`/`-` per format, `dot<R>`,
 `cross<R>` (both `mul_wide` sums in `i64`, one `rne_shr`), `len2_wide(vec2<pos_t>) → i64` (Q36),
@@ -437,8 +439,11 @@ vec2<q_t>` (two `div<q_t>` by `len`; zero → `(0,0)` + assert), `rotate(vec2<po
 `f * 2^FRAC` to an integer, range-clamped, with a `TL_ASSERT` on NaN/inf. **No `<math.h>`**:
 `CPP-SUBSET.md` §1 allows it only in `render/`/`editor/`/`platform/` and the include gate
 enforces that for `foundation/` too, so the rounding is the libm-free identity
-`(s + 1.5·2^23) − 1.5·2^23` (f64: `1.5·2^52`), exact under the default rounding mode - which is
-guaranteed because `-ffast-math` is banned everywhere (`CPP-SUBSET.md` §7).
+`(|s| + 2^23) − 2^23` applied per sign (f64: `2^52`), exact under the default rounding mode -
+which is guaranteed because `-ffast-math` is banned everywhere (`CPP-SUBSET.md` §7). Not the
+sign-free `1.5·2^23` magic: it is exact only for `|s| ≤ 2^22` (above, `s + 1.5·2^23 ≥ 2^24`
+where the spacing is 2) and the W1 fx review measured every odd integer in `[2^22, 2^23)`
+coming back even.
 
 ### 10.5 Tests (`tests/foundation/`)
 

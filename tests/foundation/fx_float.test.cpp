@@ -57,8 +57,10 @@ TL_TEST(fx_float_quantize_rne_and_clamp, "foundation,fx,fast") {
         if (from_f64_quantized<q_t>(to_f64(fx_raw<q_t>(r))).v != r) ++bad;
         const i32 back = from_f32_quantized<pos_t>(to_f32(fx_raw<pos_t>(r))).v;
         const i64 ar = r < 0 ? -(i64)r : (i64)r;
-        i64 tol = 1;
-        while ((ar >> 24) >= tol) tol *= 2;          // f32 has 24 bits: the quantum grows with |r|
+        // f32 has 24 bits: below 2^24 the round trip is EXACT (a tolerance of 1 here hid the
+        // 1.5 * 2^23 rint bug for a whole octave - W1 fx review 1); above, half the spacing.
+        i64 tol = 0;
+        if (ar >= ((i64)1 << 24)) { tol = 1; while ((ar >> 25) >= tol) tol *= 2; }
         if (!fx_near_raw(back, r, tol)) ++bad;
     }
     TL_EXPECT_EQ(bad, 0u);

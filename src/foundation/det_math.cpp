@@ -124,7 +124,7 @@ static i64 atan_unit_turns(i64 z) {
 }
 
 // Octant reduction on raw magnitudes (i64 so INT32_MIN negates cleanly), one exact RNE ratio,
-// the polynomial, unfold. Result in (-HALF_TURN, HALF_TURN].
+// the polynomial, unfold. Result in [-HALF_TURN, HALF_TURN] (closed: z == 0 with x < 0, y < 0).
 static i32 atan2_raw(i64 y, i64 x) {
     TL_ASSERT(!(x == 0 && y == 0));
     if (x == 0 && y == 0) return 0;

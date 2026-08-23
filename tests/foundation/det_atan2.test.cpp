@@ -63,7 +63,7 @@ static u32 check_symmetries(i32 y, i32 x) {
         const i32 t = atan2q(fx_raw<q_t>(x), fx_raw<q_t>(y)).v;
         if (((u32)t - (u32)(QT - r)) & ((1u << 30) - 1u)) ++bad;
     }
-    if (r > HT || r <= -HT) ++bad;                                                           // range (-1/2, 1/2]
+    if (r > HT || r < -HT) ++bad;                                                            // range [-1/2, 1/2] (closed; det_math.h)
     return bad;
 }
 
@@ -75,9 +75,10 @@ TL_TEST(det_atan2_symmetries_seeded, "foundation,fx,det,fast") {
     static const i32 mags[] = { 1, 5, 1 << 10, 1 << 20, 1 << 29, (1 << 30) - 1, 1 << 30, INT32_MAX - 1 };
     for (i32 m : mags) {
         for (i32 d = -3; d <= 3; ++d) {
-            if (m + d <= 0) continue;
-            bad += check_symmetries(m + d, m);
-            bad += check_symmetries(m, m + d);
+            const i64 md = (i64)m + d;                   // i64: INT32_MAX - 1 + 3 overflowed i32 (UBSan, W1 fx review 1)
+            if (md <= 0 || md > INT32_MAX) continue;
+            bad += check_symmetries((i32)md, m);
+            bad += check_symmetries(m, (i32)md);
             bad += check_symmetries(d, m);
             bad += check_symmetries(m, d);
         }
