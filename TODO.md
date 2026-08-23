@@ -143,6 +143,18 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [ ] A jam-scale C++/Luau/SDL probe, no engine; deliverable = one 15-second clip a stranger can
       read (the commercial-thesis gate). `PIVOT-DESIGN.md` §10.
 
+## W1 fx - what the next lanes inherit (2026-08-23)
+- [ ] **Cross-ISA half of `FX-PALETTE.md` §10.6 is open until RR-1**: `fx_trace_hash_pinned`
+      reproduces `0x1a1803512f224fad` on clang-cl (dev/debug/netcode/ship) and is in the PR lane
+      for ubuntu clang; the Pi leg runs the same test the day a Pi build exists. A mismatch
+      there is UB until proven otherwise (`TESTING.md` §4).
+- [ ] `tools/fxcheck` is not in CI yet: it is a separate CMake project (`cmake -S tools -B
+      out/tools`), ~4 min in full. Add a nightly step (`fxcheck` + `oracle.py check-coeffs` +
+      `oracle.py verify worst.tsv`) with RR-2's `nightly.yml`; `--quick` (~3 s) could sit in the
+      PR lane today.
+- [ ] `tests/foundation/fx_test_util.h` carries a local splitmix64 - replace with `rng_for`
+      from the rng/hash lane when it lands (same mix; the seeds are arbitrary).
+
 ## Foundation week(s) (`docs/MEMORY.md`, `CONTAINERS.md`, `DETERMINISM.md`, `TESTING.md`)
 - [ ] Finish the test runner (`tests/runner`; W0 shipped the stub — generated list, tags/filter,
       `--isolate` one child per test, TSV + JUnit): `NEAR_FX`, `SPAN_EQ`/`MEM_EQ`,
