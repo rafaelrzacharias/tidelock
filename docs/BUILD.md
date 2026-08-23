@@ -150,7 +150,9 @@ Durable context lives in committed files only (`docs/`, `TODO.md`, `LESSONS.md`)
 
 - **R-4 The offline tools are Python, not C++, until one of them needs to link a vendored
   library.** `fingerprint`, `audit/*` and `rebuild_budget` are `tools/*.py`; `luauc` (links the
-  Luau compiler) and `fxcheck` (links `fx.h` + MPFR) will be C++ in `tools/CMakeLists.txt`. This
+  Luau compiler) and the exhaustive/differential half of `fxcheck` (links `fx.h` + the vendored
+  FixPointCS) are C++ in `tools/CMakeLists.txt`; `fxcheck`'s arbitrary-precision oracle is
+  Python + `mpmath` (`FX-PALETTE.md` §4.4) — nothing vendors MPFR. This
   answers what `build_id` gets BLAKE2b-256 from: `hashlib`, not a second copy of Monocypher
   vendored a wave early — the fingerprint is computed offline and only its 32 bytes reach the
   binary, so nothing links a hash implementation for it. Alternatives rejected: a C++ tool with a

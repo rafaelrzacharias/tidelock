@@ -189,11 +189,25 @@ side (2D rigid transforms are `(pos, sin, cos)`); `mat3` lives render-side in fl
    minutes offline per function; no sampling.
 2. **Differential** vs vendored FixPointCS (tools-only, C#/C++ reference) on its native Q32.32 /
    Q16.16 — proves the port.
-3. **Error-vs-MPFR/double bounds**, using fpm's published accuracy-test methodology as the template;
-   bounds recorded in the header next to each kernel.
+3. **Error bounds at arbitrary precision** — `tools/fxcheck/oracle.py`, Python + `mpmath` at 60
+   digits (`BUILD.md` §9 R-4: offline tools are Python until one must link a vendored library;
+   MPFR is not vendored and a hand-rolled oracle would be worth nothing as a check on the thing
+   it checks). It emits the coefficient block (verbatim sin integers; the atan table pre-scaled
+   to turns) and re-checks it in CI, emits the correctly-rounded reference tables the fast tests
+   use, and re-evaluates the worst cases layer 1 reports. Bounds are recorded as constants in
+   `det_math.h` (`FX_*_MAX_ERR_ULP`) and asserted by the tests.
 
-Plus the PC-vs-Pi cross-compiled bit-compare (`TESTING.md` §4). These run in `tools/fxcheck/`
-(exempt from the subset — may use doubles, MPFR, and C++ freely).
+Layers 1–2 are C++ (`tools/fxcheck/fxcheck.cpp`, vendored FixPointCS under
+`tools/fxcheck/vendor/`), exempt from the subset. Plus the PC-vs-Pi cross-compiled bit-compare
+(`TESTING.md` §4).
+
+**Measured at rev 1 (2026-08-23, exhaustive):** `sin`/`cos` max |err| **9.06 ulp** of `q_t`
+(the reference `SinPoly4` is "27.13 bits" — 7.3 ulp of Q30 — before our RNE steps); `sin²+cos²`
+within 18 ulp; `atan2` max 4.34 ulp (2²⁴ samples + every octant boundary) and `atan2(sin a,
+cos a)` returns `a` within 4 ulp; `sqrt` is correctly rounded (0.5 ulp) by construction. The
+symmetries (`sin(−a) = −sin a`, `sin(a+¼) = cos a`, `atan2(x,y) = ¼ − atan2(y,x)`) are
+bit-exact, which the reference's truncating `Qmul30` does not give. A tighter sine is a ruling
+(`TODO.md`), not a quiet refit: FixPointCS ships nothing better, so it would be a bespoke kernel.
 
 ---
 
@@ -390,19 +404,24 @@ angle_t atan2(pos_t y, pos_t x);  angle_t atan2q(q_t y, q_t x);
 template <typename R> R lerp(R a, R b, q_t t);                   // a + mul<R>(to<q_t>… no: a + mul<R>(b − a, t) — (b−a) is R, t is q_t, listed in the op table
 ```
 
-**`sincos` in turns.** `u32 t = u32(a.v) & (TURN.v − 1)` (exact range reduction by masking);
-quadrant `k = t >> 28`; phase `p = t & ((1u << 28) − 1)` is Q28 in `[0, 1)` of a quarter turn;
-`z = p` for quadrants 0 and 2, `z = (1 << 28) − p` for 1 and 3. Evaluate the **FixPointCS
-quarter-wave polynomial** (`Fixed32`'s `SinPoly4` family — the coefficients are copied verbatim
-from the reference with the MIT notice, converted once to Q30 by `tools/fxcheck`, committed as
-constants) by Horner in `i64` on `z` rescaled to the reference's input domain; `sin = ±P(z)`,
-`cos = sin(a + quarter turn)` computed from the same reduction (`k+1`). Sign table by quadrant.
-Output `q_t`; `sin(0)` is exactly 0, `sin(quarter)` exactly `q_t::ONE` (asserted).
+**`sincos` in turns.** `z = i32(u32(a.v) << 2)` is the angle in quarter turns, Q30, mod 2³² —
+the integer turns fall off the top, which *is* the range reduction (exact); it is also exactly
+the reference's `UnitSin` input domain, so the port is the reference's own mirroring (quadrants
+1–2 → `2 − z`, wrapping) and its quarter-wave polynomial (`FixedUtil::SinPoly4`, coefficients
+verbatim, committed by `tools/fxcheck/oracle.py emit-coeffs` and re-checked by `check-coeffs`),
+`sin = P(z²)·z`, `cos = sin(z + quarter)`. Two deviations, both measured: every Horner step
+rounds with `rne_shr` rather than the reference's truncating `Qmul30` (odd symmetry becomes
+bit-exact, the downward bias goes), and the result is clamped to `±ONE` because the reference
+overshoots by one ulp at `±1` (`P(1) = ONE + 1` with the verbatim coefficients). Output `q_t`;
+`sin(0)` is exactly 0, `sin(quarter)` exactly `q_t::ONE`, `|sin| ≤ ONE` always.
 
-**`atan2`.** Octant reduction on `(|y|, |x|)` to a ratio `z = min/max` via one `div<q_t>`, the
-FixPointCS `Atan` polynomial on `z ∈ [0, 1]` (coefficients pre-scaled by `1/(2π)` in
-`tools/fxcheck` so the result is in turns directly — no runtime radian conversion), then octant
-unfold (`quarter − r`, `half ± r`, negate for `y < 0`). `atan2(0, 0)` returns 0 with a `TL_ASSERT`.
+**`atan2`.** Octant reduction on `(|y|, |x|)` (as i64, so `INT32_MIN` negates) to a ratio
+`z = min/max` via one exact `rne_div` (the reference uses a reciprocal polynomial here; we do
+not), the FixPointCS `AtanPoly5Lut8` polynomial on `z ∈ [0, 1]` (eight segments by `z >> 27`
+plus the `atan(1)` row; coefficients pre-scaled by `1/(2π)` at 60 digits by
+`tools/fxcheck/oracle.py`, so the result is in turns directly — no runtime radian conversion),
+then octant unfold (`quarter − r`, `half − r`, negate for `y < 0`), result in `(−½, ½]`.
+`atan2(0, 0)` returns 0 with a `TL_ASSERT`. Axes and diagonals are exact.
 
 Vectors: `template <typename T> struct vec2 { T x, y; }` with `+`/`-` per format, `dot<R>`,
 `cross<R>` (both `mul_wide` sums in `i64`, one `rne_shr`), `len2_wide(vec2<pos_t>) → i64` (Q36),
@@ -428,14 +447,17 @@ guaranteed because `-ffast-math` is banned everywhere (`CPP-SUBSET.md` §7).
 | `fx_rne.test.cpp` | `rne_shr` tie table (±half, even/odd) for s = 1..62; exhaustive on 16-bit inputs |
 | `fx_mul_div.test.cpp` | exhaustive small-operand `mul<R>`/`div<R>` (8-bit × 16-bit raw, every 16-bit-shift entry; 9-bit × 9-bit quotients) and property (1M seeded pairs) for every distinct format triple of the op table, both vs an **exact integer** rational reference written sign-magnitude style (a `double` loses bits above 2^53; the reference does not) — bit-equal, not "≤ ½ ulp"; `div` ties (an `INT32_MIN` divisor is the only way to make one); `sat_*`/`wrap_*` clamps and wraps at every boundary; `mulhi64` vs the compiler's 128-bit product. `div` by zero → fatal-expected **lands when the runner lane ships `TL_TEST_EXPECT_FATAL`** (`TODO.md`) |
 | `fx_palette.test.cpp` | every `static_assert` derivation re-checked at runtime; `H`, `G_SUBSTEP`, `TEXEL` raw values equal the documented constants |
-| `det_sqrt.test.cpp` | `isqrt32` exhaustive (2³² in ~2 min, `slow` tag); `sqrt<pos_t>` nearest property vs `isqrt64` |
-| `det_trig.test.cpp` | `sincos` exhaustive over all 2³⁰ turn fractions (`slow`): |err| ≤ 2 ulp of `q_t` vs the MPFR table emitted by `tools/fxcheck`; exact values at 0, ¼, ½, ¾; `sin²+cos²` within 4 ulp; symmetry identities bit-exact |
-| `det_atan2.test.cpp` | 2²⁴ seeded samples + every octant boundary; `atan2(sin a, cos a) == a` within 2 ulp for all 2¹⁶ sampled `a` |
-| `det_vec.test.cpp` | `normalize` length within 2 ulp; `rotate` by quarter turns exact; zero-vector assert |
+| `det_sqrt.test.cpp` | `isqrt32` exhaustive (2³² in ~1 min, `slow` tag) and every perfect square ± 1 at both widths; `sqrt<R>` nearest property as an exact integer inequality (no reference needed) over 2²⁰ seeded inputs per shift (0, 18, 30); `rsqrt` = `div` of `sqrt` |
+| `det_trig.test.cpp` | exact points (0, ¼, ½, ¾, ±turns, `INT32_MIN`); every symmetry bit-exact over 2²⁰ seeded angles (fast) and all 2³⁰ (`slow`); `sin²+cos²` within `FX_SIN2COS2_MAX_ERR_ULP`; monotone per quadrant; vs the correctly-rounded mpmath table at 4096 turn fractions within `FX_SIN_MAX_ERR_ULP`. The true-error sweep over all 2³⁰ inputs is `tools/fxcheck` (nightly) — a 2³⁰-entry table cannot be committed; its measured bound is the constant the tests assert |
+| `det_atan2.test.cpp` | axes/diagonals exact at every magnitude incl. `INT32_MIN`; mirror/swap symmetries bit-exact over 2²⁰ seeded pairs + octant neighbourhoods; `atan2(sin a, cos a) == a` within `FX_ATAN2_ROUNDTRIP_MAX_ERR_ULP` for all 2¹⁶ grid angles; vs the mpmath table at 4096 ratios. The 2²⁴-sample true-error sweep is `tools/fxcheck` |
+| `det_vec.test.cpp` | `dot`/`cross` vs the exact product (seeded), `len` 3-4-5 exact, `normalize` within the input-quantisation bound (`2³⁰/|d|` + 4 ulp — a short vector cannot normalise better than its own quantum), `rotate` by quarter turns exact and round-trip within 3 quanta, `lerp` ties. Zero-vector assert: fatal-expected, pending the runner (`TODO.md`) |
 | `fx_crossisa` (driver job) | a 1M-op trace (`mul/div/sqrt/sincos/atan2` over seeded inputs) hashed on PC and Pi — identical |
 
-`tools/fxcheck/` (exempt from the subset; C++ with MPFR or `long double`): emits the coefficient
-constants, the MPFR reference tables, and the differential run against vendored FixPointCS.
+`tools/fxcheck/` (exempt from the subset): `fxcheck.cpp` (C++, `long double` reference) is the
+exhaustive + differential layers — `cmake -S tools -B out/tools && cmake --build out/tools &&
+out/tools/fxcheck [--quick]`, nightly in full (~4 min), `--quick` anywhere; `oracle.py` (mpmath)
+emits/checks the coefficients, emits `tests/foundation/det_ref_tables.inc`, and `verify`s the
+worst cases `fxcheck` writes to `worst.tsv`.
 
 ### 10.6 Done criteria
 

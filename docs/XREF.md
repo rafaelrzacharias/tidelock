@@ -44,7 +44,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `BUILD.md` -> §3
 - `CPP-SUBSET.md` -> §1
 - `ECS.md` -> §5
-- `FX-PALETTE.md` -> §5
+- `FX-PALETTE.md` -> §5, §9
 - `GATE0-BENCH.md` -> §2
 - `LUAU-LAYER.md` -> §5
 - `NETCODE.md` -> §5, §9
@@ -123,6 +123,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 
 ## FX-PALETTE.md
 - `ALLOY.md` -> §1, §3, §3.1, §9
+- `BUILD.md` -> §4.4
 - `CANON.md` -> §3
 - `ECS.md` -> §6
 - `FRAME-LOOP.md` -> §2

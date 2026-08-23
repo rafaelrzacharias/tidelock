@@ -13,9 +13,9 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       (W1 fx, 2026-08-23; the fatal-expected halves wait for the runner, below.)
 - [x] `fx_palette.h` — the rev-1 rows, derivation `static_assert`s, mixed-op instantiations, world
       constants, `H`/`G_SUBSTEP`; `FX_PALETTE_REV`. (W1 fx, 2026-08-23.)
-- [ ] `det_math.h` — `sqrt`/`rsqrt`/`sincos`/`atan2`/`isqrt`/`lerp`, `vec2<T>`, normalize/rotate;
+- [x] `det_math.h` — `sqrt`/`rsqrt`/`sincos`/`atan2`/`isqrt`/`lerp`, `vec2<T>`, normalize/rotate;
       FixPointCS ports attributed; `tools/fxcheck/` three-layer oracle (exhaustive + differential +
-      MPFR bounds) green for `sqrt`/`sin`/`cos`.
+      mpmath bounds) green for `sqrt`/`sin`/`cos`. (W1 fx, 2026-08-23; bounds in `det_math.h`.)
 - [ ] `tests/gate0/` — disposable solver (gravity, rigid boxes, distance + contact + friction, PBF
       density), scenarios G-01..G-06, substep sweep 4/8/16, CSV + verdict lines, FLOAT-SHADOW config.
 - [ ] Run on PC; cross-compile + run on Pi 4 (`docs/BUILD.md` §7); commit CSVs under
@@ -24,6 +24,13 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `PIVOT-DESIGN.md` §3.1b/§12 updated + `LESSONS.md` entries per rung climbed.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **RR-6 A tighter sine?** Measured (`FX-PALETTE.md` §4.4): the ported `SinPoly4` gives
+      max 9.06 ulp of `q_t` (its documented 27.13 bits), not the 2 ulp §10.5 had guessed; the
+      reference ships nothing better (its 64-bit `Sin` uses the same polynomial). At 1 m lever
+      arm that is 8 nm - 1/450 of a `pos_t` quantum - so it is below anything Gate 0 can see.
+      Options if a consumer ever needs more: a degree-5/6 minimax fit (bespoke - would need its
+      own oracle run, which `tools/fxcheck` now provides), or a 2^k-entry table + linear
+      interpolation. Not before a consumer names the need.
 - [ ] **RR-5 Tagged palette rows?** `fx<Rep,FRAC>` keys a row by format, so `pos_t`/`invmass_t`,
       `q_t`/`stiff_t`/`angle_t`/`dt_t`, `vel_t`/`omega_t` and `scalar_t`/`lambda_t` are one C++
       type each: `pos_t + invmass_t` compiles, and the §3.1 op table collapses to format triples

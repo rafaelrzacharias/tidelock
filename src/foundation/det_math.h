@@ -61,10 +61,26 @@ inline R rsqrt(A x) {
 
 // --- trigonometry in turns (det_math.cpp) ---------------------------------------------------
 
+// Measured error bounds, in ulps of the result format (q_t / angle_t, 2^-30), over the WHOLE
+// input domain: tools/fxcheck sweeps all 2^30 turn fractions for sin/cos and 2^24 seeded pairs
+// plus every octant boundary for atan2, against a long double reference, and
+// tools/fxcheck/oracle.py re-evaluates the argmax at 60 digits (2026-08-23, W1 fx lane). The
+// tests assert against these; re-measure and re-pin them whenever a coefficient changes.
+//   sin/cos      : max |err| 9.0584 ulp at raw 759040234 (the reference polynomial is "27.13
+//                  bits" = 7.3 ulp of Q30, plus the RNE steps). docs/FX-PALETTE.md section
+//                  10.5's 2-ulp figure was unattainable with SinPoly4; a tighter kernel is a
+//                  ruling (TODO.md).
+//   sin^2 + cos^2: within 18 ulp of 1 (two ~9-ulp kernels, doubled by the squaring).
+//   atan2        : max |err| 4.3359 ulp (2^24 samples); atan2(sin a, cos a) returns a within 4.
+constexpr i32 FX_SIN_MAX_ERR_ULP             = 10;
+constexpr i32 FX_SIN2COS2_MAX_ERR_ULP        = 19;
+constexpr i32 FX_ATAN2_MAX_ERR_ULP           = 5;
+constexpr i32 FX_ATAN2_ROUNDTRIP_MAX_ERR_ULP = 5;
+
 // sin and cos of a in one reduction. a is reduced mod 1 turn by masking (exact), so any
-// angle_t value is valid. Max |err| vs the true value: recorded in det_math.cpp next to the
-// kernel (measured by tools/fxcheck over all 2^30 turn fractions). sin(0) == 0 and
-// sin(QUARTER_TURN) == q_t::ONE exactly; |s|, |c| <= ONE always.
+// angle_t value is valid. Max |err| vs the true value: FX_SIN_MAX_ERR_ULP (measured over all
+// 2^30 turn fractions). sin(0) == 0 and sin(QUARTER_TURN) == q_t::ONE exactly; |s|, |c| <= ONE
+// always; sin(-a) == -sin(a), cos(-a) == cos(a), sin(a + 1/4) == cos(a) bit-exactly.
 void sincos(angle_t a, q_t* s, q_t* c);
 // sin(a) alone; same contract as sincos.
 q_t sin(angle_t a);
@@ -72,8 +88,10 @@ q_t sin(angle_t a);
 q_t cos(angle_t a);
 
 // Angle of the vector (x, y) in turns, in (-HALF_TURN, HALF_TURN]. Octant reduction on
-// (|y|, |x|), one exact div<q_t>, the FixPointCS polynomial (coefficients pre-scaled to turns),
-// unfold. Max |err|: recorded in det_math.cpp. atan2(0, 0) asserts and returns 0.
+// (|y|, |x|), one exact RNE ratio, the FixPointCS polynomial (coefficients pre-scaled to turns),
+// unfold. Max |err|: FX_ATAN2_MAX_ERR_ULP. Axes and diagonals are exact; atan2(-y, x) ==
+// -atan2(y, x) and atan2(x, y) == 1/4 - atan2(y, x) (mod 1) bit-exactly. atan2(0, 0) asserts
+// and returns 0.
 angle_t atan2(pos_t y, pos_t x);
 // The q_t overload of atan2 (unit vectors, normals); same contract.
 angle_t atan2q(q_t y, q_t x);
