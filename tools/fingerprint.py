@@ -81,6 +81,10 @@ DROP_PREFIX = (
     "-W", "/W", "-O", "/O", "-g", "/DEBUG",
     "--target=", "-target", "--sysroot", "-fdiagnostics", "-fcolor-diagnostics",
     "-fansi-escape-codes", "--driver-mode", "-x", "/std-",
+    # ISA selection is codegen, and R-8 puts codegen in build_env. Hashing it would stop a
+    # Deck build with -march from hand-shaking with the PC - the exact failure R-8 exists to
+    # prevent. The code and the ruling disagreed; the ruling wins.
+    "-march", "-mtune", "-mcpu", "-mfpu", "-mfloat-abi", "/arch:",
 )
 # Flags whose argument is a SEPARATE token. Dropping the flag but keeping its argument is how
 # `-isystem <path>` (GNU) and `-imsvc<path>` (clang-cl, joined) came out as different token sets

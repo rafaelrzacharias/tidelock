@@ -27,3 +27,7 @@
 - `const char*` is legal in sim code for message literals — which re-opens the `char` hole one level down: `(u64)s[i]` over a byte ≥ 0x80 sign-extends where `char` is signed. Sim **string literals** must be ASCII; comments are free (they never become char data).
 - Backslashes do not survive this shell's heredocs: `` in a regex arrived as a literal backspace byte (``), so four new bans compiled fine and matched nothing. Print `pattern` after generating a regex programmatically.
 - A patch script that asserts before writing loses every earlier edit in the same run. Three bans "landed" and vanished; only the selftest noticed.
+- **Check CI before writing "verified" in a commit message.** Three pushes went out claiming verification while four jobs were red on main - including the job built to prove R-8. A green local run is evidence about the local machine, nothing more.
+- A compile line is not whitespace-separated. CMake >= 4.4 quotes `"C:/Program Files/LLVM/bin/clang-cl.exe"`; `cmd.split()` made `build_id` depend on whether the compiler's install path contained a space. Use `shlex`.
+- Dropping a flag but keeping its separate argument is worse than keeping both: `-isystem <dir>` and `-imsvc<dir>` became different token sets for the same directory.
+- An exemption carved for one rule silently applies to every rule sharing the flag. `tl_types.h` was exempt from the float ban - and therefore from the bit-field, platform-macro and section bans too, in the one header every sim TU includes.

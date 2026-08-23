@@ -2,7 +2,7 @@
 """The link-granularity gate - the @deterministic replacement. Spec: docs/CPP-SUBSET.md §4,
 docs/ARCHITECTURE.md §1, docs/TESTING.md §5.
 
-Three checks over the audited static libs, in layer order (bottom first):
+Two checks over the audited static libs, in layer order (bottom first):
 
   1. Undefined symbols. A symbol is allowed only if it is defined in this lib, in a lib BELOW it,
      or matched by tools/audit/allow.txt. Unioning the defined set across all layers would let
@@ -16,9 +16,10 @@ Three checks over the audited static libs, in layer order (bottom first):
      `.data.rel.ro` is NOT writable static storage - it is const data holding relocations, which
      is where clang puts a const function-pointer table under the PIE default on Linux and the
      Pi. Rejecting it would have passed on Windows and failed every W1 lane in CI.
-  3. Banned symbols still matched by the allowlist are reported, not silently waved through:
-     the allowlist is for what a build genuinely needs, never for the tripwires the audit exists
-     to trip (libm, malloc, clocks, entropy, io, floating-point markers).
+
+The allowlist is for what a build genuinely needs, never for the tripwires the audit exists to
+trip (libm, malloc, clocks, entropy, io, floating-point markers); tools/audit/allow.txt records
+which entries were removed for that reason and why.
 """
 import argparse, fnmatch, os, re, subprocess, sys
 

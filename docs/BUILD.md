@@ -48,7 +48,7 @@ containers, arenas — audited), `tl_core`, `tl_sim` (audited), `tl_net`, `tl_re
 | `dev` | `-O1 -g`, all assert tiers, `TL_DEV=1` | editor, probes, float-shadow, impairment shim, Luau compiled on load |
 | `debug` | `-O0 -g` (+ optional `-fsanitize=address,undefined`) | as dev; for stepping through sim code |
 | `netcode` | `-O2 -g1`, slim fatal tier only, `TL_DEV=0` | what peers must match; Hovel and soaks run this |
-| `ship` | as netcode + `-DNDEBUG`-class stripping, LTO optional (LTO is *not* a determinism variable under fixed point, but it is a fingerprint input) | the shipped binary |
+| `ship` | as netcode + `-DNDEBUG`-class stripping; **no LTO** (§9 R-2 forbids it in every tier - this row used to say "optional") | the shipped binary |
 
 `netcode` and `ship` have **different `build_id`s by design** - the tier name and `NDEBUG` are
 both §5 inputs - so a session is homogeneous in tier and a `ship` peer cannot join a `netcode`
@@ -81,7 +81,7 @@ Two 256-bit BLAKE2b values with fixed names used identically in every doc:
 
 | Name | Computed | Over |
 |---|---|---|
-| **`build_id`** | at build, by `tools/fingerprint.py`, embedded as `const u8 TL_BUILD_ID[32]` | **target-independent by construction (§9 R-8).** git tree hash of `src/` + `cmake/` + `CMakeLists.txt` + `CMakePresets.json` + `vendor/` + `script/sim/` + `script/lib/` + `toolchain/VERSIONS`, plus `git diff HEAD` and the content of every untracked-**or-ignored** source under them · the canonical compile tokens of the TUs under `src/`: every `-D` define minus a platform drop-list, plus `-std` · the tier name · `FX_PALETTE_REV` · the precompiled sim-script bytecode bytes (`script/sim/**` + `script/lib/**`) in load order |
+| **`build_id`** | at build, by `tools/fingerprint.py`, embedded as `const u8 TL_BUILD_ID[32]` | **target-independent by construction (§9 R-8).** git tree hash of `src/` + `cmake/` + `CMakeLists.txt` + `CMakePresets.json` + `vendor/` + `script/sim/` + `script/lib/` + `toolchain/VERSIONS`, plus the **content** of every modified, untracked **or ignored** source under them (listed with `git status --porcelain`, which no git config alters - `git diff` output does) · the canonical compile tokens of the TUs under `src/`: **every token except a drop-list** of target-inherent and cosmetic ones (driver, triple, `-march`, include and output paths, warning/optimisation/debug flags, both driver spellings of one switch); an unrecognised token is hashed, so it surfaces as a loud mismatch rather than a silent hole · the tier name · `FX_PALETTE_REV` · the precompiled sim-script bytecode bytes (`script/sim/**` + `script/lib/**`) in load order |
 | **`build_env`** | at build, alongside it, embedded as `const u8 TL_BUILD_ENV[32]` | the compiler id/version/target triple and the full resolved compile commands · everything `build_id` deliberately drops. **Reported, never compared** |
 | **`session_fingerprint`** | at init, once the world is built (`app/` after all registrations) | `build_id` ‖ reflection field tables in registration order (name-hash, kind, offset, size per field; component name-hash per table) ‖ arena registry order (ids) ‖ action map (name-hash, kind, class per action in order) ‖ `hash(DataTables)` ‖ every `SIM`-flagged cvar value |
 

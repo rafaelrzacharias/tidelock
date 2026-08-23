@@ -358,15 +358,18 @@ def check_file(root, path, nondet, errors):
 
     is_det_tu = rel.startswith("src/sim/") or (
         rel.startswith("src/foundation/") and stem not in nondet)
-    if rel in TYPE_EXEMPT_PATHS:
-        is_det_tu = False
+    # tl_types.h declares f32/f64 and StrView's `const char*`, and fx_float.h is the bridge, so
+    # both are exempt from the TOKEN bans - but not from the layout and target-selection rules,
+    # which apply to every sim TU including the leaf. Exempting them wholesale (as the first
+    # version did) left the one header every sim TU includes free to carry a bit-field.
+    tokens_exempt = rel in TYPE_EXEMPT_PATHS
 
     # `const char*` stays legal for message literals, which re-opens the char hole one level
     # down: `h ^= (u64)s[i]` over a literal byte >= 0x80 sign-extends where `char` is signed and
     # not where it is unsigned, so a NameHash over a non-ASCII literal differs per target with no
     # `char` token in sight. Only LITERALS matter - a comment never becomes char data, and the
     # doc-citation style is full of section signs (docs/CPP-SUBSET.md 5).
-    if is_det_tu:
+    if is_det_tu and not tokens_exempt:
         for i, line in enumerate(code_lines, 1):
             for lit in LITERAL.findall(line):
                 if any(ord(ch) > 127 for ch in lit):
@@ -422,7 +425,7 @@ def check_file(root, path, nondet, errors):
         for rx, why in GREP_BANS:
             if rx.search(tline):
                 errors.append("%s:%d: %s" % (rel, i, why))
-        if is_det_tu:
+        if is_det_tu and not tokens_exempt:
             m3 = FLOAT_TOKENS.search(tline)
             if m3:
                 errors.append("%s:%d: '%s' in a sim TU (docs/CANON.md; f32/f64 are the same ban): %s"
@@ -432,6 +435,7 @@ def check_file(root, path, nondet, errors):
                 errors.append("%s:%d: '%s' in a sim TU - its width or signedness differs between "
                               "x86-64 and aarch64; use the fixed-width types of docs/CANON.md: %s"
                               % (rel, i, m4.group(1), raw_lines[i - 1].strip()[:60]))
+        if is_det_tu:
             if BITFIELD.search(tline):
                 errors.append("%s:%d: bit-field in a sim TU - the layout differs between "
                               "windows-msvc and linux/aarch64, so the arena bytes differ "

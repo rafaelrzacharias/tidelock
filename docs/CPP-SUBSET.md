@@ -102,7 +102,10 @@ banned:    malloc free calloc realloc operator new/delete
 ```
 
 A grep line in the same job covers what never becomes a symbol: `__rdtsc`, `rdtsc`, `asm`,
-`__builtin_ia32_*`, `std::`, `thread_local`, `static` mutable. The sim-lib boundary this needs is
+`__builtin_ia32_*`, `std::` and `thread_local` (all three spellings). **Mutable static state
+is deliberately NOT in that list** - no grep sees an anonymous-namespace global, an `inline
+static` member or a static local - so §1's rule is enforced by the link gate's
+zero-`.data`/`.bss`/TLS check over every `src/` lib instead. The sim-lib boundary this needs is
 the `ARCHITECTURE.md` §1 layout doing double duty. This is a callgraph effect ban at link
 granularity — about 90% of what the attribute gave.
 
@@ -110,7 +113,11 @@ granularity — about 90% of what the attribute gave.
 
 ## 5. UB discipline — the new thing that can silently break bit-exactness (DECIDED)
 
-With no floats, the only way two peers diverge is undefined behaviour. Rules:
+With no floats, two peers diverge in exactly two ways: undefined behaviour, and **language
+constructs whose width, signedness or layout the target chooses**. The second half of that
+sentence was missing until the W0 reviews measured it — `char`, `long`, bit-fields, unfixed enum
+bases and `size_t`'s type identity all differ between windows-msvc and linux/aarch64 with no UB
+anywhere. Rules:
 
 - **Sanctioned arithmetic helpers are the only arithmetic in quanta paths:** `wrap_add/sub/mul`
   (two's-complement, explicit), `sat_add/sub/mul` (saturating), `mul_widen` (i32×i32→i64),
