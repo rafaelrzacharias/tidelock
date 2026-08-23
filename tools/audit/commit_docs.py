@@ -46,18 +46,24 @@ def main():
         print("commit_docs: base %s is not in this clone - skipped (not a pass)" % a.base)
         return 0
 
-    changed = [p for p in run("git", "diff", "--name-only", a.base, "HEAD").splitlines() if p]
-    message = run("git", "log", "--format=%B", a.base + "..HEAD")
-    if "[docs:none]" in message:
-        print("commit_docs: [docs:none] declared")
-        return 0
-
-    touched_docs = {p for p in changed if p.startswith("docs/")}
+    # Per COMMIT, not per range. A range-wide check let a later unrelated commit's [docs:none]
+    # waive an earlier undocumented module change - and the gate's own fixture enshrined that as
+    # correct behaviour until the fourth W0 review wrote the counter-example.
+    commits = [c for c in run("git", "rev-list", "--reverse", a.base + "..HEAD").splitlines() if c]
     missing = []
-    for module, docs in MODULE_DOCS.items():
-        prefix = "src/%s/" % module
-        if any(p.startswith(prefix) for p in changed) and not touched_docs.intersection(docs):
-            missing.append("%s changed but none of %s did" % (prefix, ", ".join(docs)))
+    for sha in commits:
+        changed = [p for p in run("git", "show", "--name-only", "--format=", sha).splitlines() if p]
+        message = run("git", "log", "-1", "--format=%B", sha)
+        if "[docs:none]" in message:
+            continue
+        touched_docs = {p for p in changed if p.startswith("docs/")}
+        for module, docs in MODULE_DOCS.items():
+            prefix = "src/%s/" % module
+            if any(p.startswith(prefix) for p in changed) and not touched_docs.intersection(docs):
+                missing.append("%s in %s changed but none of %s did"
+                               % (prefix, sha[:9], ", ".join(docs)))
+    if not missing:
+        print("commit_docs: %d commit(s) checked" % len(commits))
 
     for m in missing:
         print("ERROR commit_docs: " + m)

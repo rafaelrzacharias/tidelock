@@ -27,6 +27,9 @@ def main():
     ap.add_argument("--preset", default="netcode-win")
     ap.add_argument("--repo", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     ap.add_argument("--touch", default="src/sim/sim.cpp")
+    ap.add_argument("--strict-toolchain", choices=("on", "off"), default="on",
+                    help="passed through to configure; CI runners carry stock clang, not the\n"
+                         "pinned major (docs/BUILD.md §9 R-7)")
     ap.add_argument("--full-budget", type=float, default=FULL_BUDGET_S,
                     help="seconds; the default is the reference PC's (docs/BUILD.md §3). A CI box "
                          "has its own budget and must pass it explicitly rather than inherit ours.")
@@ -37,7 +40,8 @@ def main():
     if os.path.isdir(out):
         shutil.rmtree(out)                       # cold: the budget must hold without ccache
 
-    run(["cmake", "--preset", a.preset], a.repo)
+    run(["cmake", "--preset", a.preset,
+         "-DTL_STRICT_TOOLCHAIN=" + a.strict_toolchain.upper()], a.repo)
     full = run(["cmake", "--build", "--preset", a.preset], a.repo)
 
     touched = os.path.join(a.repo, a.touch)

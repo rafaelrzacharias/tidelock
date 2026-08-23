@@ -92,7 +92,10 @@ CHAR_LITERAL_USE = re.compile(r'\b(?:const\s+char|char\s+const)\s*(\*|\[|\(\s*&)
 #   platform macros     a sim TU that branches on _WIN32 or __aarch64__ is two different programs
 #   custom sections     section(".x") hides a mutable global from the .data/.bss gate
 #   unfixed enum base   the underlying type is the compiler's choice; hashed state cannot have one
-BITFIELD = re.compile(r'\b\w+\s*:\s*\d+\s*[;,]')
+# A bit-field in this subset is `<fixed-width type> [name] :`. Anchoring on the TYPE is what
+# keeps `return x < 0 ? -1 : 1;` from reading as one (it did) and catches the four spellings
+# the width-anchored version missed (`: W;`, `: sizeof(u8)*8;`, `: 0x4;`, `: 4 = 0;`).
+BITFIELD = re.compile(r'\b(?:u8|u16|u32|u64|i8|i16|i32|i64|bool)\s*(?:[A-Za-z_]\w*)?\s*:(?!:)')
 PLATFORM_MACRO = re.compile(
     r'\b(_WIN32|_WIN64|_MSC_VER|_M_X64|_M_ARM64|__aarch64__|__x86_64__|__i386__|__arm__'
     r'|__linux__|__APPLE__|__unix__|__ARM_ARCH|__SIZEOF_LONG__|__CHAR_BIT__)\b')
@@ -394,7 +397,13 @@ def check_file(root, path, nondet, errors):
                                   % (rel, i, inc, module, ", ".join(allowed)))
             elif is_det_tu and inc_module == "foundation":
                 inc_stem = os.path.splitext(os.path.basename(inc))[0]
-                if inc_stem in nondet:
+                if inc_stem == "fx_float":
+                    # The bridge is exempt from the float ban because it IS the bridge; that made
+                    # it a legal include for a sim TU, i.e. a float path into sim code with no
+                    # _fltused tripwire on ELF (docs/FX-PALETTE.md 6).
+                    errors.append('%s:%d: a sim TU includes the float bridge "%s" - it is '
+                                  "render/editor/tools only (docs/FX-PALETTE.md §6)" % (rel, i, inc))
+                elif inc_stem in nondet:
                     errors.append('%s:%d: a sim TU includes the non-det foundation header "%s" '
                                   "(docs/BUILD.md §10.2)" % (rel, i, inc))
         if m or m2:

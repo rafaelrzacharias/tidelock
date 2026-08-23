@@ -32,7 +32,7 @@ investigation reads first, not a reason to refuse a connection.
 Emits build_id.cpp (TL_BUILD_ID[32] and TL_BUILD_ENV[32]), build_id.txt, build_env.txt and
 flags.txt; each is rewritten only when its content changes, so a stable tree never relinks.
 """
-import argparse, hashlib, json, os, subprocess, sys
+import argparse, hashlib, json, os, shlex, subprocess, sys
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -47,7 +47,8 @@ SOURCE_EXT = (".h", ".hpp", ".inc", ".c", ".cc", ".cpp", ".luau", ".cmake", ".tx
 # -ffast-math is banned in every tier (docs/CPP-SUBSET.md §7). It is not a fingerprint question:
 # a build carrying it is not a tidelock build, so the fingerprint refuses rather than recording it.
 FAST_MATH = ("-ffast-math", "-Ofast", "/fp:fast", "-funsafe-math-optimizations",
-             "-ffinite-math-only", "-fassociative-math", "-freciprocal-math")
+             "-ffinite-math-only", "-fassociative-math", "-freciprocal-math",
+             "-ffp-model=fast", "-ffp-contract=fast", "/fp:except-", "-menable-unsafe-fp-math")
 
 # Defines the platform or the CMake generator injects; dropping them is part of what lets
 # win/linux/pi4 agree.
@@ -76,17 +77,34 @@ DROP_EXACT = {
 }
 DROP_PREFIX = (
     "-o", "/Fo", "/Fd", "/Fp", "-MD", "-MT", "-MF", "-MMD", "-clang:-M", "-M",
-    "-I", "/I", "-isystem", "-iquote", "-idirafter",
+    "-I", "/I", "-isystem", "-iquote", "-idirafter", "-imsvc", "-external:I",
     "-W", "/W", "-O", "/O", "-g", "/DEBUG",
     "--target=", "-target", "--sysroot", "-fdiagnostics", "-fcolor-diagnostics",
     "-fansi-escape-codes", "--driver-mode", "-x", "/std-",
 )
+# Flags whose argument is a SEPARATE token. Dropping the flag but keeping its argument is how
+# `-isystem <path>` (GNU) and `-imsvc<path>` (clang-cl, joined) came out as different token sets
+# for the same include directory - which would have broken build_id parity the moment the W1
+# platform lane vendored SDL3.
+DROP_WITH_ARG = ("-isystem", "-iquote", "-idirafter", "-imsvc", "-external:I", "-I",
+                 "-o", "-MF", "-MT", "-MQ", "--sysroot", "-target", "-x", "--driver-mode")
 
 
 def drop(token):
     if token in DROP_EXACT:
         return True
     return token.startswith(DROP_PREFIX)
+
+
+def split_command(cmd):
+    """A compile line is not whitespace-separated. `C:/Program Files/LLVM/bin/clang-cl.exe` is
+    quoted by CMake >= 4.4, and cmd.split() turned it into two tokens - so build_id depended on
+    whether the compiler happened to be installed in a path with a space, which is exactly why
+    the cross-target job went red on the CI runner and not here."""
+    try:
+        return [t.strip('"') for t in shlex.split(cmd, posix=False)]
+    except ValueError:
+        return [t.strip('"') for t in cmd.split()]
 
 SEP = b"\x00"
 
@@ -146,7 +164,7 @@ def canonical_tokens(rows):
             continue
         matched += 1
         tokens = []
-        for t in cmd.split():
+        for t in split_command(cmd):
             if t in FAST_MATH or t.startswith("-ffast-math"):
                 sys.exit("fingerprint: %s is on the compile line for %s - it is banned in every "
                          "tier (docs/CPP-SUBSET.md §7)" % (t, f))
@@ -156,9 +174,16 @@ def canonical_tokens(rows):
                 tokens.extend(t.split(",")[1:])
             else:
                 tokens.append(t)
+        skip_next = False
         for i, t in enumerate(tokens):
+            if skip_next:
+                skip_next = False
+                continue
             if i == 0:
                 continue                          # the compiler executable
+            if t in DROP_WITH_ARG:
+                skip_next = True
+                continue
             if t[:2] in ("-U", "/U") and len(t) > 2:
                 keep.add("U:" + t[2:])
             elif t[:2] in ("-D", "/D") and len(t) > 2:

@@ -129,6 +129,9 @@ INCLUDE_CASES = [
      "template <class T> T tdef_id(T x) { return x; }\n"
      "u32 tdef_hidden(u32 a);\n",
      "no contract comment"),
+    ("a sim TU includes the float bridge", "src/sim/bridge.cpp",
+     '#include "foundation/fx_float.h"\n',
+     "includes the float bridge"),
     ("std:: in src/", "src/core/g.cpp",
      "void f(void) { std::abort(); }\n",
      "std:: in src/"),
@@ -201,6 +204,8 @@ INCLUDE_CLEAN = [
      "inline u32 ok7_div(u32 a, u32 b) { return a / b; }\n\n"
      "// Equality over the raw representation. Exact, never approximate.\n"
      "inline bool operator==(u32 a, i32 b) { return a == (u32)b; }\n\n"
+     "// Sign of a value. Returns -1, 0 or 1 - a ternary is not a bit-field.\n"
+     "inline i32 ok7_sign(i32 x) { return x < 0 ? -1 : (x > 0 ? 1 : 0); }\n\n"
      "// Compiled only in dev tiers; same contract either way.\n"
      "#if TL_DEV\n"
      "inline u32 ok7_probe(u32 a) { return a; }\n"
@@ -401,6 +406,23 @@ def test_fingerprint(tmp):
         got = fingerprint_id(tmp, "flag_" + tag, NIX_CMD + " " + flag)
         record("fingerprint: %s changes build_id" % flag, got != nix, got[:32])
 
+    # The two shapes that made build-id-cross-target red in CI while passing locally.
+    quoted = fingerprint_id(tmp, "quoted", '"C:/Program Files/LLVM/bin/clang-cl.exe" '
+                            + WIN_CMD.split(" ", 1)[1])
+    plain = fingerprint_id(tmp, "plain", WIN_CMD)
+    record("fingerprint: a quoted compiler path does not change build_id", quoted == plain,
+           "quoted=%s plain=%s" % (quoted[:16], plain[:16]))
+
+    isys = fingerprint_id(tmp, "isys", NIX_CMD + " -isystem $REPO/vendor")
+    imsvc = fingerprint_id(tmp, "imsvc", WIN_CMD + " -imsvc$REPO/vendor")
+    record("fingerprint: -isystem <dir> and -imsvc<dir> agree", isys == imsvc,
+           "isystem=%s imsvc=%s" % (isys[:16], imsvc[:16]))
+
+    for flag in ("-ffp-model=fast", "-ffp-contract=fast"):
+        got = fingerprint_id(tmp, "fm" + flag[-4:], NIX_CMD + " " + flag)
+        record("fingerprint: %s is refused, not recorded" % flag,
+               got.startswith("FAILED") and "banned" in got, got[:140])
+
     # A tree with no git history can see no source change at all; that must be an error, not a
     # constant id (docs/BUILD.md §5).
     nogit = os.path.join(tmp, "nogit", "src", "sim")
@@ -438,11 +460,27 @@ def test_commit_docs(tmp):
     record("commit_docs: a module change with no doc change is refused",
            rc == 1 and "docs/ALLOY.md" in out, out.strip()[:200])
 
+    # The waiver is per COMMIT. A later commit saying [docs:none] must not retroactively excuse
+    # the undocumented one above it - the previous version of this fixture asserted that it did,
+    # which is how the hole survived a review.
     write(repo, "src/sim/y.cpp", "int g(void) { return 2; }\n")
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "touch sim again\n\n[docs:none]")
     rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"), "--base", base], cwd=repo)
-    record("commit_docs: [docs:none] is accepted", rc == 0 and "docs:none" in out, out.strip()[:200])
+    record("commit_docs: a later [docs:none] does not waive an earlier commit",
+           rc == 1 and "x.cpp" not in out and "src/sim/" in out, out.strip()[:200])
+
+    mid = git(repo, "rev-parse", "HEAD~1")[1].strip()
+    rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"), "--base", mid], cwd=repo)
+    record("commit_docs: [docs:none] waives its own commit", rc == 0, out.strip()[:200])
+
+    write(repo, "src/sim/z.cpp", "int h(void) { return 3; }\n")
+    write(repo, "docs/ALLOY.md", "# alloy\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "touch sim with its doc")
+    head = git(repo, "rev-parse", "HEAD~1")[1].strip()
+    rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"), "--base", head], cwd=repo)
+    record("commit_docs: a module change with its doc passes", rc == 0, out.strip()[:200])
 
     rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"),
                    "--base", "0" * 40], cwd=repo)

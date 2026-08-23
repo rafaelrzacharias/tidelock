@@ -87,8 +87,11 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.13' }
       - run: sudo apt-get update && sudo apt-get install -y clang lld llvm ninja-build
-      - run: cmake --preset netcode-linux
-      - run: cmake --preset ship-linux
+      # -DTL_STRICT_TOOLCHAIN=OFF: the runners carry stock clang, not the pinned major
+      # (docs/BUILD.md §9 R-7). Every job that configures netcode or ship needs it; three of
+      # them did not, and CI was red for three pushes.
+      - run: cmake --preset netcode-linux -DTL_STRICT_TOOLCHAIN=OFF
+      - run: cmake --preset ship-linux -DTL_STRICT_TOOLCHAIN=OFF
       - run: python tools/audit/tier_parity.py --netcode out/netcode-linux --ship out/ship-linux
 
   build-id-win:
@@ -143,10 +146,12 @@ jobs:
       - name: build twice, compare
         run: |
           set -eu
-          cmake --preset netcode-linux && cmake --build --preset netcode-linux
+          cmake --preset netcode-linux -DTL_STRICT_TOOLCHAIN=OFF
+          cmake --build --preset netcode-linux
           cp out/netcode-linux/build_id.txt first.txt
           rm -rf out/netcode-linux
-          cmake --preset netcode-linux && cmake --build --preset netcode-linux
+          cmake --preset netcode-linux -DTL_STRICT_TOOLCHAIN=OFF
+          cmake --build --preset netcode-linux
           diff first.txt out/netcode-linux/build_id.txt
 
   sanitizers:
@@ -169,7 +174,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.13' }
       - run: choco install ninja -y
-      - run: python tools/rebuild_budget.py --preset netcode-win
+      - run: python tools/rebuild_budget.py --preset netcode-win --strict-toolchain off
 
   cross-pi4:
     # Build-only aarch64 leg. Runs once the sysroot tarball of docs/BUILD.md §9 R-3 exists and

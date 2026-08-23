@@ -19,6 +19,45 @@ if(NOT TL_AUDITED)
   message(FATAL_ERROR "no audited libs registered - tl_register_lib(<target> TRUE) is missing")
 endif()
 
+# The claim above ("a lane that forgets to register fails configure") was false: the only check
+# was `if(NOT TL_AUDITED)`, which an empty list triggers and a MISSING lib does not. An
+# unregistered sim lib with a mutable global was measured to pass tl_audit_symbols with 0
+# violations. Compare the registered set against every static lib the buildsystem actually
+# defines under src/.
+function(tl_collect_static_libs dir out)
+  get_property(subs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
+  get_property(targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
+  set(found "")
+  foreach(t IN LISTS targets)
+    get_target_property(type ${t} TYPE)
+    if(type STREQUAL "STATIC_LIBRARY")
+      list(APPEND found ${t})
+    endif()
+  endforeach()
+  foreach(sub IN LISTS subs)
+    tl_collect_static_libs("${sub}" sub_found)
+    list(APPEND found ${sub_found})
+  endforeach()
+  set(${out} "${found}" PARENT_SCOPE)
+endfunction()
+
+# From the root: src/ itself has no CMakeLists, so it is not a directory scope of its own.
+tl_collect_static_libs("${CMAKE_SOURCE_DIR}" TL_ALL_LIBS)
+set(TL_REGISTERED ${TL_AUDITED} ${TL_MODULES})
+foreach(lib IN LISTS TL_ALL_LIBS)
+  get_target_property(TL_LIB_DIR ${lib} SOURCE_DIR)
+  string(FIND "${TL_LIB_DIR}" "${CMAKE_SOURCE_DIR}/src" TL_IN_SRC)
+  if(NOT TL_IN_SRC EQUAL 0)
+    continue()                                  # vendor/, tests/, the generated build_id lib
+  endif()
+  if(NOT lib IN_LIST TL_REGISTERED)
+    message(FATAL_ERROR
+      "src/ lib '${lib}' is not registered, so no audit would ever look at it.\n"
+      "Add tl_register_lib(${lib} TRUE) for a sim lib or tl_register_lib(${lib} FALSE) "
+      "otherwise (cmake/tier.cmake); tl_module() does it for you.")
+  endif()
+endforeach()
+
 set(TL_SYMBOL_ARGS "")
 foreach(lib IN LISTS TL_AUDITED)
   list(APPEND TL_SYMBOL_ARGS --layer "${lib}=$<TARGET_FILE:${lib}>")
