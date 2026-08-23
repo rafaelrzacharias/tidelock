@@ -1388,7 +1388,7 @@ F4 zone [zone ↑]: cone/box membership test in q_t, same dv form with the zone'
 Magnetism [pole source ↑, target carriers ↑]: k·qᵢqⱼ/(r²+ε²): den = r2 + EPS2 (fx<i64,36>), f = div<q_t>(K_MAG·qᵢqⱼ as fx<i64,36>, den) clamped to ±ONE, then as F3
 Buoyancy/drag:
   body in basin b [body slot ↑]: imm = immersed-area fraction (q_t; capsule/AABB vs level_y analytic); ratio = scalar_t density_ratio[material][species] (tables)
-      adv.y −= i64(mul<vel_t>(ratio, mul<vel_t>(imm, G)).v) << 16;  drag: v = mul<vel_t>(x − px, INV_H) (tick-level implicit velocity); adv −= (mul<vel_t>(drag_q × imm, v).v) << 16
+      adv.y −= i64(mul<vel_t>(ratio, mul<vel_t>(imm, G)).v) << 16;  drag: v = mul_int<vel_t>(x − px, INV_H) (tick-level implicit velocity); adv −= (mul<vel_t>(drag_q × imm, v).v) << 16
   particle drag in gas: adv −= (mul<vel_t>(DRAG_GAS_Q, v).v) << 16 for PF_EMBER/PF_GRANULAR only; wind: opening flow → v_wind at the carrier (falloff F3-style from each CavityEdge with |flow| > 0, [edge ↑])
   cavity buoyancy on bodies with an attached cavity: Δρ from P, T vs surrounding cavity (integer), applied as F1-style uniform within the body
 Agent locomotion [agent slot ↑] (agent.cpp): medium from immersion/ground contact (previous tick's PContact set);
@@ -1412,9 +1412,9 @@ Colouring: persistent constraints: cached Constraint.color (recoloured only when
   level lists: Level[c] = array of (kind, index) in the same order; parallel_levels(jobs, n_colors, levels, project_chunk, ctx) with grain GRAIN_CONSTRAINT
 Substep loop, s = 0..7:
   S1 predict [particle index ↑ ∥ body slot ↑] (parallel_for):
-       xs = x (pos_t, saved as x_start in scratch);  v = mul<vel_t>(x − px, INV_H) + dv_ext (plain vel_t add; validator bounds |v| < 2·V_MAX)
+       xs = x (pos_t, saved as x_start in scratch);  v = mul_int<vel_t>(x − px, INV_H) + dv_ext (plain vel_t add; validator bounds |v| < 2·V_MAX)
        xl = fx<i64,30>(i64(x.v) << 12) + (i64(mul<pos_t>(v, H).v) << 12)        // solver-local widened position
-       bodies also: θl = i64(theta.v) + i64(mul<angle_t>(omega + dω_ext, H).v), omega = wrap_sub(theta, ptheta) × INV_H via mul<omega_t>
+       bodies also: θl = i64(theta.v) + i64(mul<angle_t>(omega + dω_ext, H).v), omega = mul_int<omega_t>(theta − ptheta, INV_H) (the angle subtraction wraps by policy)
        px = xs  (prev ← start of this substep; velocity is now implicit in xl − xs)
   S2 reset λ: every constraint/contact lambda = 0 (parallel_for over the level lists)
   S3 project, colour by colour (parallel_levels); within a colour each constraint reads/writes only its own carriers' xl/θl — the colouring guarantees no two constraints in a level share a carrier:
@@ -1449,7 +1449,7 @@ Substep loop, s = 0..7:
            dλ as generic; Δx_i = mul<pos_t>(∇C_i, mul<pos_t>(w_i, dλ)) applied to xl_i only (owner-only write; the symmetric Δx_j is applied when j is the owner — the standard PBF λ_i + λ_j form, realised over two constraints)
   S4 writeback, single round [index ↑ ∥ slot ↑] (parallel_for):
        x = pos_t(i32(rne_shr(xl, 12)))   // THE one round per substep
-       v = mul<vel_t>(x − px, INV_H)      // px == xs
+       v = mul_int<vel_t>(x − px, INV_H)  // px == xs
   S5 velocity pass (parallel_for over contacts by colour again, then XSPH):
        restitution: vn = dot<vel_t>(v_a − v_b, n); vn_prev from the pre-solve velocities saved in S1; if vn_prev < −rest_vel_min: Δvn = −vn + max(mul<vel_t>(restitution, −vn_prev), 0); split by w' → v (i64 accumulate in scratch `vacc`, frac 36)
        XSPH [index ↑, nbr ↑]: vacc_i += Σ_j mul_widen(W.v, (v_j − v_i).v) × c_visc[si] — reads v (not vacc): Jacobi; i64 then one rne_shr(…, 30 + 16)

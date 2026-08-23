@@ -1,6 +1,7 @@
 # The fx palette and det math (tidelock, rev 1)
 
-> **Status:** design rev 1.1, 2026-08-22. Mechanism, policy and rows **DECIDED**; Gate 0
+> **Status:** design rev 1.1, 2026-08-22; reconciled with the W1 fx lane's headers 2026-08-23.
+> Mechanism, policy and rows **DECIDED**; Gate 0
 > (`GATE0-BENCH.md`) *verifies* the rows and may force a recorded rev-2 revision through the
 > pre-committed ladder (§3.2, §9 R-1). `fx_palette.h` is written from this doc; rev 2 carries the
 > measured values.
@@ -25,7 +26,7 @@ editor, and in offline tools (`fx_float.h` is the only bridge, §6).
 ## 1. The mechanism — `fx<Rep, FRAC>` (DECIDED)
 
 ```cpp
-template <typename Rep, int FRAC> struct fx { Rep v; };   // one ~300-line header, zero includes
+template <typename Rep, int FRAC> struct fx { Rep v; };   // one header, no system includes (layout: §7)
 ```
 
 - **`+`/`-` compile only between identical formats.** Saturating variants `sat_add/sat_sub` exist;
@@ -42,7 +43,13 @@ template <typename Rep, int FRAC> struct fx { Rep v; };   // one ~300-line heade
   Truncation biases every op downward — systematic energy drain and convergence stall — and RNE
   costs ~1 extra add per op. Conversions `to<R>(x)` also RNE when narrowing.
 - **No implicit conversions, ever.** Every constructor is `explicit`; `to<R>(x)` is the only
-  conversion and it is greppable. `fx` ↔ integer: `fx_from_int<R>(i)` / `fx_to_int_floor(x)`.
+  conversion and it is greppable. `fx` ↔ integer: `fx_int<R>(i)` / `fx_to_int_floor(x)`.
+- **Rows are keyed by format, not by name.** `using pos_t = fx<i32,18>` and `using invmass_t =
+  fx<i32,18>` are one C++ type, as are `q_t`/`stiff_t`/`angle_t`/`dt_t` and `vel_t`/`omega_t`
+  and `scalar_t`/`lambda_t`. The compiler checks *scale*, never units: the mixed-op table
+  (§3.1) therefore has one line per distinct format triple and admits every row of those
+  formats. Distinct-type rows would need a tag parameter (`fx<Rep,FRAC,Tag>`) and a `to<R>` at
+  every unit change - a rev-2 question, filed in `TODO.md` as a ruling request, not decided here.
 - **Comparisons** between identical formats only. `abs`, `min`, `max`, `clamp`, `sign` per format.
 - **Width is a performance decision.** No usable 64-bit SIMD multiply exists on SSE2/AVX2/NEON, so
   every column the solver should vectorize is a 32-bit format. `fx<i64,·>` rows exist only where
@@ -223,10 +230,16 @@ be — if rung 4 ever fires, `LUAU-LAYER.md` §3 gains a boxed-i64 rule.
 
 | File | Contents | Includes |
 |---|---|---|
-| `fx.h` | `fx<Rep,FRAC>`, `mul/div/to`, sat/wrap helpers, compare/abs/min/max/clamp | none |
+| `fx.h` | `fx<Rep,FRAC>`, `mul/div/to`, sat/wrap helpers, compare/abs/min/max/clamp | `tl_types.h` (widths), `tl_assert.h` (the range asserts - the R-3 panic ABI, `CPP-SUBSET.md` §9) |
 | `fx_palette.h` | the rows as named types, `static_assert`s on the derivation rule, the mixed-op instantiations, world constants, precomputed `H`, `G_SUBSTEP` | `fx.h` |
 | `det_math.h` | `sqrt/rsqrt/sincos/atan2/isqrt/lerp`, `vec2<T>`, normalize, rotate; FixPointCS attribution | `fx_palette.h` |
 | `fx_float.h` | the bridge (§6) | `fx_palette.h` — render/editor/tools only |
+
+Everything lives in `namespace fx` (`CPP-SUBSET.md` §6: one namespace per module); the helpers
+stay namespaced (`fx::mul`, `fx::sqrt`, `fx::div`) so they never collide with libc names. The
+nine row aliases are *also* exported at global scope by `fx_palette.h`, because every X-macro
+field table (`ECS.md` §6, `ALLOY.md` §14) spells them bare. The i64 locals of §3.1 have names
+too: `pos2_wide_t = fx<i64,36>`, `den_wide_t = fx<i64,30>`.
 
 `fx_palette.h` has a `FX_PALETTE_REV` constant; it is part of the build fingerprint
 (`BUILD.md` §5) — two peers on different palette revs cannot handshake.
@@ -285,7 +298,7 @@ template <typename Rep, int FRAC> struct fx {
 template <typename R> constexpr R fx_raw(typename R::rep bits);                 // the only bit-level constructor (greppable)
 template <typename R> constexpr R fx_int(i32 i);                                  // i << FRAC; static_assert/TL_ASSERT |i| < 2^(31-FRAC)
 template <typename R> constexpr R fx_lit(i64 num, i64 den);                       // RNE of num/den at the row quantum — for H, G_SUBSTEP, kernel coefficients
-template <typename R> constexpr R fx_to  (auto x);                                // spelled to<R>(x): widen = shift left; narrow = rne_shr; TL_ASSERT on range
+template <typename R, typename A> constexpr R to(A x);                            // the only conversion: widen = exact; narrow = rne_shr; TL_ASSERT on range
 ```
 
 Operators: `+`, `-`, unary `-` (two's-complement wrap, explicit by policy), `== != < <= > >=`
@@ -298,7 +311,7 @@ format: `abs`, `min`, `max`, `clamp`, `sign`, `sat_add`, `sat_sub`, `sat_neg`, `
 constexpr i64 rne_shr(i64 x, int s) {          // round-to-nearest-even arithmetic shift right, s in [0, 62]
     if (s == 0) return x;
     const i64 q    = x >> s;                    // arithmetic shift (C++20: defined)
-    const i64 r    = x - (q << s);              // remainder in [0, 2^s)
+    const i64 r    = x & ((i64(1) << s) - 1);   // remainder in [0, 2^s); never `q << s` - a negative left shift is UB (CPP-SUBSET §5)
     const i64 half = i64(1) << (s - 1);
     return (r > half || (r == half && (q & 1))) ? q + 1 : q;
 }
@@ -320,22 +333,23 @@ template <typename R, typename A, typename B> R div(A a, B b) {
     static_assert(fx_op_allowed<R, A, B>::value);
     constexpr int S = R::FRAC_BITS + B::FRAC_BITS - A::FRAC_BITS;   // static_assert(0 <= S && S <= 31)
     TL_ASSERT(b.v != 0);                                             // callers guard; release returns saturated sign(a)*INT32_MAX
-    const i64 n = i64(a.v) << S;
-    i64 q = n / b.v, r = n % b.v;                                    // C++ truncation toward zero
+    const i64 n = i64(a.v) * (i64(1) << S);                          // a multiply, never a shift of a signed value
+    i64 q = n / b.v, r = n % b.v;                                    // C++ truncation toward zero (the body is `rne_div(n, b.v)`, the second rounding primitive)
     // RNE on the exact rational: compare 2|r| with |b|; ties to even
     const i64 r2 = (r < 0 ? -r : r) * 2, bb = (b.v < 0 ? -i64(b.v) : i64(b.v));
     if (r2 > bb || (r2 == bb && (q & 1))) q += ((n < 0) != (b.v < 0)) ? -1 : 1;
     TL_ASSERT(q >= INT32_MIN && q <= INT32_MAX);
     return fx_raw<R>(i32(q));
 }
-template <typename R, typename A> R mul_int(A a, i32 k);            // a.v * k, no shift (e.g. INV_H = 480); i64 intermediate, range-asserted
+template <typename R, typename A> R mul_int(A a, i32 k);            // exact a.v * k, then rescaled from A's point to R's (pos_t x 480 -> vel_t widens 2 bits exactly; angle_t x 480 -> omega_t narrows 10 with RNE); listed in the op table as fx_op_allowed<R, A, i32>
 template <typename A> i64 mul_wide(A a, A b);                        // raw i64 product, no rounding — for squared lengths (fx<i64,36> local)
 ```
 
 `fx_op_allowed<R,A,B>` is a closed `constexpr bool` table in `fx_palette.h` (one specialization per
-row of §3.1 plus the `scalar_t` rules); the primary template is `false`, so an unlisted product
-fails to compile with the message above. **Every call site names `R` explicitly**; there is no
-deduction of the result format.
+distinct *format* triple of §3.1 plus the `scalar_t` rules - rows sharing a format are one type,
+§1); the primary template is `false`, so an unlisted product fails to compile with the message
+above. `B = i32` marks the plain-integer factor of `mul_int`. **Every call site names `R`
+explicitly**; there is no deduction of the result format. `dot<R>`/`cross<R>` consult the same table.
 
 Wrapping/saturating integer helpers for quanta paths live in the same header: `wrap_add/sub/mul`
 (unsigned-cast two's-complement), `sat_add/sub/mul` for `i32`/`i64`, `mulhi64`.
@@ -351,7 +365,7 @@ constexpr u32 FX_PALETTE_REV = 1;
 constexpr pos_t   TEXEL          = fx_raw<pos_t>(1 << 14);                 // 1/16 m
 constexpr i32     INV_H          = 480;                                     // plain integer
 constexpr dt_t    H              = fx_lit<dt_t>(1, 480);                    // raw 2236962 (RNE of 2^30/480 = 2236962.13)
-constexpr vel_t   G_SUBSTEP      = fx_lit<vel_t>(981 /*9.81*/, 100 * 480);  // raw 21432 (RNE of 9.81/480 · 2^20 = 21431.7)
+constexpr vel_t   G_SUBSTEP      = fx_lit<vel_t>(981 /*9.81*/, 100 * 480);  // raw 21430 (RNE of 9.81/480 · 2^20 = 21430.27; the compiler corrected an earlier 21432)
 constexpr pos_t   WORLD_HALF     = fx_int<pos_t>(4096);
 constexpr vel_t   V_MAX_WORLD    = fx_int<vel_t>(512);
 constexpr i32     MASS_RATIO_CLAMP = 4096;
@@ -400,16 +414,19 @@ vec2<q_t>` (two `div<q_t>` by `len`; zero → `(0,0)` + assert), `rotate(vec2<po
 ### 10.4 `fx_float.h` (render/editor/tools; banned tokens in sim TUs)
 
 `to_f32(fx) = float(x.v) * (1.0f / (1 << FRAC))` (the reciprocal is exact — a power of two);
-`to_f64` likewise; `from_f32_quantized<R>(float f)` = `fx_raw<R>(i32(lrintf(f * (1 << FRAC))))`
-with range clamp and a `TL_ASSERT` on NaN/inf (`lrintf` rounds to nearest-even under the default
-FP environment; this header may include `<math.h>`).
+`to_f64` likewise; `from_f32_quantized<R>(float f)` / `from_f64_quantized<R>` = RNE of
+`f * 2^FRAC` to an integer, range-clamped, with a `TL_ASSERT` on NaN/inf. **No `<math.h>`**:
+`CPP-SUBSET.md` §1 allows it only in `render/`/`editor/`/`platform/` and the include gate
+enforces that for `foundation/` too, so the rounding is the libm-free identity
+`(s + 1.5·2^23) − 1.5·2^23` (f64: `1.5·2^52`), exact under the default rounding mode - which is
+guaranteed because `-ffast-math` is banned everywhere (`CPP-SUBSET.md` §7).
 
 ### 10.5 Tests (`tests/foundation/`)
 
 | File | What |
 |---|---|
 | `fx_rne.test.cpp` | `rne_shr` tie table (±half, even/odd) for s = 1..62; exhaustive on 16-bit inputs |
-| `fx_mul_div.test.cpp` | exhaustive `fx<i8,4> × fx<i8,4>` vs a `double` reference (tools-style `TL_TEST_FLOAT_OK` tag — this test file alone may use `double`, it is not sim code); property (1M seeded pairs) for every row pair in the op table vs `long double`, error ≤ ½ ulp of `R`; `div` ties; `div` by zero → fatal-expected; `sat_*` clamps |
+| `fx_mul_div.test.cpp` | exhaustive small-operand `mul<R>`/`div<R>` (8-bit × 16-bit raw, every 16-bit-shift entry; 9-bit × 9-bit quotients) and property (1M seeded pairs) for every distinct format triple of the op table, both vs an **exact integer** rational reference written sign-magnitude style (a `double` loses bits above 2^53; the reference does not) — bit-equal, not "≤ ½ ulp"; `div` ties (an `INT32_MIN` divisor is the only way to make one); `sat_*`/`wrap_*` clamps and wraps at every boundary; `mulhi64` vs the compiler's 128-bit product. `div` by zero → fatal-expected **lands when the runner lane ships `TL_TEST_EXPECT_FATAL`** (`TODO.md`) |
 | `fx_palette.test.cpp` | every `static_assert` derivation re-checked at runtime; `H`, `G_SUBSTEP`, `TEXEL` raw values equal the documented constants |
 | `det_sqrt.test.cpp` | `isqrt32` exhaustive (2³² in ~2 min, `slow` tag); `sqrt<pos_t>` nearest property vs `isqrt64` |
 | `det_trig.test.cpp` | `sincos` exhaustive over all 2³⁰ turn fractions (`slow`): |err| ≤ 2 ulp of `q_t` vs the MPFR table emitted by `tools/fxcheck`; exact values at 0, ¼, ½, ¾; `sin²+cos²` within 4 ulp; symmetry identities bit-exact |

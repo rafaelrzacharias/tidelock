@@ -10,7 +10,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `DETERMINISM.md` -> §12
 - `ECS.md` -> §1.1, §9.2
 - `FRAME-LOOP.md` -> §0.4
-- `FX-PALETTE.md` -> §5, §10, §13
+- `FX-PALETTE.md` -> §5, §10, §13, §14
 - `GATE0-BENCH.md` -> §2.1
 - `INPUT.md` -> §8.2
 - `JOBS.md` -> §8.1
@@ -72,13 +72,13 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `CANON.md` -> §4
 - `DETERMINISM.md` -> §4, §5
 - `ECS.md` -> §9
-- `FX-PALETTE.md` -> §2, §4, §5
+- `FX-PALETTE.md` -> §1, §2, §4, §5, §6, §7, §9
 - `LUAU-LAYER.md` -> §6
 - `NETCODE.md` -> §9
 - `PLATFORM.md` -> §1, §4
 - `RENDER2D.md` -> §1, §7
 - `TESTING.md` -> §4, §6
-- `TOOLING.md` -> §4
+- `TOOLING.md` -> §4, §9
 
 ## DETERMINISM.md
 - `ARCHITECTURE.md` -> §9.5
@@ -102,6 +102,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `CPP-SUBSET.md` -> §5, §6, §10.2, §10.3
 - `DETERMINISM.md` -> §3
 - `FRAME-LOOP.md` -> §3
+- `FX-PALETTE.md` -> §6
 - `INPUT.md` -> §4
 - `JOBS.md` -> §3
 - `LUAU-LAYER.md` -> §3, §4, §6.1, §9

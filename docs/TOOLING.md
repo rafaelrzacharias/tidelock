@@ -179,10 +179,10 @@ void tl_log_write(u8 level, const char* file, u32 line, const char* fmt, ...) __
 #  define TL_PROBE_LOG(lit, v, n) ((void)0)   /* … */
 #endif
 // tl_assert.h
-#define TL_FATAL(msg)        tl_fatal(__FILE__, __LINE__, (msg))                       // all tiers, [[noreturn]]
-#define TL_CHECK(c)          ((c) ? (void)0 : tl_fatal(__FILE__, __LINE__, "check: " #c)) // all tiers
+#define TL_FATAL(msg)        tl_fatal(__FILE__, (u32)__LINE__, (msg))                   // all tiers, [[noreturn]]
+#define TL_CHECK(c)          ((c) ? (void)0 : tl_check_failed(__FILE__, (u32)__LINE__, #c))  // all tiers
 #if TL_DEV
-#  define TL_ASSERT(c)       TL_CHECK(c)
+#  define TL_ASSERT(c)       ((c) ? (void)0 : tl_assert_failed(__FILE__, (u32)__LINE__, #c)) // each tier its own R-3 symbol (CPP-SUBSET.md §9), so the report names what fired
 #else
 #  define TL_ASSERT(c)       ((void)0)
 #endif

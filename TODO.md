@@ -8,10 +8,11 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 `docs/ARCHITECTURE.md` §0/§4, test-infra-first.
 
 ## Gate 0 — the pivot gate (`docs/GATE0-BENCH.md`, `docs/FX-PALETTE.md`)
-- [ ] `src/foundation/fx.h` — `fx<Rep,FRAC>`, `mul<R>`/`div<R>` with RNE + widened intermediates,
+- [x] `src/foundation/fx.h` — `fx<Rep,FRAC>`, `mul<R>`/`div<R>` with RNE + widened intermediates,
       sat/wrap helpers, comparisons; exhaustive tests on small formats, property tests on 32-bit.
-- [ ] `fx_palette.h` — the rev-1 rows, derivation `static_assert`s, mixed-op instantiations, world
-      constants, `H`/`G_SUBSTEP`; `FX_PALETTE_REV`.
+      (W1 fx, 2026-08-23; the fatal-expected halves wait for the runner, below.)
+- [x] `fx_palette.h` — the rev-1 rows, derivation `static_assert`s, mixed-op instantiations, world
+      constants, `H`/`G_SUBSTEP`; `FX_PALETTE_REV`. (W1 fx, 2026-08-23.)
 - [ ] `det_math.h` — `sqrt`/`rsqrt`/`sincos`/`atan2`/`isqrt`/`lerp`, `vec2<T>`, normalize/rotate;
       FixPointCS ports attributed; `tools/fxcheck/` three-layer oracle (exhaustive + differential +
       MPFR bounds) green for `sqrt`/`sin`/`cos`.
@@ -23,6 +24,34 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `PIVOT-DESIGN.md` §3.1b/§12 updated + `LESSONS.md` entries per rung climbed.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **RR-5 Tagged palette rows?** `fx<Rep,FRAC>` keys a row by format, so `pos_t`/`invmass_t`,
+      `q_t`/`stiff_t`/`angle_t`/`dt_t`, `vel_t`/`omega_t` and `scalar_t`/`lambda_t` are one C++
+      type each: `pos_t + invmass_t` compiles, and the §3.1 op table collapses to format triples
+      (`FX-PALETTE.md` §1, the W1 fx lane's finding). The compiler checks scale, not units. A
+      `fx<Rep,FRAC,Tag>` third parameter would make the rows distinct types at the cost of an
+      explicit `to<R>` at every unit change (`invmass_t → scalar_t` is already one) and a larger
+      op table. Rev-1 ships format-keyed, as the doc now states; decide before Gate 0's solver is
+      promoted (W3 alloy-solver), because that is the last point where the retag is a header edit.
+- [ ] **`foundation/tl_assert.h` landed from the fx lane, not tooling-rt.** `fx.h` needs
+      `TL_ASSERT` on its first line of arithmetic and the tooling-rt lane had not published its
+      header; the header's content is pinned by `TOOLING.md` §9 + `CPP-SUBSET.md` §9 R-3 +
+      `tools/audit/allow.txt`, so it was transcribed (each tier routed to its own R-3 symbol;
+      `TOOLING.md` §9 snippet aligned). **`tl_assert.cpp` is a stub** - every entry
+      `__builtin_trap`s with file/line/msg live in the frame for a debugger; foundation has no
+      sanctioned io. The tooling-rt lane replaces it with the crash writer (`TOOLING.md` §9.3.9)
+      and owns both files from then on.
+- [ ] **Gate finding (fixed in the same commit, for the record):** `tools/audit/includes.py`
+      rejected `fx.h` → `tl_assert.h` as "a sim TU includes a non-det foundation header" because
+      the det/non-det split is by *stem* and `tl_assert` is non-det for its runtime. R-3 mandates
+      the include. Exempted by full path (`PANIC_ABI_HEADER`), with three selftest fixtures
+      (`tl_assert.h` passes; `tl_assert.cpp` and `tl_log.h` still fail). Also: `static_assert`
+      message literals are literals to the non-ASCII gate, so header messages spell "section 3.1",
+      not "§3.1" - not a gate bug, noted so nobody "fixes" it.
+- [ ] **fx tests that need the runner lane** (`TESTING.md` §9.1 `TL_TEST_EXPECT_FATAL`): `div`
+      by zero, `sqrt` of a negative, `normalize` of a zero vector, `atan2(0,0)`, `to<R>` out of
+      range, `clamp` with lo > hi - each asserts in dev and has a documented release value; the
+      release values are testable today only by building the test against a non-dev tier. Land
+      them in `tests/foundation/fx_fatal.test.cpp` the day the macro exists.
 - [ ] **RR-1 Pi 4 sysroot + the aarch64 leg of `BUILD.md` §10.5.** Rafael has a Pi 4 on the LAN,
       so this is now an execution task, not a decision. Lane: W0 skeleton (**Opus 5 high**). It
       touches only `toolchain/`, `cmake/toolchain-pi4.cmake`, `tools/sysroot.sh|deploy.sh` and this

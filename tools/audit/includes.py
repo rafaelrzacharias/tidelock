@@ -69,6 +69,12 @@ RENDER_SIM_HEADER = "sim/views.h"
 # (docs/CPP-SUBSET.md §1) and fx_float.h is the render/editor/tools bridge (docs/FX-PALETTE.md §6).
 TYPE_EXEMPT_PATHS = {"src/foundation/tl_types.h", "src/foundation/fx_float.h"}
 THREAD_LOCAL_EXEMPT = {"src/foundation/jobs.cpp", "src/foundation/jobs.h"}   # the worker slot
+# The panic ABI (docs/CPP-SUBSET.md §9 R-3): tl_assert.h is the one non-det-STEM header a sim TU
+# may include. Its runtime (tl_assert.cpp, the crash writer) reaches io and stays in the non-det
+# half, but the header is three extern "C" declarations and three macros, and every TL_CHECK in
+# fx.h needs it. The stem-keyed split cannot express "header det, runtime non-det", so the
+# exemption is by full path - the .cpp is still barred.
+PANIC_ABI_HEADER = "foundation/tl_assert.h"
 
 INC_SYS = re.compile(r'^\s*#\s*include\s*<([^>]+)>')
 INC_LOCAL = re.compile(r'^\s*#\s*include\s*"([^"]+)"')
@@ -431,7 +437,7 @@ def check_file(root, path, nondet, errors):
                     # _fltused tripwire on ELF (docs/FX-PALETTE.md 6).
                     errors.append('%s:%d: a sim TU includes the float bridge "%s" - it is '
                                   "render/editor/tools only (docs/FX-PALETTE.md §6)" % (rel, i, inc))
-                elif inc_stem in nondet:
+                elif inc_stem in nondet and inc != PANIC_ABI_HEADER:
                     errors.append('%s:%d: a sim TU includes the non-det foundation header "%s" '
                                   "(docs/BUILD.md §10.2)" % (rel, i, inc))
         if m or m2:

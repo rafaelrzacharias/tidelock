@@ -65,6 +65,14 @@ INCLUDE_CASES = [
     ("sim TU includes a non-det foundation header", "src/sim/c.cpp",
      '#include "foundation/jobs.h"\n',
      "non-det foundation header"),
+    # The panic-ABI exemption is the HEADER only (docs/CPP-SUBSET.md §9 R-3): its runtime and its
+    # non-det siblings stay barred.
+    ("sim TU includes the panic runtime, not just its header", "src/sim/c2.cpp",
+     '#include "foundation/tl_assert.cpp"\n',
+     "non-det foundation header"),
+    ("sim TU includes tl_log.h (non-det, not the panic ABI)", "src/sim/c3.cpp",
+     '#include "foundation/tl_log.h"\n',
+     "non-det foundation header"),
     ("banned system include", "src/sim/d.cpp",
      "#include <stdio.h>\n",
      "not on the allowlist"),
@@ -201,6 +209,9 @@ INCLUDE_CLEAN = [
      "// Advances the fixture one step. No preconditions.\nvoid ok1_step(void);\n"),
     ("a string literal mentioning double is not a violation", "src/sim/ok2.cpp",
      '#include "foundation/tl_types.h"\nextern const char* k;\nconst char* k = "double trouble";\n'),
+    # docs/CPP-SUBSET.md §9 R-3: the first TL_CHECK in fx.h includes tl_assert.h from a det TU.
+    ("a sim TU may include the panic ABI header tl_assert.h", "src/sim/ok8.cpp",
+     '#include "foundation/tl_assert.h"\nu32 ok8(u32 a) { TL_CHECK(a != 0u); return a; }\n'),
     ("a commented-out include is not a violation", "src/sim/ok3.cpp",
      '// #include "net/wire.h"\n#include "foundation/tl_types.h"\n'),
     ("internal-linkage functions and constants are not mutable state", "src/sim/ok5.cpp",

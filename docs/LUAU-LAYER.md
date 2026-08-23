@@ -306,7 +306,7 @@ their width; counts use their declared range.
 | `fx.mul_scalar(s, a) → a's row` | `mul<A>(scalar_t, A)` | shift always 16 |
 | `fx.div_q(a, b) → q` | `div<q_t>(A, A)` | same-row operands; `b == 0` → error |
 | `fx.mul_pos_vel_dt(x, v) → pos` | `x + mul<pos_t>(v, H)` | the integrate step; `dt_t` is only `H` so no dt argument exists |
-| `fx.vel_from_delta(dx) → vel` | `mul<vel_t>(pos_t, INV_H)` | |
+| `fx.vel_from_delta(dx) → vel` | `mul_int<vel_t>(pos_t, INV_H)` | |
 | `fx.dist(x0,y0,x1,y1) → pos` | `sqrt<pos_t>(fx<i64,36>)` | the only path to `pos×pos` |
 | `fx.normalize(dx, dy) → qx, qy` | `normalize(vec2<pos_t>)` | zero vector → `0, 0` |
 | `fx.sincos(a) → qs, qc` / `fx.atan2(y, x) → angle` | `det_math.h` | `atan2` takes `pos_t`; a `q_t` variant is `fx.atan2_q` |
