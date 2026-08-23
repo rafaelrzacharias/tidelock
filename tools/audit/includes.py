@@ -85,8 +85,14 @@ FLOAT_TOKENS = re.compile(r'\b(float|double|f32|f64)\b')
 # size_t/ptrdiff_t/intptr_t/max_align_t are the same class `usize` was: the same width on all three
 # targets but not reliably the same TYPE, so an overload or specialisation keyed on one selects
 # different code per target (docs/CANON.md).
+# The int_fast/int_least families are the measured boundary of the no-sysroot model in
+# tools/audit/targets.py: clang's freestanding <stdint.h> defines them as the LEAST types and no
+# hosted libc does - MSVC's int_fast16_t is `int`, glibc's is `long`, so a record holding one is
+# 8 B on Windows and 16 B on Linux while the gate's three legs all see 8. Enumeration is the
+# correct tool for a closed family the measurement cannot reach.
 ABI_TOKENS = re.compile(r'\b(long|char|wchar_t|char8_t|char16_t|char32_t'
-                        r'|size_t|ptrdiff_t|intptr_t|uintptr_t|max_align_t)\b')
+                        r'|size_t|ptrdiff_t|intptr_t|uintptr_t|max_align_t'
+                        r'|u?int_fast(?:8|16|32|64)_t|u?int_least(?:8|16|32|64)_t|wint_t)\b')
 # Compile-time wall clock. __FILE__/__LINE__ are deliberately NOT here: they are deterministic
 # given the tree, TL_CHECK expands them into every sim TU, and they never feed sim state.
 BUILD_CLOCK = re.compile(r'\b(__DATE__|__TIME__|__TIMESTAMP__)\b')
@@ -112,7 +118,12 @@ CHAR_LITERAL_USE = re.compile(r'\b(?:const\s+char|char\s+const)\s*(\*|\[|\(\s*&)
 BITFIELD = re.compile(r'\b(?:u8|u16|u32|u64|i8|i16|i32|i64|bool)\s*(?:[A-Za-z_]\w*)?\s*:(?!:)')
 PLATFORM_MACRO = re.compile(
     r'\b(_WIN32|_WIN64|_MSC_VER|_M_X64|_M_ARM64|__aarch64__|__x86_64__|__i386__|__arm__'
-    r'|__linux__|__APPLE__|__unix__|__ARM_ARCH|__SIZEOF_LONG__|__CHAR_BIT__)\b')
+    r'|__linux__|__APPLE__|__unix__|__ARM_ARCH|__SIZEOF_LONG__|__CHAR_BIT__'
+    r'|__LP64__|__LLP64__|_LP64|__CHAR_UNSIGNED__|__SIZEOF_WCHAR_T__|__GNUC__)\b')
+# __has_include of a platform header answers differently in the real build (true on Windows) and
+# under the cross-target gate's freestanding model (uniformly false) - a divergence that gate is
+# blind to by construction. The include allowlist makes it useless in a sim TU anyway.
+HAS_INCLUDE = re.compile(r'__has_include\b')
 # Checked on the strings-blanked text, so the section NAME is already gone - match the
 # attribute itself, not its argument.
 CUSTOM_SECTION = re.compile(r'section\s*\(|__declspec\s*\(\s*allocate')
@@ -461,6 +472,10 @@ def check_file(root, path, nondet, errors):
                 errors.append("%s:%d: bit-field in a sim TU - the layout differs between "
                               "windows-msvc and linux/aarch64, so the arena bytes differ "
                               "(docs/CPP-SUBSET.md §5): %s" % (rel, i, raw_lines[i - 1].strip()[:60]))
+            if HAS_INCLUDE.search(tline):
+                errors.append("%s:%d: __has_include in a sim TU - it answers differently in the "
+                              "real build and under the cross-target gate's freestanding model "
+                              "(docs/CPP-SUBSET.md §5)" % (rel, i))
             m5 = PLATFORM_MACRO.search(tline)
             if m5:
                 errors.append("%s:%d: '%s' in a sim TU - a per-target branch makes two different "

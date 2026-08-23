@@ -142,6 +142,17 @@ INCLUDE_CASES = [
      '#include "foundation/tl_types.h"\n'
      'extern const char* b;\nconst char* b = __DATE__;\n',
      "compile-time wall clock"),
+    # The fifth review: the boundary of the cross-target gate's no-sysroot model, which only a
+    # token ban can cover.
+    ("int_fast16_t in a sim TU", "src/sim/fastint.cpp",
+     '#include "foundation/tl_types.h"\nu32 f(int_fast16_t n) { return (u32)n; }\n',
+     "'int_fast16_t' in a sim TU"),
+    ("__has_include in a sim TU", "src/sim/hasinc.cpp",
+     '#include "foundation/tl_types.h"\n#if __has_include(<vcruntime.h>)\nu32 g(void) { return 1u; }\n#endif\n',
+     "__has_include in a sim TU"),
+    ("__LP64__ in a sim TU", "src/sim/lp64.cpp",
+     '#include "foundation/tl_types.h"\n#if __LP64__\nu32 s(void) { return 1u; }\n#endif\n',
+     "'__LP64__' in a sim TU"),
     ("a sim TU includes the float bridge", "src/sim/bridge.cpp",
      '#include "foundation/fx_float.h"\n',
      "includes the float bridge"),
@@ -469,6 +480,35 @@ TARGET_CLEAN = ("struct OK { u32 a; u64 b; };\n"
                 "static const u64 MASK = 0xFFFFFFFFULL;\n"
                 "inline u64 ok_mask(u64 v) { return v & MASK; }\n")
 
+# The fifth review's silent passes. Every one is a divergent record that the name-keyed comparison
+# dropped instead of reporting - the same failure shape as the path filter that compared two empty
+# lists. They are here so the positional comparison can never regress to keying by name.
+TARGET_IDENTITY = [
+    ("a record named like a system one is still compared", "sysname",
+     "struct __Cell { u8 a : 4; u16 c : 8; };\n"
+     "u32 use(void) { return (u32)sizeof(__Cell); }\n"),
+    ("an anonymous-namespace record is still compared", "anonns",
+     "namespace { struct R { u8 a : 4; u16 c : 8; }; }\n"
+     "u32 use(void) { return (u32)sizeof(R); }\n"),
+    ("an unnamed typedef'd record is still compared", "unnamed",
+     "typedef struct { u8 a : 4; u16 c : 8; } T;\n"
+     "u32 use(void) { return (u32)sizeof(T); }\n"),
+    ("two function-local records with one name are both compared", "shadow",
+     "u32 f1(void) { struct L { u8 a : 4; u16 c : 8; }; return (u32)sizeof(L); }\n"
+     "u32 f2(void) { struct L { u32 x; }; return (u32)sizeof(L); }\n"),
+]
+
+# The 64-bit spellings and literal suffixes that made a realistic fx.h read as 18 divergences, none
+# of them real. fx<i64,FRAC> dumps as fx<long long,..> on windows-msvc and fx<long,..> elsewhere.
+TARGET_FX_HEADER = (
+    "template <class Rep, u32 FRAC>\nstruct fx { Rep raw; };\n"
+    "using pos_t = fx<i32, 18>;\n"
+    "using wide_t = fx<i64, 32>;\n"
+    "struct Body { pos_t x; pos_t y; wide_t accum; u64 mask; };\n"
+    "inline u64 fx_all_ones(void) { return UINT64_C(0xFFFFFFFF); }\n"
+    "inline u64 fx_big(void) { return 1000ULL; }\n"
+    "u32 use(void) { return (u32)sizeof(Body); }\n")
+
 
 def test_targets(tmp, cxx):
     root = fixture_root(tmp, "tgt")
@@ -486,8 +526,15 @@ def test_targets(tmp, cxx):
         rc, out = run_one(name, body)
         record("targets: " + label, rc == 1 and expect in out, out.strip()[:200])
 
+    for label, name, body in TARGET_IDENTITY:
+        rc, out = run_one(name, body)
+        record("targets: " + label, rc == 1 and "different layout" in out, out.strip()[:200])
+
     rc, out = run_one("clean", TARGET_CLEAN)
     record("targets: ordinary sim code is not a divergence", rc == 0, out.strip()[:300])
+
+    rc, out = run_one("fxlike", TARGET_FX_HEADER)
+    record("targets: a realistic fx.h is not 18 false positives", rc == 0, out.strip()[:400])
 
     # The filter that reads our own lines out of the preprocessor output is the whole gate: when it
     # was wrong, every comparison was between two empty lists and everything passed.

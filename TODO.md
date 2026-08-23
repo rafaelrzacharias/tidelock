@@ -72,6 +72,11 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       scanner, still open below; and the value-divergence classes stay with the token bans by
       design (`char` signedness, `long`/`size_t` in an expression, wide literals, high escape
       bytes), which is the split the review's own attack recommended.
+- [ ] **Coverage boundary of the cross-target gate, tied to RR-1.** `tools/audit/targets.py`
+      measures the TUs under `src/sim` and the det half of `src/foundation`. A record instantiated
+      only from `net`/`script`/`save` - a `TL_WIRE_STRUCT` template with a bit-field, say - is
+      measured nowhere until those modules compile for aarch64, i.e. until RR-1. Stated in
+      `CPP-SUBSET.md` §5; close it by extending the gate's TU set once a Pi build exists.
 - [ ] **The contract-comment rule is at the limit of a regex.** Three reviews have now found
       false positives and false negatives in `tools/audit/includes.py`'s declaration scanner
       (operators, attributes, template heads, a `(` inside a literal). The token bans are fine as

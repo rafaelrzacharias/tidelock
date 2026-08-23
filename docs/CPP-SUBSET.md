@@ -141,15 +141,17 @@ anywhere. Rules:
   it preprocesses every sim TU and dumps its record layouts for all three triples and diffs, so
   a `#pragma pack`, an `alignas`, a `[[no_unique_address]]`, a bit-field or any per-target `#if`
   is caught in *any* spelling rather than by whichever spelling someone listed. **`tools/audit/includes.py` bans the tokens** whose divergence is in the VALUE, over identical
-  text and identical layouts, which no diff can see: `char` (signed on x86-64, unsigned on aarch64), `long` (32-bit on Windows,
-  64-bit on Linux), `wchar_t`, and `size_t`/`ptrdiff_t`/`intptr_t`/`max_align_t`; **bit-fields** —
-  `struct { u8 a:4; u16 c:8; }` is 4 B on windows-msvc and 2 B on linux/pi, so the arena bytes
-  differ; **enums without a fixed underlying type** (measured: in-range enumerators promote to
-  `int` on all three targets today, so this one is latent rather than active — but the width is
-  only pinned by writing it, and `-fshort-enums` changes it); **platform macros** (`_WIN32`,
-  `_MSC_VER`, `__aarch64__`, …), since a sim TU that branches on the target is two different
-  programs; **custom section attributes**, which hide storage from the `.data`/`.bss` gate; and
-  **non-ASCII bytes in literals**, written directly *or as a `\x`/octal escape*, because a byte
+  text and identical layouts, which no diff can see - and nothing belongs to both lists: `char` (signed on x86-64, unsigned on aarch64), `long` (32-bit on Windows,
+  64-bit on Linux), `wchar_t`, `size_t`/`ptrdiff_t`/`intptr_t`/`max_align_t`, and the
+  **`int_fast*`/`int_least*` families** — the last of these is the measured boundary of the
+  cross-target gate: clang's freestanding `<stdint.h>` defines them as the *least* types and no
+  hosted libc does (MSVC's `int_fast16_t` is `int`, glibc's is `long`), so a record holding one
+  is 8 B on Windows and 16 B on Linux while all three of the gate's legs see 8. **Platform
+  macros** (`_WIN32`, `_MSC_VER`, `__aarch64__`, `__LP64__`, `__GNUC__`, …) and
+  **`__has_include`**, since a sim TU that branches on the target is two different programs and
+  `__has_include` of a platform header answers one way in the real build and another under the
+  gate's freestanding model. **Custom section attributes**, which hide storage from the
+  `.data`/`.bss` gate. And **non-ASCII bytes in literals**, written directly *or as a `\x`/octal escape*, because a byte
   ≥ 0x80 hashes differently where `char` is signed — `const char*` message literals stay legal,
   which is exactly why the byte rule is needed. `usize` is `u64` rather than `size_t` for the same
   class of reason (`CANON.md`): same width everywhere, but not reliably the same *type*, and a
@@ -157,6 +159,15 @@ anywhere. Rules:
   `__TIMESTAMP__` are banned in all of `src/`** — two peers building one tree get different bytes.
   `__FILE__`/`__LINE__` stay legal (deterministic given the tree, and `TL_CHECK` expands them into
   every sim TU) but must never feed sim state.
+
+  **Bit-fields, `#pragma pack`, `alignas`, `[[no_unique_address]]`, enums without a fixed
+  underlying type and every other layout or macro construct are the *measurement* gate's**, not
+  the token bans' — in any spelling, which is the whole point of measuring. Its stated
+  boundaries: it compiles freestanding with a stubbed `<string.h>`, so the `int_fast*` family
+  and `__has_include` fall to the token bans above; and it measures the TUs under `src/sim` and
+  the det half of `src/foundation`, so a record instantiated only from `net`/`script`/`save` is
+  covered by its own module's `TL_WIRE_STRUCT` asserts and, on aarch64, only once RR-1 makes a
+  Pi build possible.
 
 ---
 

@@ -2,30 +2,39 @@
 """Cross-target divergence gate - measurement, not pattern-matching.
 Spec: docs/CPP-SUBSET.md §5, docs/BUILD.md §9 R-8, docs/TESTING.md §5.
 
-Four adversarial reviews each found target-variable constructs that a regex missed, because the
-space cannot be enumerated: `#pragma pack`, `alignas`, `[[no_unique_address]]`, `#pragma data_seg`,
-`#ifdef __GNUC__`, and every macro outside whatever denylist someone thought of. This gate stops
-guessing and measures instead. For every sim TU, on all three supported triples:
+Four adversarial reviews found target-variable constructs a regex missed, because the space cannot
+be enumerated: `#pragma pack`, `alignas`, `[[no_unique_address]]`, `#ifdef __GNUC__`, and every
+macro outside whatever denylist someone thought of. This gate measures instead. For every sim TU,
+on all three supported triples:
 
-  1. **Preprocess** (`clang -E`) and diff. Any line of OUR source that differs between targets is a
-     per-target program - which is the violation, not noise. Lines coming from clang's own
-     resource-dir headers are dropped by following the `# N "file"` markers, so `size_t`'s
-     expansion differing per ABI is not a finding.
-  2. **Record layouts** (`-Xclang -fdump-record-layouts-complete`) and diff. Any struct whose
-     sizeof, align or field offsets differ between targets changes the arena bytes and therefore
-     the world hash. This catches every layout hazard in any spelling, including the ones no
-     regex saw.
+  1. **Preprocess** (`clang -E`) and diff, once per tier define set. Any line of OUR source that
+     differs between targets is a per-target program - the violation, not noise. Lines from clang's
+     resource-dir headers are dropped by following the `# N "file"` markers.
+  2. **Record layouts** (`-Xclang -fdump-record-layouts-complete`) and diff. Any record whose
+     sizeof, align or field offsets differ changes the arena bytes and therefore the world hash.
 
-What it does NOT cover, and what the regex gate keeps: value divergence over identical text and
-identical layouts (`char` signedness in arithmetic, `long`/`size_t` in an expression, high escape
-bytes), and the discipline rules (module DAG, include firewall, contract comments). The two gates
-are complements - this one replaces the layout/macro half of the old ruleset, not the whole of it.
+THE DESIGN RULE OF THIS FILE, learned the hard way twice: **a filter must never decide what gets
+compared.** The first version dropped every line whose path failed a broken match and compared two
+empty lists - passing everything. The second keyed records by a name parsed out of the dump, so an
+anonymous-namespace record, an unnamed typedef'd one, a second local record with the same name, or
+one a lane happened to call `__Cell` simply vanished. Both were silent passes, which is the only
+failure mode that matters in a gate.
+
+So: records are compared **positionally** (the dump order is a function of the TU, identical on
+every target) with a count check, names are used only in messages, and the system records to skip
+are **measured** per triple from a TU containing nothing but the sanctioned headers - not matched
+by prefix. Any structural surprise is an error, never a silent skip.
+
+What this gate does NOT cover, and the token bans in includes.py do: value divergence over
+identical text and identical layouts (`char` signedness, `long`/`size_t`/`int_fast*` in an
+expression, wide literals, high escape bytes), and records instantiated only from modules outside
+`src/sim` + `src/foundation` (see docs/CPP-SUBSET.md §5's stated boundary).
 
 No sysroot needed: `<stdint.h>`, `<stddef.h>` and `<limits.h>` come from clang's resource dir under
-`-nostdlibinc`, and `<string.h>` - the only sanctioned header that is not - is stubbed with the four
-declarations docs/CPP-SUBSET.md §1 allows. That holds exactly as long as the include allowlist
-stays freestanding, which the include firewall enforces; if a hosted header is ever allowed, this
-gate needs the three real sysroots and says so rather than quietly passing.
+`-nostdlibinc`, and `<string.h>` is stubbed with the four declarations docs/CPP-SUBSET.md §1
+allows. The boundary of that model is real and stated in §5: the freestanding `<stdint.h>` defines
+the `int_fast*` family differently from every hosted libc, so those names are token-banned rather
+than measured here, and `__has_include` of a platform header is uniformly false and is banned too.
 """
 import argparse, os, re, shutil, subprocess, sys, tempfile
 
@@ -37,8 +46,14 @@ TRIPLES = [
     ("pi", "aarch64-unknown-linux-gnu"),
 ]
 
-# The four declarations of docs/CPP-SUBSET.md §1. size_t comes from <stddef.h> either way, so the
-# stub is exact for the sanctioned subset.
+# The tier define sets that reach a sim TU (docs/BUILD.md §3). The preprocess leg runs once per
+# set: a `#if TL_DEV` guarding a per-target record is invisible if only one tier is measured.
+TIER_DEFINES = [
+    ("netcode", ["-DTL_DEV=0", "-DTL_TIER_NETCODE=1"]),
+    ("dev", ["-DTL_DEV=1", "-DTL_TIER_DEV=1"]),
+]
+
+# The four declarations of docs/CPP-SUBSET.md §1. size_t comes from <stddef.h> either way.
 STRING_H_STUB = """#pragma once
 #include <stddef.h>
 extern "C" void* memcpy(void*, const void*, size_t);
@@ -46,24 +61,50 @@ extern "C" void* memmove(void*, const void*, size_t);
 extern "C" void* memset(void*, int, size_t);
 extern "C" int memcmp(const void*, const void*, size_t);
 """
+# Used to measure which records the sanctioned headers themselves define, per triple.
+SYSTEM_PROBE = '#include <stdint.h>\n#include <stddef.h>\n#include <limits.h>\n#include <string.h>\n'
 
-# -nostdlibinc, NOT -nostdinc: the latter drops clang's own resource dir too, which is where
-# <stdint.h>, <stddef.h> and <limits.h> live under freestanding. We want the builtin headers
-# (their definitions come from __INT64_TYPE__-class builtins, i.e. the target's own ABI) and
-# no platform headers at all.
+# -nostdlibinc, NOT -nostdinc: the latter drops clang's own resource dir too, which is where the
+# freestanding <stdint.h>/<stddef.h>/<limits.h> live.
 BASE_FLAGS = ["-std=c++20", "-ffreestanding", "-nostdlibinc", "-nostdinc++",
-              "-fno-exceptions", "-fno-rtti",
-              "-DTL_SIM_TU=1", "-DTL_DEV=0", "-DTL_TIER_NETCODE=1"]
+              "-fno-exceptions", "-fno-rtti", "-DTL_SIM_TU=1"]
+LAYOUT_FLAGS = ["-fsyntax-only", "-Xclang", "-fdump-record-layouts-complete"]
 
 LINE_MARKER = re.compile(r'^#\s+\d+\s+"([^"]*)"')
-# 1UL / 1ULL / 1L on one target and 1U on another are the same value written for a different ABI.
-INT_SUFFIX = re.compile(r'\b(\d+)[uU]?(?:[lL]{1,2})[uU]?\b')
-RECORD_START = re.compile(r'^\s*\*\*\* Dumping AST Record Layout')
-RECORD_NAME = re.compile(r'^\s*\d+\s*\|\s*(?:struct|class|union)\s+([A-Za-z_][\w:<>, ]*)')
-# dsize/nvsize/nvalign are dump bookkeeping that differs per ABI even when sizeof and every offset
-# agree; they are format noise, not layout.
+
+# int64_t is `long long` on windows-msvc and `long` on linux/aarch64 - the same 64-bit type spelled
+# two ways, which made every fx<i64,FRAC> and Result<u64> read as a divergence. Both spellings
+# collapse to one canonical name. This is only sound because `long` and the `int_fast*` family are
+# token-banned in sim TUs (docs/CPP-SUBSET.md §5), so a `long` in a dump can only have come from a
+# 64-bit typedef - never from a 32-bit Windows `long`.
+CANON_TYPES = [("unsigned long long", "u64"), ("unsigned long", "u64"),
+               ("long long", "i64"), ("long", "i64")]
+
+# Integer-literal suffixes are MAPPED, never stripped. Stripping made `1LL` identical to `1`, which
+# hid a genuine 64-bit-vs-32-bit shift; and a decimal-only pattern left UINT64_C(0x...) reading as
+# a divergence between ULL and UL. Hex, binary and digit separators are all covered.
+LITERAL = re.compile(r'\b(0[xX][0-9a-fA-F\']+|0[bB][01\']+|[0-9][0-9\']*)'
+                     r'([uU][lL]{1,2}|[lL]{1,2}[uU]|[uU]|[lL]{1,2})\b')
 ABI_NOISE = re.compile(r'\b(dsize|nvsize|nvalign)=\d+,?\s*')
-SYSTEM_RECORD = re.compile(r'^(__|max_align_t|_GUID|_?IMAGE_|_TP_|std::)')
+RECORD_START = re.compile(r'^\s*\*\*\* Dumping AST Record Layout')
+RECORD_NAME = re.compile(r'\|\s*(?:struct|class|union)\s+(.+?)\s*$')
+
+
+def canon_literal(m):
+    """1u -> 1<U>, 1L/1LL -> 1<I64>, 1UL/1ULL -> 1<U64>. Width is preserved, spelling is not."""
+    suffix = m.group(2).lower()
+    if "l" in suffix:
+        kind = "<U64>" if "u" in suffix else "<I64>"
+    else:
+        kind = "<U>"
+    return m.group(1).replace("'", "") + kind
+
+
+def canon_text(line):
+    out = ABI_NOISE.sub("", line.rstrip())
+    for spelling, name in CANON_TYPES:
+        out = re.sub(r'\b' + spelling + r'\b', name, out)
+    return LITERAL.sub(canon_literal, out)
 
 
 def run(cmd):
@@ -71,46 +112,41 @@ def run(cmd):
     return r.returncode, r.stdout, r.stderr
 
 
-def det_sources(root, nondet):
-    """Every sim TU: the .cpp files, plus one generated TU per public sim header so a header-only
-    module (fx.h is one, for its whole first week) is measured before any .cpp includes it."""
-    out = []
-    for sub in ("sim", "foundation"):
-        base = os.path.join(root, "src", sub)
-        for dirpath, _dirs, files in os.walk(base):
-            for name in sorted(files):
-                stem, ext = os.path.splitext(name)
-                if ext not in (".cpp", ".h"):
-                    continue
-                if sub == "foundation" and stem in nondet:
-                    continue
-                rel = os.path.relpath(os.path.join(dirpath, name), root).replace("\\", "/")
-                if rel in ("src/foundation/fx_float.h",):
-                    continue                       # the render/editor bridge, not a sim TU
-                out.append(rel)
-    return out
-
-
-def tu_for(root, rel, tmp):
-    """A compilable TU for a source: the .cpp itself, or a generated includer for a header."""
-    if rel.endswith(".cpp"):
-        return os.path.join(root, rel.replace("/", os.sep))
-    path = os.path.join(tmp, "hdr_" + rel.replace("/", "_") + ".cpp")
-    inc = rel[len("src/"):]
-    open(path, "w", encoding="utf-8", newline="\n").write('#include "%s"\n' % inc)
-    return path
-
-
 def norm_path(p):
-    """A line marker escapes backslashes, so a Windows path arrives as C:\\\\dir\\\\file. Collapsing
-    any run of backslashes to one slash is the difference between this gate reading our source and
-    silently comparing two empty lists - which is how it passed every fixture on first run."""
+    """Line markers escape backslashes, so a Windows path arrives as C:\\\\dir\\\\file."""
     return re.sub(r'[\\/]+', '/', p).lower()
 
 
-def preprocess(clang, triple, tu, incs, root):
-    """Our own preprocessed lines, with resource-dir headers dropped via the line markers."""
-    rc, out, err = run([clang, "--target=" + triple, "-E"] + BASE_FLAGS + incs + [tu])
+def det_sources(root, nondet):
+    """Every sim TU: the .cpp files, plus one generated TU per public sim header, so a header-only
+    module (fx.h is one for its whole first week) is measured before any .cpp includes it."""
+    out = []
+    for sub in ("sim", "foundation"):
+        base = os.path.join(root, "src", sub)
+        for dirpath, dirs, files in os.walk(base):
+            dirs.sort()                            # host-independent order, so is the error order
+            for name in sorted(files):
+                stem, ext = os.path.splitext(name)
+                if ext not in (".cpp", ".h") or (sub == "foundation" and stem in nondet):
+                    continue
+                rel = os.path.relpath(os.path.join(dirpath, name), root).replace("\\", "/")
+                if rel == "src/foundation/fx_float.h":
+                    continue                       # the render/editor bridge, not a sim TU
+                out.append(rel)
+    return sorted(out)
+
+
+def tu_for(root, rel, tmp):
+    if rel.endswith(".cpp"):
+        return os.path.join(root, rel.replace("/", os.sep))
+    path = os.path.join(tmp, "hdr_" + rel.replace("/", "_") + ".cpp")
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write('#include "%s"\n' % rel[len("src/"):])
+    return path
+
+
+def preprocess(clang, triple, defines, tu, incs, root):
+    rc, out, err = run([clang, "--target=" + triple, "-E"] + BASE_FLAGS + defines + incs + [tu])
     if rc != 0:
         return None, err
     ours = (norm_path(os.path.join(root, "src")), norm_path(tu))
@@ -120,80 +156,103 @@ def preprocess(clang, triple, tu, incs, root):
         if m:
             current = norm_path(m.group(1))
             continue
-        if not line.strip():
-            continue
-        if current.startswith(ours):
-            keep.append(INT_SUFFIX.sub(r"\1", line.rstrip()))
+        if line.strip() and current.startswith(ours):
+            keep.append(canon_text(line))
     if not keep:
         return None, ("no preprocessed line came from our own source - the line-marker filter is "
-                      "wrong and this gate would pass anything")
+                      "wrong and this gate would compare two empty lists")
     return keep, ""
 
 
-def record_layouts(clang, triple, tu, incs):
-    """{record name: normalised layout} for every record that is ours."""
-    rc, out, err = run([clang, "--target=" + triple, "-fsyntax-only",
-                        "-Xclang", "-fdump-record-layouts-complete"] + BASE_FLAGS + incs + [tu])
-    if rc != 0:
-        return None, err
-    records, name, body = {}, None, []
-    for line in out.splitlines():
+def parse_records(dump):
+    """[(name, normalised block)] in dump order. The name is for the message only - nothing is
+    dropped or keyed by it."""
+    blocks, name, body = [], None, None
+    for line in dump.splitlines():
         if RECORD_START.match(line):
-            if name and not SYSTEM_RECORD.match(name):
-                records[name] = "\n".join(body)
+            if body is not None:
+                blocks.append((name or "<unnamed>", "\n".join(body)))
             name, body = None, []
             continue
+        if body is None:
+            continue
         if name is None:
-            m = RECORD_NAME.match(line)
+            m = RECORD_NAME.search(line)
             if m:
                 name = m.group(1).strip()
-        body.append(ABI_NOISE.sub("", line.rstrip()))
-    if name and not SYSTEM_RECORD.match(name):
-        records[name] = "\n".join(body)
-    return records, ""
+        body.append(canon_text(line))
+    if body is not None:
+        blocks.append((name or "<unnamed>", "\n".join(body)))
+    return blocks
 
 
-def first_difference(a, b):
-    for i, (x, y) in enumerate(zip(a, b)):
-        if x != y:
-            return i, x, y
-    if len(a) != len(b):
-        longer = a if len(a) > len(b) else b
-        return min(len(a), len(b)), (longer[min(len(a), len(b))] if longer else ""), "<absent>"
-    return None, "", ""
+def record_layouts(clang, triple, tu, incs, system_names):
+    rc, out, err = run([clang, "--target=" + triple] + LAYOUT_FLAGS + BASE_FLAGS
+                       + TIER_DEFINES[0][1] + incs + [tu])
+    if rc != 0:
+        return None, err
+    return [b for b in parse_records(out) if b[0] not in system_names], ""
 
 
-def check(clang, root, rel, tmp, incs, errors):
+def system_record_names(clang, triple, incs, tmp):
+    """Measured, not guessed: whatever the sanctioned headers alone define on this triple. A prefix
+    filter here was user-controllable - a record named `__Cell` or `max_align_tx` disappeared."""
+    probe = os.path.join(tmp, "system_probe.cpp")
+    with open(probe, "w", encoding="utf-8", newline="\n") as f:
+        f.write(SYSTEM_PROBE)
+    rc, out, _err = run([clang, "--target=" + triple] + LAYOUT_FLAGS + BASE_FLAGS
+                        + TIER_DEFINES[0][1] + incs + [probe])
+    return {b[0] for b in parse_records(out)} if rc == 0 else set()
+
+
+def check(clang, root, rel, tmp, incs, system_names, errors):
     tu = tu_for(root, rel, tmp)
-    pre, lay = {}, {}
+    base_tag = TRIPLES[0][0]
+
+    for tier, defines in TIER_DEFINES:
+        pre = {}
+        for tag, triple in TRIPLES:
+            p, err = preprocess(clang, triple, defines, tu, incs, root)
+            if p is None:
+                first = [l for l in err.strip().splitlines() if l.strip()]
+                errors.append("%s: preprocessing failed for %s (%s tier):\n    %s"
+                              % (rel, triple, tier, first[0] if first else "(no diagnostic)"))
+                return
+            pre[tag] = p
+        for tag, _t in TRIPLES[1:]:
+            for i, (x, y) in enumerate(zip(pre[base_tag], pre[tag])):
+                if x != y:
+                    errors.append("%s: preprocessed source differs %s vs %s in the %s tier - a "
+                                  "per-target program (docs/CPP-SUBSET.md §5)\n    %s: %s\n    %s: %s"
+                                  % (rel, base_tag, tag, tier, base_tag, x[:100], tag, y[:100]))
+                    break
+            else:
+                if len(pre[base_tag]) != len(pre[tag]):
+                    errors.append("%s: %d preprocessed lines on %s vs %d on %s in the %s tier"
+                                  % (rel, len(pre[base_tag]), base_tag, len(pre[tag]), tag, tier))
+
+    lay = {}
     for tag, triple in TRIPLES:
-        p, err = preprocess(clang, triple, tu, incs, root)
-        if p is None:
-            errors.append("%s: does not compile for %s:\n    %s"
-                          % (rel, triple, err.strip().splitlines()[0] if err.strip() else "?"))
-            return
-        pre[tag] = p
-        r, err = record_layouts(clang, triple, tu, incs)
+        r, err = record_layouts(clang, triple, tu, incs, system_names[tag])
         if r is None:
-            first = err.strip().splitlines()
+            first = [l for l in err.strip().splitlines() if l.strip()]
             errors.append("%s: layout dump failed for %s:\n    %s"
                           % (rel, triple, first[0] if first else "(no diagnostic)"))
             return
         lay[tag] = r
 
-    base_tag = TRIPLES[0][0]
-    for tag, _triple in TRIPLES[1:]:
-        idx, x, y = first_difference(pre[base_tag], pre[tag])
-        if idx is not None:
-            errors.append("%s: preprocessed source differs %s vs %s - a per-target program "
-                          "(docs/CPP-SUBSET.md §5)\n    %s: %s\n    %s: %s"
-                          % (rel, base_tag, tag, base_tag, x[:100], tag, y[:100]))
-        for name in sorted(set(lay[base_tag]) | set(lay[tag])):
-            a, b = lay[base_tag].get(name), lay[tag].get(name)
-            if a != b:
-                errors.append("%s: record '%s' has a different layout %s vs %s - the arena bytes "
-                              "and therefore the world hash differ (docs/CPP-SUBSET.md §5)"
-                              % (rel, name, base_tag, tag))
+    for tag, _t in TRIPLES[1:]:
+        a, b = lay[base_tag], lay[tag]
+        if len(a) != len(b):
+            errors.append("%s: %d records laid out on %s but %d on %s - a record exists on one "
+                          "target and not the other (docs/CPP-SUBSET.md §5)"
+                          % (rel, len(a), base_tag, len(b), tag))
+            continue
+        for pos, ((na, ba), (nb, bb)) in enumerate(zip(a, b)):
+            if ba != bb:
+                errors.append("%s: record #%d ('%s'/'%s') has a different layout %s vs %s - the "
+                              "arena bytes and therefore the world hash differ "
+                              "(docs/CPP-SUBSET.md §5)" % (rel, pos, na, nb, base_tag, tag))
 
 
 def nondet_stems(root):
@@ -214,41 +273,41 @@ def main():
     if not shutil.which(a.clang):
         sys.exit("targets: %s is not on PATH - the cross-target gate cannot run" % a.clang)
 
-    # The record-layout dump is the half of this gate that nothing else replaces, and it has to
-    # work FOR EVERY TRIPLE, not just the host's: clang 18 crashes dumping layouts for
-    # x86_64-pc-windows-msvc from Linux, which a host-only probe passed straight over. Probe each
-    # triple by name so an unusable compiler is one named failure instead of one per TU. This
-    # clang need NOT be the pinned major (docs/BUILD.md 1): the gate compares targets against each
-    # other, it does not produce a shipped binary.
-    probe = os.path.join(tempfile.gettempdir(), "tl_targets_probe.cpp")
-    with open(probe, "w", encoding="utf-8", newline="\n") as f:
-        f.write("struct S { int a; };\n")
-    _rc, ver, _e = run([a.clang, "--version"])
-    vline = ver.strip().splitlines()[0] if ver.strip() else "?"
-    for _tag, triple in TRIPLES:
-        rc, _out, err = run([a.clang, "--target=" + triple, "-fsyntax-only", "-std=c++20",
-                             "-ffreestanding", "-nostdlibinc", "-nostdinc++",
-                             "-Xclang", "-fdump-record-layouts-complete", probe])
-        if rc != 0:
-            detail = [l for l in err.strip().splitlines() if l.strip()]
-            sys.exit("targets: %s cannot dump record layouts for %s, which this gate depends on.\n"
-                     "    compiler: %s\n    said: %s\n"
-                     "Install a clang that can - any recent one will do, it need not be the pinned "
-                     "major." % (a.clang, triple, vline, detail[0] if detail else "(no diagnostic)"))
-
     root = os.path.abspath(a.root)
     sources = [a.only] if a.only else det_sources(root, nondet_stems(root))
     errors = []
     with tempfile.TemporaryDirectory(prefix="tl_targets_") as tmp:
-        open(os.path.join(tmp, "string.h"), "w", encoding="utf-8", newline="\n").write(STRING_H_STUB)
+        with open(os.path.join(tmp, "string.h"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(STRING_H_STUB)
         incs = ["-I" + os.path.join(root, "src"), "-I" + tmp]
+
+        # The layout dump has to work for EVERY triple, not just the host's: clang 18 crashes
+        # dumping layouts for x86_64-pc-windows-msvc from Linux, and a host-only probe walked past
+        # it. This clang need not be the pinned major - it compares targets, it ships nothing.
+        probe = os.path.join(tmp, "probe.cpp")
+        with open(probe, "w", encoding="utf-8", newline="\n") as f:
+            f.write("struct S { int a; };\n")
+        _rc, ver, _e = run([a.clang, "--version"])
+        vline = ver.strip().splitlines()[0] if ver.strip() else "?"
+        system_names = {}
+        for tag, triple in TRIPLES:
+            rc, _out, err = run([a.clang, "--target=" + triple] + LAYOUT_FLAGS + BASE_FLAGS
+                                + TIER_DEFINES[0][1] + [probe])
+            if rc != 0:
+                detail = [l for l in err.strip().splitlines() if l.strip()]
+                sys.exit("targets: %s cannot dump record layouts for %s, which this gate depends "
+                         "on.\n    compiler: %s\n    said: %s\nInstall a clang that can - any "
+                         "recent one will do, it need not be the pinned major."
+                         % (a.clang, triple, vline, detail[0] if detail else "(no diagnostic)"))
+            system_names[tag] = system_record_names(a.clang, triple, incs, tmp)
+
         for rel in sources:
-            check(a.clang, root, rel, tmp, incs, errors)
+            check(a.clang, root, rel, tmp, incs, system_names, errors)
 
     for e in errors:
         print("ERROR " + e)
-    print("targets: %d sim TU(s) x %d triples, %d divergences"
-          % (len(sources), len(TRIPLES), len(errors)))
+    print("targets: %d sim TU(s) x %d triples x %d tiers, %d divergences"
+          % (len(sources), len(TRIPLES), len(TIER_DEFINES), len(errors)))
     return 1 if errors else 0
 
 
