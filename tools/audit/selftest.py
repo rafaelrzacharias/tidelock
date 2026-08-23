@@ -101,7 +101,7 @@ INCLUDE_CASES = [
     ("non-ASCII byte in a sim-TU string literal", "src/sim/utf8.cpp",
      '#include "foundation/tl_types.h"\n'
      'extern const char* k;\nconst char* k = "café";\n',
-     "non-ASCII byte in a string literal"),
+     "non-ASCII byte in a sim-TU literal"),
     ("enum without a fixed underlying type in a sim TU", "src/sim/en.cpp",
      '#include "foundation/tl_types.h"\nenum Phase { PHASE_A, PHASE_B };\n',
      "fixed underlying type"),
@@ -129,6 +129,19 @@ INCLUDE_CASES = [
      "template <class T> T tdef_id(T x) { return x; }\n"
      "u32 tdef_hidden(u32 a);\n",
      "no contract comment"),
+    # The fourth review's self-attack: a hex escape is a non-ASCII byte the source-character scan
+    # cannot see, and `size_t` is the identity hazard `usize` was fixed for.
+    ("a high hex escape in a sim-TU literal", "src/sim/esc.cpp",
+     '#include "foundation/tl_types.h"\n'
+     'extern const char* k;\nconst char* k = "' + chr(92) + 'xE9";\n',
+     "non-ASCII byte in a sim-TU literal"),
+    ("size_t in a sim TU", "src/sim/szt.cpp",
+     '#include "foundation/tl_types.h"\nu32 f(size_t n) { return (u32)n; }\n',
+     "'size_t' in a sim TU"),
+    ("compile-time wall clock", "src/sim/clk.cpp",
+     '#include "foundation/tl_types.h"\n'
+     'extern const char* b;\nconst char* b = __DATE__;\n',
+     "compile-time wall clock"),
     ("a sim TU includes the float bridge", "src/sim/bridge.cpp",
      '#include "foundation/fx_float.h"\n',
      "includes the float bridge"),

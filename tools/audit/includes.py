@@ -82,7 +82,17 @@ CONST_QUAL = re.compile(r'\b(const|constexpr|consteval|constinit)\b')
 FLOAT_TOKENS = re.compile(r'\b(float|double|f32|f64)\b')
 # Target-variable integer spellings. `int`/`short` are 32/16-bit on all three targets and are not
 # banned here; `long`, `char` and `wchar_t` are not.
-ABI_TOKENS = re.compile(r'\b(long|char|wchar_t|char8_t|char16_t|char32_t)\b')
+# size_t/ptrdiff_t/intptr_t/max_align_t are the same class `usize` was: the same width on all three
+# targets but not reliably the same TYPE, so an overload or specialisation keyed on one selects
+# different code per target (docs/CANON.md).
+ABI_TOKENS = re.compile(r'\b(long|char|wchar_t|char8_t|char16_t|char32_t'
+                        r'|size_t|ptrdiff_t|intptr_t|uintptr_t|max_align_t)\b')
+# Compile-time wall clock. __FILE__/__LINE__ are deliberately NOT here: they are deterministic
+# given the tree, TL_CHECK expands them into every sim TU, and they never feed sim state.
+BUILD_CLOCK = re.compile(r'\b(__DATE__|__TIME__|__TIMESTAMP__)\b')
+# A hex or octal escape >= 0x80 is a non-ASCII byte the source-character scan cannot see:
+# `"\xE9"[0]` sign-extends where `char` is signed and does not where it is unsigned.
+HIGH_ESCAPE = re.compile(r'\\x[89a-fA-F][0-9a-fA-F]|\\[2-3][0-7][0-7]')
 # `const char*` / `const char[]` for message literals stays legal: TL_FATAL takes one.
 CHAR_LITERAL_USE = re.compile(r'\b(?:const\s+char|char\s+const)\s*(\*|\[|\(\s*&)')
 
@@ -372,10 +382,10 @@ def check_file(root, path, nondet, errors):
     if is_det_tu and not tokens_exempt:
         for i, line in enumerate(code_lines, 1):
             for lit in LITERAL.findall(line):
-                if any(ord(ch) > 127 for ch in lit):
-                    errors.append("%s:%d: non-ASCII byte in a string literal in a sim TU - it "
-                                  "hashes differently where `char` is signed; keep sim literals "
-                                  "ASCII (docs/CPP-SUBSET.md §5)" % (rel, i))
+                if any(ord(ch) > 127 for ch in lit) or HIGH_ESCAPE.search(lit):
+                    errors.append("%s:%d: non-ASCII byte in a sim-TU literal (directly or via a "
+                                  "\\x/\\nnn escape) - it hashes differently where `char` is "
+                                  "signed (docs/CPP-SUBSET.md §5)" % (rel, i))
                     break
 
     allow = set(SYS_ALLOW)
@@ -425,6 +435,9 @@ def check_file(root, path, nondet, errors):
         for rx, why in GREP_BANS:
             if rx.search(tline):
                 errors.append("%s:%d: %s" % (rel, i, why))
+        if BUILD_CLOCK.search(tline):
+            errors.append("%s:%d: compile-time wall clock in src/ - two peers building the same "
+                          "tree get different bytes (docs/CPP-SUBSET.md §5)" % (rel, i))
         if is_det_tu and not tokens_exempt:
             m3 = FLOAT_TOKENS.search(tline)
             if m3:

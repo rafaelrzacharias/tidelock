@@ -139,15 +139,21 @@ anywhere. Rules:
 - **Target-variable language constructs are banned in sim TUs** (enforced by
   `tools/audit/includes.py`; each was measured to differ between windows-msvc and linux/aarch64
   with no UB involved): `char` (signed on x86-64, unsigned on aarch64), `long` (32-bit on Windows,
-  64-bit on Linux) and `wchar_t`; **bit-fields** — `struct { u8 a:4; u16 c:8; }` is 4 B on
-  windows-msvc and 2 B on linux/pi, so the arena bytes differ; **enums without a fixed underlying
-  type**; **platform macros** (`_WIN32`, `_MSC_VER`, `__aarch64__`, …), since a sim TU that
-  branches on the target is two different programs; **custom section attributes**, which hide
-  storage from the `.data`/`.bss` gate; and **non-ASCII bytes in string literals**, because a
-  literal byte ≥ 0x80 hashes differently where `char` is signed — `const char*` message literals
-  stay legal, which is exactly why the byte rule is needed. `usize` is `u64` rather than `size_t`
-  for the same class of reason (`CANON.md`): same width everywhere, but not reliably the same
-  *type*, and a `usize`-keyed template would select differently per target.
+  64-bit on Linux), `wchar_t`, and `size_t`/`ptrdiff_t`/`intptr_t`/`max_align_t`; **bit-fields** —
+  `struct { u8 a:4; u16 c:8; }` is 4 B on windows-msvc and 2 B on linux/pi, so the arena bytes
+  differ; **enums without a fixed underlying type** (measured: in-range enumerators promote to
+  `int` on all three targets today, so this one is latent rather than active — but the width is
+  only pinned by writing it, and `-fshort-enums` changes it); **platform macros** (`_WIN32`,
+  `_MSC_VER`, `__aarch64__`, …), since a sim TU that branches on the target is two different
+  programs; **custom section attributes**, which hide storage from the `.data`/`.bss` gate; and
+  **non-ASCII bytes in literals**, written directly *or as a `\x`/octal escape*, because a byte
+  ≥ 0x80 hashes differently where `char` is signed — `const char*` message literals stay legal,
+  which is exactly why the byte rule is needed. `usize` is `u64` rather than `size_t` for the same
+  class of reason (`CANON.md`): same width everywhere, but not reliably the same *type*, and a
+  `usize`-keyed template would select differently per target. **`__DATE__`, `__TIME__` and
+  `__TIMESTAMP__` are banned in all of `src/`** — two peers building one tree get different bytes.
+  `__FILE__`/`__LINE__` stay legal (deterministic given the tree, and `TL_CHECK` expands them into
+  every sim TU) but must never feed sim state.
 
 ---
 

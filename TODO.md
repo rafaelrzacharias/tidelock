@@ -68,6 +68,16 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       escapes (`"é"`), `sizeof(L"x")`, a `size_t`-keyed template, four bit-field spellings,
       and any platform macro outside a 16-name denylist. The pattern is structural: a regex cannot
       enumerate this space, and each round the denylist grows by whatever the reviewer thought of.
+      **The proposal survived its own adversarial attack (measured), with one correction that
+      makes it cheaper: it replaces the scanner's LAYOUT/MACRO half, not the scanner.** Token bans
+      and discipline checks stay under every option, so the choice is narrower than "regex or
+      parser". Measured on this tree: preprocess diff 0 lines and layout diff 0 records for the
+      real TUs; 4/4 planted violations caught; false positives 0 after two deterministic
+      normalisations (integer-literal suffixes, and the dump's ABI-specific dsize/nvsize plus
+      resource-dir records). ~90 ms per triple per TU. The Windows leg runs the clang driver with
+      `--target=x86_64-pc-windows-msvc` and a 4-line `<string.h>` stub, so it needs **no sysroot**
+      and does not wait on RR-1 - the claim holds exactly as long as the include allowlist stays
+      freestanding, which the firewall enforces.
       The reviewer's costed proposal, which I judge correct:
         (a) **Contract scanning** (the part patched three times, ~150 LOC): replace with libclang -
             walk `FunctionDecl`/`CXXMethod` cursors at namespace/record scope with
