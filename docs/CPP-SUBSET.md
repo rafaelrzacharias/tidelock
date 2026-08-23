@@ -132,8 +132,10 @@ anywhere. Rules:
   its ruling ("this pool is hashed over used rows; padding is explicit").
 - **No reading uninitialized memory:** arenas hand out zeroed pages; scratch is poisoned `0xDD` in
   debug so a read shows up as garbage, and ASan/MSan runs catch it.
-- **UBSan + ASan are part of the determinism CI**, not optional hygiene. A G-06 / S-01 hash
-  divergence is treated as UB until proven otherwise.
+- **UBSan + ASan are part of the determinism CI**, not optional hygiene, and a report is a
+  FAILURE: the sanitizer lane builds with `-fno-sanitize-recover=all` (UBSan's default is to
+  print and continue to exit 0 — the W1 fx review found a signed overflow reported in the log of
+  a green run). A G-06 / S-01 hash divergence is treated as UB until proven otherwise.
 - **No pointer comparisons except equality**, no pointer-to-integer keys (ordering by address is a
   nondeterminism source — `DETERMINISM.md` §2).
 - **Target-variable language constructs are banned in sim TUs.** Two gates, split by what each
@@ -155,7 +157,12 @@ anywhere. Rules:
   ≥ 0x80 hashes differently where `char` is signed — `const char*` message literals stay legal,
   which is exactly why the byte rule is needed. `usize` is `u64` rather than `size_t` for the same
   class of reason (`CANON.md`): same width everywhere, but not reliably the same *type*, and a
-  `usize`-keyed template would select differently per target. **`__DATE__`, `__TIME__` and
+  `usize`-keyed template would select differently per target. **Literals that carry a banned
+  type with no type token** (the W1 fx review planted them past every gate): a floating literal
+  in any spelling (`1.0`, `1e3`, `0x1p3` — `decltype(1.0) x`, `auto y = 0x1p3` and `k * 2.5` are
+  doubles), the extra float types `_Float16`/`__fp16`/`__bf16`/`__float128`, and an integer
+  literal suffixed `L`/`UL` (a `long`; `LL`/`ULL` stay legal — `long long` is 64-bit
+  everywhere). **`__DATE__`, `__TIME__` and
   `__TIMESTAMP__` are banned in all of `src/`** — two peers building one tree get different bytes.
   `__FILE__`/`__LINE__` stay legal (deterministic given the tree, and `TL_CHECK` expands them into
   every sim TU) but must never feed sim state.
