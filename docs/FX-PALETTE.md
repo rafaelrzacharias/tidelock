@@ -115,7 +115,7 @@ combination compiles because no other helper is instantiated.
 | `pos_t × pos_t` | `fx<i64,36>` (local, never stored) | squared distance before `sqrt<pos_t>` |
 | `omega_t × dt_t` | `angle_t` (delta) | rotate |
 | `angle_t` → `(sin, cos)` | `q_t`, `q_t` | det math |
-| `stiff_t + invmass_t (+ invmass_t)` | `invmass_t`-ranged `fx<i64,30>` local | the XPBD denominator, widened; `div<lambda_t>` once |
+| `stiff_t + invmass_t (+ invmass_t)` | `invmass_t`-ranged `fx<i64,30>` local | the XPBD denominator, widened; **one `rne_div` on the raw i64 bits** (§9 R-6: `div<R>` is 32-bit; the caller spells the shift — `ALLOY.md` §14.4.3) |
 | `invmass_t = div(unit, quanta·unit_mass)` | at creation only | i64 divide, not a per-tick op |
 
 Precomputed constants (rounded once, shared): `H = dt_t(1/480)`, `G_SUBSTEP = vel_t(9.81·h)`,
@@ -295,6 +295,17 @@ too: `pos2_wide_t = fx<i64,36>`, `den_wide_t = fx<i64,30>`.
   modifiers, utility scores. Range ±32,768, resolution 1.5e-5. `lambda_t` is an alias of it (same
   format, solver-facing name). Mixed ops: `scalar_t × any row → that row`, `scalar_t × scalar_t →
   scalar_t`, enumerated in `fx_palette.h` like the rest. The palette is now nine rows + quanta.
+
+- **R-6 i64 quotients are one `rne_div` on the raw bits, RNE, at rev 1 (ruled 2026-08-23,
+  the W1 fx review's defect 11).** `div<R>` narrows 32-bit rows only (§10.1); the two sim
+  quotients with an i64 operand — the XPBD denominator (§3.1, `ALLOY.md` §14.4.3,
+  `GATE0-BENCH.md` §8) and the magnetism ratio (`ALLOY.md` §14.4) — are spelled
+  `rne_div(num * (i64(1) << S), den)` at the site, the widening visible, no new helper. The
+  rounding is RNE like every other narrowing (§1, rung 2): a `/` (truncation toward zero) or a
+  `floor_div` never appears in sim pseudocode or code — `ALLOY.md`'s earlier `(num << 16) / den`
+  and the circuit solve's `floor_div` were the same downward bias §1 bans. The `<< S` is a
+  multiply, never a shift of a signed value (`CPP-SUBSET.md` §5). A `div<R>` over an i64 operand
+  becomes an op-table row only if a third site appears.
 
 ## 10. Implementation specification
 

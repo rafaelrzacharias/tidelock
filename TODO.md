@@ -202,13 +202,13 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       the solver is inside a kernel radius, so this is only a precondition to STATE in
       `ALLOY.md` §14.3, but a debug `len2` over an arbitrary pair (ray queries, far-field
       magnetism) must not call it.
-      (b) `ALLOY.md` §14.4 magnetism writes `div<q_t>(K_MAG*qi*qj as fx<i64,36>, den)` - an i64
-      quotient - and `FX-PALETTE.md` §3.1 itself writes `div<lambda_t>` once over the widened
-      `fx<i64,30>` XPBD denominator (the W1 fx review, defect 11). `div<R>` is 32-bit-only at
-      rev 1 (`FX-PALETTE.md` §10.1), so BOTH lines are today either a raw `rne_div` on the i64
-      bits (the caller spells the shift) or a new `div<R>(A32, B64)` overload listed in the op
-      table. Decide once, in the alloy-solver lane (the first consumer), record it in
-      `FX-PALETTE.md` §3.1 + §10.1 first, then `ALLOY.md` §14.4 cites it.
+      (b) RULED 2026-08-23 (`FX-PALETTE.md` §9 R-6): the two i64 quotients (the XPBD
+      denominator, the magnetism ratio) are one `rne_div` on the raw bits at the site, RNE, no
+      new helper; `ALLOY.md` §14.4.3's `(num << 16) / den` (truncating) and the circuit solve's
+      `floor_div` were rewritten to `rne_div` in the same edit, and `GATE0-BENCH.md` §8's
+      `div<lambda_t>` with them. Left for the alloy-fields lane: the magnetism `|num| < 2^33`
+      raw bound is a validator claim to assert, and ALLOY §14.4's F1/F2/F3/buoyancy lines still
+      spell `i64(x.v) << 16` on signed values (UB by `CPP-SUBSET.md` §5: multiply by 65536).
       (c) `normalize(vec2<pos_t>)` is bounded by the INPUT's quantisation: `|u|^2 - 1` is
       within `2^30/|d| + 4` ulp, so a contact normal from a 4-quantum difference is a 25%
       vector. The SDF gradient path (`ALLOY.md` §3.2, R-2 of `FX-PALETTE.md` §9) normalises

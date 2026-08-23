@@ -169,7 +169,7 @@ for bodies; `sort_u32_kv` on `(cell_key, index)`; neighbor lists built per tick 
    ```
    C, gradients; wsum = Σ w_i·|∇C_i|² (i64, each w clamped by MASS_RATIO_CLAMP relative to the pair's min nonzero w)
    den  = wsum + a_tilde  (i64 at FRAC 30 after aligning wsum's FRAC)
-   dlam = div<lambda_t>(−C − mul(a_tilde, lam), den)         // widened, one RNE
+   dlam = lambda_t(i32(rne_div(num * (i64(1) << 16), den)))  // num = −C − a_tilde·lam at FRAC 30 (i64); ONE rne_div on the raw bits, RNE — FX-PALETTE.md §9 R-6 (div<R> is 32-bit)
    lam  = sat_add(lam, dlam)
    Δp_i = mul<pos_t>(w_i, mul<lambda_t>(dlam, ∇C_i))          // rung 1: accumulated in an i64 per body/particle across the color sweep
    ```

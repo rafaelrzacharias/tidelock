@@ -1365,7 +1365,7 @@ Electricity (dirty circuits only; a circuit = an island whose bodies have BF_CON
   sources = scratch current list [command order] (CmdCurrent → region_head of the body)
   CIRCUIT_ITERS = 16 Jacobi sweeps, each [node ↑] reading old potentials into new_pot (scratch):
       num = Σ_j mul_widen(g_ij, pot_j) + (i64(I_src_i) << 16);  den = Σ_j g_ij (u32, ≥ 1 by construction: isolated nodes skipped)
-      new_pot_i = i32(floor_div(num, den));  then pot ← new_pot
+      new_pot_i = i32(rne_div(num, i64(den)));  then pot ← new_pot                            // RNE, never floor/truncate (FX-PALETTE.md §9 R-6)
   edge current I = i32(rne_shr(mul_widen(g_ij, pot_i − pot_j), 16)) [edge ↑]; I²R heat = quanta_mul(sat_mul(I, I), r_ij) into acc (a second, ordered accumulate → applied with the same Apply rule);
   |I| > trip threshold → EV_CURRENT_TRIPPED; loads (motors) read the edge current as their torque budget (stored on the Constraint ③ motor_max via min())
 Registered game scalars (§5.6): the same edge walk E1–E5 over the game's coefficient table, one scalar per carrier in a parallel column (`alloy.hdr` declares the count; the columns live in arena #6/#1 as extra fields only when declared — v0: none).
@@ -1385,7 +1385,7 @@ F3 radial point [impulse list, command order] then [radial table rows ↑]:
      dv = mul<vel_t>(to<scalar_t>(inv_mass), mul<vel_t>(f, peak_dv))                        // invmass_t → scalar_t RNE narrow (range ±8192 fits)
      n = normalize(d) (r == 0 ⇒ n = (0, 1));  adv += (i64(mul<vel_t>(n.x, dv).v) << 16, ...)
 F4 zone [zone ↑]: cone/box membership test in q_t, same dv form with the zone's direction
-Magnetism [pole source ↑, target carriers ↑]: k·qᵢqⱼ/(r²+ε²): den = r2 + EPS2 (fx<i64,36>), f = div<q_t>(K_MAG·qᵢqⱼ as fx<i64,36>, den) clamped to ±ONE, then as F3
+Magnetism [pole source ↑, target carriers ↑]: k·qᵢqⱼ/(r²+ε²): den = r2 + EPS2 (fx<i64,36>), num = K_MAG·qᵢqⱼ as fx<i64,36>; f = q_t(i32(rne_div(num * (i64(1) << 30), den))) clamped to ±ONE, then as F3   // FX-PALETTE.md §9 R-6: one rne_div on raw bits; needs |num| < 2^33 raw, which the K_MAG validator bound must guarantee (alloy-fields lane asserts it)
 Buoyancy/drag:
   body in basin b [body slot ↑]: imm = immersed-area fraction (q_t; capsule/AABB vs level_y analytic); ratio = scalar_t density_ratio[material][species] (tables)
       adv.y −= i64(mul<vel_t>(ratio, mul<vel_t>(imm, G)).v) << 16;  drag: v = mul_int<vel_t>(x − px, INV_H) (tick-level implicit velocity); adv −= (mul<vel_t>(drag_q × imm, v).v) << 16
@@ -1423,9 +1423,9 @@ Substep loop, s = 0..7:
        grad   : ∇C per carrier as vec2<q_t> (unit) and, for bodies, the angular term r×n via cross<pos_t>(r_world, n) → pos_t
        w_eff  : pair clamp — wa' = max(wa, wb >> 12), wb' = max(wb, wa >> 12) unless the raw w is 0 (static stays 0)   // MASS_RATIO_CLAMP = 2¹²
                  body: w += rne_shr(mul_widen(i32(rne_shr(i64(rn.v) * rn.v, 18)), inv_inertia.v), 18)  // (r×n)² at frac 18, × invmass frac 18 → frac 18
-       den    : i64 = (i64(wa'.v) << 12) + (i64(wb'.v) << 12) + i64(alpha_tilde.v)                 // frac 30; never 0 unless both static (skipped)
-       num    : i64 = −(i64(C.v) << 12) − rne_shr(i64(alpha_tilde.v) * i64(lambda.v), 16)            // frac 30: stiff(30)×lambda(16) → >>16
-       dλ     : lambda_t = lambda_t(i32(rne_shr(num << 16, 0) / den))   — written as: dl = (num << 16) / den (i64 division, truncating toward zero; |num| < 2^50)
+       den    : i64 = i64(wa'.v) * 4096 + i64(wb'.v) * 4096 + i64(alpha_tilde.v)                  // frac 30; < 2^45; never 0 unless both static (skipped). Multiplies, never << of a signed value (CPP-SUBSET.md §5)
+       num    : i64 = −i64(C.v) * 4096 − rne_shr(i64(alpha_tilde.v) * i64(lambda.v), 16)             // frac 30: |C|·2^12 < 2^43, stiff(30)×lambda(16) >> 16 < 2^46 ⇒ |num| < 1.125·2^46
+       dλ     : lambda_t = lambda_t(i32(rne_div(num * (i64(1) << 16), den)))                        // ONE rne_div on the raw i64 bits, RNE (FX-PALETTE.md §9 R-6); num·2^16 < 2^63 by the bound above; |dl| ≤ 2^31 asserted
        unilateral kinds (contact, max-only, min-only, density): dl = max(dl, −lambda) ⇒ λ ≥ 0
        lambda += dl (i32 add; range ±32768 asserted in debug)
        Δ      : per carrier: mag = rne_shr(mul_widen(w'.v, dl), 4)  // invmass(18)×lambda(16) = 34 → frac 30

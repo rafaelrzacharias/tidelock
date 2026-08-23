@@ -10,7 +10,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `DETERMINISM.md` -> §12
 - `ECS.md` -> §1.1, §9.2
 - `FRAME-LOOP.md` -> §0.4
-- `FX-PALETTE.md` -> §5, §10, §13, §14
+- `FX-PALETTE.md` -> §5, §10, §13, §14, §14.4, §14.4.3
 - `GATE0-BENCH.md` -> §2.1
 - `INPUT.md` -> §8.2
 - `JOBS.md` -> §8.1
@@ -127,12 +127,13 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `CANON.md` -> §3
 - `ECS.md` -> §6
 - `FRAME-LOOP.md` -> §2
-- `GATE0-BENCH.md` -> §3, §3.2
+- `GATE0-BENCH.md` -> §3, §3.2, §9
 - `RENDER2D.md` -> §6
 - `ROADMAP.md` -> §10.6
 
 ## GATE0-BENCH.md
 - `ARCHITECTURE.md` -> §8.5
+- `FX-PALETTE.md` -> §8
 - `ROADMAP.md` -> §8.5
 
 ## INPUT.md
