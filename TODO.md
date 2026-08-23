@@ -143,7 +143,35 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [ ] A jam-scale C++/Luau/SDL probe, no engine; deliverable = one 15-second clip a stranger can
       read (the commercial-thesis gate). `PIVOT-DESIGN.md` §10.
 
-## W1 fx - what the next lanes inherit (2026-08-23)
+## W1 fx - NEXT: the adversarial review, then what the other lanes inherit (2026-08-23)
+- [ ] **Adversarial review of W1 fx (`3a35976`..`a45ae57`) - the next thing on the critical
+      path.** `ROADMAP.md` §2: a Fable-lane merge is reviewed by **Fable 5 high in a fresh
+      context**; nothing in W2 ★ gate0 starts on an unreviewed fx. The review's only goal is to
+      break it; the brief the reviewer starts from (`CLAUDE.md` rule 5):
+      1. *Spec read:* `FX-PALETTE.md` §1, §3.1, §10.1-§10.5 against `fx.h`/`fx_palette.h`/
+         `det_math.h`/`det_math.cpp`. Every deviation the lane recorded (RNE Horner steps, the
+         `+-ONE` clamp, the exact-division atan ratio, format-keyed op table, `mul_int`
+         rescale, `fx_float.h` without libm) is a claim to test, not a fact.
+      2. *Edge matrix:* `INT32_MIN` through every helper (`abs`, `sat_neg`, `div` with an
+         `INT32_MIN` divisor, `atan2` with `INT32_MIN` components, `to<R>` at the widen
+         overflow edge, `fx_int`/`fx_lit` at the exact range limits, `rne_shr(x, 62)`,
+         `rne_div` with `d = -1`); `mul_int` at `|k| = INT32_MAX`; `dot`/`len2_wide` at the
+         2^63 saturation edge; `sqrt<R>` where `y + 1` lands on `INT32_MAX + 1`.
+      3. *UB hunt:* run the fx tests under the sanitize-linux preset by hand (CI did, but
+         read the UBSan configuration first); look for any signed left shift, any
+         implementation-defined conversion the subset doc does not sanction, any unsigned
+         wrap the code relies on without saying so.
+      4. *Determinism:* the pinned trace hash `0x1a1803512f224fad` reproduces on clang-cl and
+         ubuntu clang at O0/O1/O2 - attack it on the Pi the moment RR-1 lands; until then,
+         attack the TRACE: does it exercise every helper on every sign/magnitude class?
+      5. *The gates:* three audits passed on the first real code. Plant the clever violation
+         (LESSONS.md): a `§` in a `static_assert` message is caught, but is `u8"..."`? a
+         `char` hidden in a template argument? an `enum class` without a base in a sim TU?
+         `[[no_unique_address]]` inside `vec2`?
+      6. *Tests:* which public function has no test for its error path? (`rsqrt` of 0,
+         `normalize` of 0 and `atan2(0,0)` wait for the runner - everything else must be
+         covered now.) Are the seeded property tests' skip rates reported, not hidden?
+      Verdict + ranked defect list goes into this file; fixes land as `W1 fx review N` commits.
 - [ ] **Cross-ISA half of `FX-PALETTE.md` §10.6 is open until RR-1**: `fx_trace_hash_pinned`
       reproduces `0x1a1803512f224fad` on clang-cl (dev/debug/netcode/ship) and is in the PR lane
       for ubuntu clang; the Pi leg runs the same test the day a Pi build exists. A mismatch
@@ -154,6 +182,26 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       PR lane today.
 - [ ] `tests/foundation/fx_test_util.h` carries a local splitmix64 - replace with `rng_for`
       from the rng/hash lane when it lands (same mix; the seeds are arbitrary).
+- [ ] **For alloy-substrate / alloy-solver (W2/W3) - three facts the headers state and the
+      ALLOY pseudocode does not yet respect:**
+      (a) `len2_wide`/`dot<pos2_wide_t>` saturate and assert when `|d|^2 >= 2^63` raw, i.e.
+      `|d| >= 11,585 m` - a world-diagonal pair overflows Q36. Every pair the broadphase hands
+      the solver is inside a kernel radius, so this is only a precondition to STATE in
+      `ALLOY.md` §14.3, but a debug `len2` over an arbitrary pair (ray queries, far-field
+      magnetism) must not call it.
+      (b) `ALLOY.md` §14.4 magnetism writes `div<q_t>(K_MAG*qi*qj as fx<i64,36>, den)` - an i64
+      quotient. `div<R>` is 32-bit-only at rev 1 (`FX-PALETTE.md` §10.1); that line is either a
+      raw `rne_div` on i64 like the XPBD denominator, or a new op-table row. Decide in the
+      alloy-fields lane, record it in `FX-PALETTE.md` §3.1 first.
+      (c) `normalize(vec2<pos_t>)` is bounded by the INPUT's quantisation: `|u|^2 - 1` is
+      within `2^30/|d| + 4` ulp, so a contact normal from a 4-quantum difference is a 25%
+      vector. The SDF gradient path (`ALLOY.md` §3.2, R-2 of `FX-PALETTE.md` §9) normalises
+      differences of sampled i16 distances, not positions - check that its inputs are long
+      enough (>= a texel, 2^14 quanta, gives 1 part in 16k) before the first contact test.
+- [ ] **For luau-bindings (W3):** the helpers live in `namespace fx` (`fx::mul`, `fx::sqrt`,
+      `fx::sincos`); only the nine row aliases are global. `fx.vel_from_delta` is
+      `mul_int<vel_t>`; `fx.div_q` is `div<q_t>(A, A)` and is only in the table for
+      `pos_t/vel_t/q_t/scalar_t` formats; `fx.atan2` takes `pos_t`, `fx.atan2_q` takes `q_t`.
 
 ## Foundation week(s) (`docs/MEMORY.md`, `CONTAINERS.md`, `DETERMINISM.md`, `TESTING.md`)
 - [ ] Finish the test runner (`tests/runner`; W0 shipped the stub — generated list, tags/filter,
