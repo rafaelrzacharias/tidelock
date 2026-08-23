@@ -77,8 +77,11 @@ if(TL_SANITIZE)
   if(MSVC)
     message(FATAL_ERROR "TL_SANITIZE is the ubuntu-clang lane (docs/TESTING.md §6); not clang-cl")
   endif()
-  target_compile_options(tl_flags_common INTERFACE -fsanitize=address,undefined -fno-omit-frame-pointer)
-  target_link_options(tl_flags_common INTERFACE -fsanitize=address,undefined)
+  # -fno-sanitize-recover=all: UBSan RECOVERS by default - it prints the report and the process
+  # continues to exit 0, so a signed overflow in the sanitizer lane was a green CI job (the W1 fx
+  # review read it in the log of a passing run). A finding is a failure, or the gate is a log.
+  target_compile_options(tl_flags_common INTERFACE -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
+  target_link_options(tl_flags_common INTERFACE -fsanitize=address,undefined -fno-sanitize-recover=all)
 endif()
 
 # --- the sim half: no libm builtins, no C++ standard headers ---------------------------------

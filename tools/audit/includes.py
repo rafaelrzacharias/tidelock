@@ -85,7 +85,20 @@ INC_LOCAL = re.compile(r'^\s*#\s*include\s*"([^"]+)"')
 STATIC_DECL = re.compile(r'^\s*static\s+(?!_assert\b)(.*)$')
 CONST_QUAL = re.compile(r'\b(const|constexpr|consteval|constinit)\b')
 
-FLOAT_TOKENS = re.compile(r'\b(float|double|f32|f64)\b')
+FLOAT_TOKENS = re.compile(r'\b(float|double|f32|f64|_Float16|_Float32|_Float64|_Float128|__fp16|__bf16|__float128)\b')
+# A floating literal is a float with no type token in sight: `decltype(1.0) x`, `auto y = 0x1p3`,
+# `k * 2.5` (the product is a double). Checked on the comments-and-strings-blanked text. The
+# three spellings: decimal with a point, decimal with an exponent, hex with a binary exponent.
+# `a.v` / `p.x` never match (a digit is required on at least one side of the point and nothing
+# alphanumeric may precede it), and `1'000` digit separators are allowed inside.
+FLOAT_LITERAL = re.compile(
+    r"(?<![\w.])(?:\d[\d']*\.\d*|\.\d+)(?:[eE][+-]?\d+)?[fFlL]?(?![\w.])"
+    r"|\b\d[\d']*[eE][+-]?\d+[fFlL]?\b"
+    r"|\b0[xX][0-9a-fA-F']*(?:\.[0-9a-fA-F']*)?[pP][+-]?\d+[fFlL]?\b")
+# An integer literal suffixed L/l (or UL/LU in either case) is a `long` with no `long` token:
+# `decltype(1L) x` is 32-bit on Windows and 64-bit on Linux. `LL`/`ULL` stay legal (long long is
+# 64-bit on every target). The W1 fx review planted all three of these past the token bans.
+LONG_SUFFIX = re.compile(r"\b(?:0[xX][0-9a-fA-F']+|\d[\d']*)(?:[uU][lL]|[lL][uU]?)(?![lL\w])")
 # Target-variable integer spellings. `int`/`short` are 32/16-bit on all three targets and are not
 # banned here; `long`, `char` and `wchar_t` are not.
 # size_t/ptrdiff_t/intptr_t/max_align_t are the same class `usize` was: the same width on all three
@@ -464,6 +477,18 @@ def check_file(root, path, nondet, errors):
             if m3:
                 errors.append("%s:%d: '%s' in a sim TU (docs/CANON.md; f32/f64 are the same ban): %s"
                               % (rel, i, m3.group(1), raw_lines[i - 1].strip()[:60]))
+            m3b = FLOAT_LITERAL.search(tline)
+            if m3b:
+                errors.append("%s:%d: floating literal '%s' in a sim TU - a float with no type token "
+                              "(decltype/auto/promotion); spell the value as a rational through "
+                              "fx_lit (docs/CANON.md): %s"
+                              % (rel, i, m3b.group(0), raw_lines[i - 1].strip()[:60]))
+            m3c = LONG_SUFFIX.search(tline)
+            if m3c:
+                errors.append("%s:%d: integer literal '%s' is a `long` with no `long` token - 32-bit "
+                              "on Windows, 64-bit on Linux; use LL/ULL or a fixed-width cast "
+                              "(docs/CPP-SUBSET.md §5): %s"
+                              % (rel, i, m3c.group(0), raw_lines[i - 1].strip()[:60]))
             m4 = ABI_TOKENS.search(CHAR_LITERAL_USE.sub("", tline))
             if m4:
                 errors.append("%s:%d: '%s' in a sim TU - its width or signedness differs between "
