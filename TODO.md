@@ -1312,6 +1312,13 @@ right; it is the template the others now follow.
       checks `file`). Closed from this lane's side by `#if defined(TL_SIM_TU)` + `#error` in
       `atomic.h` and `jobs.h`, which fires on every target; the audit-side fix (run `symbols.py`
       over the pi4 archives, or add a positive fixture) belongs to the audit's owner.
+- [ ] **`platform.entropy_nonrepeat` is flaky: 1 failure in 30 runs, measured 2026-08-24.** Not a
+      jobs change - `tests/platform/entropy.test.cpp`'s byte histogram is a statistical bound over
+      1000x32 random bytes, so it reddens roughly 3% of full-suite runs on its own, and it turned
+      the jobs lane's suite red once while this slice was being built. A ~3% flake on a shared
+      suite means roughly one spurious red per PR lane invocation across a wave, which trains
+      people to re-run instead of read. Either widen the bound to a stated per-run false-positive
+      budget (and write the arithmetic down), or seed it. Its owner's test, so: a request.
 - [ ] **Signatures and names added over the rev-1 spec are folded into `JOBS.md` in the same
       commit** (this lane's own doc); announced here for the wave merge: §5 R-3..R-6 (per-worker
       wake semaphores; the barrier counting participants rather than chunks; `LevelFn`/`struct

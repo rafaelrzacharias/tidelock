@@ -203,10 +203,12 @@ parallel_for(j, n, grain, fn, ctx):
     if in_job != 0: TL_FATAL                                    // jobs never nest
     c = jobs_chunk_count(n, grain); if c == 0: return
     in_job = 1
-    if worker_count == 0 || c == 1: for k in 0..c: fn(ctx, k, k*grain, min(n,(k+1)*grain), scratch[0])
+    epoch += 1 (RELEASE); key = shuffle_seed ? mix(shuffle_seed, epoch) : 0   // every job, inline or not
+    if worker_count == 0 || c == 1:
+        for t in 0..c: run_one({fn,ctx,key,n,grain,c}, t, scratch[0])   // shuffle reorders this path too
     else:
-        job = {fn, ctx, shuffle_key, n, grain, c}; next_chunk = 0
-        pending = worker_count + 1                              // PARTICIPANTS, not chunks — R-4
+        job = {fn, ctx, key, n, grain, c}; next_chunk = 0 (RELEASE)
+        pending = worker_count + 1 (RELEASE)                    // PARTICIPANTS, not chunks — R-4
         atomic_store(epoch, epoch + 1, RELEASE)                 // publishes `job` to every worker
         for w in 1..worker_count: wake[w-1].post()              // one post per worker — R-3
         claim_loop(j, /*worker*/ 0)                             // the calling thread participates
@@ -215,9 +217,11 @@ parallel_for(j, n, grain, fn, ctx):
 claim_loop(j, w):
     local = job                                                 // snapshot under the epoch acquire
     loop: t = atomic_add(next_chunk, 1); if t >= local.chunks: break
-          k = local.shuffle_key ? permute(t, local.chunks, local.shuffle_key) : t
-          fn(local.ctx, k, k*local.grain, min(local.n,(k+1)*local.grain), scratch[w])
+          run_one(local, t, scratch[w]); if local.shuffle_key: jitter(t)
     if w != 0 and atomic_sub(pending, 1) == 1: done.post()      // only a worker posts; main waits
+run_one(job, t, scratch):                                       // the ONE ticket -> chunk mapping
+    k = job.shuffle_key ? permute(t, job.chunks, job.shuffle_key) : t
+    job.fn(job.ctx, k, k*job.grain, min(job.n,(k+1)*job.grain), scratch)
 worker_main(slot):
     seen = 0
     loop: wake[slot.index-1].wait(); if atomic_load(shutdown): return
@@ -229,10 +233,19 @@ parallel_levels(j, L, levels, fn, ctx):                         // R-5
 
 Scratch reset for workers happens at the barrier (`FRAME-LOOP.md` §3), never inside a job:
 `jobs_scratch_reset_all` is that verb (step 4 of the barrier order).
-`dev` tier "shuffle" mode: `claim_loop` maps its ticket through a seeded index bijection
-(`permute` = a small Feistel over `ceil(log2(chunks))` bits with cycle-walking, so it needs **no
-permutation array** and works at any chunk count) and jitters completion order; results must not
-change. Its seed is the caller's (`jobs_shuffle_set`), so a failing shuffle run replays exactly.
+"Shuffle" mode: `run_one` maps its ticket through a seeded index bijection (`permute` = a balanced
+4-round Feistel over an even `ceil(log2(chunks))` bits with cycle-walking, so it needs **no
+permutation array** and works at any chunk count — a Feistel network is a bijection for any round
+function, and bijectivity is the whole requirement: a fallback to the identity on a long walk
+would run one chunk twice and another never), and `claim_loop` jitters completion order with a
+`yield`, never a sleep. Results must not change. Its seed is the caller's (`jobs_shuffle_set`), so
+a failing shuffle run replays exactly. Two deliberate departures from rev 1: it is compiled into
+**every tier** (inert at seed 0; an `#if` would leave the mode untested in the tier that ships and
+make its test tier-conditional), and it reorders the **inline path** too — a chunk fn that depends
+on chunk order is a bug at `worker_count == 0` as much as at 16, and an inline path that always
+ran `0,1,2,…` could never expose it. That is also what makes the §6.4 shuffle test non-racy: at
+`worker_count == 0` the claim order is a pure function of the seed, so the test asserts the exact
+schedule CHANGED rather than sampling a timing-dependent trace.
 
 ### 6.4 Tests (`tests/foundation/jobs.test.cpp`)
 

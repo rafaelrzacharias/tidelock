@@ -163,8 +163,10 @@ void jobs_shutdown(Jobs* j);
 // Runs fn over [0, n) split into jobs_chunk_count(n, grain) chunks, and RETURNS ONLY WHEN EVERY
 // CHUNK HAS COMPLETED - it is its own barrier, and every write a chunk made is visible to the
 // caller afterwards. The calling thread participates. n == 0 runs nothing; worker_count == 0 or a
-// single chunk runs inline with no atomics touched. TL_FATAL if called from inside a chunk fn
-// (jobs never nest) or with a null fn. Main-thread-only. Allocates nothing.
+// single chunk runs inline (no wake, no barrier, and the job never reaches shared state) - but
+// still through the ticket->chunk mapping, so shuffle mode reorders the inline path too. TL_FATAL
+// if called from inside a chunk fn (jobs never nest) or with a null fn. Main-thread-only.
+// Allocates nothing.
 void parallel_for(Jobs* j, u32 n, u32 grain, ChunkFn fn, void* ctx);
 
 // Runs `level_count` levels STRICTLY IN ORDER, each a parallel_for over levels[l] - so every
@@ -182,7 +184,10 @@ u32 jobs_worker_count(const Jobs* j);
 // keyed by worker or by arrival CHANGES and a correct one cannot. Legally non-deterministic by
 // design - its own PRNG, never a sim RNG, never keyed on a tick. seed 0 turns it off. The seed is
 // the caller's so a failing shuffle run can be replayed exactly. Main-thread-only, no job in
-// flight; it is a no-op in netcode/ship, where the mode does not exist.
+// flight. Compiled into EVERY tier, not just dev: it costs one predictable branch per chunk claim
+// and is inert at seed 0, whereas an #if would leave the mode untested in the tier that ships and
+// would make its test tier-conditional (LESSONS.md: a test whose #if mirrors the header's cannot
+// fail on the branch the current tier does not take).
 void jobs_shuffle_set(Jobs* j, u64 seed);
 
 // The Scratch of worker `w` (0 = the calling thread). For the BARRIER and the test harness only -
