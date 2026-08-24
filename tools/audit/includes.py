@@ -144,6 +144,15 @@ ABI_TOKENS = re.compile(r'\b(long|char|wchar_t|char8_t|char16_t|char32_t'
 # Compile-time wall clock. __FILE__/__LINE__ are deliberately NOT here: they are deterministic
 # given the tree, TL_CHECK expands them into every sim TU, and they never feed sim state.
 BUILD_CLOCK = re.compile(r'\b(__DATE__|__TIME__|__TIMESTAMP__)\b')
+# Atomic/interlocked builtins called DIRECTLY in a det TU (W1 jobs review). The sanctioned wrap
+# is foundation/atomic.h, which #errors under TL_SIM_TU - but the #error only guards the header:
+# a det TU that spells `__atomic_fetch_add(&x, 1, 5)` itself includes nothing, emits NO symbol on
+# x86-64 (a 32-bit RMW inlines to `lock xadd`), and the `__aarch64_*` outline-atomic tripwire in
+# allow.txt exists only on the Pi leg, where the symbol audit does not run. An atomic in det code
+# is worker-observable ordering (docs/DETERMINISM.md section 2 rule 5), so the TOKEN is banned -
+# clang's `__atomic_*`/`__c11_atomic_*`, GCC-legacy `__sync_*`, and MSVC's `_Interlocked*`.
+ATOMIC_BUILTIN = re.compile(r'\b(__atomic_[a-z_]+|__c11_atomic_[a-z_]+|__sync_[a-z_]+'
+                            r'|_Interlocked[A-Za-z0-9_]*)\b')
 # A wide or unicode literal carries the target's wchar_t/char16_t width with no `wchar_t` token in
 # sight: sizeof(L"x") is 4 on windows-msvc and 8 on linux/aarch64. Text and record layouts are
 # identical, so only a token ban sees it (docs/CPP-SUBSET.md §5).
@@ -635,6 +644,14 @@ def check_file(root, path, nondet, tooling, errors):
                 errors.append("%s:%d: enum without a fixed underlying type in a sim TU - the width "
                               "is the compiler's choice (docs/CANON.md): %s"
                               % (rel, i, raw_lines[i - 1].strip()[:60]))
+            m6 = ATOMIC_BUILTIN.search(tline)
+            if m6:
+                errors.append("%s:%d: atomic builtin '%s' called directly in a sim TU - an atomic "
+                              "in det code is worker-observable ordering, and on x86-64 it emits "
+                              "no symbol for the audit to catch; the wrap is foundation/atomic.h, "
+                              "which a det TU may not reach either (docs/JOBS.md section 6.1, "
+                              "docs/DETERMINISM.md section 2): %s"
+                              % (rel, i, m6.group(1), raw_lines[i - 1].strip()[:60]))
 
     if path.endswith((".h", ".hpp")):
         if not re.search(r'//.*Spec:\s*docs/[A-Z0-9-]+\.md\s*§', "\n".join(raw_lines[:30])):

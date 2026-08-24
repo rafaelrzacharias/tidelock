@@ -80,6 +80,18 @@ INCLUDE_CASES = [
     ("float in a sim TU whose basename collides with a non-det stem", "src/sim/fmt.cpp",
      '#include "foundation/tl_types.h"\nextern const float x;\nconst float x = 1.0f;\n',
      "'float' in a sim TU"),
+    # W1 jobs review: an atomic builtin called directly needs no include, emits no symbol on
+    # x86-64, and the aarch64 outline-atomic tripwire only exists on the Pi leg. One fixture per
+    # spelling family - "the clang one already covers it" is the __GNUC__ lesson (LESSONS.md).
+    ("a direct __atomic_* call in a sim TU", "src/sim/at1.cpp",
+     '#include "foundation/tl_types.h"\nu32 at1(u32* p) { return __atomic_fetch_add(p, 1u, 5); }\n',
+     "atomic builtin '__atomic_fetch_add'"),
+    ("a direct __sync_* call in a sim TU", "src/sim/at2.cpp",
+     '#include "foundation/tl_types.h"\nu32 at2(u32* p) { return __sync_fetch_and_add(p, 1u); }\n',
+     "atomic builtin '__sync_fetch_and_add'"),
+    ("a direct _Interlocked* call in a sim TU", "src/sim/at3.cpp",
+     'long _InterlockedIncrement(long volatile*);\nu64 at3(long* p) { return (u64)_InterlockedIncrement(p); }\n',
+     "atomic builtin '_InterlockedIncrement'"),
     ("sim TU includes a peer module", "src/sim/b.cpp",
      '#include "net/wire.h"\n',
      "violates the module DAG"),
@@ -566,6 +578,29 @@ def test_tier_parity(tmp):
     record("tier_parity: an optimisation delta is caught", rc == 1 and "-O1" in out, out.strip()[:200])
 
 
+# --- the TL_SIM_TU #error in atomic.h / jobs.h (W1 jobs review) -------------------------------
+# The #error is the one atomics tripwire that runs on every target (the `__aarch64_*` symbol line
+# exists only on the Pi leg). A guard that has never been seen to fire is a phantom gate
+# (LESSONS.md: grep for the tool before believing the sentence) - so compile each header with
+# TL_SIM_TU defined and require the compile to FAIL with the header's own message, and compile it
+# without the define and require success, so the check cannot pass via an unrelated breakage.
+def test_sim_tu_error(tmp, cxx):
+    root = os.path.join(tmp, "sim_tu_err")
+    os.makedirs(root, exist_ok=True)
+    for header in ("foundation/atomic.h", "foundation/jobs.h"):
+        tu = write(root, header.split("/")[-1] + ".probe.cpp",
+                   '#include "%s"\nint tl_probe_anchor;\n' % header)
+        obj = os.path.join(root, "probe.o")
+        base = [cxx, "-std=c++20", "-fno-exceptions", "-fno-rtti",
+                "-I", os.path.join(REPO, "src"), "-c", "-o", obj, tu]
+        rc, out = run(base + ["-DTL_SIM_TU=1"])
+        record("sim_tu: %s #errors under TL_SIM_TU" % header,
+               rc != 0 and "non-det" in out, out.strip()[:200])
+        rc, out = run(base)
+        record("sim_tu: %s compiles without TL_SIM_TU (the failure above is the guard, not rot)"
+               % header, rc == 0, out.strip()[:200])
+
+
 # --- fingerprint.py ---------------------------------------------------------------------------
 WIN_CMD = ("clang-cl /nologo -TP -DWIN32 -D_WINDOWS -D_HAS_EXCEPTIONS=0 -DTL_TIER_NETCODE=1 "
            "-DTL_DEV=0 -DTL_SIM_TU=1 -std:c++20 /W4 /WX /EHs-c- /GR- /O2 /Z7 "
@@ -848,6 +883,7 @@ def main():
         test_symbols(tmp, a.nm, a.objdump, a.ar, a.cxx)
         test_symbols_tooling(tmp, a.nm, a.objdump, a.ar, a.cxx)
         test_targets(tmp, a.cxx)
+        test_sim_tu_error(tmp, a.cxx)
         test_tier_parity(tmp)
         test_fingerprint(tmp)
         test_commit_docs(tmp)
