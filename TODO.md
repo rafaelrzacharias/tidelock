@@ -264,6 +264,85 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       RELEASE CRT (`/MD`), so `_CrtSetAllocHook` is unavailable regardless - Windows counting
       needs a different interposition even after the ruling.
 
+## W1 mem - the adversarial review (2026-08-24)
+- [x] **Adversarial review of W1 mem (d69aadb..53e73ac + both merges) - DONE 2026-08-24
+      (Fable 5 high, fresh context), fixes in reviews 1-3 on `w1-mem`. Verdict: fix first ->
+      shipped.** What held up under attack: the alignment-gap zero-on-push fix is correct and
+      its test constructs real dirty-reuse-then-realign (the dirt survives every tier); the
+      snapshot/restore blob layout is symmetric, hashes cover `[base, used)` never capacity,
+      the per-arena array bisects, restore-then-grow re-zeroes via the `high_water =
+      max(high_water, used)` rule; the OS-backed test fixture leaks no address into hashed
+      state (two worlds at different bases hash equal); registration order is a pure function
+      of the app wiring's call order (single-threaded init, sealed - not timing); the two merge
+      resolutions are clean (LESSONS/TODO text only; `registry_hash_all`'s `tl_hash64` use
+      matches DETERMINISM section 4 token for token); mem_pool's 64K two-granule carve, header
+      recovery at `p & ~0xFFFF`, budget-return-on-large-free and realloc matrix all verified
+      against section 8.6. Ranked defects, all fixed:
+      1. **High** `mem_pool.cpp` carve_aligned: the reserve check ignored arena_push's COMMIT
+         rounding, so on a base that is only page-aligned (every mmap reserve on Linux/Pi -
+         VirtualAlloc's 64K alignment is why no existing test could see it) a carve at the
+         reserve edge TL_FATALed where mem_pool.h promises null. Measured with a misaligned-base
+         fixture: pre-fix the test dies on the fatal trap. (review 1)
+      2. **High (test vacuity)** `arena_reset_to` poisoned EVERY arena in dev, not just
+         ARENA_POISON ones: both worlds' "divergent dirt histories" in the section 8.8
+         two-worlds criterion became identical 0xDD before the identical ops ran, so the
+         criterion passed even with zero-on-push deleted; the restore-trace test wrote every
+         pushed byte at 16-alignment and could not catch it either. Poison is now flag-gated,
+         the two-worlds test writes divergent dirt directly and diverges the histories
+         structurally (restore vs decommit), and sim_step pushes odd-sized partially-written
+         blocks so the mid-run-restore replay crosses rollback dirt through alignment gaps.
+         (review 3)
+      3. **Medium** `registry_seal` did not fold the sealed ids into `session_fingerprint`
+         (MEMORY.md section 8.3 says it does): until the app's `registry_set_fingerprint`, the
+         fingerprint was zero and restore accepted a snapshot from ANY same-count registry -
+         "the fingerprint check IS the id check" was vacuous exactly when no fingerprint
+         existed. Seal now writes a little-endian tl_hash64 fold of the id array; wrong id and
+         wrong ORDER are both refused with no app fingerprint set. (review 2)
+      4. **Low** `arena_push`: an `end` within one COMMIT_GRANULE of 2^64 wrapped
+         `align_up(end, GRANULE)` to a small value and sailed past the over-reserve fatal;
+         `end` is now checked against the reserve before the rounding. (review 3)
+      5. **Low** `ring_push` stamped the new tick on a slot still holding the EVICTED
+         snapshot's payload; between push and a failed/skipped `registry_snapshot`, `ring_find`
+         served a lie. The claimed slot is invalidated until the fill succeeds; pinned. (rev. 3)
+      6. **Low** the alloc-shim vacuity (honest ERR_MEM_UNSUPPORTED, counter reads 0) was
+         stated in comments but invisible to a test reader; now pinned by
+         `alloc_shim_vacuity_is_visible`, which the writable-static ruling must flip. (rev. 3)
+      Edge tests added: tick-0 snapshot find/restore (tick 0 is NOT a sentinel - the
+      invalidated-slot path keys on `count == 0`), empty-registry hash, MAX_ARENAS full-house
+      round trip, restore from the oldest live slot after wrap, commit exactly at the reserve
+      edge, zero-size push (already present). Deferred-fatal tests (over-reserve, add-after-seal,
+      guard trips, netcode overflow) remain gated on the runner lane's `TL_TEST_EXPECT_FATAL`
+      (TESTING.md section 9.1) - the per-file headers list them; re-check at the runner merge.
+- [ ] **For the platform merge (recorded by the mem review): `src/foundation/handle.h` exists on
+      BOTH w1-mem and w1-platform and the copies differ - mem's is canonical (MEMORY.md §3).**
+      w1-platform's copy: `handle_make` shifts `gen` in u32 (silent truncation for any geometry
+      past 32 bits where mem's widens to u64), `handle_gen` truncates `bits` to u32 BEFORE
+      shifting (wrong for >32-bit handles), it lacks mem's `IDX_BITS >= 1 / <= 31 / sum <= 64`
+      static_asserts, and it exposes `IDX_BITS_V/GEN_BITS_V` where mem's spells `IDX_BITS_N` +
+      `rep` - any platform-side consumer of those names breaks when mem's copy wins. The merge
+      must take mem's file whole and re-point platform consumers.
+- [ ] **For the platform merge: `platform/platform.h` REDEFINES `struct VMemApi` instead of
+      including `foundation/vmem_api.h`** (the already-filed ruling request above). Verified
+      token-by-token 2026-08-24: all three copies (PLATFORM.md §9.2, vmem_api.h, platform.h)
+      agree field-for-field today, so the fix is mechanical - delete platform.h's definition,
+      include the foundation header - but until then any TU including both headers is an ODR
+      violation waiting at the merge.
+- [ ] **Ruling request: is `ARENA_HASHED` without `ARENA_SNAPSHOT` legal for MUTABLE state?**
+      A hashed-but-not-snapshotted arena that mutates cannot be rolled back, so a mid-run
+      restore CANNOT reproduce the hash trace (section 8.8) - a desync trap wired at
+      registration, caught only weeks later. Legit use is immutable data (compiled tables,
+      MEMORY.md §5). Options: (a) `registry_add` TL_FATALs on the combo and immutable tables
+      get SNAPSHOT anyway (they're small; restore is a no-op-equivalent memcpy), (b) bless the
+      combo for immutable arenas and state the mutation ban in §1.2. The registry test fixture
+      documents the hazard in place; MEMORY.md §1.2/§5 should carry the ruling.
+- [ ] **Ruling request (spec gap, behavior matches spec pseudocode): a reserve that is not a
+      COMMIT_GRANULE multiple has an unusable tail** - `arena_push` TL_FATALs "over reserve"
+      when `align_up(end, 64K) > reserved` even though `end <= reserved`, so the effective
+      budget is `round_down(reserved, 64K)` and a sub-64K reserve can never push. Recommend:
+      `vmem_arena_init` rounds the reserve up to COMMIT_GRANULE (address space is free) so the
+      fatal coincides with the real budget; MEMORY.md §8.2's "rounded up to page" would change.
+      Not improvised in the review - the shipped behavior is what §8.2's pseudocode spells.
+
 ## W1 rng/hash - the adversarial review (2026-08-24)
 - [x] **Adversarial review of W1 rng/hash (`8bdc6ee`) - DONE 2026-08-24 (Opus 5 high, fresh
       context), fixes in reviews 1-3 on `w1-rng-hash`. **Verdict: fix first -> shipped.** What
