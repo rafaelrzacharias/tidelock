@@ -67,7 +67,16 @@ SYSTEM_PROBE = '#include <stdint.h>\n#include <stddef.h>\n#include <limits.h>\n#
 # -nostdlibinc, NOT -nostdinc: the latter drops clang's own resource dir too, which is where the
 # freestanding <stdint.h>/<stddef.h>/<limits.h> live.
 BASE_FLAGS = ["-std=c++20", "-ffreestanding", "-nostdlibinc", "-nostdinc++",
-              "-fno-exceptions", "-fno-rtti", "-DTL_SIM_TU=1"]
+              "-fno-exceptions", "-fno-rtti", "-DTL_SIM_TU=1",
+              # _MSC_VER is a banned platform macro in every src/ TU (docs/CPP-SUBSET.md §5,
+              # enforced by includes.py's token ban) - the only thing that can still branch on it
+              # is a vendor header (rapidhash.h does, for <intrin.h>). Clang predefines it for the
+              # win triple regardless, and clang's OWN resource-dir intrin.h then declares ~90
+              # SIMD-intrinsic records the linux/pi triples never see - a real preprocessed-text
+              # difference but an inert one: rapidhash's __SIZEOF_INT128__ branch always wins on
+              # every triple we build for, so the intrin.h include is dead code either way.
+              # Undefining it here removes the noise at its source instead of laundering it.
+              "-U_MSC_VER"]
 LAYOUT_FLAGS = ["-fsyntax-only", "-Xclang", "-fdump-record-layouts-complete"]
 
 LINE_MARKER = re.compile(r'^#\s+\d+\s+"([^"]*)"')
@@ -279,7 +288,10 @@ def main():
     with tempfile.TemporaryDirectory(prefix="tl_targets_") as tmp:
         with open(os.path.join(tmp, "string.h"), "w", encoding="utf-8", newline="\n") as f:
             f.write(STRING_H_STUB)
-        incs = ["-I" + os.path.join(root, "src"), "-I" + tmp]
+        # vendor/rapidhash: the one vendor header a det TU includes (src/foundation/hash.cpp),
+        # per its wrap-module restriction in tools/audit/includes.py's BACKEND_HEADERS.
+        incs = ["-I" + os.path.join(root, "src"), "-I" + tmp,
+                "-I" + os.path.join(root, "vendor", "rapidhash")]
 
         # The layout dump has to work for EVERY triple, not just the host's: clang 18 crashes
         # dumping layouts for x86_64-pc-windows-msvc from Linux, and a host-only probe walked past

@@ -35,6 +35,7 @@ SYS_ALLOW_DIRS = {                        # additional system headers, by path p
     "src/render": {"math.h"},
     "src/editor": {"math.h"},
     "src/platform": {"math.h"},
+    "src/foundation": {"rapidhash.h"},
 }
 BACKEND_FREE = ("src/platform/impl_sdl3", "src/platform/impl_headless")   # OS headers live here
 
@@ -47,6 +48,7 @@ BACKEND_HEADERS = {                       # token in the include path -> allowed
     "lua.h": ("src/script",),
     "monocypher": ("src/net",),
     "stb_": ("src/platform/impl_sdl3", "src/core"),
+    "rapidhash": ("src/foundation",),
 }
 
 # The include DAG of docs/ARCHITECTURE.md §1: module -> the modules it may include (itself
