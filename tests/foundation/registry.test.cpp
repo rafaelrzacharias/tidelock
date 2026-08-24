@@ -1,10 +1,12 @@
-// arena_registry.h + snapshot.h - snapshot/restore round trips, fingerprint gating, the ring.
-// Spec: docs/MEMORY.md §8.3, §8.7 test list; docs/DETERMINISM.md §4 (what restore must
-// reproduce). Rubric: docs/TESTING.md §7.
-// Waits on w1-rng-hash (noted in TODO.md): the hash-region integrity test, the two-worlds hash
-// equality and the restore-reproduces-hash-trace test land with tl_hash64.
+// arena_registry.h + snapshot.h - snapshot/restore round trips, fingerprint gating, the ring,
+// and the docs/MEMORY.md §8.8 done criteria: hash-region integrity, two worlds in one process
+// hashing identically, and a mid-run restore reproducing the hash trace.
+// Spec: docs/MEMORY.md §8.3, §8.7 test list; docs/DETERMINISM.md §4 (what the hash covers).
+// Rubric: docs/TESTING.md §7. No hash VALUE is pinned here - only relative properties, so
+// these tests are hash-implementation-agnostic (rapidhash's own vectors live in hash.test.cpp,
+// the rng/hash lane).
 // Deferred to the runner lane's TL_TEST_EXPECT_FATAL: add-after-seal, duplicate id,
-// MAX_ARENAS+1, set_fingerprint before seal, netcode/ship overflow fatal.
+// MAX_ARENAS+1, set_fingerprint before seal, hash_all before seal, netcode/ship overflow fatal.
 #include "runner/tl_test.h"
 #include "foundation/arena_registry.h"
 #include "foundation/snapshot.h"
@@ -215,4 +217,135 @@ TL_TEST(ring_overflow_is_a_budget_violation, "foundation,mem,fast") {
 #else
     TL_EXPECT_TRUE(true);   // netcode/ship: overflow is TL_FATAL by contract
 #endif
+}
+
+// --- the docs/MEMORY.md §8.8 done criteria -----------------------------------------------------
+
+TL_TEST(registry_hash_region_integrity, "foundation,mem,determinism,smoke") {
+    // docs/DETERMINISM.md §4: mutating a transient byte must NOT move the hash; mutating any
+    // authoritative byte MUST. Automated over every registered arena.
+    TestWorld w;
+    TL_ASSERT_TRUE(world_init(&w));
+    fill(&w.a, 200u, 3u);
+    fill(&w.b, 100u, 5u);
+    fill(&w.c, 50u, 7u);
+
+    u64 pa0[MAX_ARENAS]; u64 pa1[MAX_ARENAS];
+    const u64 h0 = registry_hash_all(&w.reg, pa0);
+    TL_EXPECT_EQ(registry_hash_all(&w.reg, pa1), h0);   // pure function of state
+    TL_EXPECT_EQ(pa0[1], (u64)0);                        // b is not HASHED: folded as 0
+
+    // Flip one byte INSIDE used of each HASHED arena: the world hash moves and the per-arena
+    // array pinpoints exactly that arena (the desync bisection property, NETCODE §14).
+    VMemArena* hashed[2] = { &w.a, &w.c };
+    const u32 hashed_idx[2] = { 0u, 2u };
+    for (u32 k = 0; k < 2u; ++k) {
+        hashed[k]->base[7] = (u8)(hashed[k]->base[7] ^ 0xFFu);
+        const u64 h = registry_hash_all(&w.reg, pa1);
+        TL_EXPECT_NE(h, h0);
+        TL_EXPECT_NE(pa1[hashed_idx[k]], pa0[hashed_idx[k]]);
+        TL_EXPECT_EQ(pa1[hashed_idx[1u - k]], pa0[hashed_idx[1u - k]]);   // the OTHER one did not move
+        hashed[k]->base[7] = (u8)(hashed[k]->base[7] ^ 0xFFu);
+        TL_EXPECT_EQ(registry_hash_all(&w.reg, pa1), h0);                 // flip back restores
+    }
+
+    // A registered-but-not-HASHED arena is transient to the hash.
+    w.b.base[0] = (u8)(w.b.base[0] ^ 0xFFu);
+    TL_EXPECT_EQ(registry_hash_all(&w.reg, pa1), h0);
+    w.b.base[0] = (u8)(w.b.base[0] ^ 0xFFu);
+
+    // A byte ABOVE used (committed, dirty) is not state: flipping it must not move the hash.
+    w.a.base[w.a.used + 10u] = 0x5Au;
+    TL_EXPECT_EQ(registry_hash_all(&w.reg, pa1), h0);
+
+    // The extent itself IS state: growing by one ZERO byte must move the hash.
+    (void)arena_push(&w.a, 1u, 1u);
+    TL_EXPECT_NE(registry_hash_all(&w.reg, pa1), h0);
+
+    world_release(&w);
+}
+
+TL_TEST(registry_two_worlds_hash_identically, "foundation,mem,determinism,smoke") {
+    // docs/MEMORY.md §8.8: two worlds' registries in one process hash identically. The two
+    // worlds take DIFFERENT dirt histories (different pre-reset fills), then perform identical
+    // logical operations - zero-on-push must make the hashed bytes converge, including the
+    // alignment gap (docs/CPP-SUBSET.md §5: hashed memory is a pure function of state).
+    TestWorld w1, w2;
+    TL_ASSERT_TRUE(world_init(&w1));
+    TL_ASSERT_TRUE(world_init(&w2));
+    fill(&w1.a, 300u, 9u);   // divergent history...
+    fill(&w2.a, 200u, 4u);
+    arena_reset_to(&w1.a, 0u);
+    arena_reset_to(&w2.a, 0u);
+
+    TestWorld* worlds[2] = { &w1, &w2 };
+    for (u32 i = 0; i < 2u; ++i) {
+        TestWorld* w = worlds[i];
+        u8* p = (u8*)arena_push(&w->a, 5u, 1u);
+        memset(p, 0x5A, 5u);
+        u8* q = (u8*)arena_push(&w->a, 100u, 64u);   // 64-aligned: [5,64) is a re-zeroed gap
+        for (u32 j = 0; j < 100u; ++j) { q[j] = (u8)(j * 3u); }
+        fill(&w->c, 40u, 11u);
+    }
+
+    u64 pa_1[MAX_ARENAS]; u64 pa_2[MAX_ARENAS];
+    const u64 h1 = registry_hash_all(&w1.reg, pa_1);
+    const u64 h2 = registry_hash_all(&w2.reg, pa_2);
+    TL_EXPECT_EQ(h1, h2);
+    for (u32 i = 0; i < 3u; ++i) { TL_EXPECT_EQ(pa_1[i], pa_2[i]); }
+
+    // Diverge one authoritative byte: the worlds separate and the per-arena array names arena 2.
+    w2.c.base[3] = (u8)(w2.c.base[3] ^ 1u);
+    const u64 h2b = registry_hash_all(&w2.reg, pa_2);
+    TL_EXPECT_NE(h2b, h1);
+    TL_EXPECT_EQ(pa_1[0], pa_2[0]);
+    TL_EXPECT_NE(pa_1[2], pa_2[2]);
+
+    world_release(&w1);
+    world_release(&w2);
+}
+
+namespace {
+// A deterministic synthetic tick: mutate the HASHED|SNAPSHOT arena as a pure function of
+// (state, tick) - growth AND in-place. (c is HASHED-but-not-SNAPSHOT by this fixture's design,
+// so a rollback cannot reproduce a trace that mutates it: hashed authoritative state must also
+// be snapshotted, which is the real registry wiring.)
+void sim_step(TestWorld* w, u64 tick) {
+    u8* p = (u8*)arena_push(&w->a, 16u, 16u);
+    for (u32 i = 0; i < 16u; ++i) { p[i] = (u8)(tick * 31u + i); }
+    w->a.base[tick % 8u] = (u8)(w->a.base[tick % 8u] ^ (u8)(tick * 7u + 1u));
+}
+}  // namespace
+
+TL_TEST(registry_restore_reproduces_hash_trace, "foundation,mem,determinism,smoke") {
+    // docs/MEMORY.md §8.8: a snapshot restore mid-run reproduces the original hash trace from
+    // that tick onward - the rollback contract netcode rides on (docs/DETERMINISM.md §5).
+    TestWorld w;
+    TL_ASSERT_TRUE(world_init(&w));
+    fill(&w.c, 32u, 1u);
+
+    SnapshotRing ring;
+    TL_ASSERT_EQ(ring_init(&ring, 1u << 20, &w.backing), ERR_OK);
+
+    u64 trace[10];
+    u64 pa[MAX_ARENAS];
+    Snapshot* snap = nullptr;
+    for (u64 tk = 0u; tk < 10u; ++tk) {
+        sim_step(&w, tk);
+        trace[tk] = registry_hash_all(&w.reg, pa);
+        if (tk == 5u) {
+            snap = ring_push(&ring, tk);
+            TL_ASSERT_EQ(registry_snapshot(&w.reg, snap, tk), ERR_OK);
+        }
+    }
+    // Roll back to tick 5 and replay 6..9: the trace must be bit-identical.
+    TL_ASSERT_TRUE(snap != nullptr);
+    TL_ASSERT_EQ(registry_restore(&w.reg, snap), ERR_OK);
+    TL_EXPECT_EQ(registry_hash_all(&w.reg, pa), trace[5]);
+    for (u64 tk = 6u; tk < 10u; ++tk) {
+        sim_step(&w, tk);
+        TL_EXPECT_EQ(registry_hash_all(&w.reg, pa), trace[tk]);
+    }
+
+    world_release(&w);
 }

@@ -1,9 +1,8 @@
 // arena_registry.cpp - the registered arena set. Spec: docs/MEMORY.md §8.3.
 // Audited det half: no io - the R-2 dev overflow is a returned code, the caller logs.
-// registry_hash_all still waits on foundation/hash.h (tl_hash64, the w1-rng-hash lane) -
-// TODO.md, W1 mem notes.
 #include "foundation/arena_registry.h"
 #include "foundation/snapshot.h"
+#include "foundation/hash.h"
 
 #include <string.h>  // memcpy/memcmp/memset (docs/CPP-SUBSET.md §1 allowlist)
 
@@ -57,8 +56,16 @@ void registry_set_fingerprint(ArenaRegistry* r, const u8 fingerprint[32]) {
     memcpy(r->session_fingerprint, fingerprint, 32u);
 }
 
-u64 registry_hash_all(const ArenaRegistry*, u64[MAX_ARENAS]) {
-    TL_FATAL("unimplemented: registry_hash_all (waits on w1-rng-hash tl_hash64 - TODO.md W1 mem notes)");
+u64 registry_hash_all(const ArenaRegistry* r, u64 out_per_arena[MAX_ARENAS]) {
+    TL_CHECK(r != nullptr && out_per_arena != nullptr);
+    TL_CHECK(r->sealed != 0u);   // the fold order below IS the lockstep contract
+    for (u32 i = 0; i < r->count; ++i) {
+        const ArenaEntry* e = &r->e[i];
+        out_per_arena[i] = (e->flags & ARENA_HASHED) != 0u
+                               ? tl_hash64(e->arena->base, e->arena->used, TL_HASH_SEED)
+                               : 0u;
+    }
+    return tl_hash64(out_per_arena, (usize)r->count * 8u, TL_HASH_SEED);
 }
 
 ErrCode registry_snapshot(const ArenaRegistry* r, Snapshot* s, u64 tick) {

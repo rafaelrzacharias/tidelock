@@ -228,13 +228,13 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `foundation/atomic.h` precedent - owned by `JOBS.md`, lives in foundation). The platform
       lane should `#include "foundation/vmem_api.h"` from platform.h, not redefine the struct,
       and `PLATFORM.md` §9.1 needs the one-line doc fix (its owner's edit, not this lane's).
-- [ ] **`registry_hash_all` is a stub until w1-rng-hash publishes `foundation/hash.h`.**
-      `MEMORY.md` §8.3 calls `tl_hash64` (rapidhash), but `ROADMAP.md` §2 lists mem's dependency
-      as "skeleton" only and the rng/hash lane has not pushed. Referencing the symbol now would
-      fail the audit (undefined outside the lib set). The final slice - hash-region integrity
-      test, two-worlds hash equality, restore-reproduces-hash-trace (§8.8 done criteria) - lands
-      the day hash.h merges into this branch. No hash VALUES are pinned in mem tests (relative
-      properties only), so the rapidhash swap-in changes nothing.
+- [x] **`registry_hash_all` waited on w1-rng-hash** (`ROADMAP.md` §2 lists mem's dependency as
+      "skeleton" only, but `MEMORY.md` §8.3 calls `tl_hash64` - the doc's dependency row was
+      incomplete; note for the ROADMAP owner). Resolved 2026-08-24: w1-rng-hash's header commit
+      merged into w1-mem, hash_all implemented, and the §8.8 done criteria are green
+      (hash-region integrity, two-worlds-in-one-process equality over divergent dirt histories,
+      mid-run restore reproducing the hash trace). No hash VALUES are pinned in mem tests
+      (relative properties only).
 - [ ] **Ruling request: §7 R-2's dev-tier `TL_LOG_WARN` cannot live in the det half** (the audit
       allowlist is closed to io - `CPP-SUBSET.md` §4/§9 R-3; `tl_log.h` also does not exist until
       tooling-rt lands). Implemented as: blob-cap overflow returns `ERR_MEM_RING_OVERFLOW` in dev
