@@ -54,11 +54,14 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       (`tl_assert.h` passes; `tl_assert.cpp` and `tl_log.h` still fail). Also: `static_assert`
       message literals are literals to the non-ASCII gate, so header messages spell "section 3.1",
       not "§3.1" - not a gate bug, noted so nobody "fixes" it.
-- [ ] **fx tests that need the runner lane** (`TESTING.md` §9.1 `TL_TEST_EXPECT_FATAL`): `div`
-      by zero, `sqrt` of a negative, `normalize` of a zero vector, `atan2(0,0)`, `to<R>` out of
-      range, `clamp` with lo > hi - each asserts in dev and has a documented release value; the
-      release values are testable today only by building the test against a non-dev tier. Land
-      them in `tests/foundation/fx_fatal.test.cpp` the day the macro exists.
+- [x] **fx tests that need the runner lane** (`TESTING.md` §9.1 `TL_TEST_EXPECT_FATAL`) - landed
+      in `tests/foundation/fx_fatal.test.cpp` (W1 runner+driver lane, 2026-08-24): `div` by zero,
+      `sqrt` of a negative, `normalize` of a zero vector, `atan2(0,0)`, `to<R>` out of range,
+      `clamp` with lo > hi, each `TL_TEST_EXPECT_FATAL` and gated `#if TL_DEV` (a no-op pass on
+      netcode/ship, where `TL_ASSERT` compiles out - `fx_review_release_error_values` in
+      `fx_review.test.cpp` already covers the returned release values there). The runner judges
+      these as fatal-expected only under `TL_DEV` (`tests/runner/main.cpp` `child_passes`), else
+      as ordinary must-exit-0 tests, so the row is never a false fatal expectation outside dev.
 - [ ] **RR-1 Pi 4 sysroot + the aarch64 leg of `BUILD.md` §10.5.** Rafael has a Pi 4 on the LAN,
       so this is now an execution task, not a decision. Lane: W0 skeleton (**Opus 5 high**). It
       touches only `toolchain/`, `cmake/toolchain-pi4.cmake`, `tools/sysroot.sh|deploy.sh` and this
