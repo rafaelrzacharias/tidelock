@@ -576,17 +576,37 @@ right; it is the template the others now follow.
   assert for the case where the caller has already asserted liveness. Alternatives: (b) drop the
   assert from `get` and lose the stale-handle bug signal; (c) leave it and require every consumer to
   hold a parallel liveness bit. Recommend (a). Blocks the ECS lane, not this one.
+  **RULED 2026-08-24 (Rafael): option (a).** `bool slotmap_alive(const SlotMap*, H)` - pure,
+  assert-free, false for stale/out-of-range/null - and `slotmap_get` keeps its assert. The
+  error model as designed (CPP-SUBSET §3): absence is queryable, a stale deref is a bug.
+  Implementation: the W2-prep closeout lane, with the edge matrix (null handle, gen 0, wrapped
+  slot, out-of-range index) and CONTAINERS.md §8.2 updated in the same commit.
 - **R2 — may a `Map` live on an `ARENA_HASHED` arena at all?** A growing `Map` orphans its old
   keys/vals/state blocks below the arena's `used`, so they are hashed forever and the hash encodes
   growth history. Stated in `map.h`'s contract block and `CONTAINERS.md` §3 as a derived constraint
   (bump allocation + "hashes cover `[base, used)`"), not a new decision. The open question is
   whether the answer should be "never" (enforced how?) or "only if it never grows" (sized at init,
   `TL_FATAL` on grow when the arena is hashed — but `Map` cannot see its arena's registry flags).
+  **RULED 2026-08-24 (Rafael): fixed-shape on hashed arenas, not "never".** The desync fear
+  dissolves on inspection - lockstep peers run identical op histories so orphans hash
+  identically, and checkpoints are raw arena images (DETERMINISM.md §5) so a joiner inherits
+  the exact bytes; what stays wrong is hygiene (unbounded hashed garbage, a hash encoding
+  allocation history for nothing). Rule: any container on an ARENA_HASHED arena is sized at
+  init; `Map` gains a fixed mode exactly like `Array`'s (no grow arena -> TL_FATAL on the
+  insert that would grow) - which is also the only honest enforcement, since a fixed-mode Map
+  cannot grow anywhere. MEMORY.md §1.2 + CONTAINERS.md §3 carry the ruling. Implementation:
+  the W2-prep closeout lane.
 - **R3 — `CONTAINERS.md` §8.3 specifies `TL_ASSERT(!in_tick)` on `map_grow` and it is not
   implemented**, because no `in_tick` facility exists in foundation yet. Either the ArenaGuard's
   barrier window becomes readable from `map.h` or the clause moves to the guard. Filed rather than
   improvised.
-- **R4 — `CANON.md:22` says Entity gets "1024 gens"; the slot actually yields 1023.** Generation 0
+  **RULED 2026-08-24 (Rafael): the clause moves to the ArenaGuard** - tick-window knowledge is
+  the guard's; map.h cites it. With R2's fixed-shape rule, growth exists only on non-hashed
+  arenas, where GROWS_AT_BARRIER is the discipline the guard enforces. Doc move now (W2-prep
+  closeout); the guard hook lands when the window API exists (the guard owner's lane).
+- [x] **R4 — `CANON.md:22` says Entity gets "1024 gens"; the slot actually yields 1023.**
+  (CLOSED 2026-08-24: CANON corrected to "1023 usable gens" at the containers wave merge.)
+  Original finding: Generation 0
   is never issued and `GEN_MAX == 1023` triggers quarantine on the remove that would wrap, so
   generations 1..1023 are issued and the slot retires — 1023 reuses, not 1024. No code states the
   wrong number, so `docaudit` is silent, but the ECS lane will size its churn budget from that row.
@@ -595,16 +615,26 @@ right; it is the template the others now follow.
   caller must bound the loop itself, unlike `map_iter` which returns `bool`. §8.4 says only
   "`sorted_iter` walks `0..count`". Two iterators with two shapes in one module is a papercut the
   Luau-facing lane will hit; align them or write the difference down.
+  **RULED 2026-08-24 (Rafael): align on `map_iter`'s shape** - `sorted_iter` returns bool, one
+  iterator idiom per module. CONTAINERS.md §8.4 updated with the change (W2-prep closeout).
 - **R6 — `fx.h:247,250` declare `min`/`max` as free functions in the global namespace.** That is the
   root cause the `NOMINMAX` fix in `tests/foundation/vmem_test_api.h` treats at the symptom end: any
   TU that reaches a Windows header before that fixture (or any future non-test TU pairing the two)
   hits the same mangled-declaration break, and `NOMINMAX` only helps where it is defined first. The
   fix at the root is `fx_min`/`fx_max` or a namespace, and it belongs to the fx lane. `LESSONS.md`
   carries the trap; this is the request to close it rather than keep paying it.
+  **RULED 2026-08-24 (Rafael): fix at the preprocessor, not the names.** Renaming would churn
+  doc-pinned spellings across FX-PALETTE/ALLOY to dodge a Windows macro; instead `#define
+  NOMINMAX` precedes every `<windows.h>` include - the include gate already confines windows.h
+  to platform/ and tests, so the sites are enumerable, and includes.py gains the check
+  (windows.h not preceded by NOMINMAX in the same file = violation) with fixtures, gate-edit
+  rule as always. W2-prep closeout.
 - **R7 — `Span<T>`, `StrView` and `Interner` carry implicit tail padding** (4 bytes each). None is
   registered state today, and `StrView`'s shape is pinned by `CANON.md`, so nothing was changed.
   If any of them ever enters a hashed arena, `CPP-SUBSET.md` §5 applies and CANON's `StrView` row
   has to move with it. Recorded so it is a decision, not a discovery.
+  **AFFIRMED 2026-08-24 (Rafael) as the standing rule, no code**: none of Span/StrView/Interner
+  enters a hashed arena without the explicit-padding revision and the CANON row moving with it.
 
 ## W1 mem - notes and ruling requests (2026-08-24, w1-mem lane)
 - [ ] **Ruling request: `VMemApi`'s definition needs one foundation-visible home.**
