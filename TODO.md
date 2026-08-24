@@ -228,6 +228,33 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `tl_driver` / `tl_gate0` / `tl_hovel` real mains (they exit 70 today).
 - [ ] `platform/` contract + **headless impl** (file/clock/vmem/entropy/threads real; window/draw/
       events null). `docs/PLATFORM.md`.
+- [x] **W1 platform - the contract header (`src/platform/platform.h`), 2026-08-24.** Every struct
+      and the layout `static_assert`s from `PLATFORM.md` §9.2, transcribed verbatim; 0 violations
+      on `tl_audit_includes` and a clean `/W4 /WX` standalone compile. Landed alongside it, because
+      `platform.h` needs them and no lane owning them had started (same precedent as `tl_assert.h`
+      landing from the fx lane, `LESSONS.md`): `foundation/handle.h` (MEMORY.md §3/§8.5),
+      `foundation/strview.h` (CONTAINERS.md §8.6), `foundation/ring.h` (CONTAINERS.md §8.5),
+      `foundation/span.h` (CONTAINERS.md §1/§8.1), `foundation/rect.h` (RENDER2D.md §9.2, struct
+      line only - no min/max/overlap helpers, nothing landing today needs them). `rect` added to
+      `TL_FOUNDATION_NONDET` in `src/foundation/CMakeLists.txt` (it carries `f32`). The mem/
+      containers/render2d lanes own these files outright the moment they start; a conflicting
+      definition there wins over this stopgap.
+- [ ] **RR-7 W1 platform is blocked on MEMORY.md's `VMemArena`, not just `docs/ROADMAP.md`
+      says.** `PLATFORM.md` §9.5's init order allocates each impl's own state "from the platform's
+      own `VMemArena`" from the FIRST step, and `FileApi::read_all` pushes into a caller-supplied
+      one - not a peripheral use, the load-bearing allocation pattern for both impls. `ROADMAP.md`
+      §2 lists platform's only dependency as **skeleton**, with mem scheduled as a sibling W1 lane,
+      not a prerequisite - so the graph and the implementation spec disagree. Unlike the four
+      headers above, `VMemArena` is not a trivial POD: reserve/commit-growth, bump-pointer push
+      with alignment, poison, hashing semantics (`MEMORY.md` §8.2) - a second implementation here
+      risks diverging from whatever mem actually ships and duplicating its real work. Ruled by
+      Rafael 2026-08-24: **wait** - the mem lane is being built now; W1 platform resumes
+      `os_*_vmem.cpp` / `os_entropy.cpp` / `impl_headless/{init,file,clock,thread,vmem,entropy}.cpp`
+      and the step-1 test set (`vmem_reserve_commit`, `vmem_page_size`, `entropy_nonrepeat`,
+      `thread_primitives`, `read_all_contract`, `clock_monotonic`) once `VMemArena` lands. Either
+      close this by reordering `ROADMAP.md` §1's W1 graph (platform depends on mem for `VMemArena`
+      specifically, not the whole mem lane) or state why the graph is right and this reading of
+      §9.5 is wrong.
 - [ ] `VMemArena` + scratch + `ArenaRegistry` (hash-all, snapshot/restore, ring) + arena-offset guard
       + CRT counting shim. Two-worlds test from line one.
 - [ ] `mem_pool` (vendor heaps only) + grep rule.

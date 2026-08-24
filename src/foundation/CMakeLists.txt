@@ -9,7 +9,11 @@
 # tl_probe/crash all reach io, so the panic ABI of docs/CPP-SUBSET.md §9 R-3 is *defined* here and
 # only *referenced* from the audited half. Left off this list they would default into
 # tl_foundation_det and fail its own audit - which is what R-3 claimed was impossible.
-set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim
+# `rect` has no .cpp (header-only), so this entry moves nothing between libs; it exists only so
+# tools/audit/includes.py classifies foundation/rect.h as non-det - it carries Rect_f32 (f32),
+# which the sim-TU float ban would otherwise reject in the one header every sim TU could reach
+# through foundation/ (docs/RENDER2D.md §9.2, landed from the W1 platform lane, 2026-08-24).
+set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim rect
                          tl_assert tl_log tl_prof tl_probe crash)
 
 file(GLOB TL_FOUNDATION_SRC CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
