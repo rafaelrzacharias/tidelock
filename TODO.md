@@ -278,15 +278,14 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       9. **Low** thin edge coverage: `carrier_id = 2^64-1`, `n = 2^32-1`, and the
          `(system_id, draw)` packing's injectivity at the field boundary were all untested.
          `rng_edge_matrix` and `rng_for_system_id_draw_packing_is_injective` cover them.
-- [ ] **Ruling request - is `system_id == 0` a precondition or just a registration policy?**
-      `rng_systems.h` states "0 is reserved: an accidentally-default-initialised `system_id` must
-      never alias a real system", nothing enforces it, and the lane's own tests draw with
-      `system_id` 0-4. Two readings: (a) it is a precondition, so `rng_for` gets
-      `TL_ASSERT(system_id != 0)` and six of the seven goldens must be recomputed with a non-zero
-      `system_id`; (b) it is only a statement about which ids registration hands out, and the
-      header should say that instead of stating an invariant. `DETERMINISM.md` §3 is silent, so
-      this is a ruling, not a fix. (a) is the fail-loud option and costs a golden churn; (b) is
-      free and leaves a default-initialised id aliasing whatever registration puts at 0.
+- [x] **Ruling (2026-08-24, Rafael): `system_id == 0` is RESERVED and is a precondition.**
+      `rng_for` gains `TL_ASSERT(system_id != 0)` (fail-loud, compiled out in netcode/ship like
+      every `TL_ASSERT`); the six goldens that used `system_id` 0 were recomputed on a real enum
+      id (`RNG_SYS_LUAU_BASE`) by `tools/rapidhash_ref.py`, independently, never by re-running the
+      header; the ruling's home is `DETERMINISM.md` §3 and `rng_systems.h` cites it. The other
+      option on the table - reading the reservation as registration policy only and softening the
+      header's wording - was rejected: it would have left a default-initialised `system_id`
+      aliasing whatever registration puts first.
 
 ## Foundation week(s) (`docs/MEMORY.md`, `CONTAINERS.md`, `DETERMINISM.md`, `TESTING.md`)
 - [ ] Finish the test runner (`tests/runner`; W0 shipped the stub — generated list, tags/filter,

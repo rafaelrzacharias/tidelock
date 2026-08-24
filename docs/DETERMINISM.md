@@ -112,6 +112,15 @@ template <typename R> R rng_range(u64 r, R lo, R hi);   // lo + mul<R>(rng_q, hi
   enum is part of `build_id` by being source. The enum reserves a 256-wide block
   `RNG_SYS_LUAU_BASE .. +255` assigned to Luau-registered systems by registration ordinal
   (`LUAU-LAYER.md` §10.6), so a script's draws are keyed without editing the header.
+- **`system_id == 0` is reserved, and it is a precondition of `rng_for`, not a convention**
+  (ruled 2026-08-24). `rng_for` asserts `system_id != 0`; engine systems register from 1, Luau
+  ones from `RNG_SYS_LUAU_BASE`. Rev 1 stated the reservation in `rng_systems.h` and enforced it
+  nowhere, so a default-initialised or forgotten `system_id` would have keyed its draws as
+  whatever registration put first — silently, and identically on every peer, which is the shape
+  of bug the closed enum exists to prevent. Like every `TL_ASSERT` it compiles out in the
+  netcode/ship tiers (`CPP-SUBSET.md` §1): it is a development guard, and the closed enum remains
+  the actual guarantee. The `rng_for` goldens are keyed on `RNG_SYS_LUAU_BASE` for the same
+  reason.
 - `rng_range` is **closed at both ends**, not half-open: `rng_q`'s largest value is 1 − 2⁻³⁰ and
   `mul<R>` rounds RNE, so every span narrower than 2²⁹ raw units rounds its top draw up to exactly
   `hi`. Its two preconditions are asserted: `lo <= hi`, and `hi - lo` must be representable in `R`
@@ -278,5 +287,6 @@ re-derived independently by `tools/rapidhash_ref.py` (rapidhash v3 COMPACT+FAST 
 written out in Python from the algorithm; `--check` exits non-zero on disagreement). A vendor bump
 re-runs it; the vectors are never re-pinned to whatever the new code returns.
 
-*Rev 1 — 2026-08-22; §3 `rng_range` contract and §9.5 golden provenance reconciled 2026-08-24
-(W1 rng/hash review). Supersedes `../foundry/DETERMINISM-DESIGN.md` for this engine.*
+*Rev 1 — 2026-08-22; §3 `rng_range` contract, §3 `system_id != 0` ruling and §9.5 golden
+provenance reconciled 2026-08-24 (W1 rng/hash review). Supersedes
+`../foundry/DETERMINISM-DESIGN.md` for this engine.*

@@ -138,14 +138,19 @@ HASH_VECTORS = [
     (b"the quick brown fox jumps over the lazy dog", 0xC077819F6F45F995),
     (bytes(range(128)), 0x63D79B273D2C819C),          # crosses the COMPACT unroll boundary (>112)
 ]
+# system_id 0 is reserved and is a precondition of rng_for (docs/DETERMINISM.md §3, ruled
+# 2026-08-24), so the field-independence vectors are based on RNG_SYS_LUAU_BASE = 256 - a real
+# enum id - rather than on 0. Perturbing one field at a time, then a mixed one.
+LUAU_BASE = 256
 RNG_VECTORS = [
-    ((0, 0, 0, 0, 0), 0x1957A7604E215178),
-    ((1, 0, 0, 0, 0), 0x92A152CB66AF0C17),
-    ((0, 1, 0, 0, 0), 0x7D2A6F022D441849),
-    ((0, 0, 1, 0, 0), 0x2EB6817E205351D5),
-    ((0, 0, 0, 1, 0), 0x005A85820A61E3BE),
-    ((0, 0, 0, 0, 1), 0x35BE14FE33FFF9AC),
-    ((TL_HASH_SEED, 1000000, 256, 0xDEADBEEF, 7), 0xF2E5E37808D75849),
+    ((0, 0, LUAU_BASE, 0, 0), 0x21C24BB43807B8B5),
+    ((1, 0, LUAU_BASE, 0, 0), 0x8F4E2459DFE9E176),
+    ((0, 1, LUAU_BASE, 0, 0), 0x736A2770798C17E6),
+    ((0, 0, LUAU_BASE + 1, 0, 0), 0x8BEC1FACBBDD35D1),
+    ((0, 0, LUAU_BASE, 1, 0), 0x17C7A9967B655A3A),
+    ((0, 0, LUAU_BASE, 0, 1), 0xBE29556F063A9F74),
+    ((TL_HASH_SEED, 1000000, LUAU_BASE, 0xDEADBEEF, 7), 0xF2E5E37808D75849),
+    ((0, 0, LUAU_BASE, 0xFFFFFFFFFFFFFFFF, 0), 0xF402F9428FCF7195),   # widest carrier_id
 ]
 
 

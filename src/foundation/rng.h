@@ -10,7 +10,8 @@
 //   rng_for and (per docs/TODO.md) tests/foundation/fx_test_util.h's seeded generator - same
 //   mix, so replacing the test's inline copy with a call to this one must not move its pinned
 //   trace hashes.
-// Invariants: `system_id` values come from the closed enum in rng_systems.h. `draw` is a
+// Invariants: `system_id` values come from the closed enum in rng_systems.h and are never 0 -
+//   a precondition of rng_for, asserted (docs/DETERMINISM.md §3, ruled 2026-08-24). `draw` is a
 //   per-carrier counter the CALLER owns locally within the tick - never stored across ticks
 //   (docs/DETERMINISM.md §3). `rng_below`'s Lemire step has no rejection loop: a ~n/2^64 bias is
 //   accepted so draw count never depends on the value drawn. `rng_range` is CLOSED at both ends
@@ -35,8 +36,13 @@ constexpr u64 mix64(u64 x) {
 constexpr u64 RNG_K0 = 0x9e3779b97f4a7c15ull;
 
 // The one entry point every doc uses. A pure function of the five key fields; `draw` defaults to
-// 0 for a carrier that draws once per tick. Never fails, never allocates.
+// 0 for a carrier that draws once per tick. Never allocates.
+// Precondition: `system_id != 0` (asserted). 0 is reserved so that a default-initialised or
+// forgotten system_id traps instead of silently keying its draws as whatever system registration
+// put first - ruled 2026-08-24, docs/DETERMINISM.md §3. Like every TL_ASSERT it compiles out in
+// the netcode/ship tiers, so it is a development guard, not a runtime check.
 constexpr u64 rng_for(u64 seed, u64 tick, u32 system_id, u64 carrier_id, u32 draw = 0) {
+    TL_ASSERT(system_id != 0);
     u64 r = mix64(seed ^ RNG_K0);
     r = mix64(r + tick);
     r = mix64(r + ((u64(system_id) << 32) | u64(draw)));

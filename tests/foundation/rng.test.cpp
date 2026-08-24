@@ -10,12 +10,16 @@
 // implementation of docs/DETERMINISM.md §3's formula (`--check`), not just against the header
 // they guard. If these move, the mix changed - fix the mix, never re-pin (docs/TODO.md).
 TL_TEST(rng_for_known_answer_vectors, "foundation,smoke,fast") {
-    TL_EXPECT_EQ(rng_for(0, 0, 0, 0, 0), (u64)0x1957a7604e215178ull);
-    TL_EXPECT_EQ(rng_for(1, 0, 0, 0, 0), (u64)0x92a152cb66af0c17ull);
-    TL_EXPECT_EQ(rng_for(0, 1, 0, 0, 0), (u64)0x7d2a6f022d441849ull);
-    TL_EXPECT_EQ(rng_for(0, 0, 1, 0, 0), (u64)0x2eb6817e205351d5ull);
-    TL_EXPECT_EQ(rng_for(0, 0, 0, 1, 0), (u64)0x005a85820a61e3beull);
-    TL_EXPECT_EQ(rng_for(0, 0, 0, 0, 1), (u64)0x35be14fe33fff9acull);
+    // One field perturbed at a time, all keyed on RNG_SYS_LUAU_BASE: system_id 0 is reserved and
+    // is now a precondition of rng_for (docs/DETERMINISM.md §3, ruled 2026-08-24), so the six
+    // vectors that used it were recomputed on a real enum id - by tools/rapidhash_ref.py, not by
+    // running the header, which is what "never re-pin" is protecting.
+    TL_EXPECT_EQ(rng_for(0, 0, RNG_SYS_LUAU_BASE, 0, 0), (u64)0x21c24bb43807b8b5ull);
+    TL_EXPECT_EQ(rng_for(1, 0, RNG_SYS_LUAU_BASE, 0, 0), (u64)0x8f4e2459dfe9e176ull);
+    TL_EXPECT_EQ(rng_for(0, 1, RNG_SYS_LUAU_BASE, 0, 0), (u64)0x736a2770798c17e6ull);
+    TL_EXPECT_EQ(rng_for(0, 0, RNG_SYS_LUAU_BASE + 1u, 0, 0), (u64)0x8bec1facbbdd35d1ull);
+    TL_EXPECT_EQ(rng_for(0, 0, RNG_SYS_LUAU_BASE, 1, 0), (u64)0x17c7a9967b655a3aull);
+    TL_EXPECT_EQ(rng_for(0, 0, RNG_SYS_LUAU_BASE, 0, 1), (u64)0xbe29556f063a9f74ull);
     TL_EXPECT_EQ(rng_for(TL_HASH_SEED, 1000000, RNG_SYS_LUAU_BASE, 0xdeadbeefull, 7),
                  (u64)0xf2e5e37808d75849ull);
 }
@@ -41,8 +45,9 @@ TL_TEST(rng_for_two_instance_determinism, "foundation,smoke,fast") {
     FxRng gen_b = { 0x1234u };
     for (u32 i = 0; i < 64; ++i) {
         const u64 key = fx_rng_next(&gen_a);
-        const u64 ra = rng_for(key, i, i * 3u, key ^ i);
-        const u64 rb = rng_for(key, i, i * 3u, key ^ i);
+        const u32 sys = RNG_SYS_LUAU_BASE + (i & 255u);   // never 0: reserved (section 3)
+        const u64 ra = rng_for(key, i, sys, key ^ i);
+        const u64 rb = rng_for(key, i, sys, key ^ i);
         TL_EXPECT_EQ(ra, rb);
         (void)fx_rng_next(&gen_b);
     }
@@ -70,7 +75,7 @@ TL_TEST(rng_edge_matrix, "foundation,smoke,fast") {
     TL_EXPECT_LT(rng_below(rng_for(7, 7, 7, 7), 0xffffffffu), 0xffffffffu);
     // carrier_id = 2^64-1 is a legal key (entity ids are u64) and must not alias carrier 0.
     TL_EXPECT_NE(rng_for(0, 0, 1, ~u64(0)), rng_for(0, 0, 1, 0));
-    TL_EXPECT_EQ(rng_for(0, 0, 0, ~u64(0), 0), (u64)0x631753f755f459e8ull);
+    TL_EXPECT_EQ(rng_for(0, 0, RNG_SYS_LUAU_BASE, ~u64(0), 0), (u64)0xf402f9428fcf7195ull);
     // Every R the mixed-op table lists a q_t product for must instantiate rng_range
     // (docs/FX-PALETTE.md §3.1); this is a compile-time check with a cheap runtime assertion.
     TL_EXPECT_EQ(rng_range<q_t>(0, fx::fx_raw<q_t>(0), fx::fx_raw<q_t>(1024)).v, (i32)0);
@@ -113,15 +118,15 @@ TL_TEST(rng_for_system_id_draw_packing_is_injective, "foundation,smoke,fast") {
     // is exactly the bug the closed enum exists to prevent (docs/DETERMINISM.md §3). The packing
     // is injective by construction; this measures it, including at the field boundary where
     // draw = 2^32-1 sits one below system_id + 1, draw = 0.
-    TL_EXPECT_NE(rng_for(3, 4, 0, 5, 0xffffffffu), rng_for(3, 4, 1, 5, 0));
     TL_EXPECT_NE(rng_for(3, 4, 1, 5, 0xffffffffu), rng_for(3, 4, 2, 5, 0));
+    TL_EXPECT_NE(rng_for(3, 4, 2, 5, 0xffffffffu), rng_for(3, 4, 3, 5, 0));
     TL_EXPECT_NE(rng_for(3, 4, RNG_SYS_LUAU_BASE, 5, 0),
                  rng_for(3, 4, RNG_SYS_LUAU_BASE + 255u, 5, 0));
     // Distinctness over a dense block of the (system_id, draw) plane: 64 x 64 keys, no repeats.
     u64 seen[64 * 64];
     u32 m = 0;
     for (u32 s = 0; s < 64; ++s) {
-        for (u32 d = 0; d < 64; ++d) { seen[m++] = rng_for(9, 9, s, 9, d); }
+        for (u32 d = 0; d < 64; ++d) { seen[m++] = rng_for(9, 9, RNG_SYS_LUAU_BASE + s, 9, d); }
     }
     u32 collisions = 0;
     for (u32 i = 0; i < m; ++i) {
