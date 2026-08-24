@@ -1272,6 +1272,116 @@ right; it is the template the others now follow.
 - [ ] Atomic-counter pool, `parallel_for`/`parallel_levels`, per-worker scratch, chunk-tagged
       command/event merge; shuffle mode; 1/2/8/16 gate in CI.
 
+## W1 jobs - notes and ruling requests (2026-08-24, w1-jobs lane)
+- [ ] **Ruling request (granted in-lane; the doc fix is still owed): `ThreadApi` needs one
+      foundation-visible home.** `PLATFORM.md` §9.1/§9.2 define `ThreadHandle`/`SemHandle`/
+      `MutexHandle`/`ThreadFn`/`ThreadApi` in `platform/platform.h`, but foundation is a leaf
+      (`ARCHITECTURE.md` §1 rule 1, enforced by `tools/audit/includes.py`'s `MODULE_DAG`) and
+      `JOBS.md` §6.2's `Jobs` holds `ThreadHandle`s and calls through the table - so `jobs.h` can
+      never include `platform.h`. This is the `VMemApi` case verbatim (see the W1 mem entry
+      above): transcribed to **`foundation/thread_api.h`**, and `platform.h` now includes it
+      instead of redefining it (include-plus-delete only, this lane, platform suite re-run green).
+      **Owner edit outstanding:** `PLATFORM.md` §9.1's file table needs a `thread_api.h` row and
+      §9.2 should say the struct is `foundation/thread_api.h`'s - the way §9 already says it for
+      `VMemApi`. Two additions from the adversarial review (2026-08-24): (a) §9's "platform.h
+      includes nothing but foundation/{...}" sentence is also stale - the shipped header includes
+      `thread_api.h`, and the doc sentence must name it; (b) §9.2's ThreadApi row should state
+      that `sem_post` observed by `sem_wait` on the same semaphore establishes happens-before
+      (release on post, acquire on wait). Every OS primitive provides it, but the jobs wake path
+      DEPENDS on it (a woken worker must see the epoch published before the post) and a contract
+      the code depends on that no doc states is exactly the silence-is-not-permission class. The
+      sentence is already in `foundation/thread_api.h`'s contract block, marked as filed here.
+- [ ] **Ruling request: `PLATFORM.md` §9.2 restates `foundation/atomic.h`'s API** on top of its
+      real home (`JOBS.md` §6.1), in a different and incompatible spelling - rev 1 had
+      `tl_atomic_load/store/fetch_add/cas` in `JOBS.md` and `atomic_load32/64`/`atomic_add32/64`/
+      `atomic_cas32/64`/`atomic_fence_*` in `PLATFORM.md`. One header, two names: the drift class
+      the doc protocol exists to stop. `JOBS.md` §6.1 now carries the full API (the §9.2 spelling
+      won - it states widths and orders); `PLATFORM.md` §9.2 should cite `JOBS.md` §6.1 and name
+      no verbs, the way `CPP-SUBSET.md` §9 R-4 cites `TL_FOUNDATION_TOOLING` and names no stems.
+- [ ] **Ruling request: `TOOLING.md` §9.1 claims `Scratch` carries `u8 worker`** ("so worker code
+      names its buffer without `thread_local`"), and the shipped `foundation/scratch.h` has no
+      such field. Nothing needs it yet - jobs passes `Scratch*` explicitly and never hands a
+      worker index to a chunk fn (`JOBS.md` §0), and the prof/probe per-worker buffers the claim
+      exists for do not. Either mem's header gains the field when that consumer lands, or
+      `TOOLING.md` §9.1 drops the claim. Not built on spec (pulled by a real consumer, never
+      pushed).
+- [ ] **`tools/audit/includes.py`'s `THREAD_LOCAL_EXEMPT` (jobs.h/jobs.cpp) is unusable and should
+      probably be deleted.** `symbols.py`'s `writable_static` fails any `.tbss`/`.tdata`/`.tls$`
+      section in every `src/` lib and `tl_foundation` is registered for that check - so a
+      `thread_local` in jobs passes the grep and fails the link gate. That is the correct outcome
+      (`JOBS.md` §1, `PLATFORM.md` §6 and `MEMORY.md` §1.3 all say the worker index and scratch are
+      passed explicitly, which is what shipped), but an exemption no code can use reads as
+      permission that is not there. One line in another lane's tool, so: a request, not a patch.
+- [ ] **Gate hole, reported not fixed: `allow.txt`'s `__aarch64_*` line is a Pi-only tripwire.**
+      It names outline atomics as the detector for "concurrency inside det code", but on x86-64 a
+      32-bit fetch-add inlines to `lock xadd` and emits no undefined symbol at all, and the symbol
+      audit does not run on the cross-built aarch64 leg (`.github/workflows/pr.yml` builds it and
+      checks `file`). Closed from this lane's side by `#if defined(TL_SIM_TU)` + `#error` in
+      `atomic.h` and `jobs.h`, which fires on every target; the audit-side fix (run `symbols.py`
+      over the pi4 archives, or add a positive fixture) belongs to the audit's owner.
+- [ ] **`platform.entropy_nonrepeat` is flaky: 1 failure in 30 runs, measured 2026-08-24.** Not a
+      jobs change - `tests/platform/entropy.test.cpp`'s byte histogram is a statistical bound over
+      1000x32 random bytes, so it reddens roughly 3% of full-suite runs on its own, and it turned
+      the jobs lane's suite red once while this slice was being built. A ~3% flake on a shared
+      suite means roughly one spurious red per PR lane invocation across a wave, which trains
+      people to re-run instead of read. Either widen the bound to a stated per-run false-positive
+      budget (and write the arithmetic down), or seed it. Its owner's test, so: a request.
+- [ ] **Signatures and names added over the rev-1 spec are folded into `JOBS.md` in the same
+      commit** (this lane's own doc); announced here for the wave merge: §5 R-3..R-6 (per-worker
+      wake semaphores; the barrier counting participants rather than chunks; `LevelFn`/`struct
+      Level`; the `JOBS_MAX_WORKERS` clamp), plus `JobsConfig`, `jobs_default_worker_count`,
+      `jobs_worker_count`, `jobs_shuffle_set`, `jobs_scratch`, `jobs_scratch_reset_all`,
+      `ERR_JOBS_*` (module range 0x02xx), and the `jobs_chunk_count`/`JOBS_MAX_WORKERS`
+      module-prefix spellings. R-3 and R-4 are a hang and a wrong-`fn` execution in rev 1's own
+      §6.3 pseudocode, not style - read them before reviewing the pool.
+
+## W1 jobs adversarial review (2026-08-24, fresh context) — verdict: SHIP (after review commits; PR next, ubuntu+sanitizers gate the merge)
+The ordering derivation was re-done by hand on the stated orders (aarch64 rules, both edges,
+the R-4 window, the handshake, levels, scratch, seed publication) and HOLDS. The lane's R-4
+mutation claim replicated exactly: caught by the soak, by nothing else. Defects found, ranked,
+all fixed in the review commits except the two filed items:
+1. [fixed] **u32 epoch wrap is a hang**: the inline path advances epoch without waking workers,
+   so after exactly 2^32 inline jobs between two pooled ones a worker's `seen` re-equals the
+   epoch and the stale-post guard parks it on a real token. Fix: u64 epoch (jobs.h/jobs.cpp,
+   `JOBS.md` §6.2). Not reachable in any sane workload; structural, and the fix is free.
+2. [fixed] **`jobs_init`'s mid-failure teardown had never executed**: `JOBS.md` §6.4 names the
+   row ("the platform refusing a thread or a semaphore mid-init"), no test ran it. Now injected
+   deterministically via a forwarding ThreadApi; 300 failing inits also leak-check the real
+   headless tables (a leaked sem/thread exhausts SemRec[256]/ThreadRec[64] and reddens).
+   Sabotage-verified: deleting one sem_destroy fails the test.
+3. [fixed] **The soak's tags were pinned by a comment**: mistagging the checker `slow` ships R-4
+   (the lane measured it; a comment is not a gate). Now pinned by `jobs_soak_tags_are_pinned`
+   through `--list` selection; required fixing `--list` to error on a zero-match selection
+   (tests/runner/main.cpp - the fourth empty-list silent pass; runner lane owner: FYI, the fix
+   is in your file, negative arm exercised by the pin test's `--tag slow` probe).
+4. [fixed] **Soak child deadline 180 s > PR per-child budget 120 s**: the lane kills the checker
+   first and the deadlocked grandchild is orphaned past the kill (measured in this review - two
+   orphans held tl_tests.exe and broke the next build). Now 60 s, with the rule in `JOBS.md` §6.4.
+5. [fixed] **Gate gap: a direct `__atomic_*`/`__sync_*`/`_Interlocked*` call in a det TU passed
+   every gate** (no include, no symbol on x86-64, Pi-only tripwire). Token ban added to
+   includes.py + three selftest plants; the TL_SIM_TU #error is now also PROVEN to fire by a
+   real-compiler selftest fixture (fails with TL_SIM_TU, compiles without).
+6. [fixed] **The "snapshot is load-bearing" claim was false** (comment/doc accuracy): removing
+   the JobDesc snapshot survives the whole suite, and the derivation agrees - with participant
+   counting no re-read can overlap main's rewrite. Kept as defense in depth, restated as such
+   (jobs.cpp, `JOBS.md` §5 R-4).
+7. [filed] **ThreadApi semaphore happens-before is undocumented** (see the PLATFORM ruling above).
+   Closed in code for the barrier's data edge: main re-acquires `pending` after the `done` wait,
+   so chunk-write visibility is self-contained under atomic.h's stated orders; the wake path's
+   liveness still depends on the (universal, now header-stated) sem ordering.
+8. [noted] **Memory-order mutations are invisible on x86-64** (measured: relaxing atomic.h's
+   loads to RELAXED survives the whole suite). The ordering's evidence is the hand derivation
+   plus the PR's ubuntu/TSan leg - exactly the lane's own Windows-only caveat; no local test can
+   close this, do not pretend otherwise.
+Also verified: thread_api.h token-identical to the struct platform.h dropped; the platform.h
+diff is the swap and typedef moves only; platform suite re-run green on this branch (31/30/1
+skip); worker-invariance compares chunk-keyed buffers byte-for-byte with per-item visit counts
+against two oracles; shuffle asserts the schedule CHANGED + bijection + per-job key (a
+key-ignoring permutation reddens - measured); extra-token injection is absorbed by the e==seen
+guard without a double retire (measured); main-always-waits deadlocks as three TIMEOUTs, never
+a hang (measured). dev-win 254/250/0 isolate + 274/265/0 serial; netcode-win 254/229/0;
+tl_audit 113 selftest checks green on both tiers.
+
 ## Reserved (design complete, build on first consumer — `docs/RESERVED-SEAMS.md`)
 Audio · game UI (Luau) · spatial index · tilemap · nav/AI · frame animation · replay UI/cinematics ·
 modding (Luau profiles) · game-logic substrate · streaming/cook · SDL_GPU path · editor shell.

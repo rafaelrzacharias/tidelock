@@ -358,11 +358,22 @@ int main(int argc, char** argv) {
     }
 
     if (list_only) {
+        u32 listed = 0;
         for (u32 i = 0; i < TEST_COUNT; ++i) {
             if (selected(TL_TESTS[i], sel)) {
                 printf("%s\t%s\t%s\t%s\n", TL_TESTS[i].name, TL_TESTS[i].tags, TL_TESTS[i].file,
                        TL_TESTS[i].expect_fatal ? "fatal" : "normal");
+                ++listed;
             }
+        }
+        // Same rule as the run path below, for the same reason: an empty listing exiting 0 is
+        // the empty-list silent pass (docs/LESSONS.md). It also makes `--list --filter <name>
+        // --tag <tag>` a usable GATE: exit 0 iff that test carries that tag, which is how
+        // tests/foundation/jobs.test.cpp pins the soak tags (W1 jobs review).
+        if (listed == 0) {
+            fprintf(stderr, "tl_tests: --list matched nothing - a filter or tag that selects "
+                            "zero tests is an error, not an empty report\n");
+            return TL_EXIT_FAIL;
         }
         return TL_EXIT_OK;
     }

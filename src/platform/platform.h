@@ -28,7 +28,7 @@
 //   Create the primitives a worker pool needs from the owning thread before it starts - which is
 //   what `JOBS.md` does. The USE verbs (`sem_wait`/`post`/`try_wait`, `mutex_lock`/`unlock`,
 //   `yield`, `sleep_ms`, `core_count`, `is_main`) are safe from any thread; that is their point.
-// Includes: foundation/{tl_types,handle,strview,ring,rect,span,vmem_api}.h only - never an OS or
+// Includes: foundation/{tl_types,handle,strview,ring,rect,span,vmem_api,thread_api}.h only - never an OS or
 //   SDL header (those live inside impl_sdl3/impl_headless TUs, docs/PLATFORM.md caption).
 //   `VMemApi` itself is `foundation/vmem_api.h`, not redefined here: foundation is a leaf and
 //   `vmem_arena.cpp` calls through the table without including platform.h, so the struct's one
@@ -41,6 +41,7 @@
 #include "foundation/rect.h"
 #include "foundation/array.h"   // Span lives with Array (containers lane; the span.h stopgap is gone)
 #include "foundation/vmem_api.h"
+#include "foundation/thread_api.h"
 
 // Defined in entropy.h, whose include path is restricted to net/ and app/ (docs/PLATFORM.md §5).
 // Left opaque here so including the contract never exposes the verb.
@@ -52,9 +53,6 @@ struct VMemArena;
 enum : u32 { PLATFORM_ABI_VERSION = 1 };
 
 typedef Handle<struct TexTag, 12, 4>    TexHandle;     // minted by the platform (the device owns textures); the asset registry maps name->TexHandle+refcount, no second handle space
-typedef Handle<struct ThreadTag, 12, 4> ThreadHandle;
-typedef Handle<struct SemTag, 12, 4>    SemHandle;
-typedef Handle<struct MutexTag, 12, 4>  MutexHandle;
 typedef Handle<struct WatchTag, 12, 4>  WatchHandle;
 
 enum PixelFmt : u8 { PIXFMT_RGBA8 = 0 };       // bytes R,G,B,A in memory = u32 0xAABBGGRR little-endian (SDL_PIXELFORMAT_RGBA32)
@@ -163,17 +161,9 @@ struct ClockApi { void* ctx; u64 (*ticks)(void* ctx); u64 (*frequency)(void* ctx
 // VMemApi is foundation/vmem_api.h (included above) - foundation is a leaf and calls through it
 // without seeing platform.h, so its one home is there, not here.
 
-typedef void (*ThreadFn)(void* ctx);
-
-struct ThreadApi {
-    void* ctx;
-    Result<ThreadHandle> (*create)(void* ctx, ThreadFn, void* tctx, StrView name, u32 stack_bytes /*0 -> 1 MB*/);
-    void (*join)(void* ctx, ThreadHandle);
-    Result<SemHandle> (*sem_create)(void* ctx, u32 initial); void (*sem_wait)(void* ctx, SemHandle); u8 (*sem_try_wait)(void* ctx, SemHandle);
-    void (*sem_post)(void* ctx, SemHandle); void (*sem_destroy)(void* ctx, SemHandle);
-    Result<MutexHandle> (*mutex_create)(void* ctx); void (*mutex_lock)(void* ctx, MutexHandle); void (*mutex_unlock)(void* ctx, MutexHandle); void (*mutex_destroy)(void* ctx, MutexHandle);
-    void (*yield)(void* ctx); void (*sleep_ms)(void* ctx, u32); u32 (*core_count)(void* ctx); u8 (*is_main)(void* ctx);
-};
+// ThreadFn and ThreadApi are foundation/thread_api.h (included above) - foundation is a leaf
+// and docs/JOBS.md's pool calls through the table without seeing platform.h, so its one home
+// is there, not here (the VMemApi precedent, TODO.md W1 jobs).
 
 typedef void (*CrashWriterFn)(void* ctx, u32 reason, u32 code, u64 fault_addr, const void* os_context);   // TOOLING §9.3.9
 

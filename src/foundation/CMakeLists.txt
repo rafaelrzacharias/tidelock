@@ -19,7 +19,13 @@
 # tools/audit/includes.py classifies foundation/rect.h as non-det - it carries Rect_f32 (f32),
 # which the sim-TU float ban would otherwise reject in the one header every sim TU could reach
 # through foundation/ (docs/RENDER2D.md §9.2, landed from the W1 platform lane, 2026-08-24).
-set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim arena_guard rect
+# `thread_api` is the same shape for the opposite reason: header-only, moves no code, but the
+# classification is what BARS a sim TU from including it (tools/audit/selftest.py's "sim TU
+# includes a non-det foundation header" fixture). ThreadApi is the platform's thread/semaphore
+# table and lives in foundation only because foundation is a leaf and docs/JOBS.md's pool must
+# call through it (the VMemApi precedent, docs/MEMORY.md §8.2) - sim code has no business
+# reaching it, and jobs.h/atomic.h #error on TL_SIM_TU for the same boundary (W1 jobs lane).
+set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim arena_guard rect thread_api
                          tl_assert log prof probe crash)
 
 # RR-7 ruling (docs/CPP-SUBSET.md §1, docs/TOOLING.md §9): the tooling plane - never hashed, never
