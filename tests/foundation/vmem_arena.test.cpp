@@ -1,9 +1,10 @@
 // vmem_arena.h - push/align/commit growth, reset poison, decommit-then-repush-is-zero, the
 // high_water re-zero rule, the alignment-gap re-zero rule.
 // Spec: docs/MEMORY.md §8.2, §8.7 test list. Rubric: docs/TESTING.md §7.
-// Deferred to the runner lane's TL_TEST_EXPECT_FATAL (docs/TESTING.md §9.1): over-reserve push,
-// wrapped-extent push, bad align, reset mark > used - each is a dev assert with no release
-// value to pin (the arena has no error path there by design).
+// Deferred to the runner lane's TL_TEST_EXPECT_FATAL (docs/TESTING.md §9.1): wrapped-extent push,
+// bad align, reset mark > used - each is a dev assert with no release value to pin (the arena has
+// no error path there by design). The over-reserve push is covered now that the macro exists
+// (vmem_push_one_byte_past_reserve_is_fatal, bottom of this file).
 #include "runner/tl_test.h"
 #include "foundation/vmem_arena.h"
 #include "vmem_test_api.h"
@@ -24,10 +25,10 @@ TL_TEST(vmem_init_happy_and_errors, "foundation,mem,smoke,fast") {
     TL_EXPECT_EQ(a.id, (NameHash)0x1111u);
     api.release(api.ctx, a.base, a.reserved);
 
-    // reserve_bytes rounds up to a page.
+    // reserve_bytes rounds up to COMMIT_GRANULE, not to a page (ruled 2026-08-24).
     VMemArena b = {};
     TL_ASSERT_EQ(vmem_arena_init(&b, 0x2222u, 100u, 0u, &api), ERR_OK);
-    TL_EXPECT_EQ(b.reserved, (u64)api.page_size);
+    TL_EXPECT_EQ(b.reserved, (u64)COMMIT_GRANULE);
     api.release(api.ctx, b.base, b.reserved);
 
     // Error paths: state must stay untouched (no partial init).
@@ -196,4 +197,81 @@ TL_TEST(vmem_mark_reset_round_trip, "foundation,mem,fast") {
     TL_EXPECT_EQ(a.used, (u64)0);
 
     api.release(api.ctx, a.base, a.reserved);
+}
+
+// --- the 2026-08-24 ruling: the stated budget is the usable budget -----------------------------
+
+TL_TEST(vmem_reserve_rounds_up_to_commit_granule, "foundation,mem,smoke,fast") {
+    // docs/MEMORY.md section 8.2: vmem_arena_init rounds the reserve up to COMMIT_GRANULE, not to
+    // a page. arena_push commits in granule multiples and fatals when align_up(end,
+    // COMMIT_GRANULE) > reserved, so under page rounding the usable budget was
+    // round_down(reserved, COMMIT_GRANULE): a sub-64 KB reserve could never push a single byte,
+    // and a non-multiple reserve's tail was unreachable. Both cases, both properties: `reserved`
+    // is a granule multiple >= the request, and EVERY requested byte is really pushable and
+    // writable.
+    VMemApi api = test_vmem_api();
+
+    // (a) sub-granule reserve. 100 bytes rounded to one granule; before the ruling this arena
+    // reserved one page and the first push of any size fatalled.
+    VMemArena small = {};
+    TL_ASSERT_EQ(vmem_arena_init(&small, 0x9001u, 100u, 0u, &api), ERR_OK);
+    TL_EXPECT_EQ(small.reserved, (u64)COMMIT_GRANULE);
+    TL_EXPECT_EQ(small.reserved % (u64)COMMIT_GRANULE, (u64)0);
+    u8* ps = (u8*)arena_push(&small, 100u, 1u);
+    TL_ASSERT_TRUE(ps != nullptr);
+    for (u64 i = 0; i < 100u; ++i) { ps[i] = (u8)(i + 1u); }
+    TL_EXPECT_EQ(ps[99], (u8)100);
+    TL_EXPECT_EQ(small.used, (u64)100);
+    api.release(api.ctx, small.base, small.reserved);
+
+    // (b) non-multiple reserve: two granules plus a 100-byte tail. Before the ruling `reserved`
+    // was 2 granules + one page and pushing the whole REQUESTED size fatalled - the request was
+    // not a lie, the rounding was.
+    const u64 want = (u64)COMMIT_GRANULE * 2u + 100u;
+    VMemArena odd = {};
+    TL_ASSERT_EQ(vmem_arena_init(&odd, 0x9002u, want, 0u, &api), ERR_OK);
+    TL_EXPECT_EQ(odd.reserved, (u64)COMMIT_GRANULE * 3u);
+    TL_EXPECT_GE(odd.reserved, want);
+    TL_EXPECT_EQ(odd.reserved % (u64)COMMIT_GRANULE, (u64)0);
+    u8* po = (u8*)arena_push(&odd, want, 1u);
+    TL_ASSERT_TRUE(po != nullptr);
+    po[0] = 0x11u;
+    po[want - 1u] = 0x22u;                       // the last REQUESTED byte is committed
+    TL_EXPECT_EQ(odd.base[want - 1u], (u8)0x22);
+    TL_EXPECT_EQ(odd.used, want);
+
+    // And the rounded-up remainder is usable too, up to the edge exactly: the fatal is at
+    // `> reserved`, and `reserved` is now the number the caller can actually spend.
+    u8* tail = (u8*)arena_push(&odd, odd.reserved - want, 1u);
+    TL_ASSERT_TRUE(tail != nullptr);
+    TL_EXPECT_EQ(odd.used, odd.reserved);
+    TL_EXPECT_EQ(odd.committed, odd.reserved);
+    odd.base[odd.reserved - 1u] = 0x33u;
+    TL_EXPECT_EQ(odd.base[odd.reserved - 1u], (u8)0x33);
+    api.release(api.ctx, odd.base, odd.reserved);
+}
+
+TL_TEST_EXPECT_FATAL(vmem_push_one_byte_past_reserve_is_fatal, "foundation,mem,fatal") {
+#if TL_DEV
+    (void)t;
+    // The other half of "the fatal coincides with the real edge": with the whole reserve spent,
+    // ONE more byte is over budget and TL_FATALs (docs/MEMORY.md section 1.1). Paired with
+    // vmem_reserve_rounds_up_to_commit_granule, which proves every byte up to `reserved` is
+    // pushable, this pins the edge from both sides. A sub-granule request on purpose: this arena
+    // could not push at all before the ruling.
+    VMemApi api = test_vmem_api();
+    VMemArena a = {};
+    if (vmem_arena_init(&a, 0x9003u, 100u, 0u, &api) != ERR_OK) {
+        return;   // setup failed: exits 0, which the runner scores FAIL for a fatal-expected row
+    }
+    (void)arena_push(&a, a.reserved, 1u);   // the whole budget: legal, the edge is inclusive
+    (void)arena_push(&a, 1u, 1u);           // one past it: TL_FATAL, exit 2
+#else
+    // Same runner limitation as registry_add_hashed_without_snapshot_is_fatal: the over-reserve
+    // check is a TL_FATAL, so it is live on this tier, but tl_child_verdict
+    // (tests/runner/runner_core.h) inverts the pass condition only under TL_DEV. TODO.md carries
+    // it, owner the runner lane. A visible SKIP, never a vacuous pass.
+    TL_SKIP("tl_child_verdict judges fatal-expected rows only under TL_DEV (runner_core.h); this "
+            "fatal is a TL_FATAL and is live on this tier - TODO.md");
+#endif
 }

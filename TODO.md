@@ -566,7 +566,7 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       only proved on two of four tiers. The fix is a per-test "fatals in every tier" bit on
       `TestInfo` (`cmake/testlist.cmake` + `tl_test.h` + `tl_child_verdict`), which is more than
       this lane's rulings name.
-- [ ] **Ruling request (spec gap, behavior matches spec pseudocode): a reserve that is not a
+- [x] **Ruling request (spec gap, behavior matches spec pseudocode): a reserve that is not a
       COMMIT_GRANULE multiple has an unusable tail** - `arena_push` TL_FATALs "over reserve"
       when `align_up(end, 64K) > reserved` even though `end <= reserved`, so the effective
       budget is `round_down(reserved, 64K)` and a sub-64K reserve can never push. Recommend:
@@ -579,6 +579,30 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       unusable, and the over-reserve fatal coincides with the real edge). Implementation (W1
       ruling-closeout lane): the init rounding + tests at a sub-64K and a non-multiple reserve;
       MEMORY.md §8.2's "rounded up to page" becomes "rounded up to COMMIT_GRANULE".
+      **DONE 2026-08-24 (W1 ruling-closeout).** `vmem_arena_init` rounds to `COMMIT_GRANULE` and
+      `TL_CHECK`s `page <= COMMIT_GRANULE` (both powers of two, so that IS "page divides the
+      granule" - what keeps the granule rounding also a page rounding). `MEMORY.md` §8.2's
+      pseudocode comment and the `reserved` field comment carry the ruling; `vmem_arena.h`'s
+      Invariants block states `reserved` is itself a granule multiple.
+      `vmem_reserve_rounds_up_to_commit_granule` covers both filed cases (100 bytes, and
+      2·64K+100) and writes the last requested byte plus the last reserved byte;
+      `vmem_push_one_byte_past_reserve_is_fatal` is the other side of the edge. Measured, not
+      asserted: `vmem_init_happy_and_errors` previously asserted `reserved == page_size` for a
+      100-byte request and now asserts `== COMMIT_GRANULE`.
+- [ ] **`mem_pool.cpp` `carve_aligned`'s `commit_end > reserved` half is now DEAD CODE**
+      (consequence of the reserve ruling, found and recorded 2026-08-24 by the ruling-closeout
+      lane; NOT deleted by it - that is the mem lane's call). W1 mem review 1 added it because a
+      page-rounded reserve let `align_up(end, COMMIT_GRANULE) > reserved` hold while
+      `end <= reserved`. With `reserved` a granule multiple that is impossible: `end <= reserved`
+      implies `align_up(end, granule) <= reserved`. It is a harmless defensive mirror of
+      `arena_push` and costs one compare per carve. Its regression test
+      (`pool_reserve_edge_on_misaligned_base_returns_null`) had to be re-derived in the same
+      commit - it requested 192512 bytes precisely to reach the now-unreachable sub-case, so it
+      failed. It now reserves exactly 2 granules and proves the property that IS still live on a
+      64K-misaligned base: the first carve burns a 60 KB alignment gap, so the second carve is
+      past the reserve and comes back null instead of tripping `arena_push`'s fatal. Either
+      delete the dead half with a note, or keep it and say in `MEMORY.md` §8.2 that it is
+      defence-in-depth against a future non-granule reserve path.
 
 ## W1 rng/hash - the adversarial review (2026-08-24)
 - [x] **Adversarial review of W1 rng/hash (`8bdc6ee`) - DONE 2026-08-24 (Opus 5 high, fresh

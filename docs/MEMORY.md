@@ -217,7 +217,7 @@ render interpolation is snapped. That is the only hook; nothing else may observe
 ```cpp
 struct VMemArena {
     u8*  base;        // reserved range start, page aligned
-    u64  reserved;    // bytes reserved
+    u64  reserved;    // bytes reserved, a COMMIT_GRANULE multiple (init rounds up)
     u64  committed;   // bytes committed, multiple of COMMIT_GRANULE
     u64  used;        // bump pointer
     u64  high_water;  // max(used) ever — memory in [used, high_water) is dirty; [high_water, committed) is OS-zero
@@ -229,7 +229,8 @@ struct VMemArena {
 enum { COMMIT_GRANULE = 64 * 1024 };
 
 ErrCode vmem_arena_init(VMemArena* a, NameHash id, u64 reserve_bytes, u32 flags, const VMemApi* os);
-// reserve_bytes rounded up to page; os->reserve; committed = used = high_water = 0.
+// reserve_bytes rounded up to COMMIT_GRANULE; os->reserve; committed = used = high_water = 0.
+// The granule, not the page (ruled 2026-08-24): the commit path below fatals when align_up(end, COMMIT_GRANULE) > reserved, so a page-rounded reserve made the usable budget round_down(reserved, COMMIT_GRANULE) — a sub-64 KB reserve could never push a byte and a non-multiple reserve had an unreachable tail. Address space is free; the stated budget is the usable budget.
 void* arena_push(VMemArena* a, u64 bytes, u32 align) {
     u64 start = align_up(a->used, align);           // align is a power of two, ≤ page
     u64 end   = start + bytes;
