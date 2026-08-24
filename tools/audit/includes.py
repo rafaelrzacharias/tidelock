@@ -90,6 +90,15 @@ THREAD_LOCAL_EXEMPT = {"src/foundation/jobs.cpp", "src/foundation/jobs.h"}   # t
 # fx.h needs it. The stem-keyed split cannot express "header det, runtime non-det", so the
 # exemption is by full path - the .cpp is still barred.
 PANIC_ABI_HEADER = "foundation/tl_assert.h"
+# docs/PLATFORM.md §5: EntropyApi's verb "is absent from every sim lib's include path" and, more
+# than that, from every module but the one that implements it and the two that legitimately need
+# OS randomness - net/ (keygen, nonces, commit/reveal) and app/ (init wiring). The MODULE_DAG
+# above only bars it from sim/foundation (they cannot reach src/platform/* at all); this closes
+# the gap for core/render/editor/script, which the DAG otherwise lets include anything under
+# platform/. A doc sentence naming a restriction with no code behind it is a phantom gate
+# (LESSONS.md) - this is that gate, for real, not just the CI grep §5 also names.
+ENTROPY_HEADER = "platform/entropy.h"
+ENTROPY_ALLOWED_MODULES = ("platform", "net", "app")
 # RR-7 (docs/CPP-SUBSET.md §1): the tooling plane's io allowance. Narrower than SYS_ALLOW's base
 # set - `<math.h>` is still not granted here, and neither is any OS header; the crash writer's raw
 # OS calls belong to platform/, not foundation/ (docs/TOOLING.md §9.3.9).
@@ -505,6 +514,9 @@ def check_file(root, path, nondet, tooling, errors):
                 elif stem_matches(inc_stem, nondet) and inc != PANIC_ABI_HEADER:
                     errors.append('%s:%d: a sim TU includes the non-det foundation header "%s" '
                                   "(docs/BUILD.md §10.2)" % (rel, i, inc))
+            if inc == ENTROPY_HEADER and module not in ENTROPY_ALLOWED_MODULES:
+                errors.append('%s:%d: include "%s" is restricted to platform/net/app '
+                              "(docs/PLATFORM.md §5, docs/DETERMINISM.md §2)" % (rel, i, inc))
         if m or m2:
             for token, prefixes in BACKEND_HEADERS.items():
                 if token in line and not any(rel.startswith(p) for p in prefixes):

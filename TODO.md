@@ -769,6 +769,13 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       sync). Two selftest fixtures: a non-`os_`-prefixed file in `src/platform/` still bans a raw
       OS header (the exemption is prefix-scoped, not directory-wide - `platform.h` itself must
       stay clean); an `os_*.cpp` with a real OS header is clean.
+- [x] **Gate finding (fixed in the same commit, for the record): `PLATFORM.md` §5's "entropy.h
+      is restricted to net/ and app/" was a doc claim with no code behind it** - `MODULE_DAG` in
+      `tools/audit/includes.py` bars `sim`/`foundation` from `platform/*` entirely but lets
+      `core`/`render`/`editor`/`script` include anything under `platform/`, `entropy.h` included.
+      A phantom gate (LESSONS.md). Added a header-specific check: `platform/entropy.h` may be
+      included only from `platform`/`net`/`app`, on top of the general module DAG. One selftest
+      fixture: `core/` including it is refused.
 - [ ] `VMemArena` + scratch + `ArenaRegistry` (hash-all, snapshot/restore, ring) + arena-offset guard
       + CRT counting shim. Two-worlds test from line one.
 - [ ] `mem_pool` (vendor heaps only) + grep rule.

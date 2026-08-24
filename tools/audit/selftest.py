@@ -255,6 +255,12 @@ INCLUDE_CASES = [
     ("a non-os_ file in src/platform/ still bans raw OS headers", "src/platform/util.cpp",
      "#include <windows.h>\n",
      "not on the allowlist"),
+    # docs/PLATFORM.md §5: entropy.h is restricted to platform/net/app, not every module the
+    # general DAG lets reach into platform/ (core, render, editor, script all may). A doc claim
+    # with no code behind it is a phantom gate (LESSONS.md) - this proves the restriction is real.
+    ("core/ including platform/entropy.h is restricted to platform/net/app", "src/core/p.cpp",
+     '#include "platform/entropy.h"\n',
+     "restricted to platform/net/app"),
 ]
 
 # Things that must NOT fire: the gates have to be usable, not just loud.
