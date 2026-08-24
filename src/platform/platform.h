@@ -20,7 +20,14 @@
 //   (docs/PLATFORM.md §5). No floats reach a sim path through this file; `f32` here (DrawVertex,
 //   the wheel event) is legal because `platform/` is not a sim TU (docs/CPP-SUBSET.md §1).
 // Threading: `draw` is main-thread-only (`TL_ASSERT(thread.is_main)` in the impl, docs/PLATFORM.md
-//   §9.3); every other table may be called from any thread the impl itself creates.
+//   §9.3). `vmem` and `entropy` are as thread-safe as the OS calls behind them. `clock` and
+//   `file` are re-entrant. `thread`'s CREATE/DESTROY verbs are NOT: every impl keeps its slot
+//   tables (`ThreadRec[64]`, `SemRec[256]`, `MutexRec[256]`) in unsynchronised impl state and
+//   allocates from a single-writer arena (`MEMORY.md` §1.3), so two threads calling
+//   `thread.create`/`sem_create`/`mutex_create`/`join`/`*_destroy` concurrently is a data race.
+//   Create the primitives a worker pool needs from the owning thread before it starts - which is
+//   what `JOBS.md` does. The USE verbs (`sem_wait`/`post`/`try_wait`, `mutex_lock`/`unlock`,
+//   `yield`, `sleep_ms`, `core_count`, `is_main`) are safe from any thread; that is their point.
 // Includes: foundation/{tl_types,handle,strview,ring,rect,span,vmem_api}.h only - never an OS or
 //   SDL header (those live inside impl_sdl3/impl_headless TUs, docs/PLATFORM.md caption).
 //   `VMemApi` itself is `foundation/vmem_api.h`, not redefined here: foundation is a leaf and

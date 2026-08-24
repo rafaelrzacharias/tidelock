@@ -4,6 +4,8 @@
 // MutexRec[256] caps), not SlotMap<T> - the containers lane has not landed (headless_state.h).
 #include "platform/impl_headless/headless_apis.h"
 
+#include "foundation/tl_assert.h"
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -100,16 +102,25 @@ Result<SemHandle> ht_sem_create(void* ctx, u32 initial) {
     return Result<SemHandle>{ handle_make<SemHandle>(idx, (u32)s->sem_gen[idx]), ERR_OK };
 }
 
+// The USE verbs below (wait/post/try_wait, lock/unlock) TL_FATAL on a handle that does not
+// resolve, they do not return quietly. A silent no-op there is the worst available answer: a
+// mutex_lock that resolves to nothing leaves the caller believing it holds exclusion it does not,
+// and a swallowed sem_post/sem_wait turns a rendezvous into a hang somewhere else entirely -
+// both far from the actual bug, which is the dangling handle. The null handle is not a special
+// case here: there is no such thing as locking nothing (CLAUDE.md, "fail loudly & explicitly").
+// The DESTROY verbs and `join` stay tolerant of a null/stale handle - double-destroy on a
+// shutdown path is ordinary, and matches DrawApi::texture_destroy's documented no-op.
 void* sem_os(HeadlessState* s, SemHandle h) {
-    if (handle_is_null(h)) { return nullptr; }
     const u32 idx = handle_index(h);
-    if (idx >= HEADLESS_MAX_SEMS || !s->sems[idx].alive || handle_gen(h) != s->sem_gen[idx]) { return nullptr; }
+    if (handle_is_null(h) || idx >= HEADLESS_MAX_SEMS || !s->sems[idx].alive ||
+        handle_gen(h) != s->sem_gen[idx]) {
+        TL_FATAL("ThreadApi: a semaphore verb was handed a null or stale SemHandle (docs/PLATFORM.md section 9.4)");
+    }
     return s->sems[idx].os_sem;
 }
 
 void ht_sem_wait(void* ctx, SemHandle h) {
-    void* os = sem_os((HeadlessState*)ctx, h);
-    if (os == nullptr) { return; }
+    void* os = sem_os((HeadlessState*)ctx, h);   // fatal, not null, on a stale handle
 #ifdef _WIN32
     WaitForSingleObject((HANDLE)os, INFINITE);
 #else
@@ -118,8 +129,7 @@ void ht_sem_wait(void* ctx, SemHandle h) {
 }
 
 u8 ht_sem_try_wait(void* ctx, SemHandle h) {
-    void* os = sem_os((HeadlessState*)ctx, h);
-    if (os == nullptr) { return 0u; }
+    void* os = sem_os((HeadlessState*)ctx, h);   // fatal, not null, on a stale handle
 #ifdef _WIN32
     return WaitForSingleObject((HANDLE)os, 0) == WAIT_OBJECT_0 ? 1u : 0u;
 #else
@@ -128,8 +138,7 @@ u8 ht_sem_try_wait(void* ctx, SemHandle h) {
 }
 
 void ht_sem_post(void* ctx, SemHandle h) {
-    void* os = sem_os((HeadlessState*)ctx, h);
-    if (os == nullptr) { return; }
+    void* os = sem_os((HeadlessState*)ctx, h);   // fatal, not null, on a stale handle
 #ifdef _WIN32
     ReleaseSemaphore((HANDLE)os, 1, nullptr);
 #else
@@ -171,15 +180,16 @@ Result<MutexHandle> ht_mutex_create(void* ctx) {
 }
 
 void* mutex_os(HeadlessState* s, MutexHandle h) {
-    if (handle_is_null(h)) { return nullptr; }
     const u32 idx = handle_index(h);
-    if (idx >= HEADLESS_MAX_MUTEXES || !s->mutexes[idx].alive || handle_gen(h) != s->mutex_gen[idx]) { return nullptr; }
+    if (handle_is_null(h) || idx >= HEADLESS_MAX_MUTEXES || !s->mutexes[idx].alive ||
+        handle_gen(h) != s->mutex_gen[idx]) {
+        TL_FATAL("ThreadApi: a mutex verb was handed a null or stale MutexHandle (docs/PLATFORM.md section 9.4)");
+    }
     return s->mutexes[idx].os_mutex;
 }
 
 void ht_mutex_lock(void* ctx, MutexHandle h) {
-    void* os = mutex_os((HeadlessState*)ctx, h);
-    if (os == nullptr) { return; }
+    void* os = mutex_os((HeadlessState*)ctx, h);   // fatal, not null, on a stale handle
 #ifdef _WIN32
     EnterCriticalSection((CRITICAL_SECTION*)os);
 #else
@@ -188,8 +198,7 @@ void ht_mutex_lock(void* ctx, MutexHandle h) {
 }
 
 void ht_mutex_unlock(void* ctx, MutexHandle h) {
-    void* os = mutex_os((HeadlessState*)ctx, h);
-    if (os == nullptr) { return; }
+    void* os = mutex_os((HeadlessState*)ctx, h);   // fatal, not null, on a stale handle
 #ifdef _WIN32
     LeaveCriticalSection((CRITICAL_SECTION*)os);
 #else

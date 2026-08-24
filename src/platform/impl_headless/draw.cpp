@@ -81,10 +81,28 @@ Result<u8*> hd_texture_lock(void* ctx, TexHandle h, u32* pitch_out) {
     return Result<u8*>{ rec->streaming_buf, ERR_OK };
 }
 
+// The one verb in this table that validated NOTHING: it logged a TEX_UNLOCK for any handle,
+// including a null or destroyed one, and never checked the usage. Section 9.4 says the headless
+// draw stub makes "every argument check as sdl3" - and unlock is void, so there is no error code
+// to return: a bad unlock is a caller bug, which is what TL_FATAL is for (docs/CPP-SUBSET.md
+// section 3). Its two failure modes are exactly the two `lock` already refuses with TEX_STALE and
+// TEX_USAGE.
 void hd_texture_unlock(void* ctx, TexHandle h) {
-    log_call((HeadlessState*)ctx, DRAW_VERB_TEX_UNLOCK, h, 0u, 0u, 0u);
+    HeadlessState* s = (HeadlessState*)ctx;
+    ErrCode err;
+    HeadlessTexRec* rec = lookup_tex(s, h, &err);
+    if (rec == nullptr) {
+        TL_FATAL("DrawApi.texture_unlock on a null or stale TexHandle (docs/PLATFORM.md section 9.4)");
+    }
+    if (rec->usage != TEX_STREAMING) {
+        TL_FATAL("DrawApi.texture_unlock on a non-streaming texture - only lock/unlock streaming (docs/PLATFORM.md section 9.3)");
+    }
+    log_call(s, DRAW_VERB_TEX_UNLOCK, h, 0u, 0u, 0u);
 }
 
+// Unlike unlock, a stale handle here answers 0x0 rather than dying: `texture_size` is the verb a
+// caller uses to ASK about a handle it may not trust, and 0x0 is an answer, not a swallowed
+// error. docs/PLATFORM.md section 9.4 records it; headless_draw_texture_limit_and_stale pins it.
 void hd_texture_size(void* ctx, TexHandle h, u16* w_out, u16* h_out) {
     HeadlessState* s = (HeadlessState*)ctx;
     ErrCode err;
