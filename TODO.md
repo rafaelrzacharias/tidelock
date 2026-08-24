@@ -414,6 +414,44 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `mul_int<vel_t>`; `fx.div_q` is `div<q_t>(A, A)` and is only in the table for
       `pos_t/vel_t/q_t/scalar_t` formats; `fx.atan2` takes `pos_t`, `fx.atan2_q` takes `q_t`.
 
+## W1 containers - notes (2026-08-24, w1-containers lane)
+- [x] All ten containers shipped, `tl_audit` and the full `tl_tests` suite green (190 selected,
+      187 passed, 3 skipped [`fmt_buf_truncation` + two vacuous macros elsewhere], 0 failed).
+      Construction signatures the rev-1 spec left implicit are folded into `CONTAINERS.md` §8.6a
+      in the same commit (`bitset_init`, `ring_init`, `sorted_map_init`/`sorted_set_init`,
+      `interner_init`, and `slotmap_init`'s four-owned-arena shape).
+- [ ] **`fmt_buf` is a `TL_FATAL("unimplemented")` stub** (`CONTAINERS.md` §8.6b): `stb_sprintf`
+      is owned by the W1 platform lane (`vendor/CMakeLists.txt`: "SDL3 + stb arrive with the W1
+      platform lane") and had not landed as of this commit. Not vendored here to avoid a second
+      `vendor/stb_sprintf/` tree colliding with that lane's own vendoring. Replace the stub and
+      the `fmt_buf_truncation` SKIP row in `strview_interner_fmt.test.cpp` the day it lands.
+- [ ] **Cross-lane fix: `tests/foundation/vmem_test_api.h` needed `NOMINMAX`** before its
+      `#include <windows.h>`. `fx.h` declares free functions named `min`/`max`
+      (`docs/FX-PALETTE.md`); windows.h's raw macros of the same names mangle those declarations
+      in any TU that includes both. No existing test paired an fx-family header with this shared
+      vmem fixture until `sort.test.cpp` (via `rng.h` → `fx_palette.h` → `fx.h`) did. Fixed in the
+      shared fixture, not worked around per-TU, since any future test pairing the two would hit
+      the same break; owner-neutral (the fixture predates any one lane's ownership).
+- [ ] **Cross-lane interaction: `slotmap_init` floors each column's `VMemArena` reserve at
+      `COMMIT_GRANULE`**, working around a gap `TODO.md`'s own W1 mem review already ruled on
+      (2026-08-24: "`vmem_arena_init` rounds the reserve UP to `COMMIT_GRANULE`") but which has
+      not landed in `vmem_arena.cpp` yet - it still rounds to the OS page size only. Every
+      small-cap domain (not just `SlotMap`'s test geometries - any real domain whose
+      `sizeof(element) * (IDX_MASK+1)` is under 64 KB, e.g. some resource-handle pools) hits
+      "arena over reserve" on its very first push until that lands. The floor in `slotmap_init` is
+      forward-compatible with the eventual fix (harmless once `vmem_arena_init` does its own
+      rounding) - not a substitute ruling, just corroborating evidence the gap is real in
+      production shapes, not only in this lane's tiny test domains.
+- [ ] **Finding for the luau-bindings lane (W3), not fixed here - out of this lane's scope:**
+      `LUAU-LAYER.md` §4's `sortedpairs` wants a sort over MIXED numeric/string keys (`{ kind: u8;
+      double n; const char* s; u32 len; }`, "numbers before strings; numbers ascending by value;
+      strings bytewise"), but `CONTAINERS.md` §4's decided sort is `sort_u32_kv`/`sort_u64_kv` -
+      LSD radix, integer keys only, by explicit rule ("no generic `sort<T, Cmp>` in the runtime").
+      `sortedpairs`'s key set cannot be radix-sorted as specified; either it needs its own small
+      comparison sort (own file, `tools/`-style exemption or a documented sim exception) or
+      `LUAU-LAYER.md` §4 needs to route through an integer encoding of its sort key before calling
+      `sort_u64_kv`. Not decided here - the luau-bindings lane owns `LUAU-LAYER.md` §4.
+
 ## W1 mem - notes and ruling requests (2026-08-24, w1-mem lane)
 - [ ] **Ruling request: `VMemApi`'s definition needs one foundation-visible home.**
       `PLATFORM.md` §9.1/§9.2 define it in `platform/platform.h`, but foundation is a leaf
@@ -728,9 +766,10 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [ ] `VMemArena` + scratch + `ArenaRegistry` (hash-all, snapshot/restore, ring) + arena-offset guard
       + CRT counting shim. Two-worlds test from line one.
 - [ ] `mem_pool` (vendor heaps only) + grep rule.
-- [ ] Containers: `Array/Span`, `SlotMap+Handle` (gen-wrap quarantine), `Map`, `SortedMap/Set`,
+- [x] Containers: `Array/Span`, `SlotMap+Handle` (gen-wrap quarantine), `Map`, `SortedMap/Set`,
       `RingBuffer`, `Bitset`, radix `sort_u32_kv/u64_kv`; `StrView`, interner, `fmt`. Rubric tests
-      + two-instance determinism tests.
+      + two-instance determinism tests. (W1 containers, 2026-08-24; `fmt_buf` ships as a
+      documented stub - see the notes section below and `CONTAINERS.md` §8.6b.)
 - [x] Keyed RNG (`rng_for/below/q/range`) + pinned rapidhash + `constexpr` FNV-1a `NameHash`.
       Vendor rapidhash. (W1 rng/hash.) The debug side-table (hash -> literal) is NOT built here:
       `CONTAINERS.md` §8.6 already rules it as the interner's job in dev tiers - foundation has no
