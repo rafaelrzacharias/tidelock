@@ -120,6 +120,23 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `tl_tests` itself (`--filter <name>`, `TL_TESTS_EXE` from `tests/CMakeLists.txt`) - a pattern
       usable as a stopgap for any fatal-expected test until `TL_TEST_EXPECT_FATAL`/`--isolate`
       grow the same child-process-inspection support natively.
+- [x] **W1 tooling-rt: `tl_log`/`tl_prof`/`tl_probe` land (`TOOLING.md` §9 foundation half,
+      2026-08-24).** `tl_log.h` + `log.cpp` and `tl_probe.h` + `probe.cpp` are real (RR-7's io/state
+      exemption); `tl_prof.h` ships macro-only, per `TOOLING.md` §9.6 build order item 3 - its
+      runtime needs `NameHash` (`foundation/hash.h`) and `Scratch` (`MEMORY.md` §1.3), neither
+      built yet, and has no consumer until the ECS scheduler auto-scopes systems. `tl_probe.h`'s
+      macros have the same `NameHash` dependency (`"lit"_id`), so tests call the underlying
+      `tl_probe_*`/`tl_log_write` functions directly with a caller-computed key/file/line, not the
+      macros - reconciled the same day as `tl_prof.h`'s runtime (`NameHash` is `u64`, so nothing
+      about either runtime's logic changes, only the call spelling).
+      **Left for whoever builds those:** `probe_tsv_golden` (`TOOLING.md` §9.5) needs
+      `TL_GOLDEN_TSV` (`TESTING.md` §1), which the runner lane has not shipped -
+      `tests/foundation/tl_probe.test.cpp` asserts the staging buffer's exact bytes directly
+      instead; swap to the golden macro the day it exists, per the same pattern as the fx-fatal
+      tests below. `LogState`/`ProbeState` are simplified from `TOOLING.md` §9.2 (a private fixed
+      array instead of `RingBuffer<T>`/`Map<K,V>`, no `ClockApi`/`FileApi`/`StrView`, tick pinned
+      at 0) - reconcile against `CONTAINERS.md`/`PLATFORM.md`/`FRAME-LOOP.md` once those land. Both
+      files' sinks stay staging-buffer-only; the disk flush waits for `PlatformApi.file.append`.
 - [ ] **RR-1 Pi 4 sysroot + the aarch64 leg of `BUILD.md` §10.5.** Rafael has a Pi 4 on the LAN,
       so this is now an execution task, not a decision. Lane: W0 skeleton (**Opus 5 high**). It
       touches only `toolchain/`, `cmake/toolchain-pi4.cmake`, `tools/sysroot.sh|deploy.sh` and this
