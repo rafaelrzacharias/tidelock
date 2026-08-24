@@ -9,7 +9,10 @@
 # tl_probe/crash all reach io, so the panic ABI of docs/CPP-SUBSET.md §9 R-3 is *defined* here and
 # only *referenced* from the audited half. Left off this list they would default into
 # tl_foundation_det and fail its own audit - which is what R-3 claimed was impossible.
-set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim
+# arena_guard is non-det on purpose: guard_tick_end reads tl_crt_alloc_count from alloc_shim,
+# an upward symbol the det audit forbids; the guard is dev-only engine-side tooling, never
+# sim-called (docs/MEMORY.md §8.4, TODO.md W1 mem notes).
+set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim arena_guard
                          tl_assert tl_log tl_prof tl_probe crash)
 
 file(GLOB TL_FOUNDATION_SRC CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")

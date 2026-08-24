@@ -219,6 +219,41 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `mul_int<vel_t>`; `fx.div_q` is `div<q_t>(A, A)` and is only in the table for
       `pos_t/vel_t/q_t/scalar_t` formats; `fx.atan2` takes `pos_t`, `fx.atan2_q` takes `q_t`.
 
+## W1 mem - notes and ruling requests (2026-08-24, w1-mem lane)
+- [ ] **Ruling request: `VMemApi`'s definition needs one foundation-visible home.**
+      `PLATFORM.md` §9.1/§9.2 define it in `platform/platform.h`, but foundation is a leaf
+      (`ARCHITECTURE.md` §1 rule 1) and `vmem_arena.cpp` must call through the table, so it
+      cannot include platform.h. Transcribed verbatim to **`foundation/vmem_api.h`** (the
+      `foundation/atomic.h` precedent - owned by `JOBS.md`, lives in foundation). The platform
+      lane should `#include "foundation/vmem_api.h"` from platform.h, not redefine the struct,
+      and `PLATFORM.md` §9.1 needs the one-line doc fix (its owner's edit, not this lane's).
+- [ ] **`registry_hash_all` is a stub until w1-rng-hash publishes `foundation/hash.h`.**
+      `MEMORY.md` §8.3 calls `tl_hash64` (rapidhash), but `ROADMAP.md` §2 lists mem's dependency
+      as "skeleton" only and the rng/hash lane has not pushed. Referencing the symbol now would
+      fail the audit (undefined outside the lib set). The final slice - hash-region integrity
+      test, two-worlds hash equality, restore-reproduces-hash-trace (§8.8 done criteria) - lands
+      the day hash.h merges into this branch. No hash VALUES are pinned in mem tests (relative
+      properties only), so the rapidhash swap-in changes nothing.
+- [ ] **Ruling request: §7 R-2's dev-tier `TL_LOG_WARN` cannot live in the det half** (the audit
+      allowlist is closed to io - `CPP-SUBSET.md` §4/§9 R-3; `tl_log.h` also does not exist until
+      tooling-rt lands). Implemented as: blob-cap overflow returns `ERR_MEM_RING_OVERFLOW` in dev
+      tiers (TL_FATAL in netcode/ship per §8.3); the CALLER (the loop, non-det, W3) warns once and
+      grows at the next barrier. `MEMORY.md` §7 R-2 should either bless this split or name the
+      non-det home for the warn+grow.
+- [ ] **Signatures added over the rev-1 spec are folded into `MEMORY.md` §8 in the same commit**
+      (its lane's own doc): `ring_init`, `registry_set_fingerprint`, two-arg barrier guards,
+      `alloc_shim.h`, `vmem_api.h`, mem `ErrCode`s, arena_guard's non-det placement - announce
+      at the wave merge. Two rows belong to OTHER owners: `CPP-SUBSET.md` §7b's
+      `TL_SCRATCH_SCOPE(s)` row should spell the shipped `_BEGIN`/`_END` pair, and `CANON.md`
+      "Types" claims `NameHash` for `tl_types.h` (the alias now lives there; the `""_id`
+      operator stays with w1-rng-hash's hash.h) - both are one-line owner edits.
+- [ ] The `pool_alloc` CI grep (`MEMORY.md` §1.5/§8.6) is not built yet; when it lands it must
+      exempt `mem_pool.h`'s own declarations alongside `mem_pool.cpp` and `vendor_glue/`.
+- [ ] Windows CRT-malloc counting needs the **debug CRT** (`_CrtSetAllocHook`); if the dev tier
+      links the release CRT the counter is silently vacuous - resolve when the shim slice lands
+      (either an interposition that works on release CRT, or the guard test asserts the shim
+      reports live before trusting a zero delta).
+
 ## Foundation week(s) (`docs/MEMORY.md`, `CONTAINERS.md`, `DETERMINISM.md`, `TESTING.md`)
 - [ ] Finish the test runner (`tests/runner`; W0 shipped the stub — generated list, tags/filter,
       `--isolate` one child per test, TSV + JUnit): `NEAR_FX`, `SPAN_EQ`/`MEM_EQ`,
