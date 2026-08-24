@@ -208,24 +208,22 @@ void scene_g05(Scene* s, u64 seed, u32 particles) {
     const u32 rows = (particles + cols - 1u) / cols;
     const pos_t liquid_top = texels(2 * i32(rows));
     const pos_t top = liquid_top + fx::fx_int<pos_t>(30);
-    scene_add_sealed_box(s, fx::fx_int<pos_t>(-16), fx::fx_int<pos_t>(0), fx::fx_int<pos_t>(16), top, fx::fx_int<pos_t>(1));
+    // A 600 m wide sealed box: the liquid block in the middle, the 2k bodies as ONE row of 0.25 m
+    // boxes (256 quanta) on the floor either side, 0.02 m apart, x jittered by rng_for. Stacked
+    // boxes (38 rows of 1/16 kg) collapsed into clumps of thousands of contacts within 17 ticks
+    // and boxes on the liquid crush the compliant PBF (RR-10/RR-11); G-05 measures the cost of a
+    // steady state, so every body rests on the floor with its own contacts.
+    scene_add_sealed_box(s, fx::fx_int<pos_t>(-300), fx::fx_int<pos_t>(0), fx::fx_int<pos_t>(300), top, fx::fx_int<pos_t>(1));
     add_liquid_block(s, fx::fx_int<pos_t>(-8), fx::fx_int<pos_t>(0), cols, particles);
-    // 2k bodies: 0.25 m boxes (256 quanta) as two floor-standing stacks flanking the liquid
-    // (32 per row x 32 rows each side, a 0.02 m gap, x jittered by rng_for). Boxes ON the liquid
-    // crush the compliant PBF (RR-10/RR-11: a 34-row raft of boxes landing on it collected 9,769
-    // contacts on one box); G-05 measures cost at a steady state, so the bodies and the liquid
-    // each settle on the floor.
     const angle_t z = fx::fx_raw<angle_t>(0);
     for (u32 i = 0; i < 2000; ++i) {
-        const u32 side = i & 1u, k = i >> 1;               // 1000 per side
-        const u32 row = k / 32u, colx = k % 32u;
+        const u32 side = i & 1u, k = i >> 1;               // 1000 per side, 270 m each
         const u64 r = rng_for(seed, 0, GATE0_RNG_SYS, i, 0);
         const pos_t jx = rng_range<pos_t>(r, fx::fx_int<pos_t>(0), m_of(1, 100));
-        const pos_t pitch = m_of(27, 100);                  // 0.25 m box + 0.02 m gap
-        const pos_t x0 = side ? fx::fx_int<pos_t>(8) + m_of(1, 2) : fx::fx_int<pos_t>(-16) + m_of(1, 2);
-        const pos_t x = x0 + fx::fx_raw<pos_t>(pitch.v * i32(colx)) + jx;
-        const pos_t y = m_of(1, 8) + fx::fx_raw<pos_t>(pitch.v * i32(row));
-        scene_add_body(s, x, y, m_of(1, 8), m_of(1, 8), z, 256, 0);
+        const pos_t pitch = m_of(27, 100);
+        const pos_t x0 = side ? fx::fx_int<pos_t>(20) : fx::fx_int<pos_t>(-290);
+        const pos_t x = x0 + fx::fx_raw<pos_t>(pitch.v * i32(k)) + jx;
+        scene_add_body(s, x, m_of(1, 8) + m_of(1, 16), m_of(1, 8), m_of(1, 8), z, 256, 0);   // a texel above the floor
     }
     s->settle_tick = 200;
 }
