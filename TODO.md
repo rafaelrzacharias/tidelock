@@ -249,10 +249,19 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       operator stays with w1-rng-hash's hash.h) - both are one-line owner edits.
 - [ ] The `pool_alloc` CI grep (`MEMORY.md` §1.5/§8.6) is not built yet; when it lands it must
       exempt `mem_pool.h`'s own declarations alongside `mem_pool.cpp` and `vendor_glue/`.
-- [ ] Windows CRT-malloc counting needs the **debug CRT** (`_CrtSetAllocHook`); if the dev tier
-      links the release CRT the counter is silently vacuous - resolve when the shim slice lands
-      (either an interposition that works on release CRT, or the guard test asserts the shim
-      reports live before trusting a zero delta).
+- [ ] **Ruling request: the CRT-malloc COUNTER (`MEMORY.md` §2/§8.4) cannot exist under the
+      writable-static gate.** One cumulative counter is one word of `.data`/`.bss`, and
+      `CPP-SUBSET.md` §1's link gate bans writable static storage in EVERY `src/` lib
+      (`tools/audit/symbols.py` checks `tl_foundation` too, `--data-only`) with no exemption
+      mechanism. The same wall faces the tooling-rt lane (log sinks, profiler buffers). Shipped
+      meanwhile: `operator new/delete` are stateless TL_FATAL tripwires in dev/netcode tiers;
+      `tl_alloc_shim_install` returns `ERR_MEM_UNSUPPORTED` so the guard's zero delta is
+      vacuous but HONEST. Options: (a) a per-object writable-static allowlist (R-3-style: one
+      named u64 in `alloc_shim.cpp`, plus whatever tooling-rt needs), (b) drop the counter and
+      lean on the symbol audit + pool hooks, (c) app-owned state reached through a global
+      pointer (same gate problem). (a) is the recommendation; also note the dev tier links the
+      RELEASE CRT (`/MD`), so `_CrtSetAllocHook` is unavailable regardless - Windows counting
+      needs a different interposition even after the ruling.
 
 ## Foundation week(s) (`docs/MEMORY.md`, `CONTAINERS.md`, `DETERMINISM.md`, `TESTING.md`)
 - [ ] Finish the test runner (`tests/runner`; W0 shipped the stub — generated list, tags/filter,

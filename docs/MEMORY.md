@@ -299,14 +299,18 @@ template <typename H> constexpr bool handle_is_null(H h) { return h.bits == 0; }
 
 Size classes `16, 32, 64, 128, 256, 512, 1K, 2K, 4K, 8K, 16K, 32K, 64K` (13). Each class owns a
 freelist; class pages are 64 KB carved from the pool's `VMemArena` (`arena_push` on demand, never
-returned). A block has no header — the class is recovered from the 64 KB page's header (first 16
-bytes: `{u16 class; u16 _pad; u32 live; u64 _pad}`; blocks start at offset 64). Allocations
-> 64 KB: a dedicated `arena_push` of `align_up(size + 64, page)` with a 64-byte header `{u64 size;
-u8 large = 1}`; freed by `decommit` of exactly that range (the bump pointer is not moved —
-fragmentation of the *address* space is accepted, pages are returned). `pool_realloc`: same class
-→ return the same pointer; else alloc + memcpy(min) + free. Budget: `pool.budget_bytes` checked
-at page carve; exceeding it returns `NULL` (Luau raises its own memory error; ImGui/SDL assert).
-Stats (`live_bytes`, `peak`, per-class counts) are read by the profiler.
+returned) — except the 64 K class, whose pages are TWO granules (128 KB, one block): a 64 KB
+block cannot share a 64 KB page with its header (W1 mem, 2026-08-24). A block has no header — the
+class is recovered from the page's header (first 16 bytes: `{u16 class; u16 large; u32 live;
+u64 size}`; blocks start at offset 64), which works because every carve — class page or large
+block — starts at a 64 KB-ALIGNED ADDRESS (`p & ~0xFFFF` finds it; the pool pays the alignment
+gap out of its own reserve). Allocations > 64 KB: a dedicated 64 KB-granular carve with the same
+64-byte header (`large = 1`, `size` = the request); freed by `decommit` of exactly that range
+(the bump pointer is not moved — fragmentation of the *address* space is accepted, pages are
+returned and the freed carve leaves the budget). `pool_realloc`: same class (or same large
+carve) → return the same pointer; else alloc + memcpy(min) + free. Budget: `pool.budget_bytes`
+checked at every carve; exceeding it returns `NULL` (Luau raises its own memory error; ImGui/SDL
+assert). Stats (`live_bytes`, `peak`, per-class counts, `large_count`) are read by the profiler.
 
 Adaptors (one per vendored lib, in `vendor_glue/`): `tl_luau_alloc(void* ud, void* p, size_t
 osize, size_t nsize)`, `tl_imgui_alloc/free`, `tl_sdl_malloc/calloc/realloc/free`

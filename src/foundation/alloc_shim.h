@@ -18,12 +18,14 @@
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
 
-// Installs the CRT allocation hook (Windows: the debug-heap hook; Linux: the link-time wrap -
-// docs/MEMORY.md section 8.1). Call once at boot in dev/netcode tiers; ERR_MEM_BAD_ARG-class
-// failures are impossible, but the hook may be unavailable (non-debug CRT) - then the counter
-// stays 0 and the return says so. Returns ERR_OK when counting is live.
+// Installs CRT allocation counting. Call once at boot in dev/netcode tiers; returns ERR_OK
+// only when counting is live, ERR_MEM_UNSUPPORTED where it cannot be (currently: everywhere -
+// the counter needs one word of writable static storage, which docs/CPP-SUBSET.md section 1's
+// link gate bans in every src/ lib; ruling request in TODO.md, W1 mem notes). A caller that
+// wants to TRUST a zero CRT delta must check this return first.
 extern "C" ErrCode tl_alloc_shim_install(void);
 
-// Cumulative count of CRT/global-new allocations observed since install; 0 before install.
-// Compare deltas across a tick (guard_tick_begin/end).
+// Cumulative count of CRT/global-new allocations observed since install; 0 before install and
+// wherever install reported ERR_MEM_UNSUPPORTED. Compare deltas across a tick
+// (guard_tick_begin/end).
 extern "C" u64 tl_crt_alloc_count(void);
