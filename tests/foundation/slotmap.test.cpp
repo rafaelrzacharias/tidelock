@@ -129,6 +129,12 @@ TL_TEST(slotmap_gen_wrap_quarantines_never_reissued, "foundation,containers,mem,
 }
 
 TL_TEST_EXPECT_FATAL(slotmap_stale_handle_asserts_in_dev, "foundation,containers,fatal") {
+#if !TL_DEV
+    // The trigger is TL_ASSERT, compiled out here - the child would run to a clean
+    // exit and the tier-agnostic expect-fatal verdict would rightly score it FAIL.
+    // The established pattern (fx_fatal.test.cpp): a visible TL_SKIP in the body.
+    TL_SKIP("the trigger is TL_ASSERT, dev-only (docs/CPP-SUBSET.md section 7b)");
+#endif
     VMemApi api = test_vmem_api();
     SlotMap<Payload, SmH> sm;
     TL_ASSERT_EQ(slotmap_init(&sm, "test.sm6.slots"_id, "test.sm6.gen"_id, "test.sm6.free"_id, "test.sm6.live"_id, &api), ERR_OK);

@@ -131,31 +131,28 @@ static ChildResult cr_timed_out(bool abnormal, int code) {
 }
 
 TL_TEST(runner_child_verdict_ordinary_test, "runner,fast") {
-    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_of(true, false, 0)), VERDICT_PASS);
-    TL_EXPECT_EQ(tl_child_verdict(false, false, cr_of(true, false, 0)), VERDICT_PASS);
-    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_of(true, false, TL_EXIT_FAIL)), VERDICT_FAIL);
-    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_of(true, false, TL_EXIT_SKIP)), VERDICT_SKIP);
+    TL_EXPECT_EQ(tl_child_verdict(false, cr_of(true, false, 0)), VERDICT_PASS);
+    TL_EXPECT_EQ(tl_child_verdict(false, cr_of(true, false, TL_EXIT_FAIL)), VERDICT_FAIL);
+    TL_EXPECT_EQ(tl_child_verdict(false, cr_of(true, false, TL_EXIT_SKIP)), VERDICT_SKIP);
     // An ordinary test that crashed is a FAIL on every tier - a trap is never good news here.
-    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_of(true, true, -1)), VERDICT_FAIL);
-    TL_EXPECT_EQ(tl_child_verdict(false, false, cr_of(true, true, -1)), VERDICT_FAIL);
+    TL_EXPECT_EQ(tl_child_verdict(false, cr_of(true, true, -1)), VERDICT_FAIL);
     // An exit code nobody minted (127 from a failed execv, 2 from a real tl_fatal in a test that
     // was not marked fatal-expected) is a FAIL, not an unrecognised-therefore-fine.
-    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_of(true, false, 127)), VERDICT_FAIL);
-    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_of(true, false, 2)), VERDICT_FAIL);
+    TL_EXPECT_EQ(tl_child_verdict(false, cr_of(true, false, 127)), VERDICT_FAIL);
+    TL_EXPECT_EQ(tl_child_verdict(false, cr_of(true, false, 2)), VERDICT_FAIL);
 }
 
 TL_TEST(runner_child_verdict_fatal_expected, "runner,fast") {
-    // On a tier with TL_ASSERT compiled in: the real tl_fatal's controlled exit(2) is the
-    // expectation; a clean exit means the assert never fired, and an ABNORMAL exit means the
-    // child crashed some other way (stack overflow, segfault) - both fail.
-    TL_EXPECT_EQ(tl_child_verdict(true, true, cr_of(true, false, TL_EXIT_FATAL)), VERDICT_PASS);
-    TL_EXPECT_EQ(tl_child_verdict(true, true, cr_of(true, true, -1)), VERDICT_FAIL);
-    TL_EXPECT_EQ(tl_child_verdict(true, true, cr_of(true, false, 0)), VERDICT_FAIL);
-    TL_EXPECT_EQ(tl_child_verdict(true, true, cr_of(true, false, TL_EXIT_FAIL)), VERDICT_FAIL);
-    // Outside dev the same row is judged as an ordinary child, because TL_ASSERT is ((void)0)
-    // there and the body TL_SKIPs (docs/CPP-SUBSET.md §7b, tests/foundation/fx_fatal.test.cpp).
-    TL_EXPECT_EQ(tl_child_verdict(true, false, cr_of(true, false, TL_EXIT_SKIP)), VERDICT_SKIP);
-    TL_EXPECT_EQ(tl_child_verdict(true, false, cr_of(true, true, -1)), VERDICT_FAIL);
+    // Tier-agnostic (finding B): the real tl_fatal's controlled exit(2) is the expectation in
+    // EVERY tier - TL_FATAL/TL_CHECK never compile out. A clean exit means the fatal never
+    // fired; an ABNORMAL exit is an uncontrolled crash (stack overflow, segfault) - both fail.
+    // A TL_ASSERT-triggered row TL_SKIPs in its own body outside dev, and the skip is honored.
+    TL_EXPECT_EQ(tl_child_verdict(true, cr_of(true, false, TL_EXIT_FATAL)), VERDICT_PASS);
+    TL_EXPECT_EQ(tl_child_verdict(true, cr_of(true, true, -1)), VERDICT_FAIL);
+    TL_EXPECT_EQ(tl_child_verdict(true, cr_of(true, false, 0)), VERDICT_FAIL);
+    TL_EXPECT_EQ(tl_child_verdict(true, cr_of(true, false, TL_EXIT_FAIL)), VERDICT_FAIL);
+    TL_EXPECT_EQ(tl_child_verdict(true, cr_of(true, false, TL_EXIT_SKIP)), VERDICT_SKIP);
+    TL_EXPECT_EQ(tl_child_verdict(true, cr_of(true, true, -1)), VERDICT_FAIL);
 }
 
 TL_TEST(runner_child_verdict_a_failed_spawn_is_never_a_pass, "runner,fast") {
@@ -163,12 +160,11 @@ TL_TEST(runner_child_verdict_a_failed_spawn_is_never_a_pass, "runner,fast") {
     // a fatal-expected row read that as "it fataled, PASS" - so a broken exe path, a missing DLL
     // or an exhausted process table turned every fatal-expected test in the suite green while
     // running none of them.
-    TL_EXPECT_EQ(tl_child_verdict(true,  true,  cr_of(false, true, -1)), VERDICT_FAIL);
-    TL_EXPECT_EQ(tl_child_verdict(true,  false, cr_of(false, true, -1)), VERDICT_FAIL);
-    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_of(false, true, -1)), VERDICT_FAIL);
+    TL_EXPECT_EQ(tl_child_verdict(true, cr_of(false, true, -1)), VERDICT_FAIL);
+    TL_EXPECT_EQ(tl_child_verdict(false, cr_of(false, true, -1)), VERDICT_FAIL);
     // ...and not even if the failed spawn somehow left a zero exit code behind.
-    TL_EXPECT_EQ(tl_child_verdict(true,  true,  cr_of(false, false, 0)), VERDICT_FAIL);
-    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_of(false, false, 0)), VERDICT_FAIL);
+    TL_EXPECT_EQ(tl_child_verdict(true, cr_of(false, false, 0)), VERDICT_FAIL);
+    TL_EXPECT_EQ(tl_child_verdict(false, cr_of(false, false, 0)), VERDICT_FAIL);
 }
 
 // --- NEAR_FX -----------------------------------------------------------------------------------
@@ -262,15 +258,14 @@ TL_TEST(runner_child_verdict_timeout_is_its_own_status, "runner,fast") {
     // process the runner killed is the runner's own doing. The dangerous case is the last one: a
     // fatal-expected row whose body hangs instead of fatalling, killed with the fatal exit code,
     // must NOT read as a satisfied expectation.
-    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_timed_out(false, TL_EXIT_OK)),    VERDICT_TIMEOUT);
-    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_timed_out(true,  -1)),            VERDICT_TIMEOUT);
-    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_timed_out(false, TL_EXIT_SKIP)),  VERDICT_TIMEOUT);
-    TL_EXPECT_EQ(tl_child_verdict(true,  true,  cr_timed_out(false, TL_EXIT_FATAL)), VERDICT_TIMEOUT);
-    TL_EXPECT_EQ(tl_child_verdict(true,  false, cr_timed_out(false, TL_EXIT_FATAL)), VERDICT_TIMEOUT);
+    TL_EXPECT_EQ(tl_child_verdict(false, cr_timed_out(false, TL_EXIT_OK)),    VERDICT_TIMEOUT);
+    TL_EXPECT_EQ(tl_child_verdict(false, cr_timed_out(true,  -1)),            VERDICT_TIMEOUT);
+    TL_EXPECT_EQ(tl_child_verdict(false, cr_timed_out(false, TL_EXIT_SKIP)),  VERDICT_TIMEOUT);
+    TL_EXPECT_EQ(tl_child_verdict(true, cr_timed_out(false, TL_EXIT_FATAL)), VERDICT_TIMEOUT);
     // A child that never spawned is still FAIL, even flagged as timed out: nothing ran.
     ChildResult never; never.spawned = false; never.abnormal = false; never.timed_out = true; never.exit_code = -1;
-    TL_EXPECT_EQ(tl_child_verdict(true, true, never), VERDICT_FAIL);
+    TL_EXPECT_EQ(tl_child_verdict(true, never), VERDICT_FAIL);
     // And the flag is not sticky: the same shapes without it keep their old verdicts.
-    TL_EXPECT_EQ(tl_child_verdict(false, true, cr_of(true, false, TL_EXIT_OK)),    VERDICT_PASS);
-    TL_EXPECT_EQ(tl_child_verdict(true,  true, cr_of(true, false, TL_EXIT_FATAL)), VERDICT_PASS);
+    TL_EXPECT_EQ(tl_child_verdict(false, cr_of(true, false, TL_EXIT_OK)),    VERDICT_PASS);
+    TL_EXPECT_EQ(tl_child_verdict(true, cr_of(true, false, TL_EXIT_FATAL)), VERDICT_PASS);
 }

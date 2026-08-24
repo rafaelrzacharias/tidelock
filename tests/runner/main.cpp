@@ -521,7 +521,7 @@ int main(int argc, char** argv) {
                     TerminateProcess(active[s].process, (UINT)TL_EXIT_FAIL);
                     WaitForSingleObject(active[s].process, INFINITE);
                     ChildResult cr = reap(active[s].process, true);
-                    results[idx].verdict = (u8)tl_child_verdict(TL_TESTS[idx].expect_fatal != 0, TL_DEV != 0, cr);
+                    results[idx].verdict = (u8)tl_child_verdict(TL_TESTS[idx].expect_fatal != 0, cr);
                     results[idx].ms = 1000.0 * (double)(clock() - slot_t0[s]) / (double)CLOCKS_PER_SEC;
                     active[s].used = false;
                     --in_flight;
@@ -530,7 +530,7 @@ int main(int argc, char** argv) {
                 const u32 s = wait_slot[w - WAIT_OBJECT_0];
                 const u32 idx = active[s].job_index;
                 ChildResult cr = reap(active[s].process, false);
-                results[idx].verdict = (u8)tl_child_verdict(TL_TESTS[idx].expect_fatal != 0, TL_DEV != 0, cr);
+                results[idx].verdict = (u8)tl_child_verdict(TL_TESTS[idx].expect_fatal != 0, cr);
                 results[idx].ms = 1000.0 * (double)(clock() - slot_t0[s]) / (double)CLOCKS_PER_SEC;
                 active[s].used = false;
                 --in_flight;
@@ -588,7 +588,7 @@ int main(int argc, char** argv) {
                 if (active_pid[s] == done) {
                     const u32 idx = active_idx[s];
                     ChildResult cr = reap_status(status, slot_killed[s]);
-                    results[idx].verdict = (u8)tl_child_verdict(TL_TESTS[idx].expect_fatal != 0, TL_DEV != 0, cr);
+                    results[idx].verdict = (u8)tl_child_verdict(TL_TESTS[idx].expect_fatal != 0, cr);
                     results[idx].ms = 1000.0 * (double)(clock() - slot_t0[s]) / (double)CLOCKS_PER_SEC;
                     active_pid[s] = -1;
                     slot_killed[s] = false;
@@ -621,7 +621,7 @@ int main(int argc, char** argv) {
             ChildResult cr;
             spawn_and_wait(self_exe, idx, tl_seed_for(global_seed, idx), rcwd, timeout_ms, &cr);
             results[idx].ms = 1000.0 * (double)(clock() - t0) / (double)CLOCKS_PER_SEC;
-            if (tl_child_verdict(TL_TESTS[idx].expect_fatal != 0, TL_DEV != 0, cr) != VERDICT_FAIL) {
+            if (tl_child_verdict(TL_TESTS[idx].expect_fatal != 0, cr) != VERDICT_FAIL) {
                 fprintf(stderr, "tl_tests: %s: failed in the parallel pool and PASSED on serial replay - "
                                 "flake, treated as FAIL (docs/TESTING.md section 6: a determinism-gate "
                                 "flake is P0)\n", TL_TESTS[idx].name);
@@ -636,7 +636,7 @@ int main(int argc, char** argv) {
             if (ti.expect_fatal) {
                 ChildResult cr;
                 spawn_and_wait(self_exe, idx, tl_seed_for(global_seed, idx), nullptr, timeout_ms, &cr);
-                results[idx].verdict = (u8)tl_child_verdict(true, TL_DEV != 0, cr);
+                results[idx].verdict = (u8)tl_child_verdict(true, cr);
             } else {
                 const char* reason = nullptr;
                 results[idx].verdict = (u8)run_in_process(ti, tl_seed_for(global_seed, idx), &reason);
