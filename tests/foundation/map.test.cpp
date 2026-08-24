@@ -248,7 +248,7 @@ TL_TEST(map_fixed_serves_its_full_load_factor_without_growing, "foundation,conta
     // A remove frees a slot, and refilling it does not grow: the fixed shape survives churn.
     TL_EXPECT_TRUE(map_remove(&m, 6u));
     TL_EXPECT_EQ(map_count(&m), (u32)11);
-    map_put(&m, 1u, 999u);                     // overwrite (see the note below on why here)
+    map_put(&m, 1u, 999u);                     // overwrite below full load
     TL_EXPECT_EQ(*map_get(&m, 1u), (u32)999);
     TL_EXPECT_EQ(map_count(&m), (u32)11);
     map_put(&m, 100u, 55u);                    // refill, back to the full load
@@ -257,12 +257,15 @@ TL_TEST(map_fixed_serves_its_full_load_factor_without_growing, "foundation,conta
     TL_EXPECT_EQ(arena_mark(&arena), mark_after_init);
     TL_EXPECT_EQ(m.cap, (u32)16);
 
-    // NOTE, and the reason the overwrite above sits at count 11 rather than 12: map_put tests the
-    // grow condition BEFORE it probes, so an OVERWRITE of a present key at exactly the full load
-    // takes the grow path even though it needs no new slot. On a growing Map that is a spurious
-    // rehash; on a fixed one it is a TL_FATAL for an operation that adds nothing. Inherited from
-    // the reviewed grow condition, out of this lane's scope, filed in TODO.md against the next
-    // review sweep - not silently worked around here.
+    // An OVERWRITE at exactly the full load is a no-op insert and must neither grow nor fatal:
+    // map_put probes before it tests the grow condition (the W2-prep lane's finding, fixed at
+    // the wave merge - it used to take the grow path here, a TL_FATAL on a fixed Map for an
+    // operation that adds nothing). Pinned at full load, not one below it.
+    map_put(&m, 100u, 56u);
+    TL_EXPECT_EQ(*map_get(&m, 100u), (u32)56);
+    TL_EXPECT_EQ(map_count(&m), (u32)12);
+    TL_EXPECT_EQ(m.cap, (u32)16);
+    TL_EXPECT_EQ(arena_mark(&arena), mark_after_init);
 }
 
 // The other half. TL_FATAL fires in EVERY tier (unlike TL_ASSERT), so this row has no dev-only

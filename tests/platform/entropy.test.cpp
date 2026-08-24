@@ -42,7 +42,11 @@ TL_TEST(entropy_nonrepeat, "platform") {
     const double total = (double)N * (double)LEN;
     const double mean = total / 256.0;
     const double variance = mean * (255.0 / 256.0);
-    const double sigma4 = 4.0 * (variance > 0.0 ? sqrt(variance) : 1.0);
+    // 4 sigma per bucket over 256 buckets was a ~1.6% false-positive rate per run - a flake
+    // by docs/TESTING.md section 6's definition (measured: 1 in ~30 runs, W1 jobs + W2-prep).
+    // 7 sigma puts the union bound near 7e-10 per run while a stuck or constant source still
+    // fails by hundreds of sigma. The budget is the ruling; the number is derived from it.
+    const double sigma4 = 7.0 * (variance > 0.0 ? sqrt(variance) : 1.0);
     bool within = true;
     for (u32 b = 0; b < 256; ++b) {
         const double d = (double)hist[b] - mean;

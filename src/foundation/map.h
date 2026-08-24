@@ -119,16 +119,22 @@ u32 map_probe(const Map<K, V>* m, K k) {
 // TL_FATALs on a fixed-mode Map (map_init_fixed).
 template <typename K, typename V> void map_grow(Map<K, V>* m);
 
-// Inserts or overwrites k -> v. Grows (full rehash) first if load would exceed 0.75.
+// Inserts or overwrites k -> v. An OVERWRITE never grows: the probe runs first, and only an
+// insert that would push load past 0.75 rehashes (then re-probes, since a grow relocates every
+// slot). Growing before probing made an overwrite at exactly full load rehash a growing Map for
+// nothing and TL_FATAL a fixed-mode one on a no-op - the W2-prep lane's finding, fixed at the
+// wave merge. Both orders are pure functions of the op history; this one is the cheaper.
 template <typename K, typename V>
 void map_put(Map<K, V>* m, K k, V v) {
-    if ((u64)(m->count + 1u) * 4u > (u64)m->cap * 3u) { map_grow(m); }
     u32 i = map_probe(m, k);
-    if (m->state[i] == MAP_SLOT_EMPTY) {
-        m->state[i] = MAP_SLOT_FULL;
-        m->keys[i] = k;
-        m->count += 1u;
+    if (m->state[i] != MAP_SLOT_EMPTY) { m->vals[i] = v; return; }
+    if ((u64)(m->count + 1u) * 4u > (u64)m->cap * 3u) {
+        map_grow(m);
+        i = map_probe(m, k);
     }
+    m->state[i] = MAP_SLOT_FULL;
+    m->keys[i] = k;
+    m->count += 1u;
     m->vals[i] = v;
 }
 

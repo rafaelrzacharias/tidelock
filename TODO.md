@@ -635,6 +635,9 @@ right; it is the template the others now follow.
       therefore its bucket layout — reviewed behaviour, outside this closeout's contract. Fix is
       one reorder (probe; grow and re-probe only if the slot is empty) plus a test for each mode.
       Pinned meanwhile by a NOTE in `map_fixed_serves_its_full_load_factor_without_growing`.
+      **CLOSED at the W2-prep wave merge (2026-08-24): map_put probes first and grows only for an
+      absent key that would exceed the load; the map.test.cpp NOTE became the assertion at full
+      load. Both orders are pure functions of the op history; this one never rehashes a no-op.**
 - [x] **R3 — `CONTAINERS.md` §8.3 specifies `TL_ASSERT(!in_tick)` on `map_grow` and it is not
   implemented**, because no `in_tick` facility exists in foundation yet. Either the ArenaGuard's
   barrier window becomes readable from `map.h` or the clause moves to the guard. Filed rather than
@@ -1411,13 +1414,17 @@ right; it is the template the others now follow.
       checks `file`). Closed from this lane's side by `#if defined(TL_SIM_TU)` + `#error` in
       `atomic.h` and `jobs.h`, which fires on every target; the audit-side fix (run `symbols.py`
       over the pi4 archives, or add a positive fixture) belongs to the audit's owner.
-- [ ] **`platform.entropy_nonrepeat` is flaky: 1 failure in 30 runs, measured 2026-08-24.** Not a
+- [x] **`platform.entropy_nonrepeat` is flaky: 1 failure in 30 runs, measured 2026-08-24.** Not a
       jobs change - `tests/platform/entropy.test.cpp`'s byte histogram is a statistical bound over
       1000x32 random bytes, so it reddens roughly 3% of full-suite runs on its own, and it turned
       the jobs lane's suite red once while this slice was being built. A ~3% flake on a shared
       suite means roughly one spurious red per PR lane invocation across a wave, which trains
       people to re-run instead of read. Either widen the bound to a stated per-run false-positive
       budget (and write the arithmetic down), or seed it. Its owner's test, so: a request.
+      **RULED + CLOSED at the W2-prep wave merge (2026-08-24): the test now states its
+      false-positive budget - 7 sigma per bucket over 256 buckets (union bound ~7e-10 per run,
+      vs ~1.6% at 4 sigma) - a stuck or constant source still fails by hundreds of sigma.
+      docs/TESTING.md section 6: a statistical test without a stated budget IS a flake.**
 - [ ] **Signatures and names added over the rev-1 spec are folded into `JOBS.md` in the same
       commit** (this lane's own doc); announced here for the wave merge: §5 R-3..R-6 (per-worker
       wake semaphores; the barrier counting participants rather than chunks; `LevelFn`/`struct
