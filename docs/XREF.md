@@ -249,6 +249,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `BUILD.md` -> §5, §8, §9.1
 - `DETERMINISM.md` -> §4
 - `FX-PALETTE.md` -> §4
+- `JOBS.md` -> §6
 - `PLATFORM.md` -> §4
 - `ROADMAP.md` -> §9
 

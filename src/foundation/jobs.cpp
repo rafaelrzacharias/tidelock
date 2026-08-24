@@ -8,8 +8,8 @@
 // half of, not which constant was passed - there is no constant to pass.
 //
 // The two edges the whole design rests on:
-//   PUBLISH   main writes j->job (plain) -> atomic_store32(&j->epoch) RELEASE
-//             worker atomic_load32(&j->epoch) ACQUIRE -> reads j->job (plain). The release/
+//   PUBLISH   main writes j->job (plain) -> atomic_store64(&j->epoch) RELEASE
+//             worker atomic_load64(&j->epoch) ACQUIRE -> reads j->job (plain). The release/
 //             acquire pair is what makes those plain reads race-free.
 //   RETIRE    a participant finishes its claim loop -> atomic_sub32(&j->pending) ACQ_REL
 //             main observes pending == 0 (its own ACQ_REL sub returning 1, or the `done`
@@ -109,8 +109,11 @@ void jobs_run_one(const JobDesc* job, u32 ticket, Scratch* scratch) {
 static void jobs_claim_loop(Jobs* j, u32 w) {
     // PLAIN read of the published job, race-free by the PUBLISH edge above: a worker reached here
     // only after its epoch ACQUIRE, and main reached here having written these fields itself.
-    // Snapshotting into a local is load-bearing, not a micro-optimisation - the loop below must
-    // never re-read a field main may already be rewriting for the next job.
+    // The snapshot is DEFENSE IN DEPTH, not load-bearing (measured, W1 jobs review: removing it
+    // survives the whole suite, and the derivation agrees) - with a participant-counted barrier,
+    // every read of j->job is sequenced before this participant's retire, and main rewrites it
+    // only after observing every retire, so no re-read can overlap a rewrite. Kept because it
+    // makes that argument unnecessary at every use site below, for 40 bytes of stack.
     const JobDesc job = j->job;
     Scratch* scratch = j->scratch[w];
     for (;;) {
@@ -140,15 +143,16 @@ static void jobs_worker_main(void* raw) {
     JobsWorker* slot = (JobsWorker*)raw;
     Jobs* j = slot->jobs;
     const ThreadApi* th = j->thread;
-    u32 seen = 0u;
+    u64 seen = 0u;
     for (;;) {
         th->sem_wait(th->ctx, j->wake[slot->index - 1u]);
         // ACQUIRE, pairing with the RELEASE store in jobs_shutdown. Checked FIRST: a shutdown
         // post must never be mistaken for a job.
         if (atomic_load32(&j->shutdown) != 0u) { return; }
         // PUBLISH edge, acquire half - what makes the plain read of j->job in the claim loop
-        // race-free.
-        const u32 e = atomic_load32(&j->epoch);
+        // race-free. 64-bit so the guard below cannot mistake a wrapped epoch for a stale post
+        // (jobs.h, the epoch field's comment).
+        const u64 e = atomic_load64(&j->epoch);
         // A stale post (one left over from an earlier epoch) must NOT retire: main accounted for
         // exactly one retire per worker per epoch, so retiring twice would take pending below
         // zero. Parking again is safe because main posts once per worker per job, so this
@@ -256,17 +260,17 @@ void parallel_for(Jobs* j, u32 n, u32 grain, ChunkFn fn, void* ctx) {
     // ACQUIRE. Main is the only writer of epoch, but reading it plainly beside a worker's atomic
     // load would be a second story about the same word. The epoch advances on EVERY job, inline
     // or pooled, so it is the single source of the per-job shuffle key.
-    const u32 next_epoch = atomic_load32(&j->epoch) + 1u;
+    const u64 next_epoch = atomic_load64(&j->epoch) + 1u;
     // The key is per JOB, so two jobs with the same chunk count get different schedules. The low
     // bit is forced because 0 is the "shuffle off" sentinel in JobDesc.
-    const u64 key = j->shuffle_seed != 0u ? (mix64(j->shuffle_seed + (u64)next_epoch) | 1u) : 0u;
+    const u64 key = j->shuffle_seed != 0u ? (mix64(j->shuffle_seed + next_epoch) | 1u) : 0u;
 
     if (j->worker_count == 0u || c == 1u) {
         // Inline: no wake, no barrier, nothing shared to synchronize with - the job never reaches
         // j->job, so no worker can observe it. The epoch store keeps the key derivation uniform;
         // a worker that later acquires this epoch finds no post waiting and never runs it.
         const JobDesc local = { fn, ctx, key, n, grain, c, 0u };
-        atomic_store32(&j->epoch, next_epoch);   // RELEASE
+        atomic_store64(&j->epoch, next_epoch);   // RELEASE
         Scratch* scratch = j->scratch[0];
         for (u32 t = 0u; t < c; ++t) { jobs_run_one(&local, t, scratch); }
     } else {
@@ -290,7 +294,7 @@ void parallel_for(Jobs* j, u32 n, u32 grain, ChunkFn fn, void* ctx) {
         atomic_store32(&j->pending, j->worker_count + 1u);
         // RELEASE, the PUBLISH edge: everything above becomes visible to any worker that acquires
         // this value.
-        atomic_store32(&j->epoch, next_epoch);
+        atomic_store64(&j->epoch, next_epoch);
         for (u32 w = 0u; w < j->worker_count; ++w) { th->sem_post(th->ctx, j->wake[w]); }
 
         jobs_claim_loop(j, 0u);   // the calling thread participates (R-2)
@@ -301,6 +305,16 @@ void parallel_for(Jobs* j, u32 n, u32 grain, ChunkFn fn, void* ctx) {
         // will post, and this waits for exactly that one.
         if (atomic_sub32(&j->pending, 1u) != 1u) {
             th->sem_wait(th->ctx, j->done);
+            // ACQUIRE of the 0 the last retire released. This is what carries every worker's
+            // chunk writes into this thread under atomic.h's stated orders ALONE: main's own
+            // decrement above synchronised only with the retires that PRECEDED it, and the ones
+            // after it would otherwise be ordered only by the semaphore. Every real semaphore
+            // does order its post/wait pair - but the ThreadApi contract does not say so
+            // (ruling filed, TODO.md W1 jobs review), and one acquire load per pooled job makes
+            // the barrier's correctness self-contained either way.
+            const u32 p = atomic_load32(&j->pending);
+            TL_ASSERT(p == 0u);
+            (void)p;
         }
     }
 

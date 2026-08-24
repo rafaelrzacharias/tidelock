@@ -121,14 +121,19 @@ struct Jobs {
     u32          worker_count;
     u32          _pad0;
     JobDesc      job;
-    u32 epoch;       u32 _line0[15];   // atomic: published RELEASE, acquired by every worker
+    // epoch is u64, not u32 (W1 jobs review): the inline path advances it without waking a
+    // worker, so a worker's `seen` can lag by any number of jobs - after exactly 2^32 inline
+    // jobs between two pooled ones, a u32 epoch equals `seen` again and the worker parks on a
+    // REAL token (the stale-post guard cannot tell a wrapped epoch from a stale one), which is a
+    // permanent hang. 2^64 does not wrap in a machine's lifetime.
+    u64 epoch;       u32 _line0[14];   // atomic: published RELEASE, acquired by every worker
     u32 next_chunk;  u32 _line1[15];   // atomic: the claim ticket
     u32 pending;     u32 _line2[15];   // atomic: participants still inside their claim loop
     u32 shutdown;                      // atomic
     u32 in_job;                        // atomic: the nested-parallel_for tripwire
 };
 static_assert(__is_trivially_copyable(Jobs), "");
-static_assert(offsetof(Jobs, epoch) % 4 == 0, "atomics must be naturally aligned");
+static_assert(offsetof(Jobs, epoch) % 8 == 0, "atomics must be naturally aligned");
 static_assert(offsetof(Jobs, next_chunk) - offsetof(Jobs, epoch) == 64, "epoch and next_chunk must not share a cache line");
 static_assert(offsetof(Jobs, pending) - offsetof(Jobs, next_chunk) == 64, "next_chunk and pending must not share a cache line");
 
@@ -153,7 +158,9 @@ u32 jobs_default_worker_count(const ThreadApi* thread);
 // thread (the ThreadApi create verbs are not thread-safe). Returns ERR_JOBS_BAD_ARG for a null
 // table, worker_count > JOBS_MAX_WORKERS, or scratch_count < worker_count + 1; ERR_JOBS_THREAD if
 // the platform refuses a thread or semaphore (already-created ones are torn down first - there is
-// no partial pool). On ERR_OK the Jobs is live and pinned. Never call inside a tick.
+// no partial pool). On ERR_OK the Jobs is live and pinned. Never call inside a tick. PRECONDITION,
+// not detected: `j` must not be a LIVE pool (jobs_shutdown first) - a caller-allocated struct is
+// indistinguishable from garbage, so init memsets it and a live pool's threads would be orphaned.
 ErrCode jobs_init(Jobs* j, const JobsConfig* cfg);
 
 // Stops the pool: signals every worker, joins them, destroys the semaphores. Idempotent on a

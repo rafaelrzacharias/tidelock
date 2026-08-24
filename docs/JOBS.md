@@ -111,8 +111,11 @@ Added 2026-08-24 (W1 jobs lane), each a defect in rev 1's own §6.2/§6.3 found 
   0 of job N+1 **and runs it with job N's `fn`/`ctx`**. Counting participants (each decrements
   once, after its loop has exited) makes "pending == 0" mean "no thread can touch `next_chunk`",
   which is the property the publish/reset actually needs. Each participant also snapshots
-  `JobDesc` into a local under the epoch acquire, so no loop re-reads a field the main thread may
-  be rewriting. The post/wait is balanced exactly once: only a worker posts `done`, and only when
+  `JobDesc` into a local under the epoch acquire - defense in depth, not load-bearing (measured,
+  W1 jobs review: with a participant-counted barrier every read of `job` is sequenced before that
+  participant's retire, so no re-read can overlap main's rewrite; the snapshot makes that argument
+  unnecessary at each use site). The post/wait is balanced exactly once: only a worker posts
+  `done`, and only when
   its decrement returns 1; main waits iff its own decrement did not return 1 — so no stale token
   can survive a job.
 - **R-5 `parallel_levels` needs its own fn type.** Rev 1 wrote `parallel_for(..., fn, (ctx, l))`
@@ -179,7 +182,11 @@ struct Jobs {
     u64          shuffle_seed;   u32 worker_count;  u32 _pad0;
     // per job (one at a time — jobs never nest; a chunk fn calling parallel_for is TL_FATAL)
     JobDesc  job;
-    u32 epoch;       u32 _line0[15];   // atomic; published RELEASE to publish a job
+    u64 epoch;       u32 _line0[14];   // atomic; published RELEASE to publish a job. u64 (W1 jobs
+                                       // review): the inline path advances it without waking a
+                                       // worker, so after exactly 2^32 inline jobs between two
+                                       // pooled ones a u32 epoch re-equals a worker's `seen` and
+                                       // the stale-post guard parks it on a REAL token - a hang
     u32 next_chunk;  u32 _line1[15];   // atomic claim ticket
     u32 pending;     u32 _line2[15];   // atomic countdown of PARTICIPANTS, not chunks — R-4
     u32 shutdown;    u32 in_job;       // atomic; in_job is the nested-parallel_for tripwire
@@ -273,7 +280,11 @@ Added 2026-08-24 with the rulings above, because each states a property no row a
   handed and reads back only its own; `jobs_scratch_reset_all` poisons every participant's arena.
 - **A contention soak** (many small jobs, all worker counts) is the measurement behind §6.2's
   cache-line separation, and is where a lost wake-up or a stale claim shows up as a hang. Every
-  hanging-class test passes `--timeout-ms` to its child invocation rather than stalling the lane.
+  hanging-class test passes `--timeout-ms` to its child invocation rather than stalling the lane -
+  and that child deadline stays UNDER `TESTING.md` §6's PR per-child budget, or the lane kills the
+  checker first and orphans the deadlocked grandchild (measured, W1 jobs review). The soak's tags
+  (checker fast, trigger slow) are PINNED by a test through `--list`'s selection - the R-4
+  mutation is caught by the soak and nothing else, so a retag must redden, not ship.
 
 *Rev 1 — 2026-08-22; reconciled 2026-08-24 (W1 jobs lane): §6.1 carries the `atomic.h` API that
 `PLATFORM.md` §9.2 had been restating, §6.2/§6.3 land R-3..R-6, §6.4 gains the shuffle-order and

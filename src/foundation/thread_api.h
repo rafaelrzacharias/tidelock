@@ -20,7 +20,11 @@
 //   unsynchronised state and allocates from a single-writer arena. Call them from the owning
 //   thread before the pool starts, which is what docs/JOBS.md does. The USE verbs (`sem_wait`/
 //   `sem_post`/`sem_try_wait`, `mutex_lock`/`mutex_unlock`, `yield`, `sleep_ms`, `core_count`,
-//   `is_main`) are safe from any thread; that is their point.
+//   `is_main`) are safe from any thread; that is their point. A `sem_post` observed by a
+//   `sem_wait` on the same semaphore ESTABLISHES HAPPENS-BEFORE (release on post, acquire on
+//   wait) - every OS primitive behind this seam provides it, docs/JOBS.md's wake path depends on
+//   it (a woken worker must see the epoch published before the post), and it belongs in
+//   PLATFORM.md section 9.2's contract text (ruling filed, TODO.md W1 jobs review).
 // Includes: foundation/{tl_types,handle,strview}.h only.
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"

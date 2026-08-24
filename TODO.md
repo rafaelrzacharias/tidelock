@@ -1283,7 +1283,14 @@ right; it is the template the others now follow.
       instead of redefining it (include-plus-delete only, this lane, platform suite re-run green).
       **Owner edit outstanding:** `PLATFORM.md` §9.1's file table needs a `thread_api.h` row and
       §9.2 should say the struct is `foundation/thread_api.h`'s - the way §9 already says it for
-      `VMemApi`.
+      `VMemApi`. Two additions from the adversarial review (2026-08-24): (a) §9's "platform.h
+      includes nothing but foundation/{...}" sentence is also stale - the shipped header includes
+      `thread_api.h`, and the doc sentence must name it; (b) §9.2's ThreadApi row should state
+      that `sem_post` observed by `sem_wait` on the same semaphore establishes happens-before
+      (release on post, acquire on wait). Every OS primitive provides it, but the jobs wake path
+      DEPENDS on it (a woken worker must see the epoch published before the post) and a contract
+      the code depends on that no doc states is exactly the silence-is-not-permission class. The
+      sentence is already in `foundation/thread_api.h`'s contract block, marked as filed here.
 - [ ] **Ruling request: `PLATFORM.md` §9.2 restates `foundation/atomic.h`'s API** on top of its
       real home (`JOBS.md` §6.1), in a different and incompatible spelling - rev 1 had
       `tl_atomic_load/store/fetch_add/cas` in `JOBS.md` and `atomic_load32/64`/`atomic_add32/64`/
@@ -1327,6 +1334,53 @@ right; it is the template the others now follow.
       `ERR_JOBS_*` (module range 0x02xx), and the `jobs_chunk_count`/`JOBS_MAX_WORKERS`
       module-prefix spellings. R-3 and R-4 are a hang and a wrong-`fn` execution in rev 1's own
       §6.3 pseudocode, not style - read them before reviewing the pool.
+
+## W1 jobs adversarial review (2026-08-24, fresh context) — verdict: SHIP (after review commits; PR next, ubuntu+sanitizers gate the merge)
+The ordering derivation was re-done by hand on the stated orders (aarch64 rules, both edges,
+the R-4 window, the handshake, levels, scratch, seed publication) and HOLDS. The lane's R-4
+mutation claim replicated exactly: caught by the soak, by nothing else. Defects found, ranked,
+all fixed in the review commits except the two filed items:
+1. [fixed] **u32 epoch wrap is a hang**: the inline path advances epoch without waking workers,
+   so after exactly 2^32 inline jobs between two pooled ones a worker's `seen` re-equals the
+   epoch and the stale-post guard parks it on a real token. Fix: u64 epoch (jobs.h/jobs.cpp,
+   `JOBS.md` §6.2). Not reachable in any sane workload; structural, and the fix is free.
+2. [fixed] **`jobs_init`'s mid-failure teardown had never executed**: `JOBS.md` §6.4 names the
+   row ("the platform refusing a thread or a semaphore mid-init"), no test ran it. Now injected
+   deterministically via a forwarding ThreadApi; 300 failing inits also leak-check the real
+   headless tables (a leaked sem/thread exhausts SemRec[256]/ThreadRec[64] and reddens).
+   Sabotage-verified: deleting one sem_destroy fails the test.
+3. [fixed] **The soak's tags were pinned by a comment**: mistagging the checker `slow` ships R-4
+   (the lane measured it; a comment is not a gate). Now pinned by `jobs_soak_tags_are_pinned`
+   through `--list` selection; required fixing `--list` to error on a zero-match selection
+   (tests/runner/main.cpp - the fourth empty-list silent pass; runner lane owner: FYI, the fix
+   is in your file, negative arm exercised by the pin test's `--tag slow` probe).
+4. [fixed] **Soak child deadline 180 s > PR per-child budget 120 s**: the lane kills the checker
+   first and the deadlocked grandchild is orphaned past the kill (measured in this review - two
+   orphans held tl_tests.exe and broke the next build). Now 60 s, with the rule in `JOBS.md` §6.4.
+5. [fixed] **Gate gap: a direct `__atomic_*`/`__sync_*`/`_Interlocked*` call in a det TU passed
+   every gate** (no include, no symbol on x86-64, Pi-only tripwire). Token ban added to
+   includes.py + three selftest plants; the TL_SIM_TU #error is now also PROVEN to fire by a
+   real-compiler selftest fixture (fails with TL_SIM_TU, compiles without).
+6. [fixed] **The "snapshot is load-bearing" claim was false** (comment/doc accuracy): removing
+   the JobDesc snapshot survives the whole suite, and the derivation agrees - with participant
+   counting no re-read can overlap main's rewrite. Kept as defense in depth, restated as such
+   (jobs.cpp, `JOBS.md` §5 R-4).
+7. [filed] **ThreadApi semaphore happens-before is undocumented** (see the PLATFORM ruling above).
+   Closed in code for the barrier's data edge: main re-acquires `pending` after the `done` wait,
+   so chunk-write visibility is self-contained under atomic.h's stated orders; the wake path's
+   liveness still depends on the (universal, now header-stated) sem ordering.
+8. [noted] **Memory-order mutations are invisible on x86-64** (measured: relaxing atomic.h's
+   loads to RELAXED survives the whole suite). The ordering's evidence is the hand derivation
+   plus the PR's ubuntu/TSan leg - exactly the lane's own Windows-only caveat; no local test can
+   close this, do not pretend otherwise.
+Also verified: thread_api.h token-identical to the struct platform.h dropped; the platform.h
+diff is the swap and typedef moves only; platform suite re-run green on this branch (31/30/1
+skip); worker-invariance compares chunk-keyed buffers byte-for-byte with per-item visit counts
+against two oracles; shuffle asserts the schedule CHANGED + bijection + per-job key (a
+key-ignoring permutation reddens - measured); extra-token injection is absorbed by the e==seen
+guard without a double retire (measured); main-always-waits deadlocks as three TIMEOUTs, never
+a hang (measured). dev-win 254/250/0 isolate + 274/265/0 serial; netcode-win 254/229/0;
+tl_audit 113 selftest checks green on both tiers.
 
 ## Reserved (design complete, build on first consumer — `docs/RESERVED-SEAMS.md`)
 Audio · game UI (Luau) · spatial index · tilemap · nav/AI · frame animation · replay UI/cinematics ·

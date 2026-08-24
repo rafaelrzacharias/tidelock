@@ -199,10 +199,6 @@ TL_TEST(jobs_shuffle_is_worker_invariant_too, "foundation,jobs,fast") {
     const u32 counts[3] = { 1u, 2u, 8u };
     u64 golden[625];
     TL_ASSERT_EQ(chunks, 625u);
-    {
-        u8 ref_visit[1] = { 0u };
-        (void)ref_visit;
-    }
     for (u32 ci = 0u; ci < 3u; ++ci) {
         JobsFix f;
         TL_ASSERT_EQ(jobs_fix_init(&f, counts[ci], 8u << 20), ERR_OK);
@@ -560,6 +556,176 @@ TL_TEST(jobs_contention_soak, "foundation,jobs,fast") {
     // A failed spawn must never read as a pass (LESSONS.md): the child prints its own summary, and
     // a non-zero code here is a real failure - a hang shows up as the child's TIMEOUT, not as this
     // process waiting forever.
-    const int rc = run_soak_child("jobs_contention_soak_trigger", 180000u);
+    // 60000, and it must stay UNDER docs/TESTING.md §6's PR-lane per-child budget (120000): the
+    // lane kills THIS process at its budget, and a deadlocked grandchild whose own deadline is
+    // longer is orphaned past that kill - measured in this review, where two of them squatted on
+    // tl_tests.exe and broke the next build. The soak itself runs in ~200 ms; 60 s is deadlock
+    // detection, not headroom this test ever uses.
+    const int rc = run_soak_child("jobs_contention_soak_trigger", 60000u);
     TL_EXPECT_EQ(rc, 0);
+}
+
+namespace {
+// Spawns `tl_tests --list <args>`, output discarded, and returns the exit code. --list obeys
+// --filter/--tag and errors on an empty selection (tests/runner/main.cpp), so an exit code of 0
+// is exactly "at least one test matches this selection" - a tag assertion with no output parsing.
+int run_list_probe(const char* args) {
+    char cmd[1024];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "\"\"%s\" --list %s > tl_jobs_list_probe.tmp 2>&1\"", TL_TESTS_EXE, args);
+#else
+    snprintf(cmd, sizeof(cmd), "\"%s\" --list %s > tl_jobs_list_probe.tmp 2>&1", TL_TESTS_EXE, args);
+#endif
+    const int rc = system(cmd);
+    remove("tl_jobs_list_probe.tmp");
+#ifdef _WIN32
+    return rc;
+#else
+    return WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
+#endif
+}
+}  // namespace
+
+// The R-4 mutation is caught by the soak and by NOTHING ELSE (measured - this file's header), so
+// the soak CHECKER must stay in the PR lane (`--isolate --tag !slow`) and only the TRIGGER may
+// carry `slow`. A comment is not a gate: these probes pin both tags through --list, so a retag
+// reddens this test instead of silently shipping the one defect class only the soak can see.
+TL_TEST(jobs_soak_tags_are_pinned, "foundation,jobs,fast") {
+    TL_EXPECT_EQ(run_list_probe("--filter jobs_contention_soak --tag fast"), 0);
+    TL_EXPECT_EQ(run_list_probe("--filter jobs_contention_soak --tag !slow"), 0);
+    TL_EXPECT_EQ(run_list_probe("--filter jobs_contention_soak_trigger --tag slow"), 0);
+    // The negative arm, without which the three above prove nothing: a selection that cannot
+    // match must be a non-zero exit, or --list is the empty-list silent pass (LESSONS.md).
+    TL_EXPECT_TRUE(run_list_probe("--filter jobs_contention_soak --tag slow") != 0);
+}
+
+// -------------------------------------------------------------------------------------------
+// docs/JOBS.md §6.4: "the platform refusing a thread or a semaphore mid-init" returns its named
+// code and leaves NO partial pool - the one error path the suite never executed until this
+// review. A forwarding ThreadApi injects the refusal at an exact call index, deterministically.
+// -------------------------------------------------------------------------------------------
+namespace {
+struct FailingThread {
+    const ThreadApi* real;
+    u32 sem_creates;    u32 fail_sem_at;      // 1-based call index to refuse; 0 = never
+    u32 thread_creates; u32 fail_thread_at;
+};
+Result<ThreadHandle> ft_create(void* ctx, ThreadFn fn, void* tctx, StrView name, u32 stack) {
+    FailingThread* f = (FailingThread*)ctx;
+    f->thread_creates += 1u;
+    if (f->fail_thread_at != 0u && f->thread_creates == f->fail_thread_at) {
+        Result<ThreadHandle> r{}; r.err = (ErrCode)ERR_PLATFORM_THREAD_LIMIT; return r;
+    }
+    return f->real->create(f->real->ctx, fn, tctx, name, stack);
+}
+Result<SemHandle> ft_sem_create(void* ctx, u32 initial) {
+    FailingThread* f = (FailingThread*)ctx;
+    f->sem_creates += 1u;
+    if (f->fail_sem_at != 0u && f->sem_creates == f->fail_sem_at) {
+        Result<SemHandle> r{}; r.err = (ErrCode)ERR_PLATFORM_THREAD_LIMIT; return r;
+    }
+    return f->real->sem_create(f->real->ctx, initial);
+}
+void ft_join(void* ctx, ThreadHandle h)      { FailingThread* f = (FailingThread*)ctx; f->real->join(f->real->ctx, h); }
+void ft_sem_wait(void* ctx, SemHandle h)     { FailingThread* f = (FailingThread*)ctx; f->real->sem_wait(f->real->ctx, h); }
+u8   ft_sem_try_wait(void* ctx, SemHandle h) { FailingThread* f = (FailingThread*)ctx; return f->real->sem_try_wait(f->real->ctx, h); }
+void ft_sem_post(void* ctx, SemHandle h)     { FailingThread* f = (FailingThread*)ctx; f->real->sem_post(f->real->ctx, h); }
+void ft_sem_destroy(void* ctx, SemHandle h)  { FailingThread* f = (FailingThread*)ctx; f->real->sem_destroy(f->real->ctx, h); }
+Result<MutexHandle> ft_mutex_create(void* ctx) { FailingThread* f = (FailingThread*)ctx; return f->real->mutex_create(f->real->ctx); }
+void ft_mutex_lock(void* ctx, MutexHandle h)   { FailingThread* f = (FailingThread*)ctx; f->real->mutex_lock(f->real->ctx, h); }
+void ft_mutex_unlock(void* ctx, MutexHandle h) { FailingThread* f = (FailingThread*)ctx; f->real->mutex_unlock(f->real->ctx, h); }
+void ft_mutex_destroy(void* ctx, MutexHandle h){ FailingThread* f = (FailingThread*)ctx; f->real->mutex_destroy(f->real->ctx, h); }
+void ft_yield(void* ctx)          { FailingThread* f = (FailingThread*)ctx; f->real->yield(f->real->ctx); }
+void ft_sleep_ms(void* ctx, u32 ms) { FailingThread* f = (FailingThread*)ctx; f->real->sleep_ms(f->real->ctx, ms); }
+u32  ft_core_count(void* ctx)     { FailingThread* f = (FailingThread*)ctx; return f->real->core_count(f->real->ctx); }
+u8   ft_is_main(void* ctx)        { FailingThread* f = (FailingThread*)ctx; return f->real->is_main(f->real->ctx); }
+
+ThreadApi ft_table(FailingThread* f) {
+    ThreadApi t{};
+    t.ctx = f;
+    t.create = ft_create; t.join = ft_join;
+    t.sem_create = ft_sem_create; t.sem_wait = ft_sem_wait; t.sem_try_wait = ft_sem_try_wait;
+    t.sem_post = ft_sem_post; t.sem_destroy = ft_sem_destroy;
+    t.mutex_create = ft_mutex_create; t.mutex_lock = ft_mutex_lock;
+    t.mutex_unlock = ft_mutex_unlock; t.mutex_destroy = ft_mutex_destroy;
+    t.yield = ft_yield; t.sleep_ms = ft_sleep_ms; t.core_count = ft_core_count; t.is_main = ft_is_main;
+    return t;
+}
+}  // namespace
+
+TL_TEST(jobs_init_mid_failure_leaves_no_partial_pool, "foundation,jobs,fast") {
+    PlatformConfig pc{};
+    pc.title = sv("tl_tests"); pc.org = sv("tidelock"); pc.app = sv("tests");
+    const PlatformApi* api = platform_headless_init(&pc);
+    TL_ASSERT_NOT_NULL(api);
+    Scratch s[5];
+    Scratch* ptrs[5];
+    for (u32 i = 0u; i < 5u; ++i) {
+        TL_ASSERT_EQ(scratch_init(&s[i], (NameHash)(0x7100u + i), 1u << 20, &api->vmem), ERR_OK);
+        ptrs[i] = &s[i];
+    }
+    FailingThread ft{};
+    ft.real = &api->thread;
+    ThreadApi proxy = ft_table(&ft);
+    JobsConfig cfg{};
+    cfg.thread = &proxy; cfg.scratch = ptrs; cfg.scratch_count = 5u;
+    cfg.worker_count = 4u; cfg.stack_bytes = 0u; cfg._pad0 = 0u;
+
+    // 300 failing inits > the headless SemRec[256] and ThreadRec[64] tables: if any teardown
+    // leaked a semaphore or a thread, the tables exhaust mid-loop and a later iteration returns
+    // a different way - so "every iteration behaves identically AND a real init still works
+    // afterwards" is a leak check against the real impl, not a bookkeeping assertion.
+    Jobs j{};
+    for (u32 rep = 0u; rep < 300u; ++rep) {
+        // Refuse the 3rd semaphore (after `done` + wake[0]): mid-loop, some created, some not.
+        ft.sem_creates = 0u; ft.fail_sem_at = 3u;
+        ft.thread_creates = 0u; ft.fail_thread_at = 0u;
+        TL_EXPECT_EQ(jobs_init(&j, &cfg), ERR_JOBS_THREAD);
+        TL_EXPECT_EQ(jobs_worker_count(&j), 0u);       // memset: no partial pool readable
+        // Refuse the 3rd thread: every semaphore and two live workers must be torn down, joined
+        // and destroyed - the deepest failure path jobs_init has.
+        ft.sem_creates = 0u; ft.fail_sem_at = 0u;
+        ft.thread_creates = 0u; ft.fail_thread_at = 3u;
+        TL_EXPECT_EQ(jobs_init(&j, &cfg), ERR_JOBS_THREAD);
+        TL_EXPECT_EQ(jobs_worker_count(&j), 0u);
+    }
+    // The tables took no damage: a real 4-worker pool comes up on the same platform and RUNS.
+    ft.sem_creates = 0u; ft.fail_sem_at = 0u; ft.thread_creates = 0u; ft.fail_thread_at = 0u;
+    TL_ASSERT_EQ(jobs_init(&j, &cfg), ERR_OK);
+    u64 partial[8] = {};
+    u8 visit[512] = {};
+    SumWork w{};
+    w.partial = partial; w.visit = visit; w.trace = nullptr;
+    w.seed = 0xFA11ull; w.claim_index = 0u; w.n = 512u; w.chunks = 8u; w._pad0 = 0u;
+    parallel_for(&j, 512u, 64u, jobs_sum_chunk, &w);
+    TL_EXPECT_EQ(w.claim_index, 8u);
+    TL_EXPECT_EQ(jobs_flat_total(512u, 0xFA11ull),
+                 partial[0] + partial[1] + partial[2] + partial[3] +
+                 partial[4] + partial[5] + partial[6] + partial[7]);
+    jobs_shutdown(&j);
+
+    for (u32 i = 0u; i < 5u; ++i) { api->vmem.release(api->vmem.ctx, s[i].a.base, s[i].a.reserved); }
+    platform_headless_shutdown(api);
+}
+
+// -------------------------------------------------------------------------------------------
+// R-6's clamp, at core counts this machine cannot produce: jobs_default_worker_count reads ONLY
+// core_count, so a stub table is the honest fixture - the 33+-core case is exactly the one the
+// clamp exists for and exactly the one a real-platform test can never reach.
+// -------------------------------------------------------------------------------------------
+namespace {
+u32 stub_core_count(void* ctx) { return *(const u32*)ctx; }
+}  // namespace
+
+TL_TEST(jobs_default_worker_count_clamps, "foundation,jobs,fast") {
+    u32 cores = 0u;
+    ThreadApi stub{};
+    stub.ctx = &cores;
+    stub.core_count = stub_core_count;
+    const u32 cases[6][2] = { { 0u, 0u }, { 1u, 0u }, { 2u, 1u }, { 32u, 31u }, { 33u, 31u }, { 256u, 31u } };
+    for (u32 i = 0u; i < 6u; ++i) {
+        cores = cases[i][0];
+        TL_EXPECT_EQ(jobs_default_worker_count(&stub), cases[i][1]);
+        TL_EXPECT_LE(jobs_default_worker_count(&stub), (u32)JOBS_MAX_WORKERS);
+    }
 }
