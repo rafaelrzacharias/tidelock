@@ -9,11 +9,12 @@
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
-// NOMINMAX: fx.h declares free functions named min/max (docs/FX-PALETTE.md); windows.h's raw
-// min/max macros mangle those declarations in any TU that includes both (found by the W1
-// containers lane, whose tests are the first to include both this fixture and an fx-family
-// header). Fixed here, not with a workaround in the including TU, since any future test pairing
-// the two would hit the same break.
+// NOMINMAX before EVERY <windows.h> in the tree, not just this one (ruled 2026-08-24, TODO.md R6;
+// checked by tools/audit/includes.py). fx.h declares free functions named min/max
+// (docs/FX-PALETTE.md) and windows.h's raw macros of the same name mangle those declarations in
+// any TU that reaches both - which is how this line got here in the first place, as a one-site fix
+// after the W1 containers lane paired this fixture with an fx-family header. It stays because the
+// rule requires it here, not because this file is special.
 #define NOMINMAX
 #include <windows.h>
 

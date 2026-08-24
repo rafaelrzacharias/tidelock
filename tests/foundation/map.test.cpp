@@ -213,3 +213,69 @@ TL_TEST(map_grow_zeroes_state_on_a_dirty_arena, "foundation,containers,edge,fast
     TL_EXPECT_EQ(map_count(&m), (u32)100);
     TL_EXPECT_TRUE(map_get(&m, 99999u) == nullptr);
 }
+
+// R2 (RULED 2026-08-24, TODO.md; docs/MEMORY.md §1.2, docs/CONTAINERS.md §3): a fixed-mode Map is
+// the enforcement of "any container on an ARENA_HASHED arena is sized at init". Two halves, both
+// needed: this one proves a map sized at init serves its FULL specified load factor without ever
+// touching its arena again (a fixed mode that fatals early would be enforcement by accident), and
+// map_fixed_overflow_is_fatal proves the insert past it dies.
+//
+// The load bar is exact, not approximate: map_put grows when (count + 1) * 4 > cap * 3, so a
+// cap-16 table accepts exactly 12 = 0.75 * 16 entries and the 13th is the one that would grow.
+TL_TEST(map_fixed_serves_its_full_load_factor_without_growing, "foundation,containers,mem,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, "test.map_fixed"_id, 4ull * 1024 * 1024, 0, &api), ERR_OK);
+    Map<u32, u32> m;
+    map_init_fixed(&m, &arena, 16u);
+    TL_EXPECT_EQ(m.cap, (u32)16);
+    TL_EXPECT_TRUE(m.arena == nullptr);   // Array<T>::grow_arena's shape: null = fixed
+
+    // Every byte this Map will ever own is already below `used` - nothing it does from here can
+    // orphan a block, which is the property that makes it legal on a hashed arena.
+    u64 mark_after_init = arena_mark(&arena);
+
+    for (u32 i = 0; i < 12u; ++i) { map_put(&m, i + 1u, (i + 1u) * 7u); }
+    TL_EXPECT_EQ(map_count(&m), (u32)12);
+    TL_EXPECT_EQ(m.cap, (u32)16);                          // never rehashed
+    TL_EXPECT_EQ(arena_mark(&arena), mark_after_init);     // and never pushed
+
+    for (u32 i = 0; i < 12u; ++i) {
+        u32* v = map_get(&m, i + 1u);
+        TL_ASSERT_NOT_NULL(v);
+        TL_EXPECT_EQ(*v, (i + 1u) * 7u);
+    }
+    // A remove frees a slot, and refilling it does not grow: the fixed shape survives churn.
+    TL_EXPECT_TRUE(map_remove(&m, 6u));
+    TL_EXPECT_EQ(map_count(&m), (u32)11);
+    map_put(&m, 1u, 999u);                     // overwrite (see the note below on why here)
+    TL_EXPECT_EQ(*map_get(&m, 1u), (u32)999);
+    TL_EXPECT_EQ(map_count(&m), (u32)11);
+    map_put(&m, 100u, 55u);                    // refill, back to the full load
+    TL_EXPECT_EQ(map_count(&m), (u32)12);
+    TL_EXPECT_EQ(*map_get(&m, 100u), (u32)55);
+    TL_EXPECT_EQ(arena_mark(&arena), mark_after_init);
+    TL_EXPECT_EQ(m.cap, (u32)16);
+
+    // NOTE, and the reason the overwrite above sits at count 11 rather than 12: map_put tests the
+    // grow condition BEFORE it probes, so an OVERWRITE of a present key at exactly the full load
+    // takes the grow path even though it needs no new slot. On a growing Map that is a spurious
+    // rehash; on a fixed one it is a TL_FATAL for an operation that adds nothing. Inherited from
+    // the reviewed grow condition, out of this lane's scope, filed in TODO.md against the next
+    // review sweep - not silently worked around here.
+}
+
+// The other half. TL_FATAL fires in EVERY tier (unlike TL_ASSERT), so this row has no dev-only
+// skip - it runs in a child process on all four, per docs/TESTING.md §9.1.
+TL_TEST_EXPECT_FATAL(map_fixed_overflow_is_fatal, "foundation,containers,fatal") {
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    // TL_ASSERT_EQ, not a bare `if`: a failed setup returns, the child exits 0, and the runner
+    // scores this row FAIL rather than letting it pass vacuously (array_fixed_overflow_is_fatal's
+    // precedent).
+    TL_ASSERT_EQ(vmem_arena_init(&arena, "test.map_fixed_of"_id, 4ull * 1024 * 1024, 0, &api), ERR_OK);
+    Map<u32, u32> m;
+    map_init_fixed(&m, &arena, 16u);
+    for (u32 i = 0; i < 12u; ++i) { map_put(&m, i + 1u, i); }   // the full 0.75 load: legal
+    map_put(&m, 13u, 13u);   // the insert that would grow: TL_FATAL, never returns
+}

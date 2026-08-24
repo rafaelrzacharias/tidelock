@@ -20,6 +20,10 @@ Gates, all blocking:
   6. header contracts: a public header opens with a contract block naming its spec section, and
      every public function - declaration, inline definition or template - carries a contract
      comment of its own
+  7. NOMINMAX before every <windows.h>, in src/ AND tests/ (docs/LESSONS.md; ruled 2026-08-24).
+     Gate 1 confines windows.h to src/platform and the two impl_* dirs, and tests/ may spell it
+     under docs/TESTING.md §8 R-2 - so the sites are enumerable, which is what makes this
+     checkable at all. This is the ONE gate that walks tests/ as well as src/.
 
 Comments and string literals are blanked before any token check, so prose about floats does not
 fail a sim header.
@@ -675,6 +679,44 @@ def check_file(root, path, nondet, tooling, errors):
                               "(docs/CPP-SUBSET.md §6): %s" % (rel, idx + 1, unit[:60]))
 
 
+# --- gate 7: NOMINMAX before every <windows.h> ---------------------------------------------
+# windows.h's raw min/max macros mangle any same-named declaration that follows them, and fx.h
+# declares free functions `min`/`max` (docs/FX-PALETTE.md). A TU that reaches both breaks with
+# "too many arguments to function-like macro invocation" pointing at an fx template - a message
+# that names neither windows.h nor min/max, which is why this cost a build cycle to find
+# (LESSONS.md). The root-cause fix would be renaming fx's min/max, and it was REJECTED (ruled
+# 2026-08-24, TODO.md R6): those spellings are pinned across FX-PALETTE.md and ALLOY.md, and
+# churning a doc-visible vocabulary to dodge a Windows macro is the wrong trade. So the rule is
+# preprocessor-side and absolute - every <windows.h> in the tree is preceded by #define NOMINMAX
+# in the same file - and this is the gate that keeps it true for files nobody has paired with an
+# fx header YET. Per-file by design: it does not chase transitive includes, and it does not need
+# to, because gate 1 plus TESTING.md §8 R-2 mean windows.h is spelled in a handful of known TUs.
+NOMINMAX_ROOTS = ("src", "tests")
+# Case-insensitive: the Windows filesystem is, so <Windows.h> resolves to the same header and
+# carries the same macros.
+WINDOWS_H_INCLUDE = re.compile(r'^\s*#\s*include\s*<\s*[Ww][Ii][Nn][Dd][Oo][Ww][Ss]\.[Hh]\s*>')
+DEFINE_NOMINMAX = re.compile(r'^\s*#\s*define\s+NOMINMAX\b')
+
+
+def check_nominmax(root, path, errors):
+    """Fails if the file includes <windows.h> with no `#define NOMINMAX` on an earlier line."""
+    rel = os.path.relpath(path, root).replace(os.sep, "/")
+    try:
+        lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+    except OSError:
+        return
+    defined_at = -1
+    for i, line in enumerate(lines, 1):
+        if defined_at < 0 and DEFINE_NOMINMAX.match(line):
+            defined_at = i
+        if WINDOWS_H_INCLUDE.match(line) and defined_at < 0:
+            errors.append("%s:%d: <windows.h> with no `#define NOMINMAX` above it in this file - "
+                          "its raw min/max macros mangle fx.h's free functions of the same name in "
+                          "any TU that reaches both, and the error points at fx, not at this line "
+                          "(docs/LESSONS.md; ruled 2026-08-24, TODO.md R6)" % (rel, i))
+            return   # one report per file: the rest of the file's includes are the same defect
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", required=True)
@@ -689,6 +731,19 @@ def main():
             if name.endswith(SCAN_EXT):
                 scanned += 1
                 check_file(a.root, os.path.join(dirpath, name), nondet, tooling, errors)
+    # Gate 7 alone also walks tests/ - windows.h is legal there (docs/TESTING.md §8 R-2) and the
+    # break it causes is a test-tree break as often as a src/ one. Counted separately so `scanned`
+    # keeps meaning "files the src/ gates saw".
+    nominmax_scanned = 0
+    for sub in NOMINMAX_ROOTS:
+        for dirpath, _dirs, files in os.walk(os.path.join(a.root, sub)):
+            for name in sorted(files):
+                if name.endswith(SCAN_EXT):
+                    nominmax_scanned += 1
+                    check_nominmax(a.root, os.path.join(dirpath, name), errors)
+    if nominmax_scanned == 0:
+        errors.append("<tree>:0: the NOMINMAX gate scanned no files at all - a filter that selects "
+                      "nothing must be an error, not a clean run (docs/LESSONS.md)")
     for e in errors:
         print("ERROR " + e)
     print("includes: %d files checked, %d violations" % (scanned, len(errors)))

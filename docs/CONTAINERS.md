@@ -77,7 +77,13 @@ the same relative insertion order, so nothing about a *deleted* key survives in 
 `map_init`/`map_grow` zero the blocks they push (never assume `arena_push` returns zeros — it does
 so only above `high_water` or under `ARENA_ZERO_ON_PUSH`) and `map_remove` zeroes the slot it
 empties. A **growing** `Map` orphans its old blocks below the arena's `used`, so its arena must not
-be `ARENA_HASHED` (W1 containers review; `TODO.md` carries the ruling request). Walk order is deterministic per insertion sequence but **order-fragile across
+be `ARENA_HASHED` — **fixed-shape on hashed arenas, not "never"** (ruled 2026-08-24): `Map` carries
+`Array`'s fixed mode, `map_init_fixed(m, arena, cap)`, which pushes the same three blocks and then
+drops the grow arena, so the insert that would grow `TL_FATAL`s ("fixed map overflow") in every
+tier instead. That is the only honest enforcement available — a `Map` cannot read its arena's
+registry flags, but a fixed-mode `Map` cannot grow anywhere. Size for the load: capacity is
+`round_pow2(max(cap, 2))` and the usable count is `0.75 ×` that. The rule this implements is
+`MEMORY.md` §1.2 ("every container on an `ARENA_HASHED` arena is sized at init"). Walk order is deterministic per insertion sequence but **order-fragile across
 refactors** → `Map` is for registries, editor, caches — anything whose order outlives the binary
 uses a sorted walk. **Sim code keys on integers and never iterates a `Map`**
 (`DETERMINISM.md` §2.7; LESSONS finding G).
@@ -177,25 +183,45 @@ template <typename T, typename H> struct SlotMap {
     u32        live_count; u32 quarantined;
 };
 H    slotmap_insert(SlotMap*, const T* v);  // pop free_list (LIFO) else slots.count++; gen stays; live.set; memcpy; return handle_make(idx, gen[idx])
+bool slotmap_alive (const SlotMap*, H h);   // the same four terms, PURE and assert-free in every tier: false for null, gen 0, out-of-range idx, dead slot, stale gen, quarantined slot
 T*   slotmap_get   (SlotMap*, H h);         // idx < slots.count && live.test(idx) && gen[idx] == handle_gen(h) ? &slots[idx] : null (TL_ASSERT in debug on stale)
 bool slotmap_remove(SlotMap*, H h);         // get → memset(slot, 0) → live.clear → if gen == GEN_MAX { quarantined++ /* never pushed to free_list */ } else { gen++; free_list push }
 // iteration: for (u32 i = 0; i < slots.count; ++i) if (live.test(i)) …   — never 0..live_count
 ```
+
+`slotmap_alive` is the queryable-absence half of the error model (`CPP-SUBSET.md` §3) and
+`slotmap_get`'s assert is the bug-signal half: "is the handle I stored last tick still alive?" is a
+normal-flow question and must not abort, while dereferencing a handle the caller has *already*
+established is live and finding it stale is a bug. Without it `if (slotmap_get(h))` is the only
+idiom available and it aborts in dev on the ordinary case — the ECS lane's whole stale-reference
+path. The `idx < slots.count` term short-circuits ahead of `live.test(idx)`, whose `TL_CHECK` is
+live in every tier. A quarantined slot is the case only the live bit catches: the wrap remove
+freezes `gen[idx]` at `GEN_MAX`, so the retired handle's generation still matches.
+(Added by the W2-prep closeout lane, 2026-08-24; RULED 2026-08-24, `TODO.md` R1.)
 
 ### 8.3 `Map<K,V>` (`map.h`)
 
 Open addressing, linear probing, power-of-two capacity, load ≤ 0.75, backward-shift deletion.
 `K` is `u32`/`u64`/`NameHash` (static_assert integral); hash = `tl_hash64(&k, sizeof k, TL_HASH_SEED)`.
 Storage: parallel `Array<K> keys`, `Array<V> vals`, `Array<u8> state` (0 empty, 1 full) on the
-owning arena; grow by rehash into a fresh `arena_push` (registries and editor only — never in a
-tick; `TL_ASSERT(!in_tick)` in debug). API: `map_init(arena, cap)`, `map_put`, `map_get → V*`,
-`map_remove`, `map_count`, `map_iter(&it) → K,V*` (order-fragile by contract; `DETERMINISM.md`
-§2.7).
+owning arena; grow by rehash into a fresh `arena_push` (registries and editor only — **never in a
+tick**, which is the ArenaGuard's clause to enforce and not `map.h`'s: `MEMORY.md` §8.4. Rev 1
+specified `TL_ASSERT(!in_tick)` here; no `in_tick` facility exists in foundation for a container to
+read, and none is needed — a growing container's `arena_push` moves its arena's `used`, which is
+precisely what `guard_tick_end` already fatals on. Moved, not dropped; ruled 2026-08-24). API: `map_init(arena, cap)`, `map_init_fixed(arena, cap)`
+(§3 — retains no grow arena; `map_grow` `TL_FATAL`s "fixed map overflow" in every tier), `map_put`,
+`map_get → V*`, `map_remove`, `map_count`, `map_iter(&it) → K,V*` (order-fragile by contract;
+`DETERMINISM.md` §2.7).
 
 ### 8.4 `SortedMap<K,V>` / `SortedSet<K>` (`sorted.h`)
 
-`Array<K> keys` + `Array<V> vals` kept sorted; `lower_bound` binary search; insert = memmove;
-`sorted_iter` walks `0..count`. Integral `K` only. **Keys are unique — there is no tie:**
+`Array<K> keys` + `Array<V> vals` kept sorted; `lower_bound` binary search; insert = memmove.
+`bool sorted_map_iter(const SortedMap*, u32* it, K*, V*)` walks `0..count` in **exactly
+`map_iter`'s shape** (§8.3): `it` is a plain index in/out, pass 0 to start, the return value bounds
+the loop, and it returns `false` with the out-params untouched at the end — running off the end is
+how a walk terminates, not a bug, so there is no assert. (Ruled 2026-08-24: one iterator idiom per
+module. Rev 1 returned `void` and asserted `*it < count`, which made the caller bound the loop and
+gave `sorted.h` a second idiom for the Luau-facing lane to trip over.) Integral `K` only. **Keys are unique — there is no tie:**
 `sorted_map_put` on a present key overwrites its value and leaves `count` unchanged;
 `sorted_set_insert` on a present key returns `false` and changes nothing. (Stated by the W1
 containers review; rev 1 gave the operations but not the duplicate policy the tests must pin.)

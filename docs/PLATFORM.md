@@ -158,6 +158,17 @@ Exactly one platform lib links into an exe: `tidelock`, `tl_hovel` → sdl3; `tl
 `--render=software` goldens). CI grep: `SDL_`, `windows.h`, `unistd.h`, `sys/mman.h`, `bcrypt.h`,
 `imgui_impl_` appear under `src/` only in `src/platform/`.
 
+**`#define NOMINMAX` precedes every `<windows.h>` in the tree** — `src/platform/` and `tests/`
+alike (ruled 2026-08-24). `windows.h`'s raw `min`/`max` macros mangle any same-named declaration
+below them, and `fx.h` declares free functions `min`/`max` (`FX-PALETTE.md`); a TU reaching both
+fails with "too many arguments to function-like macro invocation" pointing at an `fx` template,
+naming neither `windows.h` nor `min`/`max`. Renaming `fx`'s `min`/`max` was rejected — those
+spellings are pinned across `FX-PALETTE.md` and `ALLOY.md`, and churning a doc-visible vocabulary
+to dodge a Windows macro is the wrong trade. The grep above is what makes this enforceable: the
+sites are enumerable. `tools/audit/includes.py` gate 7 fails any file that includes `<windows.h>`
+with no `#define NOMINMAX` on an earlier line, and it is the one gate that walks `tests/` as well
+as `src/` (`TESTING.md` §5).
+
 ### 9.2 Contract structs
 
 ```cpp

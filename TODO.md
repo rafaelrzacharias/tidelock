@@ -477,6 +477,22 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 fixed with tests in `W1 containers review 1..4`; the ruling requests are below. Baseline was
 198/194/0/4; after the review 221/217/0/4, `tl_audit` green, `docaudit` 0 errors.
 
+**W2-prep closeout (2026-08-24, `w2-prep`):** the five rulings below (R1, R2, R3, R5, R6) are
+implemented, one commit each, tests and the doc edit in the same commit. These are POST-review
+edits to reviewed code — **they fold into the next review sweep**, they are not covered by the
+review above. R4 and R7 needed no code.
+
+- [ ] **Out of scope, found by this lane's gate runs: `platform.entropy_nonrepeat` is a real
+      statistical flake, not a platform bug** (`tests/platform/entropy.test.cpp:38-51`). Its
+      histogram check demands all 256 buckets sit within 4σ of uniform over N*LEN = 32000 draws;
+      one-sided per-bucket tail is ~6.3e-5, so P(some bucket outside) ≈ 1 - (1 - 6.3e-5)^256 ≈
+      **1.6% per run** even for a perfect CSPRNG. Observed once in ~8 four-tier runs (ship-win,
+      `within` false, PASSED on serial replay). The runner correctly scores a pool-fail /
+      replay-pass as FAIL (`TESTING.md` §6), so this costs a re-run each time it fires. Fix is the
+      platform lane's: widen to a bound derived from a stated per-run false-positive budget
+      (Bonferroni over 256 buckets — ~4.8σ for 1e-4), or make the draw deterministic for the
+      histogram leg. Reproducer: run `tl_tests --isolate` on any tier ~60 times.
+
 The two structural findings: **Array and Map were making hashed bytes a function of history**
 (D1–D3), and **every "two instances" test fed both instances the same op sequence** (D6), so none
 of them could have caught D1–D3. `sorted.test.cpp` was the one file that got the determinism shape
@@ -567,7 +583,7 @@ right; it is the template the others now follow.
 
 ### Ruling requests (not decided here)
 
-- **R1 — `slotmap_get` has no non-asserting liveness query, so "is this handle still alive?" is
+- [x] **R1 — `slotmap_get` has no non-asserting liveness query, so "is this handle still alive?" is
   un-askable in dev tiers.** `slotmap.h:128` fires `TL_ASSERT(false)` on any stale-but-in-range
   handle, per §8.2. But "the entity I referenced last tick was destroyed" is the *normal* ECS
   question, and `if (slotmap_get(h))` is the idiomatic way to ask it — which aborts in dev. The
@@ -581,7 +597,12 @@ right; it is the template the others now follow.
   error model as designed (CPP-SUBSET §3): absence is queryable, a stale deref is a bug.
   Implementation: the W2-prep closeout lane, with the edge matrix (null handle, gen 0, wrapped
   slot, out-of-range index) and CONTAINERS.md §8.2 updated in the same commit.
-- **R2 — may a `Map` live on an `ARENA_HASHED` arena at all?** A growing `Map` orphans its old
+  **DONE 2026-08-24 (w2-prep):** `slotmap_alive` shipped; `slotmap_alive_edge_matrix` pins all
+  eight cases (the quarantined one is the only case the live bit catches alone — the wrap remove
+  freezes `gen[idx]` at `GEN_MAX`, so the retired handle's generation still matches); the
+  gen-comparison workaround in `slotmap_lifo_reuse_and_zeroed_dead_slot` is replaced by the
+  direct query; `CONTAINERS.md` §8.2 carries the signature and the why.
+- [x] **R2 — may a `Map` live on an `ARENA_HASHED` arena at all?** A growing `Map` orphans its old
   keys/vals/state blocks below the arena's `used`, so they are hashed forever and the hash encodes
   growth history. Stated in `map.h`'s contract block and `CONTAINERS.md` §3 as a derived constraint
   (bump allocation + "hashes cover `[base, used)`"), not a new decision. The open question is
@@ -596,7 +617,25 @@ right; it is the template the others now follow.
   insert that would grow) - which is also the only honest enforcement, since a fixed-mode Map
   cannot grow anywhere. MEMORY.md §1.2 + CONTAINERS.md §3 carry the ruling. Implementation:
   the W2-prep closeout lane.
-- **R3 — `CONTAINERS.md` §8.3 specifies `TL_ASSERT(!in_tick)` on `map_grow` and it is not
+  **DONE 2026-08-24 (w2-prep):** `map_init_fixed` pushes the same three blocks and drops the grow
+  arena; the guard sits at the single growth choke point (`map_grow`, so a direct call is covered
+  too) and `TL_FATAL`s "fixed map overflow" in every tier.
+  `map_fixed_serves_its_full_load_factor_without_growing` proves a cap-16 map takes all 12 entries
+  (0.75 × 16, the exact bar the grow condition sets) with `arena_mark` unmoved from init;
+  `map_fixed_overflow_is_fatal` proves the 13th dies, no dev-only skip.
+
+- [ ] **Found while implementing R2, NOT fixed (out of scope, for the next review sweep):
+      `map_put` tests the grow condition before it probes, so an OVERWRITE at exactly the full
+      load takes the grow path.** `map.h:107` — `if ((count + 1) * 4 > cap * 3) map_grow(m)` runs
+      whether or not `k` is already present. On a growing `Map` that is a spurious rehash of a
+      table that gained no entry; on a **fixed** `Map` it is a `TL_FATAL` for an operation that
+      adds nothing, which is a live trap for exactly the sized-at-init callers R2 just mandated
+      (repro: `map_init_fixed(cap 16)`, insert 12 keys, `map_put` any of those 12 again → fatal).
+      Not fixed here because probing before growing changes *when* a growing `Map` rehashes, and
+      therefore its bucket layout — reviewed behaviour, outside this closeout's contract. Fix is
+      one reorder (probe; grow and re-probe only if the slot is empty) plus a test for each mode.
+      Pinned meanwhile by a NOTE in `map_fixed_serves_its_full_load_factor_without_growing`.
+- [x] **R3 — `CONTAINERS.md` §8.3 specifies `TL_ASSERT(!in_tick)` on `map_grow` and it is not
   implemented**, because no `in_tick` facility exists in foundation yet. Either the ArenaGuard's
   barrier window becomes readable from `map.h` or the clause moves to the guard. Filed rather than
   improvised.
@@ -604,6 +643,11 @@ right; it is the template the others now follow.
   the guard's; map.h cites it. With R2's fixed-shape rule, growth exists only on non-hashed
   arenas, where GROWS_AT_BARRIER is the discipline the guard enforces. Doc move now (W2-prep
   closeout); the guard hook lands when the window API exists (the guard owner's lane).
+  **DONE 2026-08-24 (w2-prep), doc-only:** `MEMORY.md` §8.4 is the clause's home and states why the
+  guard needs no new `in_tick` facility (a grow's `arena_push` moves `used`, which `guard_tick_end`
+  already fatals on by arena name); `CONTAINERS.md` §8.3 says "moved, not dropped" instead of
+  claiming an assert that was never implementable; `map.h`'s contract block cites §8.4. The guard
+  hook itself stays filed for the guard owner's lane — nothing to build here.
 - [x] **R4 — `CANON.md:22` says Entity gets "1024 gens"; the slot actually yields 1023.**
   (CLOSED 2026-08-24: CANON corrected to "1023 usable gens" at the containers wave merge.)
   Original finding: Generation 0
@@ -611,13 +655,20 @@ right; it is the template the others now follow.
   generations 1..1023 are issued and the slot retires — 1023 reuses, not 1024. No code states the
   wrong number, so `docaudit` is silent, but the ECS lane will size its churn budget from that row.
   One-word CANON correction, owned by whoever owns the Handle rows.
-- **R5 — `sorted_map_iter` (`sorted.h:106`) asserts `*it < count` and returns `void`**, so the
+- [x] **R5 — `sorted_map_iter` (`sorted.h:106`) asserts `*it < count` and returns `void`**, so the
   caller must bound the loop itself, unlike `map_iter` which returns `bool`. §8.4 says only
   "`sorted_iter` walks `0..count`". Two iterators with two shapes in one module is a papercut the
   Luau-facing lane will hit; align them or write the difference down.
   **RULED 2026-08-24 (Rafael): align on `map_iter`'s shape** - `sorted_iter` returns bool, one
   iterator idiom per module. CONTAINERS.md §8.4 updated with the change (W2-prep closeout).
-- **R6 — `fx.h:247,250` declare `min`/`max` as free functions in the global namespace.** That is the
+  **DONE 2026-08-24 (w2-prep):** `bool sorted_map_iter(const SortedMap*, u32* it, K*, V*)`, no
+  assert — running off the end is how a walk terminates. `sorted_map_iter_returns_bool_like_map_iter`
+  is the template's **first call site anywhere in the tree**, so nothing had type-checked it before
+  (LESSONS: "a template with no call site has never been compiled"); it pins the empty map, the
+  sorted walk with the cursor stopping at `count`, idempotent false past the end with the
+  out-params untouched, and a cursor started beyond `count`. There was no existing caller pattern
+  to re-read — the "one existing caller" this lane was told to check does not exist.
+- [x] **R6 — `fx.h:247,250` declare `min`/`max` as free functions in the global namespace.** That is the
   root cause the `NOMINMAX` fix in `tests/foundation/vmem_test_api.h` treats at the symptom end: any
   TU that reaches a Windows header before that fixture (or any future non-test TU pairing the two)
   hits the same mangled-declaration break, and `NOMINMAX` only helps where it is defined first. The
@@ -629,6 +680,17 @@ right; it is the template the others now follow.
   to platform/ and tests, so the sites are enumerable, and includes.py gains the check
   (windows.h not preceded by NOMINMAX in the same file = violation) with fixtures, gate-edit
   rule as always. W2-prep closeout.
+  **DONE 2026-08-24 (w2-prep):** nine `<windows.h>` sites in the tree; seven in `src/platform/`
+  gained `#define NOMINMAX` and two (`tests/foundation/vmem_test_api.h`, `tests/runner/main.cpp`)
+  already had it. `includes.py` gate 7 checks it and is the **one gate that walks `tests/`** as
+  well as `src/`, with a zero-files-scanned check beside it. Five selftest fixtures, both ways:
+  windows.h with no define where windows.h is otherwise legal, a define placed AFTER the include
+  (order is the whole rule), a `tests/` file (proves the walk), plus the two clean shapes (a
+  non-adjacent define, and a `tests/` file that is correct). Mutation-verified: stubbing
+  `check_nominmax` fails exactly those three negatives and nothing else. The `vmem_test_api.h`
+  define is NOT redundant and was not deleted — that file is one of the nine sites; only its
+  rationale comment changed, from "fixed here as a one-site cross-lane patch" to "the rule
+  requires it here".
 - **R7 — `Span<T>`, `StrView` and `Interner` carry implicit tail padding** (4 bytes each). None is
   registered state today, and `StrView`'s shape is pinned by `CANON.md`, so nothing was changed.
   If any of them ever enters a hashed arena, `CPP-SUBSET.md` §5 applies and CANON's `StrView` row

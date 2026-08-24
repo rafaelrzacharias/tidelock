@@ -10,16 +10,22 @@
 //   must outlive the binary (saves, wire, Luau-visible) uses SortedMap/SortedSet instead.
 // Invariants: load factor <= 0.75; tombstone-free (backward-shift deletion, docs/CONTAINERS.md
 //   §8.3); hash = tl_hash64(&k, sizeof k, TL_HASH_SEED). Growth is a full rehash into a fresh
-//   arena_push - registries and editor only, TL_ASSERT(!in_tick) in debug (never in a tick).
+//   arena_push - registries and editor only, NEVER inside a tick. That clause is the ArenaGuard's
+//   to enforce, not this header's (docs/MEMORY.md §8.4, ruled 2026-08-24): map.h has no way to see
+//   the tick window, and needs none - a grow's arena_push moves the arena's `used`, which is what
+//   guard_tick_end already TL_FATALs on, by arena name, for every container at once.
 //   map_init/map_grow zero the three blocks they push (never assume arena_push returns zeros -
 //   it does so only above high_water or under ARENA_ZERO_ON_PUSH), and map_remove zeroes the
 //   slot it empties.
 // Arena: a growing Map ORPHANS its old keys/vals/state blocks inside the arena, below `used`, so
 //   the arena a Map may grow in must NOT be ARENA_HASHED - orphaned blocks would be hashed
-//   forever and the hash would encode growth history. A never-growing Map (sized at init) is
-//   fine anywhere. Derived from bump allocation + "hashes cover [base, used)"
-//   (docs/MEMORY.md §1.2); stated by the W1 containers review, TODO.md carries the ruling
-//   request for whether Map should be usable on hashed arenas at all.
+//   forever and the hash would encode growth history. Derived from bump allocation + "hashes
+//   cover [base, used)" (docs/MEMORY.md §1.2). RULED 2026-08-24 (TODO.md R2): fixed-shape on
+//   hashed arenas, not "never" - any container on an ARENA_HASHED arena is SIZED AT INIT, and
+//   Map carries Array's fixed mode to make that the only honest enforcement (a Map cannot see
+//   its arena's registry flags, but a fixed-mode Map cannot grow anywhere). map_init_fixed
+//   leaves `arena` null; the insert that would grow TL_FATALs. docs/MEMORY.md §1.2 and
+//   docs/CONTAINERS.md §3 carry the ruling.
 // Determinism: bucket order is a pure function of the insertion sequence and the pinned hash
 //   (docs/DETERMINISM.md §4); this is exactly the "order-fragile" property the header above
 //   warns about - two instances fed the same op sequence produce identical bucket layout.
@@ -42,7 +48,7 @@ struct Map {
     u8* state;        // 0 empty, 1 full (tombstone-free: backward-shift deletion)
     u32 cap;           // power of two
     u32 count;
-    VMemArena* arena;  // grow: full rehash into a fresh arena_push from this arena
+    VMemArena* arena;  // grow: full rehash into a fresh arena_push from this arena. null = fixed (Array<T>::grow_arena's shape).
 };
 
 // The doc's own instantiation constraint (docs/CPP-SUBSET.md §2): integral or NameHash keys only.
@@ -58,7 +64,8 @@ inline u32 map_round_pow2(u32 n) {
 }
 
 // Pushes the three parallel arrays (keys/vals/state) from `arena` at capacity round_pow2(max(cap,
-// 2)). Init only, never inside a tick.
+// 2)), and keeps `arena` as the GROW arena. Init only, never inside a tick. The arena must not be
+// ARENA_HASHED (see the Arena block above) - use map_init_fixed there.
 template <typename K, typename V>
 void map_init(Map<K, V>* m, VMemArena* arena, u32 cap) {
     static_assert(map_key_ok<K>(), "Map<K,V>: K must be an integral or NameHash key (docs/CONTAINERS.md section 3)");
@@ -80,6 +87,18 @@ void map_init(Map<K, V>* m, VMemArena* arena, u32 cap) {
     m->arena = arena;
 }
 
+// Fixed-shape init: the same three arena_pushes, but `arena` is NOT retained, so the Map can
+// never grow and the insert that would grow TL_FATALs instead - exactly array_init_fixed's shape
+// (docs/CONTAINERS.md §8.1). This is what a Map on an ARENA_HASHED arena uses: it cannot orphan a
+// block below `used`, so the arena's hash stays a function of state rather than of growth history
+// (RULED 2026-08-24, TODO.md R2; docs/MEMORY.md §1.2, docs/CONTAINERS.md §3). Capacity is
+// round_pow2(max(cap, 2)) as always, and the usable load is 0.75 * that - size it accordingly.
+template <typename K, typename V>
+void map_init_fixed(Map<K, V>* m, VMemArena* arena, u32 cap) {
+    map_init(m, arena, cap);
+    m->arena = nullptr;
+}
+
 // The pinned state hash of one key's bytes (docs/DETERMINISM.md §4). Pure, never fails.
 template <typename K> u64 map_hash(K k) { return tl_hash64(&k, sizeof(K), TL_HASH_SEED); }
 
@@ -97,6 +116,7 @@ u32 map_probe(const Map<K, V>* m, K k) {
 }
 
 // Forward declaration: full rehash at double capacity - see the definition below. Never in a tick.
+// TL_FATALs on a fixed-mode Map (map_init_fixed).
 template <typename K, typename V> void map_grow(Map<K, V>* m);
 
 // Inserts or overwrites k -> v. Grows (full rehash) first if load would exceed 0.75.
@@ -179,8 +199,12 @@ bool map_iter(const Map<K, V>* m, u32* it, K* out_k, V* out_v) {
 // Full rehash into a fresh arena_push at double capacity (docs/CONTAINERS.md §8.3 - "grow by
 // rehash into a fresh arena_push", never in a tick). The old block is orphaned in the arena (bump
 // allocation, no free()) - the same tradeoff registries and editor tables already accept.
+// A fixed-mode Map (null arena, map_init_fixed) TL_FATALs here instead, in EVERY tier - the guard
+// sits at the single growth choke point rather than in map_put, so a direct map_grow call is
+// covered too (RULED 2026-08-24, TODO.md R2).
 template <typename K, typename V>
 void map_grow(Map<K, V>* m) {
+    if (m->arena == nullptr) { TL_FATAL("map_grow: fixed map overflow"); }
     u32 old_cap = m->cap;
     K* old_keys = m->keys;
     V* old_vals = m->vals;

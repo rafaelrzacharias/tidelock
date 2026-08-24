@@ -302,6 +302,28 @@ INCLUDE_CASES = [
     ("the os_ prefix grants nothing outside src/platform/", "src/foundation/os_shim.cpp",
      "#include <windows.h>\n",
      "not on the allowlist"),
+    # Gate 7 (ruled 2026-08-24, TODO.md R6). The negative half of the NOMINMAX rule, planted where
+    # windows.h is otherwise perfectly legal - an os_*.cpp in src/platform/ - so the ONLY thing
+    # this fixture can be failing on is the missing #define.
+    ("<windows.h> with no NOMINMAX is a violation even where windows.h is legal",
+     "src/platform/os_nom.cpp",
+     "#define WIN32_LEAN_AND_MEAN\n#include <windows.h>\nvoid os_nom(void) {}\n",
+     "no `#define NOMINMAX`"),
+    # ORDER is the whole content of the rule: a define BELOW the include is exactly the bug, since
+    # the macros are already expanded by then. A gate that only grepped for both tokens would pass
+    # this file and the build would still break.
+    ("NOMINMAX defined AFTER the include does not count",
+     "src/platform/os_nom_late.cpp",
+     "#include <windows.h>\n#define NOMINMAX\nvoid os_nom_late(void) {}\n",
+     "no `#define NOMINMAX`"),
+    # Gate 7 is the one gate that walks tests/ as well as src/ - windows.h is legal there
+    # (docs/TESTING.md §8 R-2) and the break it causes is a test-tree break as often as a src/
+    # one; the shipped instance of this bug was in tests/foundation/vmem_test_api.h. Without this
+    # fixture the walk could quietly cover src/ only and every case above would still pass.
+    ("gate 7 walks tests/ too, not just src/",
+     "tests/foundation/nom_test_api.h",
+     "#include <windows.h>\nstatic inline void nom_probe(void) {}\n",
+     "no `#define NOMINMAX`"),
 ]
 
 # Things that must NOT fire: the gates have to be usable, not just loud.
@@ -371,8 +393,19 @@ INCLUDE_CLEAN = [
     # is_backend_free() must actually grant the exemption it claims: an os_*.cpp directly in
     # src/platform/ (not under impl_sdl3/impl_headless) with a real OS header.
     ("an os_*.cpp in src/platform/ may include a real OS header", "src/platform/os_entropy.cpp",
-     "#include <windows.h>\n"
+     "#define WIN32_LEAN_AND_MEAN\n#define NOMINMAX\n#include <windows.h>\n"
      "void os_entropy_probe(void) {}\n"),
+    # Gate 7's positive half in src/ and in tests/. The src/ one is the fixture above (it carries
+    # the #define now, and would fail this whole clean run without it); these two pin the
+    # remaining shapes: the define does not have to be adjacent to the include, and a file with no
+    # windows.h at all is untouched by the gate.
+    ("NOMINMAX earlier in the file, not adjacent to the include, satisfies gate 7",
+     "src/platform/os_nom_ok.cpp",
+     "#define NOMINMAX\n#include <stdint.h>\n#define WIN32_LEAN_AND_MEAN\n"
+     "#include <windows.h>\nvoid os_nom_ok(void) {}\n"),
+    ("a tests/ file with NOMINMAX before its <windows.h> is clean",
+     "tests/foundation/nom_ok_api.h",
+     "#define NOMINMAX\n#include <windows.h>\nstatic inline void nom_ok(void) {}\n"),
 ]
 
 

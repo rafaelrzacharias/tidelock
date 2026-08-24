@@ -101,13 +101,20 @@ bool sorted_map_remove(SortedMap<K, V>* m, K k) {
     return true;
 }
 
-// Walks the sorted key array 0..count - a pure function of the key set.
+// Walks the sorted key array 0..count - a pure function of the key set. Exactly map_iter's shape
+// (docs/CONTAINERS.md §8.4, ruled 2026-08-24: one iterator idiom per module): `it` is a plain
+// index in/out, pass 0 to start, and the return value bounds the loop -
+// `while (sorted_map_iter(m, &it, &k, &v))`. Returns false (out_k/out_v left untouched) once the
+// walk is done; running off the end is the loop's normal termination, not a bug, so there is no
+// assert. Rev 1 returned void and asserted `*it < count`, which forced every caller to bound the
+// loop itself and made this module's two iterators two different idioms.
 template <typename K, typename V>
-void sorted_map_iter(const SortedMap<K, V>* m, u32* it, K* out_k, V* out_v) {
-    TL_ASSERT(*it < m->keys.count);
+bool sorted_map_iter(const SortedMap<K, V>* m, u32* it, K* out_k, V* out_v) {
+    if (*it >= m->keys.count) { return false; }
     *out_k = m->keys.data[*it];
     *out_v = m->vals.data[*it];
     *it += 1u;
+    return true;
 }
 
 // --- SortedSet<K> --------------------------------------------------------------------------
