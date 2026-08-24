@@ -51,7 +51,9 @@ def fixture_root(tmp, name):
 
 
 # --- includes.py ------------------------------------------------------------------------------
-# Each case: (name, relative path, source, a fragment the failure message must contain).
+# Each case: (name, relative path, source, a fragment the failure message must contain) with an
+# OPTIONAL 5th element, a {rel: text} dict of extra files to plant first - needed when the gate
+# under test is a property of the TREE ("which headers reach entropy.h"), not of one file.
 INCLUDE_CASES = [
     ("f32 alias in a sim TU", "src/sim/a.cpp",
      '#include "foundation/tl_types.h"\nextern const f32 x;\nconst f32 x = 1.0f;\n',
@@ -261,6 +263,33 @@ INCLUDE_CASES = [
     ("core/ including platform/entropy.h is restricted to platform/net/app", "src/core/p.cpp",
      '#include "platform/entropy.h"\n',
      "restricted to platform/net/app"),
+    # ...and the restriction is about the VERB, not the filename. Gating only the literal string
+    # left two live bypasses in this very tree (measured by planting each in src/core/):
+    # platform/os_entropy.h hands out os_entropy_fill_table, and
+    # platform/impl_headless/headless_state.h holds a complete EntropyApi by value. Neither names
+    # entropy.h at the call site. entropy_carriers() closes over "includes entropy.h,
+    # transitively", so the next os_*/impl_* header cannot fall out of a hand-kept list.
+    ("a header that INCLUDES entropy.h is restricted too, not just entropy.h itself",
+     "src/core/q.cpp",
+     '#include "platform/os_entropy.h"\n',
+     'it includes "platform/entropy.h"',
+     {"src/platform/entropy.h":
+          '#pragma once\n// Spec: docs/PLATFORM.md §5\n'
+          '#include "foundation/tl_types.h"\n'
+          'struct EntropyApi { void* ctx; void (*fill)(void*, void*, u32); };\n',
+      "src/platform/os_entropy.h":
+          '#pragma once\n// Spec: docs/PLATFORM.md §5\n'
+          '#include "platform/entropy.h"\n'
+          '// Fills *out with the real OS-backed table.\n'
+          'void os_entropy_fill_table(EntropyApi* out);\n'}),
+    # The os_*.cpp OS-header exemption is scoped to src/platform/ EXACTLY. Its two shipped
+    # fixtures proved "a non-os_ file in src/platform/ still fails" and "an os_*.cpp in
+    # src/platform/ is clean" - but not the other leg: that the "os_" prefix grants nothing
+    # ANYWHERE ELSE. Without this, a foundation or sim TU named os_*.cpp inheriting the exemption
+    # would be a silent hole in the tree's loudest ban.
+    ("the os_ prefix grants nothing outside src/platform/", "src/foundation/os_shim.cpp",
+     "#include <windows.h>\n",
+     "not on the allowlist"),
 ]
 
 # Things that must NOT fire: the gates have to be usable, not just loud.
@@ -336,8 +365,14 @@ INCLUDE_CLEAN = [
 
 
 def test_includes(tmp):
-    for name, rel, src, expect in INCLUDE_CASES:
-        root = fixture_root(tmp, "inc_" + os.path.basename(rel).replace(".", "_"))
+    for n, case in enumerate(INCLUDE_CASES):
+        name, rel, src, expect = case[0], case[1], case[2], case[3]
+        extra = case[4] if len(case) > 4 else {}
+        # Keyed by index, not by the source basename: two cases may plant the same filename, and
+        # a case that plants EXTRA files must not inherit a neighbour's tree.
+        root = fixture_root(tmp, "inc_%03d" % n)
+        for erel, etext in extra.items():
+            write(root, erel, etext)
         write(root, rel, src)
         rc, out = run([sys.executable, os.path.join(AUDIT, "includes.py"), "--root", root])
         record("includes: " + name, rc == 1 and expect in out, out.strip()[:160])
