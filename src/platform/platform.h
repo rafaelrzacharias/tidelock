@@ -21,8 +21,11 @@
 //   the wheel event) is legal because `platform/` is not a sim TU (docs/CPP-SUBSET.md §1).
 // Threading: `draw` is main-thread-only (`TL_ASSERT(thread.is_main)` in the impl, docs/PLATFORM.md
 //   §9.3); every other table may be called from any thread the impl itself creates.
-// Includes: foundation/{tl_types,handle,strview,ring,rect}.h only - never an OS or SDL header
-//   (those live inside impl_sdl3/impl_headless TUs, docs/PLATFORM.md caption).
+// Includes: foundation/{tl_types,handle,strview,ring,rect,span,vmem_api}.h only - never an OS or
+//   SDL header (those live inside impl_sdl3/impl_headless TUs, docs/PLATFORM.md caption).
+//   `VMemApi` itself is `foundation/vmem_api.h`, not redefined here: foundation is a leaf and
+//   `vmem_arena.cpp` calls through the table without including platform.h, so the struct's one
+//   home is the foundation-visible header (TODO.md, W1 mem review "VMemApi triple copy").
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
 #include "foundation/handle.h"
@@ -30,6 +33,7 @@
 #include "foundation/ring.h"
 #include "foundation/rect.h"
 #include "foundation/span.h"
+#include "foundation/vmem_api.h"
 
 // Defined in entropy.h, whose include path is restricted to net/ and app/ (docs/PLATFORM.md §5).
 // Left opaque here so including the contract never exposes the verb.
@@ -147,14 +151,8 @@ struct FileApi {
 
 struct ClockApi { void* ctx; u64 (*ticks)(void* ctx); u64 (*frequency)(void* ctx); u64 (*wall_unix_ms)(void* ctx); };
 
-struct VMemApi {
-    void* ctx;
-    void*   (*reserve)(void* ctx, u64 bytes);
-    ErrCode (*commit)(void* ctx, void* base, u64 bytes);
-    ErrCode (*decommit)(void* ctx, void* base, u64 bytes);
-    void    (*release)(void* ctx, void* base, u64 bytes);
-    u32 page_size; u32 _pad0;
-};
+// VMemApi is foundation/vmem_api.h (included above) - foundation is a leaf and calls through it
+// without seeing platform.h, so its one home is there, not here.
 
 typedef void (*ThreadFn)(void* ctx);
 

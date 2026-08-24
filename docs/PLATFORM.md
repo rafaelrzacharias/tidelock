@@ -125,9 +125,13 @@ surface — still the sdl3 impl, not headless.
 
 Scope: the contract header, two implementations, vendor wiring, tests. `f32`/`f64`, `<math.h>`,
 OS and SDL headers are legal inside `impl_*`/`os_*` TUs only (`CPP-SUBSET.md` §1); `platform.h`
-includes nothing but `foundation/{tl_types,handle,strview,ring,rect}.h`. Every fn-ptr takes its
-table's `void* ctx` first — no static mutable state anywhere in the impls (`CPP-SUBSET.md` §1);
-the impl state is one struct allocated from the platform's own `VMemArena` at init.
+includes nothing but `foundation/{tl_types,handle,strview,ring,rect,span,vmem_api}.h`. `VMemApi`
+is defined once, in `foundation/vmem_api.h` — foundation is a leaf (`ARCHITECTURE.md` §1 rule 1)
+and `vmem_arena.cpp` calls through the table without including `platform.h`, so that is the
+struct's one foundation-visible home (`MEMORY.md` §8.2); `platform.h` includes it rather than
+redefining it. Every fn-ptr takes its table's `void* ctx` first — no static mutable state
+anywhere in the impls (`CPP-SUBSET.md` §1); the impl state is one struct allocated from the
+platform's own `VMemArena` at init.
 
 ### 9.1 File layout — `src/platform/`
 
@@ -232,6 +236,7 @@ struct FileApi { void* ctx;
 struct ClockApi { void* ctx; u64 (*ticks)(void* ctx); u64 (*frequency)(void* ctx); u64 (*wall_unix_ms)(void* ctx); };
 struct VMemApi  { void* ctx; void* (*reserve)(void* ctx, u64 bytes); ErrCode (*commit)(void* ctx, void* base, u64 bytes);
                   ErrCode (*decommit)(void* ctx, void* base, u64 bytes); void (*release)(void* ctx, void* base, u64 bytes); u32 page_size; u32 _pad0; };
+                  // ^ defined in foundation/vmem_api.h (this struct, verbatim); platform.h includes it, does not redefine it (§9)
 struct EntropyApi { void* ctx; void (*fill)(void* ctx, void* buf, u32 n); };   // defined in entropy.h; platform.h: `struct EntropyApi;`
 typedef void (*ThreadFn)(void* ctx);
 struct ThreadApi { void* ctx;
