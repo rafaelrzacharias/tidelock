@@ -10,6 +10,7 @@
 #include <direct.h>
 #else
 #include <sys/stat.h>
+#include <unistd.h>   // rmdir - the ubuntu first run found the POSIX branch had never compiled
 #endif
 
 namespace {
