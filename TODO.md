@@ -232,6 +232,13 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `cmake/tier.cmake` - explicit, gated, one home; or (b) state in `BUILD.md` §3 that
       tier-marker-derived divergence inside headers is in scope for the rule and name `TL_LOG_MIN`
       as its first instance. Not invented here (CLAUDE.md rule 7).
+      **RULED 2026-08-24 (Rafael, option (c) - neither of the above): netcode and ship share ONE
+      compiled floor, INFO+ (TL_LOG_MIN = 2 in both).** The tension dissolves instead of being
+      exempted: BUILD.md §3's parity stays absolute, tier_parity.py stays untouched, and ship
+      quiets further at RUNTIME via the log-level cvar (TOOLING.md §3 - a non-SIM cvar).
+      Implementation (W1 ruling-closeout lane): tl_log.h's derivation makes both tiers 2;
+      TOOLING.md §9/§7b table and CPP-SUBSET.md §7b's TL_LOG row change "INFO+ (ship: WARN+)"
+      to "INFO+ (both; ship quiets via cvar)"; the compile-out test's per-tier arms follow.
 
 - [x] **fx tests that need the runner lane** (`TESTING.md` §9.1 `TL_TEST_EXPECT_FATAL`) - landed
       in `tests/foundation/fx_fatal.test.cpp` (W1 runner+driver lane, 2026-08-24): `div` by zero,
@@ -522,6 +529,11 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       get SNAPSHOT anyway (they're small; restore is a no-op-equivalent memcpy), (b) bless the
       combo for immutable arenas and state the mutation ban in §1.2. The registry test fixture
       documents the hazard in place; MEMORY.md §1.2/§5 should carry the ruling.
+      **RULED 2026-08-24 (Rafael): option (a).** `registry_add` TL_FATALs on HASHED without
+      SNAPSHOT; immutable tables take SNAPSHOT anyway (small, and a restore of never-mutated
+      bytes is a no-op-equivalent memcpy). Implementation (W1 ruling-closeout lane): the fatal
+      in registry_add + a fatal-expected test; MEMORY.md §1.2/§5 carry the ruling; the fixture's
+      hazard note becomes a citation of it.
 - [ ] **Ruling request (spec gap, behavior matches spec pseudocode): a reserve that is not a
       COMMIT_GRANULE multiple has an unusable tail** - `arena_push` TL_FATALs "over reserve"
       when `align_up(end, 64K) > reserved` even though `end <= reserved`, so the effective
@@ -529,6 +541,12 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `vmem_arena_init` rounds the reserve up to COMMIT_GRANULE (address space is free) so the
       fatal coincides with the real budget; MEMORY.md §8.2's "rounded up to page" would change.
       Not improvised in the review - the shipped behavior is what §8.2's pseudocode spells.
+      **RULED 2026-08-24 (Rafael): the review's recommendation, which is the stronger form of
+      "the stated budget is the usable budget" - `vmem_arena_init` rounds the reserve UP to
+      COMMIT_GRANULE** (address space is free; no byte of the requested budget is ever
+      unusable, and the over-reserve fatal coincides with the real edge). Implementation (W1
+      ruling-closeout lane): the init rounding + tests at a sub-64K and a non-multiple reserve;
+      MEMORY.md §8.2's "rounded up to page" becomes "rounded up to COMMIT_GRANULE".
 
 ## W1 rng/hash - the adversarial review (2026-08-24)
 - [x] **Adversarial review of W1 rng/hash (`8bdc6ee`) - DONE 2026-08-24 (Opus 5 high, fresh
@@ -664,6 +682,12 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       each CI lane (PR: 120000; nightly: off), a timed-out child reported as its own `TIMEOUT`
       status that fails the run and names the test. Not improvised in this review, per CLAUDE.md
       ("silence in the spec is not permission").
+      **RULED 2026-08-24 (Rafael): the proposal as filed.** `--timeout-ms`, default 0 (off)
+      locally; the PR lane passes 120000 (it already runs `--tag !slow`, so one number serves),
+      nightly runs without one; a timed-out child is its own TIMEOUT status, fails the run,
+      names the test, and prints TESTING.md §6's P0-flake line. Implementation (W1
+      ruling-closeout lane): the flag + both wait paths + a test with a deliberately hanging
+      child; TESTING.md §9.1 gains the flag, §6 the two lane values.
 - [ ] **`to<R>` out of range has no release-value test.** `tests/foundation/fx_fatal.test.cpp`
       pairs each dev-tier assert with `fx_review_release_error_values`'s netcode/ship value —
       for five of its six rows. `to<q_t>(fx_raw<pos_t>(1 << 19))` asserts in dev and, with the
