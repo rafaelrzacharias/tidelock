@@ -189,3 +189,96 @@ TL_TEST(slotmap_small_cap_domain_needs_no_caller_reserve_floor, "foundation,cont
     TL_EXPECT_FALSE(handle_is_null(h));
     TL_EXPECT_NOT_NULL(slotmap_get(&sm, h));
 }
+
+// DIVERGENT histories that converge - the non-vacuous form of the §8.7 item "zeroed dead slot ->
+// hash equals a fresh map with the same live set". Read literally that item is unsatisfiable: a
+// churned map and a fresh one differ in slot_cap and in gen[], so their columns cannot be
+// byte-equal. What it means, and what this pins, is the SLOTS column: two maps that reach the same
+// (slot_cap, live set, contents, per-slot reuse count) by DIFFERENT removal and reuse orders hash
+// identically, because a removed slot is zeroed rather than left holding its old payload.
+// slotmap_two_instance_determinism above feeds both instances the same ops and therefore cannot
+// see this.
+TL_TEST(slotmap_divergent_histories_converge_to_one_hash, "foundation,containers,determinism,fast") {
+    VMemApi api = test_vmem_api();
+    SlotMap<Payload, SmH> a, b;
+    TL_ASSERT_EQ(slotmap_init(&a, "test.sm9a.slots"_id, "test.sm9a.gen"_id, "test.sm9a.free"_id, "test.sm9a.live"_id, &api), ERR_OK);
+    TL_ASSERT_EQ(slotmap_init(&b, "test.sm9b.slots"_id, "test.sm9b.gen"_id, "test.sm9b.free"_id, "test.sm9b.live"_id, &api), ERR_OK);
+
+    Payload seed[4] = { {1u,1u}, {2u,2u}, {3u,3u}, {4u,4u} };
+    for (u32 i = 0; i < 4u; ++i) { slotmap_insert(&a, &seed[i]); slotmap_insert(&b, &seed[i]); }
+
+    Payload x = { 77u, 78u }, y = { 88u, 89u };
+    // A removes 1 then 2 (free list [1,2]), so LIFO hands back 2 first, then 1.
+    TL_EXPECT_TRUE(slotmap_remove(&a, handle_make<SmH>(1u, 1u)));
+    TL_EXPECT_TRUE(slotmap_remove(&a, handle_make<SmH>(2u, 1u)));
+    slotmap_insert(&a, &x);   // -> idx 2
+    slotmap_insert(&a, &y);   // -> idx 1
+    // B removes 2 then 1 (free list [2,1]), so LIFO hands back 1 first, then 2 - the opposite
+    // order - and the payloads are supplied in the opposite order so both converge on the same
+    // slot contents: idx 1 = y, idx 2 = x.
+    TL_EXPECT_TRUE(slotmap_remove(&b, handle_make<SmH>(2u, 1u)));
+    TL_EXPECT_TRUE(slotmap_remove(&b, handle_make<SmH>(1u, 1u)));
+    slotmap_insert(&b, &y);   // -> idx 1
+    slotmap_insert(&b, &x);   // -> idx 2
+
+    TL_EXPECT_EQ(slotmap_slot_cap(&a), slotmap_slot_cap(&b));
+    TL_EXPECT_EQ(a.live_count, b.live_count);
+    TL_EXPECT_EQ(a.free_list.count, (u32)0);
+    TL_EXPECT_EQ(b.free_list.count, (u32)0);
+    TL_EXPECT_MEM_EQ(a.slots.data, b.slots.data, (usize)slotmap_slot_cap(&a) * sizeof(Payload));
+    TL_EXPECT_SPAN_EQ(a.gen.data, b.gen.data, slotmap_slot_cap(&a));
+    TL_EXPECT_EQ(tl_hash64(a.slots.data, (usize)slotmap_slot_cap(&a) * sizeof(Payload), TL_HASH_SEED),
+                 tl_hash64(b.slots.data, (usize)slotmap_slot_cap(&b) * sizeof(Payload), TL_HASH_SEED));
+}
+
+// A quarantined slot's payload must be zeroed like any other dead slot, and stay zeroed: it is
+// never reissued, so nothing will ever overwrite it, and it is inside the hashed [0, slot_cap)
+// range for the rest of the world's life.
+TL_TEST(slotmap_quarantined_slot_stays_zero_and_hashed, "foundation,containers,mem,edge,fast") {
+    VMemApi api = test_vmem_api();
+    SlotMap<Payload, SmH> sm;
+    TL_ASSERT_EQ(slotmap_init(&sm, "test.smA.slots"_id, "test.smA.gen"_id, "test.smA.free"_id, "test.smA.live"_id, &api), ERR_OK);
+    Payload p = { 0xABCDu, 0xEF01u };
+    SmH h = slotmap_insert(&sm, &p);
+    for (u32 g = 1; g < (u32)SmH::GEN_MAX; ++g) {   // cycle idx 0 up to GEN_MAX
+        TL_ASSERT_TRUE(slotmap_remove(&sm, h));
+        h = slotmap_insert(&sm, &p);
+    }
+    TL_EXPECT_EQ(handle_gen(h), (u32)SmH::GEN_MAX);
+    TL_EXPECT_TRUE(slotmap_remove(&sm, h));          // the wrap remove
+    TL_EXPECT_EQ(sm.quarantined, (u32)1);
+    Payload zero = {};
+    TL_EXPECT_MEM_EQ(&sm.slots.data[0], &zero, sizeof(Payload));
+    TL_EXPECT_EQ(sm.gen.data[0], (u16)SmH::GEN_MAX);  // gen frozen at max, never bumped past it
+    TL_EXPECT_EQ(sm.free_list.count, (u32)0);
+    // Fifty further inserts must never touch idx 0 again.
+    for (u32 i = 0; i < 10u; ++i) { Payload q = { i, i }; SmH hn = slotmap_insert(&sm, &q); TL_EXPECT_TRUE(handle_index(hn) != 0u); }
+    TL_EXPECT_MEM_EQ(&sm.slots.data[0], &zero, sizeof(Payload));
+}
+
+// Two invariants the CANON row depends on and no test asserted: a minted handle is never the null
+// handle (bits == 0), and generation 0 is never issued - over a long churn, not one sample.
+// Checked without slotmap_get so the dev-tier stale assert cannot mask a miss.
+TL_TEST(slotmap_never_mints_null_or_gen_zero, "foundation,containers,mem,determinism,fast") {
+    VMemApi api = test_vmem_api();
+    SlotMap<Payload, SmH> sm;
+    TL_ASSERT_EQ(slotmap_init(&sm, "test.smB.slots"_id, "test.smB.gen"_id, "test.smB.free"_id, "test.smB.live"_id, &api), ERR_OK);
+    u32 minted = 0;
+    SmH live[8] = {};
+    for (u32 round = 0; round < 40u; ++round) {
+        u32 slot = round % 8u;
+        if (!handle_is_null(live[slot])) {
+            // Only remove while the slot still has generations left; a quarantine ends its life.
+            if (handle_gen(live[slot]) < (u32)SmH::GEN_MAX) { slotmap_remove(&sm, live[slot]); }
+            live[slot] = SmH{};
+        }
+        Payload p = { round, round * 3u };
+        SmH h = slotmap_insert(&sm, &p);
+        TL_ASSERT_FALSE(handle_is_null(h));               // bits == 0 is never minted
+        TL_ASSERT_TRUE(handle_gen(h) >= 1u);               // generation 0 is never issued
+        TL_ASSERT_TRUE(handle_gen(h) <= (u32)SmH::GEN_MAX);
+        live[slot] = h;
+        minted += 1u;
+    }
+    TL_EXPECT_EQ(minted, (u32)40);
+}

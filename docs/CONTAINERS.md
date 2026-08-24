@@ -193,13 +193,21 @@ tick; `TL_ASSERT(!in_tick)` in debug). API: `map_init(arena, cap)`, `map_put`, `
 ### 8.4 `SortedMap<K,V>` / `SortedSet<K>` (`sorted.h`)
 
 `Array<K> keys` + `Array<V> vals` kept sorted; `lower_bound` binary search; insert = memmove;
-`sorted_iter` walks `0..count`. Integral `K` only.
+`sorted_iter` walks `0..count`. Integral `K` only. **Keys are unique — there is no tie:**
+`sorted_map_put` on a present key overwrites its value and leaves `count` unchanged;
+`sorted_set_insert` on a present key returns `false` and changes nothing. (Stated by the W1
+containers review; rev 1 gave the operations but not the duplicate policy the tests must pin.)
 
 ### 8.5 `RingBuffer<T>`, `Bitset`, sorting (`ring.h`, `bitset.h`, `sort.h`)
 
 ```cpp
-template <typename T> struct RingBuffer { T* data; u32 cap /* pow2 */; u32 head, tail; u8 overwrite_oldest; };
-// push: if full → overwrite_oldest ? tail++ : return false; peek(i) from tail; pop from tail.
+template <typename T> struct RingBuffer { T* data; u32 cap /* pow2 */; u32 head, tail; u8 overwrite_oldest, _pad0[3]; };
+// head = next pop / peek(0); tail = next push. Both are FREE-RUNNING u32 counters, masked only at
+// the point of indexing, so count = tail - head is a wrapping subtract that stays exact across the
+// u32 boundary. push: if full → overwrite_oldest ? head++ (drop the oldest), else return false.
+// (Rev 1 wrote the two roles the other way round — "peek/pop from tail, overwrite bumps tail";
+// the behaviour it describes is the same, the field names were swapped. Corrected against the
+// shipped header by the W1 containers review, 2026-08-24.)
 struct Bitset { u64* words; u32 bit_count; };   // set/clear/test/find_first(from)/popcount/clear_all; words on the owning arena
 void sort_u32_kv(u32* keys, u32* vals, u32 n, Scratch* s);   // LSD radix base 256, 4 passes, stable
 void sort_u64_kv(u64* keys, u32* vals, u32 n, Scratch* s);   // 8 passes; early-out on a pass whose histogram has one bucket

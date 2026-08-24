@@ -94,3 +94,86 @@ TL_TEST(fmt_buf_truncation, "foundation,containers,fmt") {
     // contract block. Replace this with a real truncation test the day the vendor tree lands.
     TL_SKIP("fmt_buf is a TL_FATAL stub pending vendor/stb_sprintf (W1 platform lane) - see fmt.h");
 }
+
+// "process-stable for the run" (docs/CANON.md "Types") has an operational meaning nothing tested:
+// the same intern ORDER produces the same ids, in two independent interners, and ids are dense
+// 0..count-1 so nothing about arena addresses or hash bucket order leaks into them.
+TL_TEST(interner_two_instances_same_order_same_ids, "foundation,containers,determinism,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena chars_a = {}, meta_a = {}, chars_b = {}, meta_b = {};
+    Interner a = make_test_interner(&api, &chars_a, &meta_a);
+    Interner b = make_test_interner(&api, &chars_b, &meta_b);
+
+    const char* names[8] = { "position", "velocity", "", "health", "position", "sprite", "health", "z" };
+    StrId ids_a[8], ids_b[8];
+    for (u32 i = 0; i < 8u; ++i) { ids_a[i] = intern(&a, sv(names[i])); }
+    for (u32 i = 0; i < 8u; ++i) { ids_b[i] = intern(&b, sv(names[i])); }
+
+    TL_EXPECT_SPAN_EQ(ids_a, ids_b, 8);
+    TL_EXPECT_EQ(a.count, b.count);
+    TL_EXPECT_EQ(a.count, (u32)6);                     // "position" and "health" repeat
+    // Dense and issued in first-intern order: 0..count-1, never a hash-derived value.
+    const StrId expect[8] = { 0u, 1u, 2u, 3u, 0u, 4u, 3u, 5u };
+    TL_EXPECT_SPAN_EQ(ids_a, expect, 8);
+    for (u32 i = 0; i < 8u; ++i) {
+        TL_EXPECT_TRUE(sv_eq(intern_name(&a, ids_a[i]), sv(names[i])));
+        TL_EXPECT_TRUE(sv_eq(intern_name(&b, ids_b[i]), sv(names[i])));
+    }
+}
+
+// The empty string is a real row, not a degenerate one: it is interned at offset == the current
+// chars mark and pushes zero bytes, so the NEXT string starts at the same offset. Both must still
+// read back correctly, and re-interning either must be idempotent.
+TL_TEST(interner_empty_string_shares_an_offset_with_its_successor, "foundation,containers,edge,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena chars = {}, meta = {};
+    Interner in = make_test_interner(&api, &chars, &meta);
+    StrId e = intern(&in, sv_lit(""));
+    StrId n = intern(&in, sv_lit("next"));
+    TL_EXPECT_EQ(in.offsets.data[e], in.offsets.data[n]);   // zero-length push advances nothing
+    TL_EXPECT_EQ(in.lens.data[e], (u16)0);
+    TL_EXPECT_EQ(in.lens.data[n], (u16)4);
+    TL_EXPECT_TRUE(sv_eq(intern_name(&in, e), sv_lit("")));
+    TL_EXPECT_TRUE(sv_eq(intern_name(&in, n), sv_lit("next")));
+    TL_EXPECT_EQ(intern(&in, sv_lit("")), e);
+    TL_EXPECT_EQ(intern(&in, sv_lit("next")), n);
+    TL_EXPECT_EQ(in.count, (u32)2);
+}
+
+// Ids stay valid and stable while the interner fills toward its capacity - the reverse table grows
+// by array_push, and nothing may renumber an id already handed out.
+TL_TEST(interner_ids_are_stable_as_the_table_fills, "foundation,containers,determinism,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena chars = {}, meta = {};
+    Interner in = make_test_interner(&api, &chars, &meta);
+    StrId first[16];
+    char buf[16];
+    for (u32 i = 0; i < 16u; ++i) {
+        buf[0] = 'k'; buf[1] = (char)('a' + (i / 10u)); buf[2] = (char)('0' + (i % 10u)); buf[3] = '\0';
+        first[i] = intern(&in, sv(buf));
+        TL_ASSERT_EQ(first[i], (StrId)i);
+    }
+    for (u32 i = 0; i < 200u; ++i) {   // fill well past the first 16
+        buf[0] = 'f'; buf[1] = (char)('a' + (i / 26u)); buf[2] = (char)('a' + (i % 26u)); buf[3] = '\0';
+        intern(&in, sv(buf));
+    }
+    for (u32 i = 0; i < 16u; ++i) {
+        buf[0] = 'k'; buf[1] = (char)('a' + (i / 10u)); buf[2] = (char)('0' + (i % 10u)); buf[3] = '\0';
+        TL_EXPECT_EQ(intern(&in, sv(buf)), first[i]);                    // same id, still
+        TL_EXPECT_TRUE(sv_eq(intern_name(&in, first[i]), sv(buf)));       // still the same bytes
+    }
+}
+
+// lens[] is u16, so a string longer than 65535 bytes would silently truncate. That bound is
+// caller-input validation and is TL_CHECK in every tier (W1 containers review 2) - it was a
+// TL_ASSERT, which is compiled out in netcode/ship exactly where the corruption would be silent.
+TL_TEST_EXPECT_FATAL(interner_over_long_string_is_fatal_in_every_tier, "foundation,containers,fatal") {
+    VMemApi api = test_vmem_api();
+    VMemArena chars = {}, meta = {};
+    Interner in = make_test_interner(&api, &chars, &meta);
+    char big[4];
+    big[0] = 'x'; big[1] = '\0';
+    TL_EXPECT_EQ(intern(&in, sv_lit("ok")), (StrId)0);   // the interner works before the bad call
+    StrView too_long = StrView{ big, 0x10000u };   // len only - the bytes are never read before the check
+    intern(&in, too_long);
+}

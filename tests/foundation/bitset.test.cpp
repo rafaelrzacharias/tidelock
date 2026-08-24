@@ -92,3 +92,50 @@ TL_TEST(bitset_two_instance_determinism, "foundation,containers,determinism,fast
     u32 wc = bitset_word_count(300u);
     TL_EXPECT_MEM_EQ(a.words, b.words, (usize)wc * 8u);
 }
+
+// A Bitset IS history-independent - set/clear order cannot survive in the words - so unlike Map or
+// RingBuffer it can be pinned with the strong form: DIVERGENT histories, identical bytes. The
+// same-ops-twice test above cannot distinguish this from an implementation that stored a journal.
+TL_TEST(bitset_divergent_histories_converge_bit_for_bit, "foundation,containers,determinism,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena arena_a = {}, arena_b = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena_a, "test.bitset_hist_a"_id, 1ull * 1024 * 1024, 0, &api), ERR_OK);
+    TL_ASSERT_EQ(vmem_arena_init(&arena_b, "test.bitset_hist_b"_id, 1ull * 1024 * 1024, 0, &api), ERR_OK);
+    Bitset a, b;
+    bitset_init(&a, &arena_a, 300u);
+    bitset_init(&b, &arena_b, 300u);
+
+    // A: churn - set a wide spread, clear most of it back down to {3, 17, 199}.
+    const u32 wide[] = { 0, 3, 17, 63, 64, 65, 128, 199, 255, 256, 299 };
+    for (u32 i = 0; i < 11u; ++i) { bitset_set(&a, wide[i]); }
+    for (u32 i = 0; i < 11u; ++i) { if (wide[i] != 3u && wide[i] != 17u && wide[i] != 199u) { bitset_clear(&a, wide[i]); } }
+    // B: the survivors only, in a different order, no clears at all.
+    bitset_set(&b, 199u); bitset_set(&b, 3u); bitset_set(&b, 17u);
+
+    TL_EXPECT_EQ(bitset_popcount(&a), (u32)3);
+    TL_EXPECT_EQ(bitset_popcount(&b), (u32)3);
+    TL_EXPECT_MEM_EQ(a.words, b.words, (usize)bitset_word_count(300u) * 8u);
+    TL_EXPECT_EQ(bitset_find_first(&a, 0u), bitset_find_first(&b, 0u));
+}
+
+// The word-boundary matrix at the bit_count edge itself, not just at bit indices: 63, 64 and 65
+// bits pick different (full_words, rem) splits inside popcount and different word_count values.
+TL_TEST(bitset_bit_count_63_64_65, "foundation,containers,edge,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, "test.bitset_636465"_id, 1ull * 1024 * 1024, 0, &api), ERR_OK);
+    const u32 counts[3] = { 63u, 64u, 65u };
+    const u32 words[3]  = { 1u, 1u, 2u };
+    for (u32 c = 0; c < 3u; ++c) {
+        Bitset b;
+        bitset_init(&b, &arena, counts[c]);
+        TL_EXPECT_EQ(bitset_word_count(counts[c]), words[c]);
+        for (u32 i = 0; i < counts[c]; ++i) { bitset_set(&b, i); }
+        TL_EXPECT_EQ(bitset_popcount(&b), counts[c]);            // every in-range bit, no more
+        TL_EXPECT_EQ(bitset_find_first(&b, 0u), (u32)0);
+        TL_EXPECT_EQ(bitset_find_first(&b, counts[c]), counts[c]);  // past the end -> sentinel
+        bitset_clear_all(&b);
+        TL_EXPECT_EQ(bitset_popcount(&b), (u32)0);
+        TL_EXPECT_EQ(bitset_find_first(&b, 0u), counts[c]);
+    }
+}
