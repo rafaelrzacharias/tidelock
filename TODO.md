@@ -668,7 +668,7 @@ right; it is the template the others now follow.
   sorted walk with the cursor stopping at `count`, idempotent false past the end with the
   out-params untouched, and a cursor started beyond `count`. There was no existing caller pattern
   to re-read — the "one existing caller" this lane was told to check does not exist.
-- **R6 — `fx.h:247,250` declare `min`/`max` as free functions in the global namespace.** That is the
+- [x] **R6 — `fx.h:247,250` declare `min`/`max` as free functions in the global namespace.** That is the
   root cause the `NOMINMAX` fix in `tests/foundation/vmem_test_api.h` treats at the symptom end: any
   TU that reaches a Windows header before that fixture (or any future non-test TU pairing the two)
   hits the same mangled-declaration break, and `NOMINMAX` only helps where it is defined first. The
@@ -680,6 +680,17 @@ right; it is the template the others now follow.
   to platform/ and tests, so the sites are enumerable, and includes.py gains the check
   (windows.h not preceded by NOMINMAX in the same file = violation) with fixtures, gate-edit
   rule as always. W2-prep closeout.
+  **DONE 2026-08-24 (w2-prep):** nine `<windows.h>` sites in the tree; seven in `src/platform/`
+  gained `#define NOMINMAX` and two (`tests/foundation/vmem_test_api.h`, `tests/runner/main.cpp`)
+  already had it. `includes.py` gate 7 checks it and is the **one gate that walks `tests/`** as
+  well as `src/`, with a zero-files-scanned check beside it. Five selftest fixtures, both ways:
+  windows.h with no define where windows.h is otherwise legal, a define placed AFTER the include
+  (order is the whole rule), a `tests/` file (proves the walk), plus the two clean shapes (a
+  non-adjacent define, and a `tests/` file that is correct). Mutation-verified: stubbing
+  `check_nominmax` fails exactly those three negatives and nothing else. The `vmem_test_api.h`
+  define is NOT redundant and was not deleted — that file is one of the nine sites; only its
+  rationale comment changed, from "fixed here as a one-site cross-lane patch" to "the rule
+  requires it here".
 - **R7 — `Span<T>`, `StrView` and `Interner` carry implicit tail padding** (4 bytes each). None is
   registered state today, and `StrView`'s shape is pinned by `CANON.md`, so nothing was changed.
   If any of them ever enters a hashed arena, `CPP-SUBSET.md` §5 applies and CANON's `StrView` row

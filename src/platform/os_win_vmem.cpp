@@ -6,6 +6,11 @@
 #include "foundation/tl_assert.h"
 
 #define WIN32_LEAN_AND_MEAN
+// NOMINMAX before EVERY <windows.h> in the tree (ruled 2026-08-24, TODO.md R6; checked by
+// tools/audit/includes.py). windows.h's raw min/max macros mangle fx.h's free functions of
+// the same name in any TU that reaches both, and the failure reads as "too many arguments
+// to function-like macro invocation" on an fx declaration, not as a min/max collision.
+#define NOMINMAX
 #include <windows.h>
 
 namespace {

@@ -227,6 +227,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `NETCODE.md` -> §3, §5
 - `RENDER2D.md` -> §0, §9.2, §9.3
 - `ROADMAP.md` -> §9
+- `TESTING.md` -> §9.1
 
 ## RENDER2D.md
 - `ASSETS-AND-DATA.md` -> §5
@@ -251,7 +252,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `DETERMINISM.md` -> §4
 - `FX-PALETTE.md` -> §4
 - `JOBS.md` -> §6
-- `PLATFORM.md` -> §4
+- `PLATFORM.md` -> §4, §5
 - `ROADMAP.md` -> §9
 
 ## TOOLING.md

@@ -84,6 +84,7 @@ successor of Ore's 43 M-tick run.
 | rebuild-time budget | full rebuild < 10 s, incremental (touch one sim TU) < 2 s on the reference PC; a regression is a failure, like perf | PR, blocking (measured on the CI box with its own budget) |
 | fingerprint stability | two clean builds of the same tree produce the same fingerprint | PR |
 | header contracts | every `module.h` has a contract block naming its spec section; every public function in a module header has a contract comment (`CPP-SUBSET.md` §6) — `tools/audit/includes.py` | PR, blocking |
+| `NOMINMAX` | every file including `<windows.h>` defines `NOMINMAX` on an earlier line (`PLATFORM.md` §9.1) — `tools/audit/includes.py` gate 7, the one gate that walks `tests/` as well as `src/` | PR, blocking |
 | cross-target divergence | `tools/audit/targets.py`: every sim TU preprocessed and its record layouts dumped for all three triples, then diffed. A per-target `#if`, a `#pragma pack`, an `alignas` or a bit-field is a finding, in any spelling - the class four W0 reviews kept finding holes in when it was a regex. Needs no sysroot | PR, blocking |
 | **doc audit** | `tools/docaudit/docaudit.py`: dangling `NAME.md §x.y` refs, numbers contradicting `CANON.md`, docs missing from `docs/README.md`, stale markers; regenerates `docs/XREF.md`; a commit touching `src/<module>/` without its doc needs `[docs:none]` | PR, blocking |
 | warnings | `-Werror` across all tiers and all platforms incl. the cross target | PR |
