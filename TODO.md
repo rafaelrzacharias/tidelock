@@ -655,12 +655,19 @@ right; it is the template the others now follow.
   generations 1..1023 are issued and the slot retires — 1023 reuses, not 1024. No code states the
   wrong number, so `docaudit` is silent, but the ECS lane will size its churn budget from that row.
   One-word CANON correction, owned by whoever owns the Handle rows.
-- **R5 — `sorted_map_iter` (`sorted.h:106`) asserts `*it < count` and returns `void`**, so the
+- [x] **R5 — `sorted_map_iter` (`sorted.h:106`) asserts `*it < count` and returns `void`**, so the
   caller must bound the loop itself, unlike `map_iter` which returns `bool`. §8.4 says only
   "`sorted_iter` walks `0..count`". Two iterators with two shapes in one module is a papercut the
   Luau-facing lane will hit; align them or write the difference down.
   **RULED 2026-08-24 (Rafael): align on `map_iter`'s shape** - `sorted_iter` returns bool, one
   iterator idiom per module. CONTAINERS.md §8.4 updated with the change (W2-prep closeout).
+  **DONE 2026-08-24 (w2-prep):** `bool sorted_map_iter(const SortedMap*, u32* it, K*, V*)`, no
+  assert — running off the end is how a walk terminates. `sorted_map_iter_returns_bool_like_map_iter`
+  is the template's **first call site anywhere in the tree**, so nothing had type-checked it before
+  (LESSONS: "a template with no call site has never been compiled"); it pins the empty map, the
+  sorted walk with the cursor stopping at `count`, idempotent false past the end with the
+  out-params untouched, and a cursor started beyond `count`. There was no existing caller pattern
+  to re-read — the "one existing caller" this lane was told to check does not exist.
 - **R6 — `fx.h:247,250` declare `min`/`max` as free functions in the global namespace.** That is the
   root cause the `NOMINMAX` fix in `tests/foundation/vmem_test_api.h` treats at the symptom end: any
   TU that reaches a Windows header before that fixture (or any future non-test TU pairing the two)

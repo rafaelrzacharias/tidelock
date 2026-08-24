@@ -114,3 +114,54 @@ TL_TEST(sorted_two_instance_determinism_different_insert_order, "foundation,cont
     TL_EXPECT_EQ(a.keys.count, b.keys.count);
     TL_EXPECT_SPAN_EQ(a.keys.data, b.keys.data, a.keys.count);
 }
+
+// R5 (RULED 2026-08-24, TODO.md; docs/CONTAINERS.md §8.4): sorted_map_iter returns bool, in
+// map_iter's exact shape - one iterator idiom per module. This is also the FIRST call site the
+// template has ever had, so before this test no compiler had type-checked it (LESSONS: "a template
+// with no call site has never been compiled"); the void-returning version shipped uninstantiated.
+//
+// The loop below is written the way a consumer writes it, and is the whole point of the change:
+// the return value bounds the walk, so the caller never reads `count` at all.
+TL_TEST(sorted_map_iter_returns_bool_like_map_iter, "foundation,containers,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, "test.sorted_iter"_id, 1ull * 1024 * 1024, 0, &api), ERR_OK);
+    SortedMap<u32, u32> m;
+    sorted_map_init(&m, &arena, 16u);
+
+    // Empty: the very first call returns false and touches neither out-param.
+    u32 it = 0, k = 0xABCDu, v = 0xEF01u;
+    TL_EXPECT_FALSE(sorted_map_iter(&m, &it, &k, &v));
+    TL_EXPECT_EQ(k, (u32)0xABCD);
+    TL_EXPECT_EQ(v, (u32)0xEF01);
+    TL_EXPECT_EQ(it, (u32)0);   // a refused step does not advance the cursor either
+
+    const u32 keys_in[] = { 40u, 10u, 30u, 20u };   // inserted out of order; the walk is sorted
+    for (u32 i = 0; i < 4u; ++i) { sorted_map_put(&m, keys_in[i], keys_in[i] * 3u); }
+
+    u32 expect_k[4] = { 10u, 20u, 30u, 40u };
+    u32 walked = 0;
+    it = 0;
+    while (sorted_map_iter(&m, &it, &k, &v)) {
+        TL_ASSERT_TRUE(walked < 4u);
+        TL_EXPECT_EQ(k, expect_k[walked]);
+        TL_EXPECT_EQ(v, expect_k[walked] * 3u);
+        walked += 1u;
+    }
+    TL_EXPECT_EQ(walked, (u32)4);
+    TL_EXPECT_EQ(it, m.keys.count);   // the cursor stopped exactly at count
+
+    // Exhausted, and idempotent there: further calls keep returning false without running off the
+    // array or advancing - the case rev 1 spent a TL_ASSERT on.
+    k = 0x1111u; v = 0x2222u;
+    TL_EXPECT_FALSE(sorted_map_iter(&m, &it, &k, &v));
+    TL_EXPECT_FALSE(sorted_map_iter(&m, &it, &k, &v));
+    TL_EXPECT_EQ(k, (u32)0x1111);
+    TL_EXPECT_EQ(v, (u32)0x2222);
+    TL_EXPECT_EQ(it, (u32)4);
+
+    // A cursor started past the end is refused, not read: the bound is >=, not ==.
+    it = 99u;
+    TL_EXPECT_FALSE(sorted_map_iter(&m, &it, &k, &v));
+    TL_EXPECT_EQ(it, (u32)99);
+}

@@ -215,8 +215,13 @@ precisely what `guard_tick_end` already fatals on. Moved, not dropped; ruled 202
 
 ### 8.4 `SortedMap<K,V>` / `SortedSet<K>` (`sorted.h`)
 
-`Array<K> keys` + `Array<V> vals` kept sorted; `lower_bound` binary search; insert = memmove;
-`sorted_iter` walks `0..count`. Integral `K` only. **Keys are unique — there is no tie:**
+`Array<K> keys` + `Array<V> vals` kept sorted; `lower_bound` binary search; insert = memmove.
+`bool sorted_map_iter(const SortedMap*, u32* it, K*, V*)` walks `0..count` in **exactly
+`map_iter`'s shape** (§8.3): `it` is a plain index in/out, pass 0 to start, the return value bounds
+the loop, and it returns `false` with the out-params untouched at the end — running off the end is
+how a walk terminates, not a bug, so there is no assert. (Ruled 2026-08-24: one iterator idiom per
+module. Rev 1 returned `void` and asserted `*it < count`, which made the caller bound the loop and
+gave `sorted.h` a second idiom for the Luau-facing lane to trip over.) Integral `K` only. **Keys are unique — there is no tie:**
 `sorted_map_put` on a present key overwrites its value and leaves `count` unchanged;
 `sorted_set_insert` on a present key returns `false` and changes nothing. (Stated by the W1
 containers review; rev 1 gave the operations but not the duplicate policy the tests must pin.)
