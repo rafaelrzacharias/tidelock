@@ -92,6 +92,36 @@ INCLUDE_CASES = [
     ("sim TU includes tl_log.h (non-det, not the panic ABI)", "src/sim/c3.cpp",
      '#include "foundation/tl_log.h"\n',
      "non-det foundation header"),
+    # RR-7 (docs/CPP-SUBSET.md §1): the tooling io/state exemption is keyed by STEM, not directory -
+    # a non-det stem that is not on TL_FOUNDATION_TOOLING inherits nothing from its neighbours.
+    ("RR-7: a non-tooling non-det stem gets no io allowance", "src/foundation/jobs.cpp",
+     "#include <stdio.h>\n",
+     "not on the allowlist"),
+    ("RR-7: a non-tooling non-det stem gets no static-state allowance", "src/foundation/mem_pool.cpp",
+     "static int g_x = 0;\nint use(void) { return g_x; }\n",
+     "static mutable state"),
+    # RR-7, the other direction: the exemption is stem-keyed and tl_assert's stem is ON the list -
+    # but tl_assert.h is also the ONE tooling header a sim TU may include (PANIC_ABI_HEADER), so
+    # granting the HEADER io/state pushes both straight through R-3's hole into every det TU in
+    # the tree. Both of these reported 0 violations before includes.py excluded it by path.
+    ("RR-7: the panic-ABI HEADER gets no io allowance", "src/foundation/tl_assert.h",
+     "#include <stdio.h>\n",
+     "not on the allowlist"),
+    ("RR-7: the panic-ABI HEADER gets no static-state allowance", "src/foundation/tl_assert.h",
+     "static int g_ta = 0;\nint ta_use(void) { return g_ta; }\n",
+     "static mutable state"),
+    # R-3 and R-4 read together: tl_assert.h is the ONLY tooling header a sim TU may include. One
+    # fixture per barred header - "tl_log.h already covers that case" is exactly how the __GNUC__
+    # fixture came to never exercise the win leg (LESSONS.md).
+    ("sim TU includes tl_prof.h (non-det, not the panic ABI)", "src/sim/c4.cpp",
+     '#include "foundation/tl_prof.h"\n',
+     "non-det foundation header"),
+    ("sim TU includes tl_probe.h (non-det, not the panic ABI)", "src/sim/c5.cpp",
+     '#include "foundation/tl_probe.h"\n',
+     "non-det foundation header"),
+    ("sim TU includes crash.h (non-det, not the panic ABI)", "src/sim/c6.cpp",
+     '#include "foundation/crash.h"\n',
+     "non-det foundation header"),
     ("banned system include", "src/sim/d.cpp",
      "#include <stdio.h>\n",
      "not on the allowlist"),
@@ -277,6 +307,13 @@ INCLUDE_CLEAN = [
      "// Widening multiply; the contract comment sits above the template head.\n"
      "template <class T>\n"
      "inline u64 ok4_mul(T a, T b) { return (u64)a * (u64)b; }\n"),
+    # RR-7: the positive half - a stem named on TL_FOUNDATION_TOOLING gets real io and mutable
+    # state. Without this fixture the negative ones above could pass for the wrong reason (the
+    # whole gate silently broken) instead of the right one (the exemption is stem-keyed).
+    ("RR-7: a tooling stem gets real io and mutable state", "src/foundation/log.cpp",
+     "#include <stdio.h>\n#include <stdlib.h>\n"
+     "namespace { unsigned g_ring_head = 0; }\n"
+     "void tl_log_bump(void) { g_ring_head += 1u; }\n"),
 ]
 
 
@@ -324,6 +361,19 @@ def build_lib(cxx, ar, root, name, sources):
         objs.append(obj)
     lib = os.path.join(root, "lib%s.a" % name)
     rc, out = run([ar, "rcs", lib] + objs)
+    return (lib, "") if rc == 0 else (None, out)
+
+
+def build_lib_named(cxx, ar, root, libname, filename, src):
+    """Like build_lib, but the member keeps an EXACT source filename - RR-7's exemption is keyed
+    by the archive member's stem, so the fixture must control it precisely."""
+    cpp = write(root, filename, src)
+    obj = cpp[:-4] + ".o"
+    rc, out = run([cxx, "-std=c++20", "-c", "-O1", "-fno-builtin", "-o", obj, cpp])
+    if rc != 0:
+        return None, out
+    lib = os.path.join(root, "lib%s.a" % libname)
+    rc, out = run([ar, "rcs", lib, obj])
     return (lib, "") if rc == 0 else (None, out)
 
 
@@ -393,6 +443,52 @@ def test_symbols(tmp, nm, objdump, ar, cxx):
         record("symbols: a clean lib passes", rc == 0, out.strip()[:200])
     else:
         record("symbols: a clean lib passes", False, err[:200])
+
+
+# --- RR-7: the tooling-plane writable-static exemption (docs/CPP-SUBSET.md §1) ----------------
+def test_symbols_tooling(tmp, nm, objdump, ar, cxx):
+    root = os.path.join(tmp, "sym_rr7")
+    os.makedirs(root, exist_ok=True)
+    # fixture_root() copies the REAL src/foundation/CMakeLists.txt, so this reads the actual
+    # TL_FOUNDATION_TOOLING line - the fixture cannot drift from what ships.
+    fixture = fixture_root(tmp, "sym_rr7_root")
+    allow = os.path.join(AUDIT, "allow.txt")
+    base = [sys.executable, os.path.join(AUDIT, "symbols.py"), "--nm", nm, "--objdump", objdump,
+            "--allow", allow]
+
+    tool_lib, err = build_lib_named(cxx, ar, root, "tool", "log.cpp", MUTABLE_CPP)
+    nontool_lib, err2 = build_lib_named(cxx, ar, root, "nontool", "jobs.cpp", MUTABLE_CPP)
+    clean_lib, err3 = build_lib(cxx, ar, root, "clean", [LOWER_CPP])   # --layer is mandatory
+    if not tool_lib or not nontool_lib or not clean_lib:
+        record("symbols: RR-7 fixtures compile", False, (err or err2 or err3)[:200])
+        return
+    layer = ["--layer", "clean=" + clean_lib]
+
+    rc, out = run(base + layer + ["--root", fixture, "--tooling-lib", "tool",
+                                  "--data-only", "tool=" + tool_lib])
+    record("symbols: RR-7 exempts a TL_FOUNDATION_TOOLING stem (log)", rc == 0, out.strip()[:200])
+
+    rc, out = run(base + layer + ["--root", fixture, "--tooling-lib", "nontool",
+                                  "--data-only", "nontool=" + nontool_lib])
+    record("symbols: RR-7 does not exempt a non-tooling non-det stem (jobs)",
+           rc == 1 and (".bss" in out or ".data" in out), out.strip()[:200])
+
+    rc, out = run(base + layer + ["--data-only", "tool=" + tool_lib])   # no --root at all
+    record("symbols: RR-7's exemption is opt-in - no --root means no exemption",
+           rc == 1 and (".bss" in out or ".data" in out), out.strip()[:200])
+
+    # RR-7 is a LIB + STEM exemption, never a stem alone. `log`/`prof`/`probe`/`crash` are ordinary
+    # words: keying on the archive member's stem alone exempted a log.o in ANY --data-only lib -
+    # i.e. every non-audited lib in src/. Measured before --tooling-lib existed: this exact object
+    # under the name tl_platform reported 0 violations.
+    rc, out = run(base + layer + ["--root", fixture, "--tooling-lib", "tl_foundation",
+                                  "--data-only", "tl_platform=" + tool_lib])
+    record("symbols: RR-7 does NOT exempt the same log.o in another lib",
+           rc == 1 and (".bss" in out or ".data" in out), out.strip()[:200])
+
+    rc, out = run(base + layer + ["--root", fixture, "--data-only", "tool=" + tool_lib])
+    record("symbols: --root without --tooling-lib grants no exemption",
+           rc == 1 and (".bss" in out or ".data" in out), out.strip()[:200])
 
 
 # --- tier_parity.py ---------------------------------------------------------------------------
@@ -674,6 +770,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="tl_selftest_") as tmp:
         test_includes(tmp)
         test_symbols(tmp, a.nm, a.objdump, a.ar, a.cxx)
+        test_symbols_tooling(tmp, a.nm, a.objdump, a.ar, a.cxx)
         test_targets(tmp, a.cxx)
         test_tier_parity(tmp)
         test_fingerprint(tmp)

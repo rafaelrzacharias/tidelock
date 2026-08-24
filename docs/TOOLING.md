@@ -123,10 +123,21 @@ arena-offset guard's last report. Luau VM panel: pool usage, GC step time, instr
 
 Scope: the four macro headers, the runtimes behind them, `src/editor/`, the crash and replay
 pipelines, tests. `f32`/`f64` are legal in `editor/` and in the non-det foundation runtimes
-(`log.cpp`, `prof.cpp`, `probe.cpp`); the macro *headers* contain no float token so a sim TU may
-include them (`CPP-SUBSET.md` §4 grep). Tier gates: `TL_DEV` (1 in `dev`/`debug`, 0 otherwise,
-`BUILD.md` §3) and `TL_LOG_MIN` (`debug`/`dev` 0, `netcode` 2, `ship` 3). Nothing here is hashed;
-every mutation of sim state is a command (§0).
+(`log.cpp`, `prof.cpp`, `probe.cpp`); the macro *headers* contain no float token, though only
+`tl_assert.h` is the one a sim TU may actually include (`CPP-SUBSET.md` §9 R-3) - `tl_log.h`/
+`tl_prof.h`/`tl_probe.h` stay barred by the non-det-stem rule like any other tooling header. Those
+runtimes' real io and their ring/frame/key-table state are the named exception of `CPP-SUBSET.md`
+§1 and §9 R-4 (RR-7): the implementation stems listed on `TL_FOUNDATION_TOOLING`
+(`src/foundation/CMakeLists.txt`, the one home - not restated here) are the only non-det stems
+allowed writable static storage and `<stdio.h>`/`<stdlib.h>`/`<stdarg.h>`, because none of them is
+hashed, snapshotted, or part of a world's registered arena set. Tier gates: `TL_DEV` (1 in
+`dev`/`debug`, 0 otherwise, `BUILD.md` §3) and `TL_LOG_MIN` (`debug`/`dev` 0, `netcode` 2, `ship`
+3). `TL_LOG_MIN` is **derived from the tier markers inside `tl_log.h`, never passed as its own
+`-D`**: `BUILD.md` §3 requires `netcode` and `ship` to differ only by the stripping defines and
+`tools/audit/tier_parity.py` enforces exactly that list, so a `TL_LOG_MIN=2` vs `=3` on the
+command line would fail that gate while this table demands the two differ. Left undefined it is
+silently 0 to the preprocessor - which is what W1 tooling-rt first shipped, compiling `TL_LOG_TRACE`
+into `ship`. Nothing here is hashed; every mutation of sim state is a command (§0).
 
 ### 9.1 File layout
 

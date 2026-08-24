@@ -39,14 +39,18 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       explicit `to<R>` at every unit change (`invmass_t → scalar_t` is already one) and a larger
       op table. Rev-1 ships format-keyed, as the doc now states; decide before Gate 0's solver is
       promoted (W3 alloy-solver), because that is the last point where the retag is a header edit.
-- [ ] **`foundation/tl_assert.h` landed from the fx lane, not tooling-rt.** `fx.h` needs
+- [x] **`foundation/tl_assert.h` landed from the fx lane, not tooling-rt.** `fx.h` needs
       `TL_ASSERT` on its first line of arithmetic and the tooling-rt lane had not published its
       header; the header's content is pinned by `TOOLING.md` §9 + `CPP-SUBSET.md` §9 R-3 +
       `tools/audit/allow.txt`, so it was transcribed (each tier routed to its own R-3 symbol;
-      `TOOLING.md` §9 snippet aligned). **`tl_assert.cpp` is a stub** - every entry
-      `__builtin_trap`s with file/line/msg live in the frame for a debugger; foundation has no
-      sanctioned io. The tooling-rt lane replaces it with the crash writer (`TOOLING.md` §9.3.9)
-      and owns both files from then on.
+      `TOOLING.md` §9 snippet aligned). **DONE 2026-08-24 (W1 tooling-rt):** `tl_assert.cpp` is
+      real - `tl_fatal`/`tl_check_failed`/`tl_assert_failed` log then call `foundation/crash.h`'s
+      `tl_crash_raise` seam (RR-7, `CPP-SUBSET.md` §9 R-4), whose built-in fallback (today's only
+      path - `platform/` has not landed) prints the `TL_FATAL origin=<TL_FATAL|TL_CHECK|
+      TL_ASSERT> <file>:<line>: <msg>` stderr marker and `exit(2)` - the exact contract
+      `TESTING.md` §9.1's fatal-expected tests match on. Proven by
+      `tests/foundation/tl_assert.test.cpp` (relaunches `tl_tests` itself via `--filter`, since
+      `TL_TEST_EXPECT_FATAL` is not built yet). tooling-rt owns both files from here on.
 - [ ] **Gate finding (fixed in the same commit, for the record):** `tools/audit/includes.py`
       rejected `fx.h` → `tl_assert.h` as "a sim TU includes a non-det foundation header" because
       the det/non-det split is by *stem* and `tl_assert` is non-det for its runtime. R-3 mandates
@@ -54,11 +58,181 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       (`tl_assert.h` passes; `tl_assert.cpp` and `tl_log.h` still fail). Also: `static_assert`
       message literals are literals to the non-ASCII gate, so header messages spell "section 3.1",
       not "§3.1" - not a gate bug, noted so nobody "fixes" it.
+- [x] **RR-7 W1 tooling-rt is blocked: `src/foundation`'s non-det stems have no sanctioned io or
+      storable state, but `TOOLING.md` §9 requires both.** Two gates, read together, make
+      `TOOLING.md` §9's foundation half unbuildable as specified, not just the `<stdio.h>` line
+      the lane brief expected:
+      (a) `tools/audit/includes.py`'s system-include allowlist for `src/foundation` is
+      `{stdint.h, stddef.h, string.h, limits.h}` with no exception for the non-det stems
+      (`tl_log tl_prof tl_probe crash` in `src/foundation/CMakeLists.txt`), so nothing in that
+      half can reach `<stdio.h>`/`<stdlib.h>`/an OS header - no `fprintf`, no `exit`, not even
+      `abort`.
+      (b) `tools/audit/symbols.py`'s writable-static check runs on the `--data-only` libs too
+      (read the tool: `--data-only` drops the undefined-symbol layering check but keeps the
+      `.data`/`.bss` zero check), and `CPP-SUBSET.md` §1 states the rule as "every object file
+      in every `src/` lib" - no carve-out for non-audited state. `TOOLING.md` §9.2's
+      `LogState`/`ProfState`/`ProbeState` (ring buffers, a TSV sink) cannot be namespace-scope
+      globals under that rule, and neither can a stored pointer for "the installed crash
+      writer" that `TL_FATAL` would call into.
+      Meanwhile `CPP-SUBSET.md` §9 R-3 says `tl_fatal`/`tl_check_failed`/`tl_assert_failed`
+      "are defined in `tl_foundation`... and reach io" - the ruling's own text assumes the io
+      path (a) forbids outright. `TOOLING.md` §9's macro catalogue (`TL_LOG_TRACE(...)`,
+      `TL_PROF_SCOPE(lit)`, `TL_PROBE_LOG(lit, v, n)`) takes no state/platform parameter at the
+      call site, by design (`TOOLING.md` §0's "zero cost by absence" tier-gates argument
+      *evaluation*, not argument *threading*).
+      **Consequence:** none of `tl_log.cpp`/`tl_prof.cpp`/`tl_probe.cpp`, the crash writer, or a
+      real (non-stub) `tl_assert.cpp` can be written today without either breaking a gate
+      silently or improvising an assumption CLAUDE.md reserves for a ruling.
+      **Options:** (A, recommended) two narrow exemptions, both scoped and justified the way R-3
+      already is: (i) a stem-aware io allowance in `includes.py` for foundation's non-det stems
+      only (the det/sim stems stay banned exactly as today); (ii) a bounded exemption from the
+      `.data`/`.bss` rule for named, non-hashed, non-snapshotted tooling-plane singleton state
+      (`LogState`, `ProfState`, `ProbeState`, the crash-writer install slot) - the tooling plane
+      is never part of a world's registered arena set, so it carries none of the rule's own
+      stated reason (the two-worlds-one-process test, rollback restoring only registered
+      arenas). (B) thread an explicit state/platform-api parameter through every macro call
+      site in the codebase - rejected as a default: touches every future consumer with no
+      consumer yet to shape it against, and contradicts the macro text `TOOLING.md` §9.1
+      already pins. (C) leave `foundation`'s macros header-only until `core`/`platform` exist to
+      own the state as `World` singletons (the way `CvarTable` is already specified to) -
+      rejected as a default: `TOOLING.md` §9.6's own build order puts `tl_log`/`tl_prof`/
+      `tl_probe` before any sim code, specifically so the Alloy harness can use them; Option C
+      inverts that order.
+      **Status: RULED 2026-08-24 - Option A.** `TL_FOUNDATION_TOOLING` (`src/foundation/
+      CMakeLists.txt`) names the exempt stems (`log prof probe crash tl_assert` - not `tl_log`/
+      `tl_prof`/`tl_probe`; `TOOLING.md` §9.1's file table names the `.cpp` implementations
+      `log.cpp`/`prof.cpp`/`probe.cpp`, only the headers keep the `tl_` prefix, which this line
+      originally missed). `docs/CPP-SUBSET.md` §1 amended, §9 gained R-4; `tools/audit/
+      includes.py`/`symbols.py` read the one list; selftest fixtures prove the exemption is
+      stem-keyed, not directory-keyed, and opt-in (`--root` required). `tl_assert.cpp` and
+      `foundation/crash.h`/`.cpp` are real now (`17dd4da` the ruling, next commit the runtime).
 - [ ] **fx tests that need the runner lane** (`TESTING.md` §9.1 `TL_TEST_EXPECT_FATAL`): `div`
       by zero, `sqrt` of a negative, `normalize` of a zero vector, `atan2(0,0)`, `to<R>` out of
       range, `clamp` with lo > hi - each asserts in dev and has a documented release value; the
       release values are testable today only by building the test against a non-dev tier. Land
       them in `tests/foundation/fx_fatal.test.cpp` the day the macro exists.
+      **The exit-2/marker contract `TL_TEST_EXPECT_FATAL` needs is real (W1 tooling-rt, 2026-08-24):**
+      a fatal (any of `TL_FATAL`/`TL_CHECK`/`TL_ASSERT`) exits the process with code 2 and writes
+      exactly one line to stderr, `TL_FATAL origin=<TL_FATAL|TL_CHECK|TL_ASSERT> <file>:<line>:
+      <msg>\n` (`foundation/crash.h`'s `tl_crash_raise`, `foundation/crash.cpp`'s fallback) - match
+      on the literal leading token `TL_FATAL`, never on `origin`, so all three tiers of the panic
+      ABI satisfy one check. `tests/foundation/tl_assert.test.cpp` proves this today by relaunching
+      `tl_tests` itself (`--filter <name>`, `TL_TESTS_EXE` from `tests/CMakeLists.txt`) - a pattern
+      usable as a stopgap for any fatal-expected test until `TL_TEST_EXPECT_FATAL`/`--isolate`
+      grow the same child-process-inspection support natively.
+- [x] **W1 tooling-rt: `tl_log`/`tl_prof`/`tl_probe` land (`TOOLING.md` §9 foundation half,
+      2026-08-24).** `tl_log.h` + `log.cpp` and `tl_probe.h` + `probe.cpp` are real (RR-7's io/state
+      exemption); `tl_prof.h` ships macro-only, per `TOOLING.md` §9.6 build order item 3 - its
+      runtime needs `NameHash` (`foundation/hash.h`) and `Scratch` (`MEMORY.md` §1.3), neither
+      built yet, and has no consumer until the ECS scheduler auto-scopes systems. `tl_probe.h`'s
+      macros have the same `NameHash` dependency (`"lit"_id`), so tests call the underlying
+      `tl_probe_*`/`tl_log_write` functions directly with a caller-computed key/file/line, not the
+      macros - reconciled the same day as `tl_prof.h`'s runtime (`NameHash` is `u64`, so nothing
+      about either runtime's logic changes, only the call spelling).
+      **Left for whoever builds those:** `probe_tsv_golden` (`TOOLING.md` §9.5) needs
+      `TL_GOLDEN_TSV` (`TESTING.md` §1), which the runner lane has not shipped -
+      `tests/foundation/tl_probe.test.cpp` asserts the staging buffer's exact bytes directly
+      instead; swap to the golden macro the day it exists, per the same pattern as the fx-fatal
+      tests below. `LogState`/`ProbeState` are simplified from `TOOLING.md` §9.2 (a private fixed
+      array instead of `RingBuffer<T>`/`Map<K,V>`, no `ClockApi`/`FileApi`/`StrView`, tick pinned
+      at 0) - reconcile against `CONTAINERS.md`/`PLATFORM.md`/`FRAME-LOOP.md` once those land. Both
+      files' sinks stay staging-buffer-only; the disk flush waits for `PlatformApi.file.append`.
+## W1 tooling-rt - the adversarial review (2026-08-24)
+- [x] **Adversarial review of W1 tooling-rt (`c7dfcb5`..`2482058`) - DONE 2026-08-24 (Opus 5 high,
+      fresh context), fixes in reviews 1-2 on `w1-tooling-rt`. Verdict: FIX FIRST -> shipped.**
+      This lane edited the gates every other lane is judged by, so RR-7's four acceptance
+      conditions were each re-tested against the real tools, not read. Two of the four had holes.
+      What held, measured not assumed: the exempt stem set has exactly one home
+      (`TL_FOUNDATION_TOOLING`, `src/foundation/CMakeLists.txt`) and both `includes.py` and
+      `symbols.py` parse it - neither retypes it, and CMake fails configure if it ever escapes
+      `TL_FOUNDATION_NONDET`; a newly added non-det stem inherits nothing (a planted
+      `newthing.cpp` with `<stdio.h>` + a mutable static: 2 violations, and the same file renamed
+      `tl_newthing.cpp` too); a det foundation stem with a mutable global still fails; the audited
+      libs still report zero `.data`/`.bss`; `tools/audit/allow.txt` still carries exactly the
+      three R-3 names and nothing else from the tooling plane. Ranked defects, all fixed:
+      1. **(High, gate) `symbols.py` exempted a bare STEM in every `--data-only` lib.** `log`,
+         `prof`, `probe` and `crash` are ordinary words, and the exemption was keyed on the archive
+         member's stem with no lib scope - i.e. all of `src/` minus the two audited libs. Measured:
+         a fabricated `tl_platform` holding a `log.o` with 4 bytes of `.data` reported 0 violations.
+         `includes.py`'s twin exemption was already scoped to `src/foundation/`; this one was not.
+         Fix: `--tooling-lib tl_foundation` (review 1) - `--root` alone now grants nothing - with a
+         fixture for the other-lib case and one for `--root` without `--tooling-lib`.
+      2. **(High, gate) `includes.py` granted io and mutable state to `tl_assert.h`.** Its stem is
+         on the list, and it is also `PANIC_ABI_HEADER` - the one tooling header a sim TU may
+         include (`CPP-SUBSET.md` §9 R-3). Measured: `#include <stdio.h>` plus `static int g_ta = 0;`
+         appended to `tl_assert.h` produced 0 violations, i.e. both in every det TU in the tree.
+         The comment at `includes.py`'s `PANIC_ABI_HEADER` was written about exactly this "header
+         det, runtime non-det" split; the new stem rule reopened it from the other side. Fix: the
+         header is excluded by path, only `tl_assert.cpp` is the tooling plane; two fixtures.
+      3. **(High, runtime) `TL_LOG_MIN` was defined nowhere.** `TOOLING.md` §9 names it
+         (`debug`/`dev` 0, `netcode` 2, `ship` 3); `cmake/tier.cmake` sets `TL_DEV` and never it,
+         and `#if TL_LOG_MIN <= 0` reads an unknown identifier as 0 - so every level compiled in,
+         in every tier including `ship`, and `tl_log.test.cpp`'s compile-out test mirrored the same
+         `#if`, making its `#else` arms dead code. The one property `TOOLING.md` §0 turns on - a
+         logged expression with side effects must not run in a tier that compiled the call out -
+         had no test that could fail. It cannot be a `-D` either: `BUILD.md` §3 and
+         `tools/audit/tier_parity.py` allow only the stripping defines to differ between `netcode`
+         and `ship`. Fix: derived from the tier markers inside `tl_log.h`, `#ifndef`-guarded,
+         verified per tier with `-E`; `tests/foundation/tl_log_compileout.test.cpp` pins
+         `TL_LOG_MIN=4` before the include and proves zero argument evaluations in any tier.
+      4. **(High, test) the fatal trigger killed a bare `tl_tests` run.** `tests/runner/main.cpp`
+         selects every test when no `--tag` is given, so the `slow` tag protected nothing:
+         `tl_tests --filter "tl_assert_forced_fatal*"` exited 2 with zero PASS lines. Gated on an
+         env var the checker sets; a bare run is 66/66 again, and a third test asserts the triggers
+         are inert without it.
+      5. **(Medium) `TL_LOG_MSG_CAP` was 240** against `TOOLING.md` §9.2's `msg[224]` and §9.5's
+         "223 bytes + NUL". Docs are the contract - the code moved, and the test now asserts the
+         doc's literal 223 next to the derived value.
+      6. **(Medium) `tl_log_test_ring_at` documented write order and returned ring order.** After a
+         wrap slot 0 is not the oldest live record; the wrap test scanned every slot, so no
+         assertion could tell the two apart, and there was no exactly-full test at all. Fixed, plus
+         `TL_CHECK` on the documented precondition and two order assertions the old scan could not
+         make.
+      7. **(Medium) UB in `probe.cpp`'s `on_change`.** `raw - k.last_raw` is signed overflow for
+         any pair straddling half the i64 range and `-diff` is UB outright at `INT64_MIN`
+         (`CPP-SUBSET.md` §5). Magnitude computed in u64; `eps < 0` is now fatal rather than
+         silently meaning "never row".
+      8. **(Medium) the threading claims contradicted each other.** `crash.h` said `tl_crash_raise`
+         may be entered from any thread; `tl_log.h`, which that path calls, said "main thread
+         only". Both now state the same thing: the ring is unsynchronized, and a fatal off a worker
+         races it the day `JOBS.md` starts one. Aspirational, and now labelled as such.
+      9. **(Medium, docs) the exempt stem list was restated in `CPP-SUBSET.md` §9 R-4 and
+         `TOOLING.md` §9** on top of its real home - the drift class R-4's own text cites
+         `LESSONS.md` for, twice. Both now cite `TL_FOUNDATION_TOOLING` and name no members.
+      10. **(Low) the probe throttle wrapped on a backwards tick.** `g_tick - k.last_tick` on u64
+          reads as an enormous gap after a replay scrub seek (`TOOLING.md` §9.3.10) or
+          `tl_probe_test_set_tick`, so the throttle became a no-op. Clamped. Answering the standing
+          question: with the tick pinned at 0 the throttle is **not** a no-op - the first call rows
+          and every later call with `n > 0` is suppressed forever. That is now in the contract
+          block, which previously said only "not meaningfully testable yet".
+      11. **(Low) the marker contract was pinned by `strstr(buf, "TL_FATAL")` alone.** The runner
+          lane is building `TL_TEST_EXPECT_FATAL` against the full string, so a change to `origin=`
+          or the separators would have broken them at merge and not here. Now pinned end to end,
+          with a `TL_CHECK` trigger proving `origin` varies while the leading token does not. Found
+          while doing it: the child's stderr is a text-mode stream, so Windows writes CR+LF where
+          `crash.cpp` writes LF - whoever implements the macro has to match the line ending, not
+          the two literal bytes.
+      Checked and dismissed, so nobody re-opens them: `ProbeKey` omits `TOOLING.md` §9.2's trailing
+      `_pad0[5]`, but `CPP-SUBSET.md` §1's explicit-padding rule is scoped to *hashed* state and the
+      probe table is never hashed; `probe.cpp` compiles to nothing outside `TL_DEV` while
+      `tl_probe.h` declares the functions unconditionally, which is deliberate (a stray call site is
+      a link error, not silent absence); `tl_log_write`'s definition carries C linkage from the
+      header's prior `extern "C"` declaration, which is correct C++ and not a mismatch.
+      **Merge note:** `w1-tooling-rt` merges cleanly into `main` as of `e2f4b17`
+      (`git merge-tree --write-tree` reports no conflict); `TODO.md` is a both-sides edit that
+      resolves.
+- [ ] **`TL_LOG_MIN` for `netcode` vs `ship` is a live tension between two docs, not resolved by
+      the fix above. Ruling request.** `TOOLING.md` §9 wants the two tiers to differ (2 vs 3);
+      `BUILD.md` §3 wants them to differ only by stripping, and `tools/audit/tier_parity.py`
+      enforces the allowed define list. Deriving `TL_LOG_MIN` inside `tl_log.h` from the tier
+      markers satisfies both gates *today* because no `-D` changes - but the two tiers really do
+      compile different code, which is the thing §3's rule exists to prevent. It is defensible (a
+      log level is stripping-class, exactly like `NDEBUG`) and it is not ruled. Either (a) add
+      `TL_LOG_MIN=\d` to `tier_parity.py`'s allowed row and pass it as a `-D` from
+      `cmake/tier.cmake` - explicit, gated, one home; or (b) state in `BUILD.md` §3 that
+      tier-marker-derived divergence inside headers is in scope for the rule and name `TL_LOG_MIN`
+      as its first instance. Not invented here (CLAUDE.md rule 7).
+
 - [ ] **RR-1 Pi 4 sysroot + the aarch64 leg of `BUILD.md` §10.5.** Rafael has a Pi 4 on the LAN,
       so this is now an execution task, not a decision. Lane: W0 skeleton (**Opus 5 high**). It
       touches only `toolchain/`, `cmake/toolchain-pi4.cmake`, `tools/sysroot.sh|deploy.sh` and this

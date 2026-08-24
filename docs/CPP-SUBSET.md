@@ -26,7 +26,7 @@ most of it. The subset is "C with namespaces, a handful of flat templates, and `
 | operator overloads beyond fx arithmetic | hidden cost | review |
 | `new`/`delete`/`malloc`/`free` outside arena backing | zero per-tick allocation | symbol audit (§4) + debug counting shim |
 | `<math.h>` in sim TUs | libm is the cross-platform determinism hole | include firewall + symbol audit |
-| static mutable state | two-worlds-one-process test; rollback restores only registered arenas | link gate: every object file in every `src/` lib must have zero bytes of `.data`/`.bss`/TLS (`tools/audit/symbols.py`). A grep cannot see anonymous-namespace globals, `inline static` or static locals; the earlier `^static [^c]` line also rejected every `static` *function*, which is internal linkage, not state |
+| static mutable state | two-worlds-one-process test; rollback restores only registered arenas | link gate: every object file in every `src/` lib must have zero bytes of `.data`/`.bss`/TLS (`tools/audit/symbols.py`), **except the named tooling-plane stems (§9 R-4)** — never hashed, never snapshotted, never part of a world's registered arena set, so none of this row's reasons apply to them. A grep cannot see anonymous-namespace globals, `inline static` or static locals; the earlier `^static [^c]` line also rejected every `static` *function*, which is internal linkage, not state |
 | recursive/meta templates, SFINAE, concepts, expression templates | compile time + cognitive cost | review; the sanctioned list is closed |
 | `auto` for non-iterator locals, lambdas capturing by reference across a call | readability / hidden lifetime | review |
 | `thread_local` outside the job system's worker slot | hidden per-thread state the hash can't see | CI grep |
@@ -35,7 +35,10 @@ most of it. The subset is "C with namespaces, a handful of flat templates, and `
 memcmp/**memmove** only - `memmove` is sanctioned because `CONTAINERS.md` §8's erase/insert paths
 need an overlapping move and it is as deterministic as the other three; the earlier list omitted
 it and contradicted that doc), `<limits.h>`. `platform/` additionally includes its OS/SDL headers inside its own
-TUs. `<math.h>` is allowed ONLY in `render/`, `editor/`, `platform/` (float is legal there).
+TUs. `<math.h>` is allowed ONLY in `render/`, `editor/`, `platform/` (float is legal there). The
+named tooling-plane stems (§9 R-4) additionally get `<stdio.h>`/`<stdlib.h>`/`<stdarg.h>` - still
+no OS header, no `<math.h>`; the real crash writer's raw OS calls stay `platform/`'s
+(`TOOLING.md` §9.3.9).
 Type traits come from clang builtins, never `<type_traits>`: `__is_trivially_copyable(T)`,
 `__is_same(A,B)`, `__is_enum(T)`, `alignof`, `sizeof`, `offsetof` (from `<stddef.h>`). `tl_types.h`
 defines `u8..u64`, `i8..i64`, `f32`, `f64`, `usize` and `uint_fit<N>` (a `constexpr` width
@@ -107,7 +110,8 @@ is deliberately NOT in that list** - no grep sees an anonymous-namespace global,
 static` member or a static local - so §1's rule is enforced by the link gate's
 zero-`.data`/`.bss`/TLS check over every `src/` lib instead. The sim-lib boundary this needs is
 the `ARCHITECTURE.md` §1 layout doing double duty. This is a callgraph effect ban at link
-granularity — about 90% of what the attribute gave.
+granularity — about 90% of what the attribute gave. §9 R-4 names the one exception: the tooling
+plane, which this gate's `--data-only` libs still check for everything except the named stems.
 
 ---
 
@@ -276,5 +280,36 @@ if (r.err) { TL_LOG_ERR(ERR_NAME(r.err)); return r.err; }
   desync dump, no column), and `TL_WIRE_STRUCT(Name)` (adds the leading `u32 format_version`, an
   `offsetof` static_assert per field generated from the list, and the little-endian write/read
   pair). Same table, same kinds, same inspector; nothing is declared twice.
+- **R-4 (RR-7) The tooling plane is exempt from the writable-static ban and reaches io directly.**
+  `TOOLING.md` §9's runtimes are named, individually, on `TL_FOUNDATION_TOOLING`
+  (`src/foundation/CMakeLists.txt`) — a strict subset of the non-det stem list `BUILD.md` §10.2
+  already splits out, and the only home the member names have: no doc, this one included,
+  restates them. Both `tools/audit/includes.py` (the `<stdio.h>`/`<stdlib.h>` allowance) and
+  `tools/audit/symbols.py` (the `.data`/`.bss` exemption) parse that one line, so the exemption
+  can only widen by editing it, never by a second hand-typed copy drifting out of sync
+  (`LESSONS.md` has that drift class twice already).
+  The exemption is **a stem inside a named scope, never a stem on its own** — the words `log`,
+  `prof`, `probe` and `crash` are too ordinary to carry a ruling by themselves. `includes.py`
+  grants it only under `src/foundation/`, and only to the `.cpp`: `tl_assert.h` is on the stem
+  list *and* is the one tooling header a sim TU may include (R-3), so granting the header io or
+  mutable state would push both through R-3's hole into every det TU in the tree. `symbols.py`
+  grants it only inside the one `--data-only` lib named by `--tooling-lib` (`tl_foundation`), so
+  a `log.o` compiled into `core/`, `platform/` or `editor/` is an ordinary violation. Both holes
+  were open in the first cut of this ruling and were measured, not argued (W1 tooling-rt review 1,
+  2026-08-24); `tools/audit/selftest.py` now carries a fixture for each. A sibling non-det stem not on the list (e.g.
+  `jobs`, `mem_pool`) inherits nothing — the negative fixtures in `tools/audit/selftest.py` prove
+  the same source under a non-tooling stem name still fails both gates, and a sim TU still cannot
+  include anything but `tl_assert.h`: one fixture per barred tooling header (`tl_log.h`,
+  `tl_prof.h`, `tl_probe.h`, `crash.h`), never one standing in for the rest (R-3's exemption is
+  unchanged). §1's row states *why* this is
+  sound and not a hole: the tooling plane is never hashed, never snapshotted, and never part of a
+  world's registered arena set, so it carries none of the two-worlds-one-process reasoning the ban
+  exists for. This also settles the seam R-3 explicitly left unresolved for the *det* side ("a
+  function pointer installed at boot… is exactly what the same audit forbids"): in the exempted
+  tooling plane, that objection does not apply, so a boot-installed callback (the crash-writer
+  install slot `TOOLING.md` §9.3.9 describes) is the correct, sanctioned way for `tl_fatal` to
+  reach `platform.crash.raise_fatal` once `platform/` exists — not a workaround, the seam.
 
-*Rev 1 — 2026-08-22; §3 names the header owning `Result<T>`, §1 corrects the static-mutable gate and adds `memmove`, §9 R-3 rules the panic ABI (W0 skeleton and its two adversarial reviews, 2026-08-22).*
+*Rev 1 — 2026-08-22, reconciled 2026-08-24 (§1 exempts the tooling plane, §9 adds R-4); §3 names
+the header owning `Result<T>`, §1 corrects the static-mutable gate and adds `memmove`, §9 R-3
+rules the panic ABI (W0 skeleton and its two adversarial reviews, 2026-08-22).*

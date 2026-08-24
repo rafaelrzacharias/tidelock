@@ -77,6 +77,10 @@ THREAD_LOCAL_EXEMPT = {"src/foundation/jobs.cpp", "src/foundation/jobs.h"}   # t
 # fx.h needs it. The stem-keyed split cannot express "header det, runtime non-det", so the
 # exemption is by full path - the .cpp is still barred.
 PANIC_ABI_HEADER = "foundation/tl_assert.h"
+# RR-7 (docs/CPP-SUBSET.md §1): the tooling plane's io allowance. Narrower than SYS_ALLOW's base
+# set - `<math.h>` is still not granted here, and neither is any OS header; the crash writer's raw
+# OS calls belong to platform/, not foundation/ (docs/TOOLING.md §9.3.9).
+TOOLING_SYS_ALLOW = {"stdio.h", "stdlib.h", "stdarg.h"}
 
 INC_SYS = re.compile(r'^\s*#\s*include\s*<([^>]+)>')
 INC_LOCAL = re.compile(r'^\s*#\s*include\s*"([^"]+)"')
@@ -187,6 +191,19 @@ def nondet_stems(root):
     return set(m.group(1).split())
 
 
+def tooling_stems(root):
+    """RR-7 (docs/CPP-SUBSET.md §1): the ONE non-det stem set allowed real io and namespace-scope
+    mutable state. A strict subset of nondet_stems() (CMake enforces this at configure time); parsed
+    from the same file's TL_FOUNDATION_TOOLING line so this list and symbols.py's copy cannot drift
+    from the one that actually ships."""
+    path = os.path.join(root, "src", "foundation", "CMakeLists.txt")
+    text = open(path, encoding="utf-8").read()
+    m = re.search(r"set\(TL_FOUNDATION_TOOLING([^)]*)\)", text)
+    if not m:
+        sys.exit("includes: src/foundation/CMakeLists.txt has no set(TL_FOUNDATION_TOOLING ...)")
+    return set(m.group(1).split())
+
+
 def strip_comments(text, blank_strings=True):
     """Blank comments - and, when asked, string/char literals - preserving line structure.
 
@@ -248,6 +265,14 @@ def strip_comments(text, blank_strings=True):
             out.append(c if (c == "\n" or not blank_strings) else " ")
         i += 1
     return "".join(out)
+
+
+def stem_matches(stem, stem_set):
+    """A file's stem is in `stem_set` (nondet or tooling), or is that stem's header sibling:
+    TOOLING.md §9.1's file table keeps the `tl_` prefix on the HEADER (`tl_log.h`) but drops it
+    on the implementation (`log.cpp`) - `tl_assert` is the one stem that keeps its prefix on both,
+    which is why the exact stem is tried first."""
+    return stem in stem_set or (stem.startswith("tl_") and stem[3:] in stem_set)
 
 
 def module_of(rel):
@@ -388,7 +413,7 @@ def contract_block_end(raw_lines):
     return len(raw_lines)
 
 
-def check_file(root, path, nondet, errors):
+def check_file(root, path, nondet, tooling, errors):
     rel = os.path.relpath(path, root).replace("\\", "/")
     try:
         raw = open(path, encoding="utf-8").read()
@@ -403,7 +428,17 @@ def check_file(root, path, nondet, errors):
     stem = os.path.splitext(os.path.basename(rel))[0]
 
     is_det_tu = rel.startswith("src/sim/") or (
-        rel.startswith("src/foundation/") and stem not in nondet)
+        rel.startswith("src/foundation/") and not stem_matches(stem, nondet))
+    # RR-7: the tooling plane is the one non-det stem set exempted from the io and .data/.bss
+    # bans - never the directory, always the named stem, so a sibling non-det stem (jobs,
+    # mem_pool, ...) that is not on the list inherits nothing just by living next to one that is.
+    # ...and never the panic-ABI HEADER, even though its stem is on the list. tl_assert.h is the
+    # one tooling header a sim TU may include (PANIC_ABI_HEADER above), so granting it io and
+    # mutable state would push both through R-3's hole into every det TU in the tree. Measured
+    # before this line existed: `#include <stdio.h>` + `static int g_ta = 0;` appended to
+    # tl_assert.h produced 0 violations. Only tl_assert.cpp is the tooling plane.
+    is_tooling_tu = (rel.startswith("src/foundation/") and stem_matches(stem, tooling)
+                     and rel != "src/" + PANIC_ABI_HEADER)
     # tl_types.h declares f32/f64 and StrView's `const char*`, and fx_float.h is the bridge, so
     # both are exempt from the TOKEN bans - but not from the layout and target-selection rules,
     # which apply to every sim TU including the leaf. Exempting them wholesale (as the first
@@ -428,6 +463,8 @@ def check_file(root, path, nondet, errors):
     for prefix, extra in SYS_ALLOW_DIRS.items():
         if rel.startswith(prefix):
             allow |= extra
+    if is_tooling_tu:
+        allow |= TOOLING_SYS_ALLOW
 
     for i, line in enumerate(code_lines, 1):
         m = INC_SYS.match(line)
@@ -452,7 +489,7 @@ def check_file(root, path, nondet, errors):
                     # _fltused tripwire on ELF (docs/FX-PALETTE.md 6).
                     errors.append('%s:%d: a sim TU includes the float bridge "%s" - it is '
                                   "render/editor/tools only (docs/FX-PALETTE.md §6)" % (rel, i, inc))
-                elif inc_stem in nondet and inc != PANIC_ABI_HEADER:
+                elif stem_matches(inc_stem, nondet) and inc != PANIC_ABI_HEADER:
                     errors.append('%s:%d: a sim TU includes the non-det foundation header "%s" '
                                   "(docs/BUILD.md §10.2)" % (rel, i, inc))
         if m or m2:
@@ -462,7 +499,7 @@ def check_file(root, path, nondet, errors):
                                   "(docs/BUILD.md §4)" % (rel, i, token, prefixes))
 
         tline = token_lines[i - 1] if i - 1 < len(token_lines) else ""
-        if is_mutable_static(tline):
+        if is_mutable_static(tline) and not is_tooling_tu:
             errors.append("%s:%d: static mutable state (docs/CPP-SUBSET.md §1): %s"
                           % (rel, i, raw_lines[i - 1].strip()[:70]))
         if TLS_SPELLINGS.search(tline) and rel not in THREAD_LOCAL_EXEMPT:
@@ -549,13 +586,14 @@ def main():
     a = ap.parse_args()
     src = os.path.join(a.root, "src")
     nondet = nondet_stems(a.root)
+    tooling = tooling_stems(a.root)
     errors = []
     scanned = 0
     for dirpath, _dirs, files in os.walk(src):
         for name in sorted(files):
             if name.endswith(SCAN_EXT):
                 scanned += 1
-                check_file(a.root, os.path.join(dirpath, name), nondet, errors)
+                check_file(a.root, os.path.join(dirpath, name), nondet, tooling, errors)
     for e in errors:
         print("ERROR " + e)
     print("includes: %d files checked, %d violations" % (scanned, len(errors)))
