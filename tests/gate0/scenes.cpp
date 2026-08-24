@@ -168,14 +168,23 @@ void scene_g03(Scene* s, u64 seed, u32 particles) {
 void scene_g04(Scene* s, u64 seed) {
     scene_add_sealed_box(s, fx::fx_int<pos_t>(-10), fx::fx_int<pos_t>(0), fx::fx_int<pos_t>(10), fx::fx_int<pos_t>(20), fx::fx_int<pos_t>(1));
     add_stack(s, fx::fx_int<pos_t>(-7), 10);                                                   // the G-01 stack
-    add_liquid_block(s, fx::fx_int<pos_t>(2), fx::fx_int<pos_t>(0), 32, 2000);                  // 4 m wide block, ~7.9 m tall
+    const pos_t liquid_top = add_liquid_block(s, fx::fx_int<pos_t>(2), fx::fx_int<pos_t>(0), 32, 2000);   // 4 m wide block, ~7.9 m tall, x in [2, 6]
     const angle_t z = fx::fx_raw<angle_t>(0);
-    // 20 free 0.5 m boxes (1024 quanta) on a 1 m pitch above everything, y jittered by rng_for
+    // 20 free 0.5 m boxes (1024 quanta): ten over the liquid a quarter metre above its surface,
+    // ten on the floor left of the stack, x jittered by rng_for. The drop height is the bench's
+    // choice (docs/GATE0-BENCH.md §2 names none): a 12 m drop hits the compliant liquid at 15 m/s,
+    // crushes it 20x (rho saturates at q_t's +2) and the run ends in a clump (measured, TODO.md);
+    // G-04 is the long-run energy envelope, not a splash test.
     for (u32 i = 0; i < 20; ++i) {
         const u64 r = rng_for(seed, 0, GATE0_RNG_SYS, i, 0);
-        const pos_t jitter = rng_range<pos_t>(r, fx::fx_int<pos_t>(0), fx::fx_int<pos_t>(3));
-        const pos_t x = fx::fx_int<pos_t>(-9) + fx::fx_int<pos_t>(i32(i)) - m_of(1, 2);   // -9.5 .. 9.5, inside the +-10 box
-        scene_add_body(s, x, fx::fx_int<pos_t>(12) + jitter, m_of(1, 4), m_of(1, 4), z, 1024, 0);
+        const pos_t jitter = rng_range<pos_t>(r, fx::fx_int<pos_t>(0), m_of(1, 8));
+        if (i < 10) {
+            const pos_t x = fx::fx_int<pos_t>(2) + m_of(1, 4) + fx::fx_raw<pos_t>(m_of(3, 8).v * i32(i)) + jitter;   // 2.25 .. 5.6 over the block
+            scene_add_body(s, x, liquid_top + m_of(1, 2), m_of(1, 4), m_of(1, 4), z, 1024, 0);
+        } else {
+            const pos_t x = fx::fx_int<pos_t>(-5) + fx::fx_raw<pos_t>(m_of(5, 8).v * i32(i - 10)) + jitter;         // -5 .. 0.6 on the floor
+            scene_add_body(s, x, m_of(1, 4) + jitter, m_of(1, 4), m_of(1, 4), z, 1024, 0);
+        }
     }
     // 10 ropes of 8 distance constraints: anchor (inv_m 0) at y = 19, eight 0.25 m segments
     // hanging at a 30 degree lean so they swing; rope particles are 512 quanta, not liquid
@@ -201,15 +210,21 @@ void scene_g05(Scene* s, u64 seed, u32 particles) {
     const pos_t top = liquid_top + fx::fx_int<pos_t>(30);
     scene_add_sealed_box(s, fx::fx_int<pos_t>(-16), fx::fx_int<pos_t>(0), fx::fx_int<pos_t>(16), top, fx::fx_int<pos_t>(1));
     add_liquid_block(s, fx::fx_int<pos_t>(-8), fx::fx_int<pos_t>(0), cols, particles);
-    // 2k bodies: 0.25 m boxes (256 quanta) on a 0.5 m pitch, 60 per row, above the liquid,
-    // x jittered by rng_for within the pitch so they do not land in one column
+    // 2k bodies: 0.25 m boxes (256 quanta) as two floor-standing stacks flanking the liquid
+    // (32 per row x 32 rows each side, a 0.02 m gap, x jittered by rng_for). Boxes ON the liquid
+    // crush the compliant PBF (RR-10/RR-11: a 34-row raft of boxes landing on it collected 9,769
+    // contacts on one box); G-05 measures cost at a steady state, so the bodies and the liquid
+    // each settle on the floor.
     const angle_t z = fx::fx_raw<angle_t>(0);
     for (u32 i = 0; i < 2000; ++i) {
-        const u32 row = i / 60u, colx = i % 60u;
+        const u32 side = i & 1u, k = i >> 1;               // 1000 per side
+        const u32 row = k / 32u, colx = k % 32u;
         const u64 r = rng_for(seed, 0, GATE0_RNG_SYS, i, 0);
-        const pos_t jx = rng_range<pos_t>(r, fx::fx_int<pos_t>(0), m_of(1, 5));
-        const pos_t x = fx::fx_int<pos_t>(-15) + fx::fx_raw<pos_t>(m_of(1, 2).v * i32(colx)) + jx;
-        const pos_t y = liquid_top + fx::fx_int<pos_t>(2) + fx::fx_raw<pos_t>(m_of(1, 2).v * i32(row));
+        const pos_t jx = rng_range<pos_t>(r, fx::fx_int<pos_t>(0), m_of(1, 100));
+        const pos_t pitch = m_of(27, 100);                  // 0.25 m box + 0.02 m gap
+        const pos_t x0 = side ? fx::fx_int<pos_t>(8) + m_of(1, 2) : fx::fx_int<pos_t>(-16) + m_of(1, 2);
+        const pos_t x = x0 + fx::fx_raw<pos_t>(pitch.v * i32(colx)) + jx;
+        const pos_t y = m_of(1, 8) + fx::fx_raw<pos_t>(pitch.v * i32(row));
         scene_add_body(s, x, y, m_of(1, 8), m_of(1, 8), z, 256, 0);
     }
     s->settle_tick = 200;

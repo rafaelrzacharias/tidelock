@@ -27,12 +27,103 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [x] `det_math.h` — `sqrt`/`rsqrt`/`sincos`/`atan2`/`isqrt`/`lerp`, `vec2<T>`, normalize/rotate;
       FixPointCS ports attributed; `tools/fxcheck/` three-layer oracle (exhaustive + differential +
       mpmath bounds) green for `sqrt`/`sin`/`cos`. (W1 fx, 2026-08-23; bounds in `det_math.h`.)
-- [ ] `tests/gate0/` — disposable solver (gravity, rigid boxes, distance + contact + friction, PBF
+- [x] `tests/gate0/` — disposable solver (gravity, rigid boxes, distance + contact + friction, PBF
       density), scenarios G-01..G-06, substep sweep 4/8/16, CSV + verdict lines, FLOAT-SHADOW config.
+      (W2 gate0, 2026-08-25 — findings and ruling requests RR-8..RR-15 in the "W2 gate0" section below.)
 - [ ] Run on PC; cross-compile + run on Pi 4 (`docs/BUILD.md` §7); commit CSVs under
       `tests/gate0/results/`. Climb the ladder on any convergence failure (`FX-PALETTE.md` §3.2).
 - [ ] **Decision commit:** `FX-PALETTE.md` rev 2 (rows DECIDED, or the fallback recorded) +
       `PIVOT-DESIGN.md` §3.1b/§12 updated + `LESSONS.md` entries per rung climbed.
+
+## W2 gate0 — the bench is built; what it measured (2026-08-25, `w2-gate0`, PC x86-64 netcode tier)
+
+The verdict table is `tests/gate0/results/2026-08-25-pc-win-netcode/README.md` (the CSVs beside
+it are the evidence; every scenario ran twice in one process with bit-identical hash traces).
+The Pi leg of G-06 is BLOCKED on RR-1 exactly as RR-1's entry says; the §8.5 remainder is filed
+at the end of this section. **Nothing below moves a threshold, a world constant or a row: the
+rev-2 decision commit is Rafael's.** Ranked by what it means for `FX-PALETTE.md` rev 2:
+
+- [ ] **RR-8 (row, measured) `lambda_t` must be an i64 across the sweep — rung 1 as
+      `FX-PALETTE.md` §3.2 states it, not as `ALLOY.md` §14.4.3's pseudocode narrows it.** The
+      pseudocode's `lambda_t(i32(rne_div(num * 2^16, den)))` per constraint quantises a unit-mass
+      correction to 4 `pos_t` quanta (`lambda_t`'s 1.5e-5 kg·m quantum × w = 1): a single resting
+      box creeps 12 quanta/tick sideways while the double shadow sits still (`--ladder 0`, the
+      `G01_s8_l0.csv` row of the results). With the frac-30 i64 λ the same box does not move a
+      quantum in 10,000 ticks. Fix the home: `ALLOY.md` §14.4.3's `dλ`/`λ +=` lines become the
+      i64 local narrowed once at writeback (the bench's `lam_narrow`); `lambda_t` stays the
+      STORAGE row. Confidence High (bit-level, both bindings).
+- [ ] **RR-9 (row, measured) `invmass_t` cannot hold the inverse inertia of a 4096:1 body
+      smaller than 2.5 m, and the angular denominator share `inv_I (r×n)²` overflows it for any
+      light plank.** `inv_I = 12/(m(w²+h²))`: a 0.25 m feather at 1/4096 kg is 393k, a 2.5 m ×
+      0.25 m plank 7,790 (the largest that fits; that is the G-02 feather the bench uses). The
+      bench keeps the angular share in the i64 den (`w_ang30`), which `ALLOY.md` §14.4.3 ("body:
+      w += ...") narrows into `invmass_t`. Needs a ruling: an inertia row or clamp, or the
+      §14.4.3 line rewritten as the i64 term. Also measured: the implicit angle encoding
+      `pθ = θ − ω·h` caps |ω| at inv_h/2 turn/s (240 at 480 Hz) whatever `omega_t`'s ±2,048
+      range — the row's headroom above 240 turn/s is unreachable by construction.
+- [ ] **RR-10 (solver design, measured in BOTH bindings) PBF density as one owner-only pass per
+      substep is unstable at any useful stiffness.** `ALLOY.md` §14.4.3's "owner-only write; the
+      symmetric Δx_j is applied when j is the owner" drops the λ_j cross terms of the standard
+      λ_i + λ_j form (it is not that form realised twice). Measured on a 48-particle block: a
+      1 m/s landing launches the top row at 2.6 m/s, fx and double alike. The bench runs the
+      standard two-pass Jacobi form (λ gather, then Σ(λ_i + λ_j)∇W — still owner-only writes,
+      deterministic). Even that needs compliance: at 480 Hz a one-pass correction over-shoots a
+      landing ~3× and v = Δx/h turns 6 mm into 2.9 m/s (LESSONS.md); α̃ ≤ 0.1 tunnels the floor,
+      α̃ = 0.3 (α = 1.3e-6, `--alpha 1302`) holds a 7.8 m column at 2.0 % p95 density error, 1.0
+      gives 4.2 %. And the compliant liquid is crushed by impacts: a 0.5 m box from 12 m collects
+      2,100 particle contacts as ρ saturates at `q_t`'s +2 (RR-11). The XPBD-substep PBF needs a
+      design pass (iterations per substep, a converged solve, boundary particles) before the
+      liquid rows can be graded at 2 %. Confidence High on the mechanism (the double shadow
+      reproduces it), Medium on which redesign.
+- [ ] **RR-11 (row, measured) ρ/ρ₀ in `q_t` saturates at 2 under impact and the constraint
+      loses its restoring force.** With the compliant liquid a box impact compresses the fluid
+      past 2× rest density; `q_sat` clamps ρ, C clamps at −1, λ stops growing, the clump persists.
+      The bench keeps ρ as the i64 frac-30 local and clamps only the stored metric copy. Either
+      the density ratio needs a wider row or the compliance must keep ρ < 2 (RR-10).
+- [ ] **RR-12 (solver design) `ALLOY.md` §14.4.3's 64-colour `TL_FATAL` fires on any body in
+      liquid.** A static body (inv_mass 0) is never written and is not a carrier for colouring
+      (the bench's reading); a DYNAMIC 0.5 m box resting in the G-04 liquid shares 40–70
+      contacts, a box landing in it 1,000+. The bench's cap is 4,096; the production sim needs
+      either a per-body Jacobi accumulation for particle–body contacts or a cap that is a
+      content rule with a real number.
+- [ ] **RR-13 (spec) G-05's threshold is unreachable by the kernel as spelled, in any
+      arithmetic.** Measured at netcode −O2: 141 ns per pair evaluation (density + XSPH:
+      one `isqrt64`, one `rne_div` for q, `normalize` = one more `isqrt64` + two `rne_div`, ~10
+      `mul<R>`), ~155 pair evaluations per particle per tick at 8 substeps. 20k particles ≤ 4 ms
+      requires ≈ 1.3 ns per pair — below what a scalar float sqrt+div kernel reaches (~20 ns) by
+      an order of magnitude and 100× below this one. The fixed-point premium (bit-serial
+      `isqrt64`, 64-bit `idiv`) is a factor ~5–10 of the ~100×; the rest is the kernel's op count
+      against the budget. The pre-committed "PC fail → float fallback" cannot rescue a budget
+      float cannot meet either: a ruling on the budget (SIMD lanes `FX-PALETTE.md` §9 R-4, a
+      sqrt-free kernel, or a threshold that names the arithmetic) before the palette is blamed.
+- [ ] **RR-14 (spec) G-03 as written cannot be built at CANON spacing.** "5k-particle column, 2 m
+      wide, ~1.2 m tall" at 2-texel spacing is 16 columns × 313 rows = 39 m tall (the bench's
+      G-03); a 2 m × 1.2 m column is 160 particles. The 39 m column crushes its own base (RR-10)
+      and fails at tick 34 in both runs; the 7.8 m (1,000-particle) column holds at 2.0 %. Which
+      geometry is THE G-03 is a ruling; the results carry both.
+- [ ] **RR-15 (spec) G-02b as posed tests the feather, not the boulder.** The boulder at V_MAX
+      never tunnels; the 4096:1 plank it lands on is ejected at V_MAX_WORLD (vmax clamps
+      counted), spun past the ω cap (RR-9) and passes a 1 m wall within 2 ticks — a tunneling
+      FAIL by the doc's letter. If the intent is "the boulder must not tunnel through the
+      feather or the floor", the criterion should say so; if it is "nothing tunnels", the
+      linearised corner contact cannot hold a body spinning a quarter turn per substep.
+- [ ] Bench facts recorded so nobody rediscovers them: the analytic box SDF needs a corner
+      tie-break (aligned stacks are all corners); walls must overlap at the box corners; the
+      neighbour list carries `ALLOY.md` §1.2's support margin (5×5 cells, reach h + travel) and
+      therefore needs 128 slots, not 64; position-level friction as §14.4.3 writes it (carrier
+      centres, no lever term) is what keeps a stack still — a contact-point form with the
+      rotational share drifts the stack through the per-corner GS order in both bindings; the
+      substep order is density → distance → contacts (a wall has the last word); `V_MAX_WORLD`
+      is applied as a per-component clamp in the velocity pass (counted); `stb_sprintf` is not
+      vendored, the CSV writer is `snprintf`; the unilateral density constraint is spelled
+      C = 1 − ρ ≤ 0 (the doc's `C = max(ρ − 1, 0)` with `dl = max(dl, −λ)` zeroes every step);
+      the free boxes of G-04/G-05 start a quarter metre over the liquid or on the floor (the spec
+      names no drop height; a 12 m plunge is a splash test the compliant liquid cannot survive).
+- [ ] **§8.5 remainder:** the Pi leg of G-06 and the Pi half of G-05 (RR-1); the UBSan/ASan
+      G-06 evidence run (`sanitize-linux` is the only sanitizer lane; no Linux host here — add
+      `tl_gate0 --scenario G06 --ticks 200` to that CI job); the weekly-lane hook (`TESTING.md`
+      §6) once the runners exist; G-04 at 1e6 ticks (the results carry 20,000: 16 h per run at
+      54 ms/tick on this PC, twice for the bit-compare).
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [ ] **RR-6 A tighter sine?** Measured (`FX-PALETTE.md` §4.4): the ported `SinPoly4` gives

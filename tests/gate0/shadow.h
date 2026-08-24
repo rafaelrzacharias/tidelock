@@ -12,6 +12,6 @@ namespace g0shadow {
 // pass, and writes one row per (tick, substep, pass, constraint_kind) with the max |fx - double|
 // position error in pos_t raw units (docs/GATE0-BENCH.md §4). Returns the max error over the
 // run. Never authoritative; its numbers are compared for drift, never for equality.
-i64 shadow_run(const g0scene::Scene* scene, const g0::Consts* k, u32 ticks, FILE* csv, Scratch* scratch, const VMemApi* os, u8 dump);
+i64 shadow_run(const g0scene::Scene* scene, const g0::Consts* k, u32 ticks, FILE* csv, Scratch* scratch, const VMemApi* os, u8 dump, u32 watch);
 
 }  // namespace g0shadow

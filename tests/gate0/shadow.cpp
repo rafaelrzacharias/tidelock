@@ -53,7 +53,7 @@ i64 compare_locals(const g0::World* a, const g0s::World* b, i64* err_b, i64* err
 
 }  // namespace
 
-i64 shadow_run(const g0scene::Scene* scene, const g0::Consts* k, u32 ticks, FILE* csv, Scratch* scratch, const VMemApi* os, u8 dump) {
+i64 shadow_run(const g0scene::Scene* scene, const g0::Consts* k, u32 ticks, FILE* csv, Scratch* scratch, const VMemApi* os, u8 dump, u32 watch) {
     g0::World* wa = (g0::World*)scratch_push(scratch, sizeof(g0::World), 64u);
     g0s::World* wb = (g0s::World*)scratch_push(scratch, sizeof(g0s::World), 64u);
     g0::world_init(wa, os, scratch, scene->nb, scene->np, scene->nd, k);
@@ -119,6 +119,12 @@ i64 shadow_run(const g0scene::Scene* scene, const g0::Consts* k, u32 ticks, FILE
             m = compare(wa, wb, err_b, err_p);
             fprintf(csv, "%u,%u,velocity,-,%lld\n", t, s, (long long)m);
             if (m > worst) worst = m;
+        }
+        if (watch < wa->np) {
+            const u32 p = watch;
+            fprintf(stderr, "t=%u p=%u fx x=%lld y=%lld rho=%lld | dbl x=%lld y=%lld rho=%lld" "%c", t, p,
+                    (long long)g0::raw_pos(wa->px[p]), (long long)g0::raw_pos(wa->py[p]), (long long)g0::raw_q(wa->rho[p]),
+                    (long long)g0s::raw_pos(wb->px[p]), (long long)g0s::raw_pos(wb->py[p]), (long long)g0s::raw_q(wb->rho[p]), 10);
         }
         if (dump) {
             for (u32 p = 0; p < wa->np && wa->np <= 64; ++p) {

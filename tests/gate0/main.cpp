@@ -40,6 +40,8 @@ struct Args {
     u32 csv_every;
     u64 seed;
     u8 dump;            // per-tick body columns to stderr (debugging aid)
+    u8 _pad0[3];
+    u32 watch;          // --watch n: the shadow dump prints particle n in both worlds every tick (0xFFFFFFFF = none)
     u32 mu_percent;     // friction coefficient x 100 (50 = the bench default; a debugging knob)
     u32 alpha_nano;     // PBF density compliance alpha x 1e9 (physical; alpha~ = alpha / h^2); default 1302 = alpha~ 0.3 at 480 Hz
     u32 iters;          // density Jacobi passes per substep (1 = the doc)
@@ -68,7 +70,7 @@ void usage() {
 
 bool parse_args(int argc, char** argv, Args* a) {
     memset(a, 0, sizeof(*a));
-    a->substeps = 8; a->ladder = 1; a->csv_every = 1; a->seed = 1; a->mu_percent = 50; a->alpha_nano = 1302; a->iters = 1;
+    a->substeps = 8; a->ladder = 1; a->csv_every = 1; a->seed = 1; a->mu_percent = 50; a->alpha_nano = 1302; a->iters = 1; a->watch = 0xFFFFFFFFu;
     for (int i = 1; i < argc; ++i) {
         const char* f = argv[i];
         const bool has_val = i + 1 < argc;
@@ -85,6 +87,7 @@ bool parse_args(int argc, char** argv, Args* a) {
         else if (!strcmp(f, "--mu") && has_val && parse_u64(argv[++i], &v) && v <= 200) { a->mu_percent = u32(v); }
         else if (!strcmp(f, "--alpha") && has_val && parse_u64(argv[++i], &v) && v <= 8000) { a->alpha_nano = u32(v); }
         else if (!strcmp(f, "--iters") && has_val && parse_u64(argv[++i], &v) && v >= 1 && v <= 16) { a->iters = u32(v); }
+        else if (!strcmp(f, "--watch") && has_val && parse_u64(argv[++i], &v)) { a->watch = u32(v); }
         else if (!strcmp(f, "--csv-every") && has_val && parse_u64(argv[++i], &v) && v >= 1) { a->csv_every = u32(v); }
         else if (!strcmp(f, "--seed") && has_val && parse_u64(argv[++i], &v)) { a->seed = v; }
         else { fprintf(stderr, "tl_gate0: bad flag or value at '%s'\n", f); return false; }
@@ -329,7 +332,10 @@ void run_scenario(Boot* bt, const g0scene::Scene* sc, const char* csv_name, u32 
     // ---- verdict ----
     char jb[32], pb[32], db[32];
     out->verdict = V_PASS;
-    if (judge == 1) {
+    if (escaped) {   // a carrier through a wall is tunneling whatever the scenario measures: FAIL, and the metrics below are of a truncated run
+        out->verdict = V_FAIL;
+        snprintf(out->detail, sizeof out->detail, "tunneling=1 (a carrier left the sealed box; the trace is truncated)");
+    } else if (judge == 1) {
         const u32 p95 = percentile(jitter_all, n_jit, 95, s);
         const i64 sink = top_y_end - top_y_at_settle;
         const i64 sink_a = sink < 0 ? -sink : sink;
@@ -517,7 +523,7 @@ int main(int argc, char** argv) {
             FILE* f = open_csv(a.out, name, a.substeps, a.ladder, "");
             if (!f) return 1;
             g0::Consts k = g0::consts_make(a.substeps, a.ladder, a.mu_percent, a.alpha_nano, a.iters);
-            const i64 worst = g0shadow::shadow_run(&sc, &k, u32(a.ticks ? a.ticks : ticks6[i]), f, s, &bt.api->vmem, a.dump);
+            const i64 worst = g0shadow::shadow_run(&sc, &k, u32(a.ticks ? a.ticks : ticks6[i]), f, s, &bt.api->vmem, a.dump, a.watch);
             fclose(f);
             arena_reset_to(&bt.scene_arena, mark);
             TL_SCRATCH_SCOPE_END(s);
