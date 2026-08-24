@@ -4,8 +4,8 @@
 // vector, atan2(0,0), to<R> out of range, clamp with lo > hi - each is documented (fx.h,
 // det_math.h) to TL_ASSERT in debug/dev and return a specific value once TL_ASSERT compiles out.
 // This file proves the ASSERT half fires; fx_review's #else branch proves the RETURNED VALUE for
-// five of the six - to<R> out of range has no release-value counterpart anywhere (filed in
-// TODO.md by W1 runner review 1; do not read the pairing as complete until it does).
+// all six - the to<R> row landed 2026-08-24 (W1 ruling-closeout), with the documented
+// out-of-range behaviour in fx.h beside it. The pairing is complete.
 //
 // Every case runs only in TL_DEV: TL_ASSERT is `((void)0)` in netcode/ship (docs/CPP-SUBSET.md
 // §7b), so there is nothing to fatal there. The generated test list registers every

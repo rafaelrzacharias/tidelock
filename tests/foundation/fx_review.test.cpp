@@ -152,6 +152,14 @@ TL_TEST(fx_review_release_error_values, "foundation,fx,det,fast") {
     TL_EXPECT_EQ(from_f64_quantized<q_t>(nan64).v, 0);
     TL_EXPECT_EQ(from_f64_quantized<q_t>(inf64).v, INT32_MAX);
     TL_EXPECT_EQ(from_f64_quantized<q_t>(-inf64).v, INT32_MIN);
+    // to<R> out of range: the sixth row of fx_fatal.test.cpp's dev-tier asserts, which had no
+    // release-value counterpart anywhere until now (TODO.md). fx.h documents the value: the
+    // intermediate is converted to R::rep by C++20's well-defined MODULAR conversion, so it
+    // wraps rather than saturating. The intermediate here is exactly 2^31, one quantum past the
+    // last value to<q_t> can hold (the edge-matrix test pins -(1 << 19) as the last that fits),
+    // and it comes back as INT32_MIN - a positive value arriving as the most negative one, which
+    // is precisely why fx.h now tells callers on this tier to range-check.
+    TL_EXPECT_EQ(to<q_t>(fx_raw<pos_t>(1 << 19)).v, INT32_MIN);
     // clamp with lo > hi is documented as asserted only: it returns lo for x < lo, else hi for
     // x > hi, else x - stated here so a change shows up
     TL_EXPECT_EQ(clamp(fx_int<pos_t>(0), fx_int<pos_t>(5), fx_int<pos_t>(-5)).v, fx_int<pos_t>(5).v);

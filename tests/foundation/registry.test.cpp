@@ -7,6 +7,7 @@
 // the rng/hash lane).
 // Deferred to the runner lane's TL_TEST_EXPECT_FATAL: add-after-seal, duplicate id,
 // MAX_ARENAS+1, set_fingerprint before seal, hash_all before seal, netcode/ship overflow fatal.
+// Covered now that the macro exists: ARENA_HASHED without ARENA_SNAPSHOT (bottom of this file).
 #include "runner/tl_test.h"
 #include "foundation/arena_registry.h"
 #include "foundation/snapshot.h"
@@ -16,12 +17,18 @@
 
 namespace {
 
-// One world: three arenas with distinct registry roles, plus a snapshot-ring backing arena.
+// One world: four arenas with distinct registry roles, plus a snapshot-ring backing arena.
+// `c` was HASHED-only until the 2026-08-24 ruling made that combination a TL_FATAL at
+// registry_add (docs/MEMORY.md section 1.2 - hashed state must be rollback-able). It is now
+// HASHED | SNAPSHOT, which keeps the two-hashed-arena bisection property the hash test needs,
+// and `d` carries the role `c` used to: registered for the guard only, so restore must not
+// touch it and the hash must not cover it.
 struct TestWorld {
     VMemApi api;
     VMemArena a;   // HASHED | SNAPSHOT
-    VMemArena b;   // SNAPSHOT | GROWS_AT_BARRIER
-    VMemArena c;   // HASHED only - restore must NOT touch it
+    VMemArena b;   // SNAPSHOT | GROWS_AT_BARRIER - restored, deliberately outside the hash
+    VMemArena c;   // HASHED | SNAPSHOT - the second hashed arena (per-arena bisection)
+    VMemArena d;   // GROWS_AT_BARRIER only - neither hashed nor snapshotted
     VMemArena backing;
     ArenaRegistry reg;
 };
@@ -32,10 +39,12 @@ bool world_init(TestWorld* w) {
     if (vmem_arena_init(&w->a, 0xAAu, 1u << 20, ARENA_ZERO_ON_PUSH, &w->api) != ERR_OK) { return false; }
     if (vmem_arena_init(&w->b, 0xBBu, 1u << 20, ARENA_ZERO_ON_PUSH, &w->api) != ERR_OK) { return false; }
     if (vmem_arena_init(&w->c, 0xCCu, 1u << 20, ARENA_ZERO_ON_PUSH, &w->api) != ERR_OK) { return false; }
+    if (vmem_arena_init(&w->d, 0xD0u, 1u << 20, ARENA_ZERO_ON_PUSH, &w->api) != ERR_OK) { return false; }
     if (vmem_arena_init(&w->backing, 0xB0u, 64u << 20, 0u, &w->api) != ERR_OK) { return false; }
     registry_add(&w->reg, 0xAAu, &w->a, ARENA_HASHED | ARENA_SNAPSHOT);
     registry_add(&w->reg, 0xBBu, &w->b, ARENA_SNAPSHOT | ARENA_GROWS_AT_BARRIER);
-    registry_add(&w->reg, 0xCCu, &w->c, ARENA_HASHED);
+    registry_add(&w->reg, 0xCCu, &w->c, ARENA_HASHED | ARENA_SNAPSHOT);
+    registry_add(&w->reg, 0xD0u, &w->d, ARENA_GROWS_AT_BARRIER);
     registry_seal(&w->reg);
     return true;
 }
@@ -44,6 +53,7 @@ void world_release(TestWorld* w) {
     w->api.release(w->api.ctx, w->a.base, w->a.reserved);
     w->api.release(w->api.ctx, w->b.base, w->b.reserved);
     w->api.release(w->api.ctx, w->c.base, w->c.reserved);
+    w->api.release(w->api.ctx, w->d.base, w->d.reserved);
     w->api.release(w->api.ctx, w->backing.base, w->backing.reserved);
 }
 
@@ -60,6 +70,7 @@ TL_TEST(registry_snapshot_restore_round_trip, "foundation,mem,smoke") {
     fill(&w.a, 100u, 1u);      // odd size: forces a 64-byte-aligned gap before b's segment
     fill(&w.b, 3000u, 7u);
     fill(&w.c, 500u, 11u);
+    fill(&w.d, 40u, 13u);
 
     SnapshotRing ring;
     TL_ASSERT_EQ(ring_init(&ring, 1u << 20, &w.backing), ERR_OK);
@@ -67,27 +78,32 @@ TL_TEST(registry_snapshot_restore_round_trip, "foundation,mem,smoke") {
     TL_ASSERT_TRUE(s != nullptr);
     TL_ASSERT_EQ(registry_snapshot(&w.reg, s, 42u), ERR_OK);
     TL_EXPECT_EQ(s->tick, (u64)42);
-    TL_EXPECT_EQ(s->count, 3u);
+    TL_EXPECT_EQ(s->count, 4u);
     TL_EXPECT_EQ(s->used[0], (u64)100);
     TL_EXPECT_EQ(s->used[1], (u64)3000);
-    TL_EXPECT_EQ(s->used[2], (u64)500);   // recorded even though c is not snapshotted
+    TL_EXPECT_EQ(s->used[2], (u64)500);
+    TL_EXPECT_EQ(s->used[3], (u64)40);    // recorded even though d is not snapshotted
 
-    // Keep golden copies, then trash the world: grow a, rewrite b, rewrite c.
+    // Keep golden copies, then trash the world: grow a, rewrite b, c and d.
     u8 gold_a[100]; memcpy(gold_a, w.a.base, 100u);
     u8 gold_b[3000]; memcpy(gold_b, w.b.base, 3000u);
+    u8 gold_c[500]; memcpy(gold_c, w.c.base, 500u);
     fill(&w.a, 5000u, 99u);
     memset(w.a.base, 0xEC, 100u);   // trash the snapshotted range itself, not just the tail
     memset(w.b.base, 0xF0, 3000u);
     memset(w.c.base, 0x0F, 500u);
+    memset(w.d.base, 0x0F, 40u);
 
     TL_ASSERT_EQ(registry_restore(&w.reg, s), ERR_OK);
     TL_EXPECT_EQ(w.a.used, (u64)100);
     TL_EXPECT_EQ(w.b.used, (u64)3000);
+    TL_EXPECT_EQ(w.c.used, (u64)500);
     TL_EXPECT_EQ(memcmp(w.a.base, gold_a, 100u), 0);
     TL_EXPECT_EQ(memcmp(w.b.base, gold_b, 3000u), 0);
-    // c is not snapshotted: restore must not touch its bytes or extent.
-    TL_EXPECT_EQ(w.c.used, (u64)500);
-    TL_EXPECT_EQ(w.c.base[0], (u8)0x0F);
+    TL_EXPECT_EQ(memcmp(w.c.base, gold_c, 500u), 0);
+    // d is not snapshotted: restore must not touch its bytes or extent.
+    TL_EXPECT_EQ(w.d.used, (u64)40);
+    TL_EXPECT_EQ(w.d.base[0], (u8)0x0F);
 
     // Restore is repeatable (idempotent from the same snapshot).
     TL_ASSERT_EQ(registry_restore(&w.reg, s), ERR_OK);
@@ -153,7 +169,8 @@ TL_TEST(registry_restore_refuses_wrong_ids_before_app_fingerprint, "foundation,m
     ArenaRegistry wrong_id = {};
     registry_add(&wrong_id, 0xAAu, &v.a, ARENA_HASHED | ARENA_SNAPSHOT);
     registry_add(&wrong_id, 0xBBu, &v.b, ARENA_SNAPSHOT | ARENA_GROWS_AT_BARRIER);
-    registry_add(&wrong_id, 0xDDu, &v.c, ARENA_HASHED);   // 0xDD, not 0xCC
+    registry_add(&wrong_id, 0xDDu, &v.c, ARENA_HASHED | ARENA_SNAPSHOT);   // 0xDD, not 0xCC
+    registry_add(&wrong_id, 0xD0u, &v.d, ARENA_GROWS_AT_BARRIER);
     registry_seal(&wrong_id);
     TL_EXPECT_EQ(registry_restore(&wrong_id, s), ERR_SNAPSHOT_MISMATCH);
 
@@ -161,7 +178,8 @@ TL_TEST(registry_restore_refuses_wrong_ids_before_app_fingerprint, "foundation,m
     ArenaRegistry wrong_order = {};
     registry_add(&wrong_order, 0xBBu, &v.b, ARENA_SNAPSHOT | ARENA_GROWS_AT_BARRIER);
     registry_add(&wrong_order, 0xAAu, &v.a, ARENA_HASHED | ARENA_SNAPSHOT);
-    registry_add(&wrong_order, 0xCCu, &v.c, ARENA_HASHED);
+    registry_add(&wrong_order, 0xCCu, &v.c, ARENA_HASHED | ARENA_SNAPSHOT);
+    registry_add(&wrong_order, 0xD0u, &v.d, ARENA_GROWS_AT_BARRIER);
     registry_seal(&wrong_order);
     TL_EXPECT_EQ(registry_restore(&wrong_order, s), ERR_SNAPSHOT_MISMATCH);
 
@@ -328,11 +346,13 @@ TL_TEST(registry_hash_region_integrity, "foundation,mem,determinism,smoke") {
     fill(&w.a, 200u, 3u);
     fill(&w.b, 100u, 5u);
     fill(&w.c, 50u, 7u);
+    fill(&w.d, 24u, 9u);
 
     u64 pa0[MAX_ARENAS]; u64 pa1[MAX_ARENAS];
     const u64 h0 = registry_hash_all(&w.reg, pa0);
     TL_EXPECT_EQ(registry_hash_all(&w.reg, pa1), h0);   // pure function of state
     TL_EXPECT_EQ(pa0[1], (u64)0);                        // b is not HASHED: folded as 0
+    TL_EXPECT_EQ(pa0[3], (u64)0);                        // nor is d
 
     // Flip one byte INSIDE used of each HASHED arena: the world hash moves and the per-arena
     // array pinpoints exactly that arena (the desync bisection property, NETCODE §14).
@@ -348,10 +368,13 @@ TL_TEST(registry_hash_region_integrity, "foundation,mem,determinism,smoke") {
         TL_EXPECT_EQ(registry_hash_all(&w.reg, pa1), h0);                 // flip back restores
     }
 
-    // A registered-but-not-HASHED arena is transient to the hash.
+    // A registered-but-not-HASHED arena is transient to the hash - both of them.
     w.b.base[0] = (u8)(w.b.base[0] ^ 0xFFu);
     TL_EXPECT_EQ(registry_hash_all(&w.reg, pa1), h0);
     w.b.base[0] = (u8)(w.b.base[0] ^ 0xFFu);
+    w.d.base[0] = (u8)(w.d.base[0] ^ 0xFFu);
+    TL_EXPECT_EQ(registry_hash_all(&w.reg, pa1), h0);
+    w.d.base[0] = (u8)(w.d.base[0] ^ 0xFFu);
 
     // A byte ABOVE used (committed, dirty) is not state: flipping it must not move the hash.
     w.a.base[w.a.used + 10u] = 0x5Au;
@@ -428,10 +451,12 @@ TL_TEST(registry_two_worlds_hash_identically, "foundation,mem,determinism,smoke"
 }
 
 namespace {
-// A deterministic synthetic tick: mutate the HASHED|SNAPSHOT arena as a pure function of
-// (state, tick) - growth AND in-place. (c is HASHED-but-not-SNAPSHOT by this fixture's design,
-// so a rollback cannot reproduce a trace that mutates it: hashed authoritative state must also
-// be snapshotted, which is the real registry wiring.) The second push is deliberately odd-sized
+// A deterministic synthetic tick: mutate a HASHED|SNAPSHOT arena as a pure function of
+// (state, tick) - growth AND in-place. (The hazard this note used to document in place - a
+// hashed arena that is not snapshotted cannot be rolled back, so a rollback cannot reproduce a
+// trace that mutates it - is REFUSED AT REGISTRATION now: registry_add TL_FATALs on
+// ARENA_HASHED without ARENA_SNAPSHOT, ruled 2026-08-24, docs/MEMORY.md section 1.2, covered by
+// registry_add_hashed_without_snapshot_is_fatal below.) The second push is deliberately odd-sized
 // and only partially written (W1 mem review 3): each tick's first 16-aligned push then leaves
 // an alignment gap, and after a mid-run restore those gaps and the unwritten tail bytes land on
 // rollback dirt - the replayed trace matches the original only if zero-on-push re-zeroes every
@@ -475,5 +500,50 @@ TL_TEST(registry_restore_reproduces_hash_trace, "foundation,mem,determinism,smok
         TL_EXPECT_EQ(registry_hash_all(&w.reg, pa), trace[tk]);
     }
 
+    world_release(&w);
+}
+
+// --- the 2026-08-24 ruling: HASHED implies SNAPSHOT --------------------------------------------
+
+TL_TEST_EXPECT_FATAL(registry_add_hashed_without_snapshot_is_fatal, "foundation,mem,fatal") {
+#if TL_DEV
+    (void)t;
+    // docs/MEMORY.md section 1.2: a hashed arena that is not snapshotted cannot be rolled back,
+    // so a mid-run restore cannot reproduce the hash trace (section 8.8) - a desync trap wired at
+    // registration. registry_add refuses the combination outright.
+    VMemApi api = test_vmem_api();
+    VMemArena a;
+    if (vmem_arena_init(&a, 0xF1u, 1u << 16, ARENA_ZERO_ON_PUSH, &api) != ERR_OK) {
+        return;   // setup failed: exits 0, which the runner scores FAIL for a fatal-expected row
+    }
+    ArenaRegistry r = {};
+    registry_add(&r, 0xF1u, &a, ARENA_HASHED);   // no ARENA_SNAPSHOT - TL_FATAL, exit 2
+#else
+    // The fatal is a TL_FATAL, so it fires on netcode/ship too - but tl_child_verdict
+    // (tests/runner/runner_core.h) judges a fatal-expected row as a fatal expectation only under
+    // TL_DEV, because every such test until now asserted through TL_ASSERT, which compiles out
+    // there. On this tier the child would exit 2 and be scored an ordinary FAIL. Filed in TODO.md
+    // ("TL_TEST_EXPECT_FATAL cannot express a TL_FATAL/TL_CHECK-expected row outside dev"); a
+    // visible SKIP until then, never a vacuous pass.
+    TL_SKIP("tl_child_verdict judges fatal-expected rows only under TL_DEV (runner_core.h); this "
+            "fatal is a TL_FATAL and is live on this tier - TODO.md");
+#endif
+}
+
+// The other side of the same ruling, in-process and on every tier: the combinations registry_add
+// still accepts. Without this the fatal above could be over-broad (refusing SNAPSHOT-only or
+// GROWS_AT_BARRIER-only registrations) and no test would notice - world_init exercises all three
+// legal shapes, and reaching the seal is the assertion.
+TL_TEST(registry_add_accepts_every_legal_flag_combination, "foundation,mem,fast") {
+    TestWorld w;
+    TL_ASSERT_TRUE(world_init(&w));
+    TL_EXPECT_EQ(w.reg.count, 4u);
+    TL_EXPECT_EQ(w.reg.e[1].flags & ARENA_HASHED, 0u);     // SNAPSHOT without HASHED: legal
+    TL_EXPECT_EQ(w.reg.e[3].flags, (u32)ARENA_GROWS_AT_BARRIER);   // neither: legal
+    for (u32 i = 0; i < w.reg.count; ++i) {
+        // The invariant the fatal enforces, asserted over the whole sealed registry.
+        const u32 f = w.reg.e[i].flags;
+        TL_EXPECT_TRUE((f & ARENA_HASHED) == 0u || (f & ARENA_SNAPSHOT) != 0u);
+    }
     world_release(&w);
 }

@@ -7,7 +7,8 @@
 // Purpose: the allocator everything authoritative lives in. Stable base forever, so columns and
 //   pools grow without relocation and raw pointers are valid within a pass; no general free()
 //   exists by design (docs/MEMORY.md section 0 rule 1).
-// Invariants: used <= committed <= reserved, all page-tracked; committed grows in COMMIT_GRANULE
+// Invariants: used <= committed <= reserved, all page-tracked; `reserved` is itself a
+//   COMMIT_GRANULE multiple (vmem_arena_init rounds up) and committed grows in COMMIT_GRANULE
 //   multiples; exceeding `reserved` is TL_FATAL - a blown budget is a bug, not silent growth.
 //   Fresh pages are OS-zero (docs/PLATFORM.md section 9.3); memory below high_water that is
 //   re-pushed is NOT zero unless ARENA_ZERO_ON_PUSH re-zeroes it - every pool header must state
@@ -66,7 +67,11 @@ struct VMemArena {
 static_assert(sizeof(VMemArena) == 64, "docs/MEMORY.md section 8.2 layout");
 static_assert(__is_trivially_copyable(VMemArena), "");
 
-// Reserves reserve_bytes (rounded up to a page) of address space; commits nothing. Returns
+// Reserves reserve_bytes ROUNDED UP TO COMMIT_GRANULE of address space; commits nothing. The
+// granule, not the page: arena_push commits in granule multiples, so a page-rounded reserve left
+// the tail unusable and the effective budget round_down(reserved, COMMIT_GRANULE) - a sub-64 KB
+// reserve could never push a byte (ruled 2026-08-24, docs/MEMORY.md section 8.2). Every byte of
+// `reserved` is therefore pushable, and the over-reserve fatal sits on the real edge. Returns
 // ERR_MEM_BAD_ARG on a null/zero argument, ERR_MEM_OOM if the OS refuses the reservation.
 ErrCode vmem_arena_init(VMemArena* a, NameHash id, u64 reserve_bytes, u32 flags, const VMemApi* os);
 

@@ -40,6 +40,21 @@ TL_TEST(log_levels_compile_out, "foundation") {
     int err_n = 0;
     TL_LOG_ERR("%d", ++err_n);
     TL_EXPECT_EQ(err_n, 1);
+
+    // The floor itself, per tier - the arms above mirror tl_log.h's #if, so they would follow a
+    // WRONG derivation just as happily. This pins the RULED values (TODO.md 2026-08-24): netcode
+    // and ship share one compiled floor, INFO+ (2), so docs/BUILD.md §3's netcode/ship parity is
+    // untouched and tier_parity.py needs no new allowed define; ship quiets further at runtime
+    // through the log-level cvar (docs/TOOLING.md §3). debug/dev compile every level in.
+#if defined(TL_TIER_SHIP) || defined(TL_TIER_NETCODE)
+    TL_EXPECT_EQ(TL_LOG_MIN, 2);
+    TL_EXPECT_EQ(info_n, 1);    // INFO is IN on both slim tiers - the substance of the ruling
+    TL_EXPECT_EQ(warn_n, 1);
+    TL_EXPECT_EQ(trace_n, 0);   // and TRACE/DEBUG are still out
+    TL_EXPECT_EQ(debug_n, 0);
+#else
+    TL_EXPECT_EQ(TL_LOG_MIN, 0);
+#endif
 }
 
 TL_TEST(log_ring_wraps_overwriting_oldest, "foundation") {

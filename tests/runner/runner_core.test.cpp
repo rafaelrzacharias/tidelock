@@ -119,7 +119,14 @@ TL_TEST(runner_ctx_verdict_zero_checks_is_a_failure, "runner,fast") {
 // --- verdicts: the child-process mapping -------------------------------------------------------
 
 static ChildResult cr_of(bool spawned, bool abnormal, int code) {
-    ChildResult r; r.spawned = spawned; r.abnormal = abnormal; r.exit_code = code;
+    ChildResult r; r.spawned = spawned; r.abnormal = abnormal; r.timed_out = false; r.exit_code = code;
+    return r;
+}
+
+// A child the runner killed on --timeout-ms. `code` is whatever the OS reported afterwards - the
+// point of the timeout branch is that it does not matter.
+static ChildResult cr_timed_out(bool abnormal, int code) {
+    ChildResult r; r.spawned = true; r.abnormal = abnormal; r.timed_out = true; r.exit_code = code;
     return r;
 }
 
@@ -247,4 +254,23 @@ TL_TEST(runner_skip_reports_skip_not_pass, "runner,fast") {
     // in the TSV and in the JUnit XML - a status nobody ever sees is a status nobody trusts.
     // Its check budget is deliberately zero: TL_SKIP must not need one.
     TL_SKIP("a live SKIP row, so the status is exercised end to end in every run");
+}
+
+TL_TEST(runner_child_verdict_timeout_is_its_own_status, "runner,fast") {
+    // docs/TESTING.md §9.1 (--timeout-ms, ruled 2026-08-24): a timed-out child is TIMEOUT, never
+    // PASS, FAIL or SKIP - and the timeout beats every other signal, because the exit code of a
+    // process the runner killed is the runner's own doing. The dangerous case is the last one: a
+    // fatal-expected row whose body hangs instead of fatalling, killed with the fatal exit code,
+    // must NOT read as a satisfied expectation.
+    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_timed_out(false, TL_EXIT_OK)),    VERDICT_TIMEOUT);
+    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_timed_out(true,  -1)),            VERDICT_TIMEOUT);
+    TL_EXPECT_EQ(tl_child_verdict(false, true,  cr_timed_out(false, TL_EXIT_SKIP)),  VERDICT_TIMEOUT);
+    TL_EXPECT_EQ(tl_child_verdict(true,  true,  cr_timed_out(false, TL_EXIT_FATAL)), VERDICT_TIMEOUT);
+    TL_EXPECT_EQ(tl_child_verdict(true,  false, cr_timed_out(false, TL_EXIT_FATAL)), VERDICT_TIMEOUT);
+    // A child that never spawned is still FAIL, even flagged as timed out: nothing ran.
+    ChildResult never; never.spawned = false; never.abnormal = false; never.timed_out = true; never.exit_code = -1;
+    TL_EXPECT_EQ(tl_child_verdict(true, true, never), VERDICT_FAIL);
+    // And the flag is not sticky: the same shapes without it keep their old verdicts.
+    TL_EXPECT_EQ(tl_child_verdict(false, true, cr_of(true, false, TL_EXIT_OK)),    VERDICT_PASS);
+    TL_EXPECT_EQ(tl_child_verdict(true,  true, cr_of(true, false, TL_EXIT_FATAL)), VERDICT_PASS);
 }

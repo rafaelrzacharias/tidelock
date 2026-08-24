@@ -19,8 +19,17 @@ ErrCode vmem_arena_init(VMemArena* a, NameHash id, u64 reserve_bytes, u32 flags,
     }
     const u64 page = (u64)os->page_size;
     TL_CHECK(page != 0u && (page & (page - 1u)) == 0u);
+    // Both are powers of two, so page <= COMMIT_GRANULE is exactly "page divides COMMIT_GRANULE",
+    // which is what makes the granule rounding below also a page rounding.
+    TL_CHECK(page <= (u64)COMMIT_GRANULE);
 
-    const u64 reserve = mem::align_up_u64(reserve_bytes, page);
+    // Rounded up to COMMIT_GRANULE, not to a page (ruled 2026-08-24, TODO.md): arena_push commits
+    // in granule multiples and TL_FATALs when align_up(end, COMMIT_GRANULE) > reserved, so a
+    // page-rounded reserve made the usable budget round_down(reserved, COMMIT_GRANULE) - every
+    // reserve below 64 KB could never push a single byte, and the tail of a non-multiple reserve
+    // was unreachable. Address space is free; the stated budget is now the usable budget and the
+    // over-reserve fatal coincides with the real edge.
+    const u64 reserve = mem::align_up_u64(reserve_bytes, (u64)COMMIT_GRANULE);
     void* base = os->reserve(os->ctx, reserve);
     if (base == nullptr) {
         return ERR_MEM_OOM;

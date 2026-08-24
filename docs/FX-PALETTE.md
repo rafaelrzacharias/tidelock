@@ -323,7 +323,7 @@ template <typename Rep, int FRAC> struct fx {
 template <typename R> constexpr R fx_raw(typename R::rep bits);                 // the only bit-level constructor (greppable)
 template <typename R> constexpr R fx_int(i32 i);                                  // i << FRAC; static_assert/TL_ASSERT |i| < 2^(31-FRAC)
 template <typename R> constexpr R fx_lit(i64 num, i64 den);                       // RNE of num/den at the row quantum — for H, G_SUBSTEP, kernel coefficients
-template <typename R, typename A> constexpr R to(A x);                            // the only conversion: widen = exact; narrow = rne_shr; TL_ASSERT on range
+template <typename R, typename A> constexpr R to(A x);                            // the only conversion: widen = exact; narrow = rne_shr; TL_ASSERT on range. Release (assert compiled out): the intermediate WRAPS into R::rep by C++20 modular conversion - it does not saturate, so callers on a slim tier range-check (2026-08-24; pinned by fx_review_release_error_values, TESTING.md section 9.1)
 ```
 
 Operators: `+`, `-`, unary `-` (two's-complement wrap, explicit by policy), `== != < <= > >=`

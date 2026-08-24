@@ -229,7 +229,7 @@ anywhere. Rules:
 | `TL_CHECK(c)` | same | check → fatal | check → fatal (slim tier) |
 | `TL_FATAL(fmt, …)` | same | crash pipeline + abort | same |
 | `TL_FIELDS_X(X,XA,XH)`, `TL_COMPONENT`, `TL_POOL_ROW`, `TL_WIRE_STRUCT` | `core/reflect.h` | as `ECS.md` §10.2 | same |
-| `TL_LOG_{TRACE,DEBUG,INFO,WARN,ERR}` | `foundation/tl_log.h` | all levels | `INFO+` (ship: `WARN+`) |
+| `TL_LOG_{TRACE,DEBUG,INFO,WARN,ERR}` | `foundation/tl_log.h` | all levels | `INFO+` (both; ship quiets via cvar, `TOOLING.md` §9) |
 | `TL_PROF_SCOPE(name)`, `TL_PROF_COUNTER(name, v)` | `foundation/tl_prof.h` | active | compiled out |
 | `TL_PROBE_*` | `foundation/tl_probe.h` | active | compiled out |
 | `TL_CVAR(type, name, default, flags, help)` | `core/cvar.h` | registered + console | `SIM` cvars registered (fingerprinted); others constant-folded |

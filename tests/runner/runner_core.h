@@ -31,14 +31,18 @@ constexpr int TL_EXIT_SKIP = 4;   // the child ran and declared itself skipped (
 constexpr int TL_EXIT_FATAL = 2;  // the real tl_fatal's controlled exit (src/foundation/crash.cpp)
 
 // How a child process terminated. `spawned` is the one that must be checked first: a spawn that
-// never happened is not evidence of anything, least of all of an expected fatal.
+// never happened is not evidence of anything, least of all of an expected fatal. `timed_out` is
+// checked immediately after it and beats everything else including `expect_fatal`: the runner
+// KILLED this child, so its exit code is the runner's own doing and says nothing about the test
+// (docs/TESTING.md §9.1, --timeout-ms).
 struct ChildResult {
     bool spawned;
     bool abnormal;   // terminated other than by returning from main() (crash/signal/trap)
-    int  exit_code;  // meaningful only when spawned && !abnormal
+    bool timed_out;  // --timeout-ms elapsed and the runner killed it
+    int  exit_code;  // meaningful only when spawned && !abnormal && !timed_out
 };
 
-enum TestVerdict : u8 { VERDICT_PASS = 0, VERDICT_FAIL = 1, VERDICT_SKIP = 2 };
+enum TestVerdict : u8 { VERDICT_PASS = 0, VERDICT_FAIL = 1, VERDICT_SKIP = 2, VERDICT_TIMEOUT = 3 };
 
 // --- selection --------------------------------------------------------------------------------
 
@@ -127,6 +131,11 @@ inline TestVerdict tl_ctx_verdict(u32 failures, u32 checks, bool skipped) {
 // failed CreateProcess, so a broken exe path turned every fatal-expected test green (review 1).
 inline TestVerdict tl_child_verdict(bool expect_fatal, bool dev_tier, const ChildResult& cr) {
     if (!cr.spawned) { return VERDICT_FAIL; }
+    // Before the fatal-expected inversion, deliberately: a killed child's exit code is the
+    // RUNNER's, not the test's, and on Windows TerminateProcess(h, code) can be made to look
+    // like any exit at all - a timed-out fatal-expected row must never read as "it fatalled".
+    // TIMEOUT is its own status and fails the run (docs/TESTING.md §9.1).
+    if (cr.timed_out) { return VERDICT_TIMEOUT; }
     // Since the wave merge linked the real tl_fatal (exit(2) + stderr marker), a controlled
     // fatal is a NORMAL exit with TL_EXIT_FATAL; an abnormal exit is an UNcontrolled crash
     // (segfault, stack overflow) and fails. The marker + file:line half of the tightening still
