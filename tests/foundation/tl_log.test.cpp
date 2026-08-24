@@ -43,6 +43,7 @@ TL_TEST(log_levels_compile_out, "foundation") {
 }
 
 TL_TEST(log_ring_wraps_overwriting_oldest, "foundation") {
+#if TL_DEV
     tl_log_test_reset();
     for (u32 i = 0; i < 4097u; ++i) {
         TL_LOG_ERR("msg %u", i);   // always on - independent of the tier's TL_LOG_MIN
@@ -65,10 +66,17 @@ TL_TEST(log_ring_wraps_overwriting_oldest, "foundation") {
     TL_EXPECT_TRUE(strcmp(tl_log_test_ring_at(0)->msg, "msg 1") == 0);
     TL_EXPECT_TRUE(strcmp(tl_log_test_ring_at(4095u)->msg, "msg 4096") == 0);
     tl_log_test_reset();
+#else
+    // The tl_log_test_* introspection hooks have no symbol outside dev
+    // (tl_log.h guards them with TL_DEV); the ring itself is exercised by the
+    // dev leg of the same suite. A visible SKIP, never a vacuous pass.
+    TL_SKIP("ring introspection is a dev-only symbol (tl_log.h TL_DEV guard)");
+#endif
 }
 
 // The boundary the wrap test steps over: exactly full, nothing overwritten yet.
 TL_TEST(log_ring_exactly_full_overwrites_nothing, "foundation") {
+#if TL_DEV
     tl_log_test_reset();
     for (u32 i = 0; i < 4096u; ++i) {
         TL_LOG_ERR("msg %u", i);
@@ -82,9 +90,16 @@ TL_TEST(log_ring_exactly_full_overwrites_nothing, "foundation") {
     TL_EXPECT_EQ(tl_log_test_ring_count(), 4096u);
     TL_EXPECT_TRUE(strcmp(tl_log_test_ring_at(0)->msg, "msg 1") == 0);
     tl_log_test_reset();
+#else
+    // The tl_log_test_* introspection hooks have no symbol outside dev
+    // (tl_log.h guards them with TL_DEV); the ring itself is exercised by the
+    // dev leg of the same suite. A visible SKIP, never a vacuous pass.
+    TL_SKIP("ring introspection is a dev-only symbol (tl_log.h TL_DEV guard)");
+#endif
 }
 
 TL_TEST(log_message_truncates_at_capacity, "foundation") {
+#if TL_DEV
     tl_log_test_reset();
     char long_msg[TL_LOG_MSG_CAP + 64];
     for (u32 i = 0; i < sizeof(long_msg) - 1; ++i) { long_msg[i] = 'a'; }
@@ -96,4 +111,10 @@ TL_TEST(log_message_truncates_at_capacity, "foundation") {
     TL_EXPECT_EQ((u32)r->len, (u32)(TL_LOG_MSG_CAP - 1));   // capacity minus the NUL
     TL_EXPECT_EQ(r->msg[TL_LOG_MSG_CAP - 1], '\0');
     tl_log_test_reset();
+#else
+    // The tl_log_test_* introspection hooks have no symbol outside dev
+    // (tl_log.h guards them with TL_DEV); the ring itself is exercised by the
+    // dev leg of the same suite. A visible SKIP, never a vacuous pass.
+    TL_SKIP("ring introspection is a dev-only symbol (tl_log.h TL_DEV guard)");
+#endif
 }

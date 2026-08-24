@@ -11,19 +11,19 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-static void* tv_reserve(void*, u64 bytes) {
+static inline void* tv_reserve(void*, u64 bytes) {
     return VirtualAlloc(nullptr, (SIZE_T)bytes, MEM_RESERVE, PAGE_NOACCESS);
 }
-static ErrCode tv_commit(void*, void* base, u64 bytes) {
+static inline ErrCode tv_commit(void*, void* base, u64 bytes) {
     return VirtualAlloc(base, (SIZE_T)bytes, MEM_COMMIT, PAGE_READWRITE) != nullptr ? ERR_OK : ERR_MEM_OOM;
 }
-static ErrCode tv_decommit(void*, void* base, u64 bytes) {
+static inline ErrCode tv_decommit(void*, void* base, u64 bytes) {
     return VirtualFree(base, (SIZE_T)bytes, MEM_DECOMMIT) != 0 ? ERR_OK : ERR_MEM_BAD_ARG;
 }
-static void tv_release(void*, void* base, u64) {
+static inline void tv_release(void*, void* base, u64) {
     (void)VirtualFree(base, 0, MEM_RELEASE);
 }
-static u32 tv_page_size() {
+static inline u32 tv_page_size() {
     SYSTEM_INFO si; GetSystemInfo(&si);
     return (u32)si.dwPageSize;
 }
@@ -32,29 +32,29 @@ static u32 tv_page_size() {
 #include <sys/mman.h>
 #include <unistd.h>
 
-static void* tv_reserve(void*, u64 bytes) {
+static inline void* tv_reserve(void*, u64 bytes) {
     void* p = mmap(nullptr, (size_t)bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     return p == MAP_FAILED ? nullptr : p;
 }
-static ErrCode tv_commit(void*, void* base, u64 bytes) {
+static inline ErrCode tv_commit(void*, void* base, u64 bytes) {
     return mprotect(base, (size_t)bytes, PROT_READ | PROT_WRITE) == 0 ? ERR_OK : ERR_MEM_OOM;
 }
-static ErrCode tv_decommit(void*, void* base, u64 bytes) {
+static inline ErrCode tv_decommit(void*, void* base, u64 bytes) {
     // DONTNEED discards private anonymous pages (they re-read as zero); PROT_NONE restores the
     // reserve-state protection so a stale read faults like it does on Windows.
     if (madvise(base, (size_t)bytes, MADV_DONTNEED) != 0) { return ERR_MEM_BAD_ARG; }
     return mprotect(base, (size_t)bytes, PROT_NONE) == 0 ? ERR_OK : ERR_MEM_BAD_ARG;
 }
-static void tv_release(void*, void* base, u64 bytes) {
+static inline void tv_release(void*, void* base, u64 bytes) {
     (void)munmap(base, (size_t)bytes);
 }
-static u32 tv_page_size() {
+static inline u32 tv_page_size() {
     return (u32)sysconf(_SC_PAGESIZE);
 }
 #endif
 
 // The table under test-fixture ownership; call once per test (cheap, stateless).
-static VMemApi test_vmem_api() {
+static inline VMemApi test_vmem_api() {
     VMemApi api = {};
     api.ctx = nullptr;
     api.reserve = tv_reserve;

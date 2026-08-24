@@ -138,9 +138,11 @@ TL_TEST(runner_child_verdict_ordinary_test, "runner,fast") {
 }
 
 TL_TEST(runner_child_verdict_fatal_expected, "runner,fast") {
-    // On a tier with TL_ASSERT compiled in: abnormal is the expectation, a clean exit is the
-    // failure (the assert that was supposed to fire did not).
-    TL_EXPECT_EQ(tl_child_verdict(true, true, cr_of(true, true, -1)), VERDICT_PASS);
+    // On a tier with TL_ASSERT compiled in: the real tl_fatal's controlled exit(2) is the
+    // expectation; a clean exit means the assert never fired, and an ABNORMAL exit means the
+    // child crashed some other way (stack overflow, segfault) - both fail.
+    TL_EXPECT_EQ(tl_child_verdict(true, true, cr_of(true, false, TL_EXIT_FATAL)), VERDICT_PASS);
+    TL_EXPECT_EQ(tl_child_verdict(true, true, cr_of(true, true, -1)), VERDICT_FAIL);
     TL_EXPECT_EQ(tl_child_verdict(true, true, cr_of(true, false, 0)), VERDICT_FAIL);
     TL_EXPECT_EQ(tl_child_verdict(true, true, cr_of(true, false, TL_EXIT_FAIL)), VERDICT_FAIL);
     // Outside dev the same row is judged as an ordinary child, because TL_ASSERT is ((void)0)

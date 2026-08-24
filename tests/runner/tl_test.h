@@ -48,12 +48,11 @@ struct TestCtx {
 // the pass condition: on a tier where TL_ASSERT is compiled in, the child terminating abnormally
 // is PASS and a clean exit is FAIL (the assert that was supposed to fire did not).
 //
-// KNOWN GAP (TODO.md, "the TL_TEST_EXPECT_FATAL tightening"): the contract is child exit code 2
-// plus a TL_FATAL_MARKER stderr line, and NEITHER half is checkable in this tree yet - this
-// tree's tl_fatal is the trap stub (src/foundation/tl_assert.cpp: __builtin_trap(), no message,
-// no controlled exit code), and the runner does not capture the child's stderr at all. Until
-// both land the runner matches on "the child spawned and then terminated abnormally"
-// (runner_core.h tl_child_verdict). TODO.md carries the exact tightening condition.
+// KNOWN GAP, half closed at the W1 wave merge (TODO.md, "the TL_TEST_EXPECT_FATAL
+// tightening"): the contract is child exit code 2 plus a TL_FATAL_MARKER stderr line. The real
+// tl_fatal is linked now, so the runner matches exit code 2 exactly (an abnormal exit is an
+// uncontrolled crash and FAILS). The marker + file:line half still needs child-stderr capture;
+// TODO.md carries the remaining condition.
 #define TL_TEST_EXPECT_FATAL(name, ...) void test_##name(TestCtx* t)
 
 // The stderr prefix a real tl_fatal prints before aborting. This is the LITERAL the tooling-rt

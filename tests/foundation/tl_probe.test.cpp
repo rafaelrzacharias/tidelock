@@ -9,6 +9,7 @@
 #include <string.h>
 
 TL_TEST(probe_log_throttles_by_tick_count, "foundation") {
+#if TL_DEV
     tl_probe_test_reset();
     tl_probe_test_set_tick(0);
     tl_probe_log(1, "k.log", 10, 0, 3);   // first call always rows
@@ -25,18 +26,32 @@ TL_TEST(probe_log_throttles_by_tick_count, "foundation") {
     TL_EXPECT_EQ((u32)k->count, 2u);      // the throttled call did not update stats
     TL_EXPECT_EQ((u32)k->changes, 1u);    // 10 -> 30 is one change; the baseline is not a change
     tl_probe_test_reset();
+#else
+    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
+    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // evaluation included). A visible SKIP, never a vacuous pass.
+    TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
+#endif
 }
 
 TL_TEST(probe_log_fx_scales_by_frac_bits, "foundation") {
+#if TL_DEV
     tl_probe_test_reset();
     tl_probe_test_set_tick(0);
     tl_probe_log(2, "k.fx", 3 << 18, 18, 1);   // pos_t-shaped: 3.0 at FRAC=18
     const char* s = tl_probe_test_staging();
     TL_EXPECT_TRUE(strstr(s, "0\tk.fx\t3\n") != nullptr);
     tl_probe_test_reset();
+#else
+    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
+    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // evaluation included). A visible SKIP, never a vacuous pass.
+    TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
+#endif
 }
 
 TL_TEST(probe_on_change_rows_only_past_eps, "foundation") {
+#if TL_DEV
     tl_probe_test_reset();
     tl_probe_on_change(3, "k.chg", 100, 5);   // first call always rows
     tl_probe_on_change(3, "k.chg", 103, 5);   // |103-100|=3 <= 5: no row
@@ -46,9 +61,16 @@ TL_TEST(probe_on_change_rows_only_past_eps, "foundation") {
     TL_EXPECT_TRUE(strstr(s, "\tk.chg\t103\n") == nullptr);
     TL_EXPECT_TRUE(strstr(s, "\tk.chg\t200\n") != nullptr);
     tl_probe_test_reset();
+#else
+    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
+    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // evaluation included). A visible SKIP, never a vacuous pass.
+    TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
+#endif
 }
 
 TL_TEST(probe_mark_rows_every_call, "foundation") {
+#if TL_DEV
     tl_probe_test_reset();
     tl_probe_mark(4, "k.mark");
     tl_probe_mark(4, "k.mark");
@@ -60,9 +82,16 @@ TL_TEST(probe_mark_rows_every_call, "foundation") {
     TL_ASSERT_EQ(tl_probe_test_key_count(), 1u);
     TL_EXPECT_EQ((u32)tl_probe_test_key_at(0)->count, 3u);
     tl_probe_test_reset();
+#else
+    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
+    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // evaluation included). A visible SKIP, never a vacuous pass.
+    TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
+#endif
 }
 
 TL_TEST(probe_assert_out_of_range_rows_and_logs, "foundation") {
+#if TL_DEV
     tl_probe_test_reset();
     tl_probe_assert(5, "k.assert", 50, 0, 10);   // out of range: [0,10]
     const char* s = tl_probe_test_staging();
@@ -72,9 +101,16 @@ TL_TEST(probe_assert_out_of_range_rows_and_logs, "foundation") {
     s = tl_probe_test_staging();
     TL_EXPECT_TRUE(strstr(s, "k.assert") == nullptr);
     tl_probe_test_reset();
+#else
+    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
+    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // evaluation included). A visible SKIP, never a vacuous pass.
+    TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
+#endif
 }
 
 TL_TEST(probe_disabled_key_emits_nothing, "foundation") {
+#if TL_DEV
     tl_probe_test_reset();
     tl_probe_test_set_enabled(6, "k.off", 0);
     tl_probe_log(6, "k.off", 42, 0, 1);
@@ -83,9 +119,16 @@ TL_TEST(probe_disabled_key_emits_nothing, "foundation") {
     TL_ASSERT_EQ(tl_probe_test_key_count(), 1u);
     TL_EXPECT_EQ((u32)tl_probe_test_key_at(0)->count, 0u);   // no stats update either
     tl_probe_test_reset();
+#else
+    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
+    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // evaluation included). A visible SKIP, never a vacuous pass.
+    TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
+#endif
 }
 
 TL_TEST(probe_summary_line_matches_registration_order, "foundation") {
+#if TL_DEV
     tl_probe_test_reset();
     tl_probe_test_set_tick(0);
     tl_probe_log(10, "a", 2, 0, 1);
@@ -105,4 +148,10 @@ TL_TEST(probe_summary_line_matches_registration_order, "foundation") {
     TL_ASSERT_TRUE(a_pos != nullptr && b_pos != nullptr);
     TL_EXPECT_TRUE(a_pos < b_pos);   // registration order: "a" (key 10) before "b" (key 11)
     tl_probe_test_reset();
+#else
+    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
+    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // evaluation included). A visible SKIP, never a vacuous pass.
+    TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
+#endif
 }

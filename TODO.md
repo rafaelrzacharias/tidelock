@@ -623,7 +623,13 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       (`tests/runner/runner_core.h`) passes a fatal-expected row on "the child spawned and then
       terminated abnormally", which cannot tell an expected assert from a stack overflow, a
       missing DLL, or `kill -9`. Two prerequisites, then one mechanical edit — do not tighten
-      before both, or every fatal-expected test fails by construction:
+      before both, or every fatal-expected test fails by construction.
+      **Update (W1 wave merge, 2026-08-24): prerequisite 1 is met** — the real tl_fatal is on
+      main and the six fx_fatal rows failed by construction exactly as predicted (exit(2) is a
+      NORMAL exit; the abnormal-exit predicate stopped matching). Interim edit landed:
+      `tl_child_verdict` passes expect_fatal iff `exit_code == TL_EXIT_FATAL` (2); abnormal is
+      now a FAIL. Remaining: prerequisite 2 (stderr capture) and the marker + file:line pinning
+      below.
       1. **`tl_fatal` must be the real one.** This tree still links the trap stub
          (`src/foundation/tl_assert.cpp`, `__builtin_trap()`). The real writer already exists on
          `w1-tooling-rt` (`src/foundation/crash.cpp`, commit `1c894ce`) and emits, verbatim:

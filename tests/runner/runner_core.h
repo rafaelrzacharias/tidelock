@@ -28,6 +28,7 @@
 constexpr int TL_EXIT_OK   = 0;
 constexpr int TL_EXIT_FAIL = 1;
 constexpr int TL_EXIT_SKIP = 4;   // the child ran and declared itself skipped (TL_SKIP)
+constexpr int TL_EXIT_FATAL = 2;  // the real tl_fatal's controlled exit (src/foundation/crash.cpp)
 
 // How a child process terminated. `spawned` is the one that must be checked first: a spawn that
 // never happened is not evidence of anything, least of all of an expected fatal.
@@ -126,7 +127,11 @@ inline TestVerdict tl_ctx_verdict(u32 failures, u32 checks, bool skipped) {
 // failed CreateProcess, so a broken exe path turned every fatal-expected test green (review 1).
 inline TestVerdict tl_child_verdict(bool expect_fatal, bool dev_tier, const ChildResult& cr) {
     if (!cr.spawned) { return VERDICT_FAIL; }
-    if (expect_fatal && dev_tier) { return cr.abnormal ? VERDICT_PASS : VERDICT_FAIL; }
+    // Since the wave merge linked the real tl_fatal (exit(2) + stderr marker), a controlled
+    // fatal is a NORMAL exit with TL_EXIT_FATAL; an abnormal exit is an UNcontrolled crash
+    // (segfault, stack overflow) and fails. The marker + file:line half of the tightening still
+    // needs child-stderr capture (TODO.md, "the TL_TEST_EXPECT_FATAL tightening").
+    if (expect_fatal && dev_tier) { return (!cr.abnormal && cr.exit_code == TL_EXIT_FATAL) ? VERDICT_PASS : VERDICT_FAIL; }
     if (cr.abnormal) { return VERDICT_FAIL; }
     if (cr.exit_code == TL_EXIT_OK)   { return VERDICT_PASS; }
     if (cr.exit_code == TL_EXIT_SKIP) { return VERDICT_SKIP; }
