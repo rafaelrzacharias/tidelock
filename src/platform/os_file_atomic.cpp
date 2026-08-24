@@ -20,6 +20,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
+#include <stdio.h>    // rename - the atomic-replace verb of the POSIX branch
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>

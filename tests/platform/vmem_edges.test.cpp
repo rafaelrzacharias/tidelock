@@ -32,12 +32,23 @@ TL_TEST(vmem_commit_past_reserve_is_an_error_not_a_fatal, "platform") {
     void* base = vm.reserve(vm.ctx, span);
     TL_ASSERT_NOT_NULL(base);
 
-    // Page-aligned and page-sized, so the TL_CHECK is satisfied - the extent is simply outside the
-    // reservation. That is an OS refusal (ERR_PLATFORM_VMEM), not a contract violation: the arena
-    // is the layer that turns an over-budget push into a TL_FATAL (docs/MEMORY.md §1.1), and it
-    // can only do that if the table below it reports rather than dies.
-    TL_EXPECT_EQ(vm.commit(vm.ctx, (u8*)base + span, page), (ErrCode)ERR_PLATFORM_VMEM);
-    // The last legal page still commits afterwards - the failed call left nothing broken.
+    // The OS refusal must be probed at an address that is DETERMINISTICALLY unreserved.
+    // `base + span` is not that: whether the page after a reservation is free is a property of
+    // the process's address-space layout, and under the isolate pool an unrelated allocation
+    // landed exactly there - the commit SUCCEEDED in the pooled child and passed on serial
+    // replay, which the runner rightly scores as a P0 flake (measured, windows-latest debug,
+    // W1 platform PR). Reserve a second span, release it, and probe inside the hole: the test
+    // body is single-threaded and nothing in this child allocates between the release and the
+    // probe, so the address is stably free - MEM_COMMIT without MEM_RESERVE (Windows) and
+    // mprotect on an unmapped range (POSIX) both refuse it, every time.
+    void* hole = vm.reserve(vm.ctx, span);
+    TL_ASSERT_NOT_NULL(hole);
+    vm.release(vm.ctx, hole, span);
+    TL_EXPECT_EQ(vm.commit(vm.ctx, hole, page), (ErrCode)ERR_PLATFORM_VMEM);
+    // That is an OS refusal (ERR_PLATFORM_VMEM), not a contract violation: the arena is the
+    // layer that turns an over-budget push into a TL_FATAL (docs/MEMORY.md section 1.1), and it
+    // can only do that if the table below it reports rather than dies. The last legal page of
+    // the LIVE reservation still commits afterwards - the failed call left nothing broken.
     TL_EXPECT_EQ(vm.commit(vm.ctx, (u8*)base + span - page, page), ERR_OK);
 
     vm.release(vm.ctx, base, span);

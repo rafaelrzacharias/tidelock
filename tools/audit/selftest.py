@@ -798,6 +798,29 @@ def test_commit_docs(tmp):
     rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"), "--base", head], cwd=repo)
     record("commit_docs: a module change with its doc passes", rc == 0, out.strip()[:200])
 
+    # A merge commit whose conflict RESOLUTION touches src/ carries no waiver and must not be
+    # flagged: its substantive commits each passed the gate individually (the W1 platform PR
+    # measured two false flags). A NON-merge commit in the same range must still be caught.
+    head_before = git(repo, "rev-parse", "HEAD")[1].strip()
+    git(repo, "checkout", "-qb", "side", head_before)
+    write(repo, "src/sim/z.cpp", "int h(void) { return 4; }\n")
+    write(repo, "docs/ALLOY.md", "# alloy side\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "side: sim change with its doc")
+    git(repo, "checkout", "-q", "-")
+    write(repo, "src/sim/z.cpp", "int h(void) { return 5; }\n")
+    write(repo, "docs/ALLOY.md", "# alloy main\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "main side: conflicting sim change with its doc")
+    run(["git", "merge", "side"], cwd=repo)                      # conflicts on both files
+    write(repo, "src/sim/z.cpp", "int h(void) { return 45; }\n")
+    write(repo, "docs/ALLOY.md", "# alloy merged\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "merge side (resolution touches src/, no waiver)")
+    rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"), "--base", head_before], cwd=repo)
+    record("commit_docs: a merge commit's conflict resolution is not a module change",
+           rc == 0, out.strip()[:200])
+
     rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"),
                    "--base", "0" * 40], cwd=repo)
     record("commit_docs: an all-zero base skips instead of crashing", rc == 0, out.strip()[:200])
