@@ -10,19 +10,45 @@
 //   items, not built here; `LogRecord.tick` reads 0 until that lane wires it.
 // Invariants: a level below the tier's `TL_LOG_MIN` compiles to `((void)0)` - the argument list is
 //   never evaluated, so a call site with a side effect in its arguments is a bug (the two tiers
-//   would run different programs). `TL_LOG_ERR` is never compiled out.
+//   would run different programs). `TL_LOG_ERR` is never compiled out. `TL_LOG_MIN` is DERIVED
+//   from the tier markers below, never passed as its own `-D` (docs/BUILD.md §3: netcode and ship
+//   must differ only by the stripping defines, and `tools/audit/tier_parity.py` enforces exactly
+//   that list - a `TL_LOG_MIN=2` vs `=3` on the command line would fail that gate).
 // Determinism: never hashed, never snapshotted, never part of a world's registered arena
 //   (docs/CPP-SUBSET.md §9 R-4) - a log line records but never feeds sim state.
-// Threading: `tl_log_write` is not synchronized; today's only caller is the main thread (the
-//   panic path and `TL_LOG_*` call sites). A worker-safe ring is `JOBS.md`'s job when parallel
-//   systems land.
+// Threading: `tl_log_write` is NOT synchronized, and that is a known gap, not a contract: the
+//   panic path reaches it from `tl_assert.cpp`, and `foundation/crash.h` states `tl_crash_raise`
+//   may be entered from any thread (a fatal ends the whole process whichever one raised it). So
+//   the moment `JOBS.md` starts a worker, a fatal off the main thread races this ring. Today no
+//   worker exists, so every caller is the main thread. A worker-safe ring is `JOBS.md`'s job and
+//   is a `TODO.md` item; until then the honest statement is "unsynchronized", not "main thread
+//   only".
 // Includes: foundation/tl_types.h only.
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
 
 enum LogLevel : u8 { LOG_TRACE = 0, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERR };
 
-enum { TL_LOG_MSG_CAP = 240 };   // ring/stderr message capacity, including the NUL
+// docs/TOOLING.md §9.2's `char msg[224]` and §9.5's "msg truncation at 223 bytes + NUL". The
+// record is 248 B here rather than the doc's 256 because this cut drops `wall_ms` (below); the
+// capacity itself is the doc's, not a number this file gets to choose.
+enum { TL_LOG_MSG_CAP = 224 };   // ring/stderr message capacity, including the NUL
+
+// The tier's lowest compiled-in level (docs/TOOLING.md §9: debug/dev 0, netcode 2, ship 3).
+// Derived, for the reason the Invariants note gives. Left undefined the preprocessor reads it as
+// 0 in `#if TL_LOG_MIN <= 0`, silently - which is what shipped: every tier, ship included,
+// compiled in `TL_LOG_TRACE`, and no tier existed in which the compile-out test's `#else` arm
+// ran. An explicit `-DTL_LOG_MIN=n` still wins, which is how the unconditional compile-out test
+// (`tests/foundation/tl_log_compileout.test.cpp`) reaches the barred branch in any tier.
+#ifndef TL_LOG_MIN
+#  if defined(TL_TIER_SHIP)
+#    define TL_LOG_MIN 3
+#  elif defined(TL_TIER_NETCODE)
+#    define TL_LOG_MIN 2
+#  else
+#    define TL_LOG_MIN 0        // debug/dev, and a tier-less standalone preprocess (targets.py)
+#  endif
+#endif
 
 // One ring slot. Simplified from docs/TOOLING.md §9.2's LogRecord (drops wall_ms/ClockApi, which
 // wait for PLATFORM.md) - reconciled once that lane lands (TODO.md).
@@ -73,7 +99,8 @@ extern "C" void tl_log_write(u8 level, const char* file, u32 line, const char* f
 u32 tl_log_test_ring_count(void);
 // Index the NEXT write lands at (the oldest live record once the ring has wrapped).
 u32 tl_log_test_ring_head(void);
-// Record at `slot`, in write order. Precondition: slot < tl_log_test_ring_count().
+// Record at `slot` in WRITE order - slot 0 is the oldest live record, which after the ring has
+// wrapped is at ring index `head`, not 0. Fatal if slot >= tl_log_test_ring_count().
 const LogRecord* tl_log_test_ring_at(u32 slot);
 // Clears the ring to its zero-initialised state. Tests only - never called from a live path.
 void tl_log_test_reset(void);

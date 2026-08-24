@@ -104,18 +104,27 @@ void update_stats(ProbeKey& k, i64 raw) {
 void tl_probe_log(u64 key, const char* name, i64 raw, u8 frac, u32 n) {
     ProbeKey& k = lookup_or_insert(key, name, PROBE_LOG, frac);
     if (!k.enabled) { return; }
-    if (k.count == 0u || (g_tick - k.last_tick) >= (u64)n) {
+    // `g_tick - k.last_tick`, not `>=` on a difference that can go negative: the tick moves
+    // backwards on a replay scrub seek (docs/TOOLING.md §9.3.10) and under
+    // tl_probe_test_set_tick, and the u64 wrap then reads as an enormous gap - the throttle
+    // becomes a no-op rather than throttling. Clamped, so a backwards tick throttles.
+    const u64 since = (g_tick >= k.last_tick) ? (g_tick - k.last_tick) : 0u;
+    if (k.count == 0u || since >= (u64)n) {
         update_stats(k, raw);
         emit_row(k, true);
     }
 }
 
 void tl_probe_on_change(u64 key, const char* name, i64 raw, i64 eps) {
+    TL_CHECK(eps >= 0);   // |raw - last_raw| is unsigned; a negative epsilon has no meaning here
     ProbeKey& k = lookup_or_insert(key, name, PROBE_ON_CHANGE, 0);
     if (!k.enabled) { return; }
-    i64 diff = raw - k.last_raw;
-    if (diff < 0) { diff = -diff; }
-    if (k.count == 0u || diff > eps) {
+    // The magnitude in u64: `raw - k.last_raw` is signed overflow (UB, docs/CPP-SUBSET.md §5) for
+    // any pair straddling half the i64 range, and `-diff` is UB outright at INT64_MIN. Unsigned
+    // subtraction wraps by definition, and the larger-minus-smaller order makes the result exact.
+    const u64 a = (u64)raw, b = (u64)k.last_raw;
+    const u64 diff = (raw >= k.last_raw) ? (a - b) : (b - a);
+    if (k.count == 0u || diff > (u64)eps) {
         update_stats(k, raw);
         emit_row(k, true);
     }

@@ -132,7 +132,12 @@ runtimes' real io and their ring/frame/key-table state are the named exception o
 allowed writable static storage and `<stdio.h>`/`<stdlib.h>`/`<stdarg.h>`, because none of them is
 hashed, snapshotted, or part of a world's registered arena set. Tier gates: `TL_DEV` (1 in
 `dev`/`debug`, 0 otherwise, `BUILD.md` §3) and `TL_LOG_MIN` (`debug`/`dev` 0, `netcode` 2, `ship`
-3). Nothing here is hashed; every mutation of sim state is a command (§0).
+3). `TL_LOG_MIN` is **derived from the tier markers inside `tl_log.h`, never passed as its own
+`-D`**: `BUILD.md` §3 requires `netcode` and `ship` to differ only by the stripping defines and
+`tools/audit/tier_parity.py` enforces exactly that list, so a `TL_LOG_MIN=2` vs `=3` on the
+command line would fail that gate while this table demands the two differ. Left undefined it is
+silently 0 to the preprocessor - which is what W1 tooling-rt first shipped, compiling `TL_LOG_TRACE`
+into `ship`. Nothing here is hashed; every mutation of sim state is a command (§0).
 
 ### 9.1 File layout
 

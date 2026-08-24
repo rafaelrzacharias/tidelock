@@ -18,8 +18,12 @@
 // Determinism: never hashed, never snapshotted (docs/CPP-SUBSET.md §9 R-4). Throttled by TICK
 //   COUNT only, never wall-clock (docs/TOOLING.md §5) - `probe.cpp`'s `tick` reads 0 until
 //   `FRAME-LOOP.md`'s tick counter is wired in (`TODO.md`; the same simplification `tl_log.h`
-//   documents), so "every N ticks" throttling is not meaningfully testable yet; the algorithm
-//   itself is complete and starts working the day a real tick feeds it.
+//   documents). With the tick pinned at 0 the throttle is NOT a no-op and does not degrade to
+//   "every call": the first call rows, and every later call with `n > 0` is suppressed forever,
+//   because no tick ever advances past `last_tick`. `n == 0` rows every call. Tests drive it
+//   through `tl_probe_test_set_tick`; the algorithm starts working unchanged the day a real tick
+//   feeds it. A tick that moves BACKWARDS (a replay scrub seek, docs/TOOLING.md §9.3.10) throttles
+//   rather than wrapping the u64 difference into an enormous gap.
 // Threading: none - the probe key table is not worker-partitioned (unlike the profiler); a
 //   parallel caller is `JOBS.md`'s job when parallel systems land.
 // Includes: foundation/tl_types.h only.
@@ -58,7 +62,7 @@ struct ProbeKey {
 // call or at least `n` ticks passed since the last one. Disabled keys (`enabled == 0`) are one
 // branch - no stats update, no row. `frac` is the fx row's FRAC bit count (0 = plain integer).
 void tl_probe_log(u64 key, const char* name, i64 raw, u8 frac, u32 n);
-// A row whenever `|raw - last_raw| > eps`, or on the key's first call.
+// A row whenever `|raw - last_raw| > eps`, or on the key's first call. Fatal if `eps < 0`.
 void tl_probe_on_change(u64 key, const char* name, i64 raw, i64 eps);
 // A row on every call, unconditionally.
 void tl_probe_mark(u64 key, const char* name);

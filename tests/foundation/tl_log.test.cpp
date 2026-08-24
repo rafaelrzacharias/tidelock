@@ -59,6 +59,28 @@ TL_TEST(log_ring_wraps_overwriting_oldest, "foundation") {
     }
     TL_EXPECT_TRUE(!found_msg_0);    // the oldest record was overwritten
     TL_EXPECT_TRUE(found_msg_4096);  // the newest record survives
+    // The scan above passes for either indexing convention; these two do not. tl_log.h says slot
+    // order is WRITE order, so after the wrap slot 0 must be the oldest LIVE record (msg 1, at
+    // ring index head=1) and the last slot the newest (msg 4096, at ring index 0).
+    TL_EXPECT_TRUE(strcmp(tl_log_test_ring_at(0)->msg, "msg 1") == 0);
+    TL_EXPECT_TRUE(strcmp(tl_log_test_ring_at(4095u)->msg, "msg 4096") == 0);
+    tl_log_test_reset();
+}
+
+// The boundary the wrap test steps over: exactly full, nothing overwritten yet.
+TL_TEST(log_ring_exactly_full_overwrites_nothing, "foundation") {
+    tl_log_test_reset();
+    for (u32 i = 0; i < 4096u; ++i) {
+        TL_LOG_ERR("msg %u", i);
+    }
+    TL_ASSERT_EQ(tl_log_test_ring_count(), 4096u);
+    TL_EXPECT_EQ(tl_log_test_ring_head(), 0u);   // wrapped to the start, nothing dropped
+    TL_EXPECT_TRUE(strcmp(tl_log_test_ring_at(0)->msg, "msg 0") == 0);
+    TL_EXPECT_TRUE(strcmp(tl_log_test_ring_at(4095u)->msg, "msg 4095") == 0);
+    // One more write is what drops "msg 0" - the transition the wrap test asserts from the far side.
+    TL_LOG_ERR("msg %u", 4096u);
+    TL_EXPECT_EQ(tl_log_test_ring_count(), 4096u);
+    TL_EXPECT_TRUE(strcmp(tl_log_test_ring_at(0)->msg, "msg 1") == 0);
     tl_log_test_reset();
 }
 
@@ -70,6 +92,7 @@ TL_TEST(log_message_truncates_at_capacity, "foundation") {
     TL_LOG_ERR("%s", long_msg);
     TL_ASSERT_EQ(tl_log_test_ring_count(), 1u);
     const LogRecord* r = tl_log_test_ring_at(0);
+    TL_EXPECT_EQ((u32)r->len, 223u);                        // docs/TOOLING.md §9.5, verbatim
     TL_EXPECT_EQ((u32)r->len, (u32)(TL_LOG_MSG_CAP - 1));   // capacity minus the NUL
     TL_EXPECT_EQ(r->msg[TL_LOG_MSG_CAP - 1], '\0');
     tl_log_test_reset();

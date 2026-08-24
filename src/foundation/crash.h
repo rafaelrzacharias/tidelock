@@ -16,7 +16,10 @@
 // Determinism: this plane is never hashed, snapshotted, or read back into a tick - the panic path
 //   terminates the process, so it never runs inside a deterministic tick to begin with.
 // Threading: `tl_crash_install` is boot-only (before any worker starts); `tl_crash_raise` may be
-//   called from any thread, since a fatal ends the whole process regardless of which one called it.
+//   called from any thread, since a fatal ends the whole process regardless of which one called
+//   it. Note the gap this opens with the step before it: `tl_assert.cpp` logs first, and
+//   `foundation/tl_log.h`'s ring is unsynchronized, so a fatal raised off the main thread races
+//   that ring the day `JOBS.md` starts a worker (`TODO.md`). No worker exists today.
 // Includes: foundation/tl_types.h only.
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
