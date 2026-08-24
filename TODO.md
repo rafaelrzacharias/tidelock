@@ -854,6 +854,130 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       legitimately leaves the tmp file on disk (the process died before the rename that would
       remove it); the per-kill loop only checks the target file, matching what a crash can
       actually guarantee. `docs/PLATFORM.md`.
+- [x] **W1 platform - adversarial review (fresh context), 2026-08-24. Verdict on the slice as
+      submitted: FIX FIRST. Verdict after the six review commits below: SHIP, with RR-9 open.**
+      Reviewed against `main` merged in (the ruling-closeout: granule-rounded reserves,
+      `registry_add`'s HASHED/SNAPSHOT refusal, `--timeout-ms`). Ranked, each with its trigger:
+      1. **`write_atomic_crash_trigger` was RED on a bare `tl_tests` run** (`review 1`).
+         A bare `return` with zero checks is a FAILURE verdict; the PR lane's `--tag '!slow'`
+         hid it and the nightly run, which drops that filter, would not have. Same finding and
+         same fix as `790f8fb`.
+      2. **Generation wrap ran off four bits in all four hand-rolled slot tables** (`review 2`).
+         `Handle<_,12,4>` has `GEN_MAX` 15 and every release path did `++gen`; a slot's 16th
+         reuse is a `TL_ASSERT` fatal in dev and, with asserts compiled out, a handle whose
+         generation reads back **0** - stale on arrival, and the NULL handle on slot 0.
+         `thread_primitives` already drove thread slot 0 to generation 6. Now wrap-to-1.
+      3. **The entropy gate `461d270` added was half a gate** (`review 3`). It matched the
+         literal `"platform/entropy.h"`; `platform/os_entropy.h` and
+         `platform/impl_headless/headless_state.h` both hand the verb over without naming it,
+         and both reported **0 violations** from `src/core/` - measured, by planting them.
+         Now a transitive carrier closure. `9f52750`'s `os_*` exemption IS correctly scoped
+         (planted `src/foundation/os_sneak.cpp` and `src/platform/sub/os_deep.cpp`, both
+         refused) but nothing held it there; fixture added.
+      4. **The whole Windows `FileApi` was on the ANSI entry points** (`review 4`) -
+         `CreateFileA`/`GetFileAttributesA`/`FindFirstFileA`/`GetCurrentDirectoryA`, and
+         `MoveFileExA` where `PLATFORM.md` §9.3 spells `MoveFileExW`. `*A` decodes in the
+         process ANSI code page, so any UTF-8 path byte >= 0x80 names a different file: running
+         the new test against the old code left a mojibake file on disk beside the real one.
+         `FindFirstFileA` also hands names BACK through that code page, which made §9.2's
+         "sorted bytewise by name" a function of the machine's locale rather than of the
+         directory. Now one UTF-8 <-> UTF-16 boundary (`os_path_win.cpp`, refuse never
+         substitute).
+      5. **`enumerate` on a missing directory returned `{0, ERR_OK}`** (`review 4`) - a missing
+         directory read as an empty one, the silent fallback `CLAUDE.md` bans. Now
+         `FILE_NOT_FOUND`.
+      6. **Every void-returning verb swallowed a dangling handle** (`review 5`):
+         `sem_wait`/`post`/`try_wait` and `mutex_lock`/`unlock` returned quietly, and
+         `texture_unlock` validated nothing at all. A `mutex_lock` that resolves to nothing
+         leaves the caller inside exclusion it does not hold, and the damage surfaces far from
+         the dangling handle. Now `TL_FATAL`; the release verbs and `texture_size` stay tolerant
+         and the whole split is written into §9.4.
+      7. **Two OS contracts disagreed on the same input** (`review 6`): `read_all`'s POSIX
+         branch called a short read `ERR_OK` where Windows calls it `FILE_IO`; and `ov_release`
+         had no page-multiple `TL_CHECK`, where `bytes` is ignored by `VirtualFree(MEM_RELEASE)`
+         but load-bearing for `munmap` - a wrong extent succeeds on Windows and unmaps the wrong
+         pages on Linux. Both closed, plus the `reserve(0)` / `commit`-past-reserve /
+         `release`-non-page-multiple edge rows §9.6 never asked for.
+      Closed without a commit of their own: `platform.h`'s Threading block claimed every table
+      but `draw` is callable from any thread - false for `ThreadApi`'s create/destroy verbs,
+      which race on unsynchronised slot tables and a single-writer arena; and the headless
+      `pref_path == base_path == cwd` plus `read_all`'s `align16(len+1)` push, which existed
+      only in code comments and are now §9.4 rows.
+      Checked and found sound, for the record: the reserve/commit/release path against mem's
+      post-closeout rounding (`vmem_arena_init` rounds to `COMMIT_GRANULE` and `TL_CHECK`s
+      `page <= COMMIT_GRANULE`, so every `commit` extent is a page multiple and the page-multiple
+      `TL_CHECK` cannot disagree with a granule-multiple caller); decommit-then-recommit reading
+      zero (`vmem_decommit_then_repush_is_zero`, `vmem_reserve_commit`); the crash hook's tier
+      gating (`#if TL_DEV`, and `cmake/tier.cmake` sets `TL_DEV=0` for netcode/ship, so no
+      `getenv` and no self-terminate exists there); zero mutable static state in
+      `tl_platform_headless` (the symbol audit's `--data-only` pass, not a grep); the clock being
+      monotonic with `wall_unix_ms` unreachable from `sim/` (the module DAG bars `sim` from
+      `platform/*` entirely); and every applicable §9.6 row having a test - all eleven rows are
+      covered, `headless_draw_validates` split across four.
+      **Not fixed, deliberately:** RR-9 below, plus the four recorded-gap entries after it.
+- [ ] **RR-9 (ruling request, W1 platform review): the headless impl leaks its own arena, and
+      the spec is the reason.** `VMemArena` has no `free` by design (`MEMORY.md` §0 rule 1), but
+      `PLATFORM.md` §9.4 tells the headless `draw` to give every streaming texture a `w*h*4` CPU
+      buffer "from the platform arena" and names no reclamation policy, so `texture_destroy`
+      cannot return it. Same shape, smaller, for `thread.create` (a 16 B `ThreadTrampolineArgs`
+      per call), `sem_create` (a `sem_t`) and `mutex_create` (a `CRITICAL_SECTION` /
+      `pthread_mutex_t`). **Measured, not asserted:** the 16 MB platform arena is 2.25 MB used at
+      init (`sizeof(HeadlessState)` is 118 KB; the 65536-entry draw log is 2 MB), and **three**
+      create/destroy cycles of a 1024x1024 streaming texture exhaust it - the fourth
+      `texture_create` is a `TL_FATAL` inside `arena_push`, with zero textures alive. Not fixed
+      in this review because every candidate is a design choice, not a patch: (a) reuse a slot's
+      existing buffer when the replacement fits - bounds nothing, only moves the wall; (b) a
+      size-class free list on the platform arena - a second allocator, which `MEMORY.md` §0
+      exists to prevent; (c) one `VMemArena` per streaming texture with `arena_decommit_above` on
+      destroy - honest, and the reason `VMemApi.decommit` exists, but it is a §9.4 contract
+      change and the per-texture reserve becomes a `CANON.md` number. Ruling needed on which,
+      before render2d (W3) becomes the first real consumer.
+      *(RR-9 is the next free number checked against every open W1 branch, not just `main` -
+      the trap RR-8's own note flagged. `main`/`containers`/`tooling-rt`/`closeout` reach RR-7;
+      RR-8 exists only here.)*
+- [ ] **W1 platform review - recorded gaps (real, but no fix in hand worth landing blind).**
+      (1) `he_dropped_total` DERIVES the drop count as `head - cap` instead of counting: correct
+      only because nothing headless ever pops the event ring, and silently wrong the moment
+      something does. (2) `headless_draw_log` returns a `Span` over the ring's physical array, so
+      a frame pushing >= 65536 draw calls with no intervening `present` returns a wrapped, wrong
+      span - documented in the code, not handled, because `Span<T>` needs contiguity.
+      (3) `PLATFORM.md` §9.3 puts `TL_ASSERT(thread.is_main)` on `draw`; the headless stub has
+      none, so the seam's one threading rule is unenforced on the impl every test uses.
+      (4) `thread.create` drops its `name` argument (no `SetThreadDescription` /
+      `pthread_setname_np`), so a profiler sees unnamed threads. (5) §9.6's
+      `write_atomic_crash_safety` asks for three instrumented kill points, but points 2 and 3
+      ("after fsync", "before rename") have nothing between them - the third is the same
+      observable state and tests nothing new; and a kill at any point leaves a `.tmp.<pid>` that
+      nothing ever reaps, which `os_file_atomic.h`'s contract block should say and does not.
+      (6) `thread_primitives` never checks `is_main` from a worker, which §9.6's row asks for.
+      (7) double-`release` is untested: Windows fails it silently, POSIX no-ops it, a void verb
+      cannot report it, and a green test would only advertise the pattern.
+- [ ] **W1 platform review - landmines for the containers merge (record now, act at the merge).**
+      Diffed `platform.h`'s consumed signatures against `w1-containers`' shipped headers:
+      (a) **`Span<T>` ends up defined TWICE** - `foundation/span.h` (this lane) and
+      `foundation/array.h` (containers, which ships no `span.h`). Identical shape, so git merges
+      cleanly and the build then fails on redefinition in any TU including both - and
+      `platform.h` includes `span.h`. Resolution: delete `span.h`, keep containers' home,
+      repoint `platform.h`.
+      (b) **`RingBuffer`'s head/tail are INVERTED between the two.** This lane: `head` = write
+      cursor, `tail` = oldest unread, `ring_count = head - tail`. Containers: `head` = next pop,
+      `tail` = next push, `ring_count = tail - head`, plus a `_pad0[3]` and a `ring_init`.
+      Callers that go through the functions are fine; the two that touch the fields directly are
+      NOT - `impl_headless/events.cpp`'s `he_dropped_total` (`head > cap`) would return 0 forever
+      under containers' semantics, and `draw.cpp`'s `headless_draw_log` / `hd_present` index the
+      wrong cursor. All three must be rewritten AT the merge, not merged and left green.
+      (c) **`sv()` changes signature**: this lane's is `constexpr sv(const char (&)[N])`;
+      containers' is `inline sv(const char*)` over a runtime strlen, with the compile-time form
+      renamed `sv_lit`. Every `sv("literal")` in `src/platform/` and `tests/platform/` still
+      compiles (array-to-pointer decay) but stops being constexpr.
+- [ ] **W1 platform review - the ubuntu leg has still never run.** `os_posix_vmem.cpp` and the
+      POSIX halves of `impl_headless/{file,clock,thread}.cpp` and `os_file_atomic.cpp` have not
+      executed on any machine. Pushing `w1-platform` runs nothing: `.github/workflows/pr.yml`
+      triggers on `pull_request` and on `push` to `main` only, and no PR is open for this branch.
+      Static review of the POSIX halves found and fixed the two divergences in review item 7;
+      what it cannot cover is behaviour - `MADV_DONTNEED` re-commit zeroing, `getrandom` short
+      reads, `dirname` on a bare filename, `sem_init` on arena memory, `pthread_t` widened
+      through `u64`. Opening the PR is the only thing that runs them.
 - [ ] `platform/impl_sdl3`: window, events ring, draw verbs, SDL3 + stb vendored per `BUILD.md`
       §4. `docs/PLATFORM.md` §9.7 steps 4-5.
 - [x] **W1 platform - the contract header (`src/platform/platform.h`), 2026-08-24.** Every struct
