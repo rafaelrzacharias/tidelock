@@ -13,7 +13,8 @@
 // Invariants: `system_id` values come from the closed enum in rng_systems.h. `draw` is a
 //   per-carrier counter the CALLER owns locally within the tick - never stored across ticks
 //   (docs/DETERMINISM.md §3). `rng_below`'s Lemire step has no rejection loop: a ~n/2^64 bias is
-//   accepted so draw count never depends on the value drawn.
+//   accepted so draw count never depends on the value drawn. `rng_range` is CLOSED at both ends
+//   and its span must fit R - see its contract comment.
 // Determinism: pure integer functions, no state, no floats, no libm. `rng_below` reuses
 //   fx::mulhi64u (fx.h) rather than a second widening-multiply implementation - one fact, one
 //   home for "high 64 bits of an unsigned 128-bit product".
@@ -55,10 +56,24 @@ constexpr q_t rng_q(u64 r) {
     return fx::fx_raw<q_t>(i32(r >> 34));
 }
 
-// lo + a uniform fraction of (hi - lo), via rng_q and the closed mixed-op table - compiles only
-// for an R the table lists a q_t product for (docs/FX-PALETTE.md §3.1: pos_t/invmass_t,
-// vel_t/omega_t, q_t/stiff_t/angle_t/dt_t, scalar_t/lambda_t). Never through doubles.
+// A uniform draw in the CLOSED interval [lo, hi] (docs/DETERMINISM.md §3): lo + a uniform
+// fraction of (hi - lo), via rng_q and the closed mixed-op table. `hi` IS attainable even though
+// rng_q is [0, 1): the largest q is 1 - 2^-30 and mul<R> rounds RNE, so any span narrower than
+// 2^29 raw units rounds its top draw up to exactly hi (measured: rng_range<scalar_t>(~0ull,
+// -10, +10) == +10). Callers that need a half-open range must reject hi themselves.
+//
+// Preconditions, both asserted: lo <= hi, and `hi - lo` is representable in R. The second is not
+// pedantry - `hi - lo` is R's WRAPPING subtract, so rng_range<pos_t>(r, -WORLD_HALF, WORLD_HALF)
+// (a uniform world position, the most obvious call there is) wrapped the span to INT32_MIN and
+// returned values metres outside the world with no diagnostic at all until this check
+// (W1 rng/hash review 2). A span that does not fit R needs a wider row, not a wrap.
+//
+// Compiles only for an R the table lists a q_t product for (docs/FX-PALETTE.md §3.1:
+// pos_t/invmass_t, vel_t/omega_t, q_t/stiff_t/angle_t/dt_t, scalar_t/lambda_t). Never through
+// doubles.
 template <typename R>
 constexpr R rng_range(u64 r, R lo, R hi) {
+    TL_ASSERT(lo.v <= hi.v);
+    TL_ASSERT(i64(hi.v) - i64(lo.v) <= i64(INT32_MAX));
     return lo + fx::mul<R>(rng_q(r), hi - lo);
 }
