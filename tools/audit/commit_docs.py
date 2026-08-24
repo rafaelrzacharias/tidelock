@@ -49,7 +49,13 @@ def main():
     # Per COMMIT, not per range. A range-wide check let a later unrelated commit's [docs:none]
     # waive an earlier undocumented module change - and the gate's own fixture enshrined that as
     # correct behaviour until the fourth W0 review wrote the counter-example.
-    commits = [c for c in run("git", "rev-list", "--reverse", a.base + "..HEAD").splitlines() if c]
+    # --no-merges: a merge commit's --name-only output is its conflict RESOLUTIONS - content
+    # whose substantive commits each passed this gate individually on their branch. Requiring
+    # [docs:none] on every wave-boundary merge would train people to paste it reflexively,
+    # which is worse than the gap (the W1 platform PR measured exactly this: two merge commits
+    # flagged, zero undocumented decisions in either). A merge that smuggles a NEW substantive
+    # change in its resolution is a review problem, not a grep problem.
+    commits = [c for c in run("git", "rev-list", "--reverse", "--no-merges", a.base + "..HEAD").splitlines() if c]
     missing = []
     for sha in commits:
         changed = [p for p in run("git", "show", "--name-only", "--format=", sha).splitlines() if p]

@@ -15,7 +15,11 @@
 # arena_guard is non-det on purpose: guard_tick_end reads tl_crt_alloc_count from alloc_shim,
 # an upward symbol the det audit forbids; the guard is dev-only engine-side tooling, never
 # sim-called (docs/MEMORY.md §8.4, TODO.md W1 mem notes).
-set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim arena_guard
+# `rect` has no .cpp (header-only), so this entry moves nothing between libs; it exists only so
+# tools/audit/includes.py classifies foundation/rect.h as non-det - it carries Rect_f32 (f32),
+# which the sim-TU float ban would otherwise reject in the one header every sim TU could reach
+# through foundation/ (docs/RENDER2D.md §9.2, landed from the W1 platform lane, 2026-08-24).
+set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim arena_guard rect
                          tl_assert log prof probe crash)
 
 # RR-7 ruling (docs/CPP-SUBSET.md §1, docs/TOOLING.md §9): the tooling plane - never hashed, never

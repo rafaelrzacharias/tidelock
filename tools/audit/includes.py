@@ -39,6 +39,19 @@ SYS_ALLOW_DIRS = {                        # additional system headers, by path p
 }
 BACKEND_FREE = ("src/platform/impl_sdl3", "src/platform/impl_headless")   # OS headers live here
 
+
+def is_backend_free(rel):
+    """True where a real OS header is legal. The two impl_* dirs, plus - docs/PLATFORM.md §9.1 -
+    the os_*.cpp TUs that sit directly in src/platform/ (not under either impl_*): they are the
+    single implementation shared by both impls (os_win_vmem.cpp/os_posix_vmem.cpp,
+    os_entropy.cpp, os_file_atomic.cpp, os_crash_win.cpp/os_crash_posix.cpp), so they cannot live
+    under impl_sdl3 or impl_headless without being compiled twice or picking a fake owner. The
+    "os_" prefix is the doc's own naming convention, not a filename list to keep in sync here."""
+    if any(rel.startswith(p) for p in BACKEND_FREE):
+        return True
+    d, base = os.path.split(rel)
+    return d == "src/platform" and base.startswith("os_") and base.endswith(".cpp")
+
 BACKEND_HEADERS = {                       # token in the include path -> allowed path prefixes
     "SDL3": ("src/platform/impl_sdl3",),
     "SDL_ttf": ("src/platform/impl_sdl3",),
@@ -77,6 +90,16 @@ THREAD_LOCAL_EXEMPT = {"src/foundation/jobs.cpp", "src/foundation/jobs.h"}   # t
 # fx.h needs it. The stem-keyed split cannot express "header det, runtime non-det", so the
 # exemption is by full path - the .cpp is still barred.
 PANIC_ABI_HEADER = "foundation/tl_assert.h"
+# docs/PLATFORM.md §5: EntropyApi's verb "is absent from every sim lib's include path" and, more
+# than that, from every module but the one that implements it and the two that legitimately need
+# OS randomness - net/ (keygen, nonces, commit/reveal) and app/ (init wiring). The MODULE_DAG
+# above only bars it from sim/foundation (they cannot reach src/platform/* at all); this closes
+# the gap for core/render/editor/script, which the DAG otherwise lets include anything under
+# platform/. A doc sentence naming a restriction with no code behind it is a phantom gate
+# (LESSONS.md) - this is that gate, for real, not just the CI grep §5 also names.
+ENTROPY_HEADER = "platform/entropy.h"
+ENTROPY_ALLOWED_MODULES = ("platform", "net", "app")
+_ENTROPY_CARRIERS = {}                    # root -> frozenset of headers that expose the verb
 # RR-7 (docs/CPP-SUBSET.md §1): the tooling plane's io allowance. Narrower than SYS_ALLOW's base
 # set - `<math.h>` is still not granted here, and neither is any OS header; the crash writer's raw
 # OS calls belong to platform/, not foundation/ (docs/TOOLING.md §9.3.9).
@@ -275,6 +298,57 @@ def stem_matches(stem, stem_set):
     return stem in stem_set or (stem.startswith("tl_") and stem[3:] in stem_set)
 
 
+def entropy_carriers(root):
+    """Every header under src/ that makes EntropyApi's verb visible - entropy.h and, transitively,
+    anything that includes it.
+
+    Gating the literal string "platform/entropy.h" is not the restriction docs/PLATFORM.md §5
+    states. §5's claim is about the VERB, and two headers in this tree hand it over without ever
+    naming entropy.h at the call site: platform/os_entropy.h (which declares
+    os_entropy_fill_table, i.e. a way to MINT the table) and
+    platform/impl_headless/headless_state.h (which holds a complete EntropyApi by value). Both
+    were reachable from core/render/editor/script with a clean audit - measured, by planting each
+    in src/core/. Half a gate is still a phantom gate (LESSONS.md), so the rule is the closure,
+    computed from the tree instead of a hand-kept list that the next os_*/impl_* header silently
+    falls out of.
+
+    Cached per root: this is a one-shot CLI, and selftest.py runs each fixture in its own
+    process."""
+    hit = _ENTROPY_CARRIERS.get(root)
+    if hit is not None:
+        return hit
+    src = os.path.join(root, "src")
+    includers = {}                          # header rel-path -> set of local includes it names
+    for dirpath, _dirs, files in os.walk(src):
+        for name in sorted(files):
+            if not name.endswith((".h", ".hpp", ".inc")):
+                continue
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, root).replace("\\", "/")
+            key = rel[len("src/"):] if rel.startswith("src/") else rel
+            try:
+                text = open(path, encoding="utf-8").read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            names = set()
+            for line in strip_comments(text, blank_strings=False).splitlines():
+                m = INC_LOCAL.match(line)
+                if m:
+                    names.add(m.group(1))
+            includers[key] = names
+    carriers = {ENTROPY_HEADER}
+    changed = True
+    while changed:                          # transitive closure; the graph is tiny and acyclic
+        changed = False
+        for key, names in includers.items():
+            if key not in carriers and (names & carriers):
+                carriers.add(key)
+                changed = True
+    out = frozenset(carriers)
+    _ENTROPY_CARRIERS[root] = out
+    return out
+
+
 def module_of(rel):
     parts = rel.split("/")
     return parts[1] if len(parts) > 2 and parts[0] == "src" else None
@@ -424,7 +498,7 @@ def check_file(root, path, nondet, tooling, errors):
     code_lines = strip_comments(raw, blank_strings=False).splitlines()   # includes keep their paths
     token_lines = strip_comments(raw, blank_strings=True).splitlines()   # bans ignore literals
     module = module_of(rel)
-    in_backend_free = any(rel.startswith(p) for p in BACKEND_FREE)
+    in_backend_free = is_backend_free(rel)
     stem = os.path.splitext(os.path.basename(rel))[0]
 
     is_det_tu = rel.startswith("src/sim/") or (
@@ -492,6 +566,10 @@ def check_file(root, path, nondet, tooling, errors):
                 elif stem_matches(inc_stem, nondet) and inc != PANIC_ABI_HEADER:
                     errors.append('%s:%d: a sim TU includes the non-det foundation header "%s" '
                                   "(docs/BUILD.md §10.2)" % (rel, i, inc))
+            if inc in entropy_carriers(root) and module not in ENTROPY_ALLOWED_MODULES:
+                via = "" if inc == ENTROPY_HEADER else ' (it includes "%s")' % ENTROPY_HEADER
+                errors.append('%s:%d: include "%s"%s is restricted to platform/net/app '
+                              "(docs/PLATFORM.md §5, docs/DETERMINISM.md §2)" % (rel, i, inc, via))
         if m or m2:
             for token, prefixes in BACKEND_HEADERS.items():
                 if token in line and not any(rel.startswith(p) for p in prefixes):

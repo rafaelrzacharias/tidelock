@@ -51,7 +51,9 @@ def fixture_root(tmp, name):
 
 
 # --- includes.py ------------------------------------------------------------------------------
-# Each case: (name, relative path, source, a fragment the failure message must contain).
+# Each case: (name, relative path, source, a fragment the failure message must contain) with an
+# OPTIONAL 5th element, a {rel: text} dict of extra files to plant first - needed when the gate
+# under test is a property of the TREE ("which headers reach entropy.h"), not of one file.
 INCLUDE_CASES = [
     ("f32 alias in a sim TU", "src/sim/a.cpp",
      '#include "foundation/tl_types.h"\nextern const f32 x;\nconst f32 x = 1.0f;\n',
@@ -248,6 +250,46 @@ INCLUDE_CASES = [
      '#pragma once\n// Spec: docs/ECS.md §1\n#include "foundation/tl_types.h"\n'
      "template <class T>\nT o_id(T x) { return x; }\n",
      "no contract comment"),
+    # docs/PLATFORM.md §9.1's os_*.cpp TUs sit directly in src/platform/ (not impl_sdl3/
+    # impl_headless) and need real OS headers - is_backend_free() scopes that to the "os_" prefix,
+    # not the whole directory. Without this fixture a bug that widened the exemption to every file
+    # in src/platform/ (platform.h included) would report 0 violations here too.
+    ("a non-os_ file in src/platform/ still bans raw OS headers", "src/platform/util.cpp",
+     "#include <windows.h>\n",
+     "not on the allowlist"),
+    # docs/PLATFORM.md §5: entropy.h is restricted to platform/net/app, not every module the
+    # general DAG lets reach into platform/ (core, render, editor, script all may). A doc claim
+    # with no code behind it is a phantom gate (LESSONS.md) - this proves the restriction is real.
+    ("core/ including platform/entropy.h is restricted to platform/net/app", "src/core/p.cpp",
+     '#include "platform/entropy.h"\n',
+     "restricted to platform/net/app"),
+    # ...and the restriction is about the VERB, not the filename. Gating only the literal string
+    # left two live bypasses in this very tree (measured by planting each in src/core/):
+    # platform/os_entropy.h hands out os_entropy_fill_table, and
+    # platform/impl_headless/headless_state.h holds a complete EntropyApi by value. Neither names
+    # entropy.h at the call site. entropy_carriers() closes over "includes entropy.h,
+    # transitively", so the next os_*/impl_* header cannot fall out of a hand-kept list.
+    ("a header that INCLUDES entropy.h is restricted too, not just entropy.h itself",
+     "src/core/q.cpp",
+     '#include "platform/os_entropy.h"\n',
+     'it includes "platform/entropy.h"',
+     {"src/platform/entropy.h":
+          '#pragma once\n// Spec: docs/PLATFORM.md §5\n'
+          '#include "foundation/tl_types.h"\n'
+          'struct EntropyApi { void* ctx; void (*fill)(void*, void*, u32); };\n',
+      "src/platform/os_entropy.h":
+          '#pragma once\n// Spec: docs/PLATFORM.md §5\n'
+          '#include "platform/entropy.h"\n'
+          '// Fills *out with the real OS-backed table.\n'
+          'void os_entropy_fill_table(EntropyApi* out);\n'}),
+    # The os_*.cpp OS-header exemption is scoped to src/platform/ EXACTLY. Its two shipped
+    # fixtures proved "a non-os_ file in src/platform/ still fails" and "an os_*.cpp in
+    # src/platform/ is clean" - but not the other leg: that the "os_" prefix grants nothing
+    # ANYWHERE ELSE. Without this, a foundation or sim TU named os_*.cpp inheriting the exemption
+    # would be a silent hole in the tree's loudest ban.
+    ("the os_ prefix grants nothing outside src/platform/", "src/foundation/os_shim.cpp",
+     "#include <windows.h>\n",
+     "not on the allowlist"),
 ]
 
 # Things that must NOT fire: the gates have to be usable, not just loud.
@@ -314,12 +356,23 @@ INCLUDE_CLEAN = [
      "#include <stdio.h>\n#include <stdlib.h>\n"
      "namespace { unsigned g_ring_head = 0; }\n"
      "void tl_log_bump(void) { g_ring_head += 1u; }\n"),
+    # is_backend_free() must actually grant the exemption it claims: an os_*.cpp directly in
+    # src/platform/ (not under impl_sdl3/impl_headless) with a real OS header.
+    ("an os_*.cpp in src/platform/ may include a real OS header", "src/platform/os_entropy.cpp",
+     "#include <windows.h>\n"
+     "void os_entropy_probe(void) {}\n"),
 ]
 
 
 def test_includes(tmp):
-    for name, rel, src, expect in INCLUDE_CASES:
-        root = fixture_root(tmp, "inc_" + os.path.basename(rel).replace(".", "_"))
+    for n, case in enumerate(INCLUDE_CASES):
+        name, rel, src, expect = case[0], case[1], case[2], case[3]
+        extra = case[4] if len(case) > 4 else {}
+        # Keyed by index, not by the source basename: two cases may plant the same filename, and
+        # a case that plants EXTRA files must not inherit a neighbour's tree.
+        root = fixture_root(tmp, "inc_%03d" % n)
+        for erel, etext in extra.items():
+            write(root, erel, etext)
         write(root, rel, src)
         rc, out = run([sys.executable, os.path.join(AUDIT, "includes.py"), "--root", root])
         record("includes: " + name, rc == 1 and expect in out, out.strip()[:160])
@@ -744,6 +797,29 @@ def test_commit_docs(tmp):
     head = git(repo, "rev-parse", "HEAD~1")[1].strip()
     rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"), "--base", head], cwd=repo)
     record("commit_docs: a module change with its doc passes", rc == 0, out.strip()[:200])
+
+    # A merge commit whose conflict RESOLUTION touches src/ carries no waiver and must not be
+    # flagged: its substantive commits each passed the gate individually (the W1 platform PR
+    # measured two false flags). A NON-merge commit in the same range must still be caught.
+    head_before = git(repo, "rev-parse", "HEAD")[1].strip()
+    git(repo, "checkout", "-qb", "side", head_before)
+    write(repo, "src/sim/z.cpp", "int h(void) { return 4; }\n")
+    write(repo, "docs/ALLOY.md", "# alloy side\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "side: sim change with its doc")
+    git(repo, "checkout", "-q", "-")
+    write(repo, "src/sim/z.cpp", "int h(void) { return 5; }\n")
+    write(repo, "docs/ALLOY.md", "# alloy main\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "main side: conflicting sim change with its doc")
+    run(["git", "merge", "side"], cwd=repo)                      # conflicts on both files
+    write(repo, "src/sim/z.cpp", "int h(void) { return 45; }\n")
+    write(repo, "docs/ALLOY.md", "# alloy merged\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "merge side (resolution touches src/, no waiver)")
+    rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"), "--base", head_before], cwd=repo)
+    record("commit_docs: a merge commit's conflict resolution is not a module change",
+           rc == 0, out.strip()[:200])
 
     rc, out = run([sys.executable, os.path.join(AUDIT, "commit_docs.py"),
                    "--base", "0" * 40], cwd=repo)

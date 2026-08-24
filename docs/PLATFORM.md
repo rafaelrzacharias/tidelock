@@ -125,9 +125,13 @@ surface — still the sdl3 impl, not headless.
 
 Scope: the contract header, two implementations, vendor wiring, tests. `f32`/`f64`, `<math.h>`,
 OS and SDL headers are legal inside `impl_*`/`os_*` TUs only (`CPP-SUBSET.md` §1); `platform.h`
-includes nothing but `foundation/{tl_types,handle,strview,ring,rect}.h`. Every fn-ptr takes its
-table's `void* ctx` first — no static mutable state anywhere in the impls (`CPP-SUBSET.md` §1);
-the impl state is one struct allocated from the platform's own `VMemArena` at init.
+includes nothing but `foundation/{tl_types,handle,strview,ring,rect,span,vmem_api}.h`. `VMemApi`
+is defined once, in `foundation/vmem_api.h` — foundation is a leaf (`ARCHITECTURE.md` §1 rule 1)
+and `vmem_arena.cpp` calls through the table without including `platform.h`, so that is the
+struct's one foundation-visible home (`MEMORY.md` §8.2); `platform.h` includes it rather than
+redefining it. Every fn-ptr takes its table's `void* ctx` first — no static mutable state
+anywhere in the impls (`CPP-SUBSET.md` §1); the impl state is one struct allocated from the
+platform's own `VMemArena` at init.
 
 ### 9.1 File layout — `src/platform/`
 
@@ -225,13 +229,14 @@ struct FileApi { void* ctx;
     ErrCode (*write_atomic)(void* ctx, StrView path, Span<const u8>);           // §9.3
     ErrCode (*append)(void* ctx, StrView path, Span<const u8>);                 // log/TSV sinks
     u8      (*exists)(void* ctx, StrView path);
-    Result<u32> (*enumerate)(void* ctx, StrView dir, FileEntry* out, u32 cap); // non-recursive; sorted bytewise by name; count > cap → ERR_PLATFORM_FILE_TOO_LARGE
+    Result<u32> (*enumerate)(void* ctx, StrView dir, FileEntry* out, u32 cap); // non-recursive; sorted bytewise by name; count > cap → ERR_PLATFORM_FILE_TOO_LARGE; a dir that does not exist → ERR_PLATFORM_FILE_NOT_FOUND, never an empty listing
     StrView (*base_path)(void* ctx);  StrView (*pref_path)(void* ctx);          // with trailing '/'
     Result<WatchHandle> (*watch)(void* ctx, StrView dir, WatchFn, void* wctx); // dev; netcode/ship: ERR_PLATFORM_UNSUPPORTED
     void    (*unwatch)(void* ctx, WatchHandle); };
 struct ClockApi { void* ctx; u64 (*ticks)(void* ctx); u64 (*frequency)(void* ctx); u64 (*wall_unix_ms)(void* ctx); };
 struct VMemApi  { void* ctx; void* (*reserve)(void* ctx, u64 bytes); ErrCode (*commit)(void* ctx, void* base, u64 bytes);
                   ErrCode (*decommit)(void* ctx, void* base, u64 bytes); void (*release)(void* ctx, void* base, u64 bytes); u32 page_size; u32 _pad0; };
+                  // ^ defined in foundation/vmem_api.h (this struct, verbatim); platform.h includes it, does not redefine it (§9)
 struct EntropyApi { void* ctx; void (*fill)(void* ctx, void* buf, u32 n); };   // defined in entropy.h; platform.h: `struct EntropyApi;`
 typedef void (*ThreadFn)(void* ctx);
 struct ThreadApi { void* ctx;
@@ -281,8 +286,12 @@ with `__ATOMIC_ACQUIRE` for loads, `__ATOMIC_RELEASE` for stores, `__ATOMIC_ACQ_
 | window | `size`/`drawable_size` return `config.window_w/h` (default 1280×720); `set_*` return OK and record; `has_focus` = 1 |
 | events | `pump` returns 0 and does nothing; `dropped_total` = 0. Tests inject events by pushing into the ring directly |
 | draw | **validating stub:** the same `SlotMap<TexRec>` and every argument check as sdl3 (limits, usage, stale, `m % 3`, `n ≤ 65536`, null vertex with `n > 0`), no device. Streaming textures own a CPU buffer (`w·h·4` from the platform arena) so `lock` returns real writable memory and tests can read it back. Every verb appends `DrawCall { u8 verb; u8 _pad0; u16 tex; u32 n, m; Rect_i32 clip; u32 rgba; }` (32 B) to a 65536-entry record ring readable by `tests/render/present_descriptor` via `headless_draw_log(const PlatformApi*) → Span<const DrawCall>`; cleared by `present` |
-| file, clock, thread | real, OS-direct (`CreateFileW`/`open`, `QueryPerformanceCounter`/`clock_gettime(MONOTONIC)`, `CreateThread`/`pthread_create`, `CreateSemaphoreW`/`sem_init`, `SRWLOCK`/`pthread_mutex`); identical contracts and error codes; `watch` → `ERR_PLATFORM_UNSUPPORTED` |
+| file, clock, thread | real, OS-direct (`CreateFileW`/`open`, `QueryPerformanceCounter`/`clock_gettime(MONOTONIC)`, `CreateThread`/`pthread_create`, `CreateSemaphoreW`/`sem_init`, `SRWLOCK`/`pthread_mutex`); identical contracts and error codes; `watch` → `ERR_PLATFORM_UNSUPPORTED`. **Every Win32 file call is the `W` entry point**, never `*A`: the `A` family decodes its argument in the process ANSI code page, not UTF-8, so a §9.3 UTF-8 path with any byte ≥ 0x80 names a different file — and `FindFirstFileA` hands names BACK through that code page, which would make §9.2's "sorted bytewise by name" a function of the machine's locale. `os_path_win.cpp` is the one UTF-8 ⇄ UTF-16 boundary (`MB_ERR_INVALID_CHARS`/`WC_ERR_INVALID_CHARS`: malformed input is refused, never substituted); an `enumerate` entry whose name does not fit `FileEntry::name` is skipped, not truncated, because truncated UTF-8 no longer names the file |
 | vmem, entropy, crash | the shared `os_*` TUs — bit-identical behaviour to sdl3 |
+| `base_path` / `pref_path` | Both are the process's **current working directory** with a trailing `/`. Headless has no SDL `org`/`app` pref-root scheme to derive the §9.2 `<os pref root>/org/app/` layout from, and inventing one would put test output somewhere a CI job cannot find. A documented simplification of this impl, not a contract change: the sdl3 impl answers §9.2 |
+| `read_all` arena cost | Pushes **`align16(len+1)`**, not `len+1`: `arena_push` aligns a push's START, not its SIZE (`MEMORY.md` §8.2), so a file whose length is not already a multiple of 16 would otherwise leave `used` unaligned and break §9.6's `read_all_contract` growth clause. `Span.count` is still `len` |
+| stale handles | The verbs that RETURN a code report one (`TEX_STALE`, `TEX_USAGE`). The void-returning verbs cannot, so they split: **use** verbs `TL_FATAL` on a handle that does not resolve — `sem_wait`/`sem_post`/`sem_try_wait`, `mutex_lock`/`mutex_unlock`, `texture_unlock` (also on a non-streaming texture, the case `lock` refuses with `TEX_USAGE`) — because a quiet return leaves the caller believing it holds a lock, or posted a signal, that it did not, and the damage surfaces far from the dangling handle. **Release** verbs (`join`, `sem_destroy`, `mutex_destroy`, `texture_destroy`) stay no-ops on a null or already-released handle: double-release on a shutdown path is ordinary. `texture_size` is the ASK verb and answers 0×0 on a stale handle — an answer, not a swallowed error |
+| slot tables | `tex`/`thread`/`sem`/`mutex` are hand-rolled arrays with `Handle`'s generation math until `SlotMap<T>` lands (`CONTAINERS.md`). Every handle here is `Handle<_,12,4>` - four generation bits, `GEN_MAX` 15 - so the release path's **generation-wrap policy is wrap-to-1, never to 0** (`MEMORY.md` §3 leaves the policy per domain; Entity's quarantine is the ECS's, not this seam's). A bare `++gen` overflows on a slot's 16th reuse and issues a handle that reads back generation 0 - stale on arrival, and the null handle on slot 0. ABA after 15 reuses of one slot is accepted and stated |
 | dev | `platform_sdl3_dev_api` is absent; `is_headless = 1` |
 
 ### 9.5 Vendor hook wiring and init order
