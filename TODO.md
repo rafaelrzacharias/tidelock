@@ -530,7 +530,7 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       agree field-for-field today, so the fix is mechanical - delete platform.h's definition,
       include the foundation header - but until then any TU including both headers is an ODR
       violation waiting at the merge.
-- [ ] **Ruling request: is `ARENA_HASHED` without `ARENA_SNAPSHOT` legal for MUTABLE state?**
+- [x] **Ruling request: is `ARENA_HASHED` without `ARENA_SNAPSHOT` legal for MUTABLE state?**
       A hashed-but-not-snapshotted arena that mutates cannot be rolled back, so a mid-run
       restore CANNOT reproduce the hash trace (section 8.8) - a desync trap wired at
       registration, caught only weeks later. Legit use is immutable data (compiled tables,
@@ -543,6 +543,29 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       bytes is a no-op-equivalent memcpy). Implementation (W1 ruling-closeout lane): the fatal
       in registry_add + a fatal-expected test; MEMORY.md §1.2/§5 carry the ruling; the fixture's
       hazard note becomes a citation of it.
+      **DONE 2026-08-24 (W1 ruling-closeout).** The `TL_FATAL` sits after the duplicate-id loop in
+      `registry_add` (`arena_registry.cpp`), so no existing fatal's precedence moved;
+      `arena_registry.h`'s flag-enum comment and `registry_add`'s contract carry it; `MEMORY.md`
+      §1.2 states the rule and §5's compiled-data-tables row cites it. `registry.test.cpp`'s
+      fixture had to change - its arena `c` WAS the refused combination - so `c` is now
+      `HASHED | SNAPSHOT` (keeping the two-hashed-arena per-arena bisection property) and a new
+      arena `d` (`GROWS_AT_BARRIER` only) carries `c`'s old "restore must not touch it" role;
+      `sim_step`'s hazard note is a citation of the ruling now.
+      `registry_add_hashed_without_snapshot_is_fatal` is the `TL_TEST_EXPECT_FATAL` row (passes
+      in dev/debug, exit 2 + the marker measured), and
+      `registry_add_accepts_every_legal_flag_combination` is its negative half so the fatal
+      cannot be over-broad without a test noticing.
+- [ ] **`TL_TEST_EXPECT_FATAL` cannot express a `TL_FATAL`/`TL_CHECK`-expected row outside dev**
+      (found 2026-08-24 by the ruling-closeout lane, filed rather than improvised). Owner: the
+      runner lane. `tl_child_verdict` (`tests/runner/runner_core.h`) inverts the pass condition
+      only when `dev_tier` is true, with the stated rationale that "on netcode/ship the call under
+      test cannot fatal" - true for `TL_ASSERT`, which compiles out there, and false for
+      `TL_FATAL`/`TL_CHECK`, which do not. `registry_add_hashed_without_snapshot_is_fatal` is the
+      first such row: its fatal is live on netcode/ship, the child really does exit 2, and the
+      runner would score that an ordinary FAIL - so the body `TL_SKIP`s there and the ruling is
+      only proved on two of four tiers. The fix is a per-test "fatals in every tier" bit on
+      `TestInfo` (`cmake/testlist.cmake` + `tl_test.h` + `tl_child_verdict`), which is more than
+      this lane's rulings name.
 - [ ] **Ruling request (spec gap, behavior matches spec pseudocode): a reserve that is not a
       COMMIT_GRANULE multiple has an unusable tail** - `arena_push` TL_FATALs "over reserve"
       when `align_up(end, 64K) > reserved` even though `end <= reserved`, so the effective

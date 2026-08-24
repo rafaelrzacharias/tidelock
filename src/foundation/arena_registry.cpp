@@ -35,6 +35,14 @@ void registry_add(ArenaRegistry* r, NameHash id, VMemArena* a, u32 flags) {
     for (u32 i = 0; i < r->count; ++i) {
         if (r->e[i].id == id) { TL_FATAL("duplicate arena id - ids key the registry"); }
     }
+    // RULED 2026-08-24 (TODO.md): HASHED without SNAPSHOT is refused at registration. A hashed
+    // arena that is not snapshotted cannot be rolled back, so a mid-run restore cannot reproduce
+    // the hash trace (docs/MEMORY.md section 8.8) - a desync trap wired at init and found weeks
+    // later. Immutable tables take SNAPSHOT anyway: they are small, and restoring bytes that
+    // never mutated is a no-op-equivalent memcpy.
+    if ((flags & ARENA_HASHED) != 0u && (flags & ARENA_SNAPSHOT) == 0u) {
+        TL_FATAL("ARENA_HASHED without ARENA_SNAPSHOT - hashed state must be rollback-able (docs/MEMORY.md section 1.2)");
+    }
     r->e[r->count].id = id;
     r->e[r->count].arena = a;
     r->e[r->count].flags = flags;

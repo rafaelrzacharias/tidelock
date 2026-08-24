@@ -60,6 +60,13 @@ ErrCode registry_restore(ArenaRegistry*, const Snapshot*);                 // fa
 
 - **Registration order is part of the lockstep contract** (the world hash folds in that order;
   the snapshot layout is that order). It is explicit in the `app/` wiring file.
+- **`HASHED` implies `SNAPSHOT`; `registry_add` `TL_FATAL`s on the combination without it**
+  (ruled 2026-08-24). A hashed arena that is not snapshotted cannot be rolled back, so a mid-run
+  restore cannot reproduce the hash trace (§8.8) — a desync trap wired at registration and found
+  weeks later. Immutable compiled tables (§5) take `SNAPSHOT` anyway: they are small, and
+  restoring bytes that never mutated is a no-op-equivalent `memcpy`. `SNAPSHOT` without `HASHED`
+  stays legal (state that is restored but deliberately outside the hash), as does membership with
+  neither flag (`GROWS_AT_BARRIER` alone — the guard's business, §2).
 - **Snapshot ring (T-F-04):** `N = CONFIRMATION_HORIZON_TICKS` slots allocated **once** from a
   dedicated arena at init; each slot sized at `Σ reserved` of snapshotted arenas at the *budget*,
   with the used extents recorded per slot so a restore copies only `[base, used)`. Cannot be sized
@@ -153,7 +160,7 @@ the interner owns long-lived names (`CONTAINERS.md` §5).
 |---|---|
 | ECS columns + sparse pages + entity slot table | spatial index caches, broadphase, neighbor lists |
 | Alloy pools, SDF stores, graphs, basins, constraint lists | Luau heaps (scripts rebuild their transient tables from world state — `LUAU-LAYER.md` §2) |
-| tick counter, RNG seed, compiled data tables (restored but fingerprint-checked) | render double-buffers (prev/current are re-primed with a snap bit after restore) |
+| tick counter, RNG seed, compiled data tables (restored but fingerprint-checked — they are hashed, so §1.2's `HASHED` ⇒ `SNAPSHOT` rule puts them here even though they never mutate) | render double-buffers (prev/current are re-primed with a snap bit after restore) |
 | singleton components (system state) | net/log rings, ImGui, audio |
 
 A restore is followed by a `post_restore` barrier where derived caches are marked dirty and the
