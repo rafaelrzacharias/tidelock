@@ -233,6 +233,19 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       tier-marker-derived divergence inside headers is in scope for the rule and name `TL_LOG_MIN`
       as its first instance. Not invented here (CLAUDE.md rule 7).
 
+- [x] **fx tests that need the runner lane** (`TESTING.md` §9.1 `TL_TEST_EXPECT_FATAL`) - landed
+      in `tests/foundation/fx_fatal.test.cpp` (W1 runner+driver lane, 2026-08-24): `div` by zero,
+      `sqrt` of a negative, `normalize` of a zero vector, `atan2(0,0)`, `to<R>` out of range,
+      `clamp` with lo > hi, each `TL_TEST_EXPECT_FATAL` and gated `#if TL_DEV`. Outside dev,
+      where `TL_ASSERT` compiles out, each body **`TL_SKIP`s with its reason** and reports SKIP -
+      it was an empty body reporting PASS until the review, six rows of green having executed
+      nothing (`fx_review_release_error_values` in `fx_review.test.cpp` covers the returned
+      release values on those tiers, for five of the six - see the `to<R>` item below). The
+      runner judges these as fatal-expected only under `TL_DEV` (`tl_child_verdict`,
+      `tests/runner/runner_core.h`), else as ordinary children, so the row is never a false fatal
+      expectation outside dev. The fatal check itself is still the loose one - see "Tighten
+      `TL_TEST_EXPECT_FATAL` to the real contract" below for the exact string, exit code and
+      prerequisites.
 - [ ] **RR-1 Pi 4 sysroot + the aarch64 leg of `BUILD.md` §10.5.** Rafael has a Pi 4 on the LAN,
       so this is now an execution task, not a decision. Lane: W0 skeleton (**Opus 5 high**). It
       touches only `toolchain/`, `cmake/toolchain-pi4.cmake`, `tools/sysroot.sh|deploy.sh` and this
@@ -585,12 +598,101 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       aliasing whatever registration puts first.
 
 ## Foundation week(s) (`docs/MEMORY.md`, `CONTAINERS.md`, `DETERMINISM.md`, `TESTING.md`)
-- [ ] Finish the test runner (`tests/runner`; W0 shipped the stub — generated list, tags/filter,
-      `--isolate` one child per test, TSV + JUnit): `NEAR_FX`, `SPAN_EQ`/`MEM_EQ`,
-      `TL_TEST_EXPECT_FATAL` via child process, `TL_ASSERT_NO_ALLOC`, `TL_ASSERT_DETERMINISTIC`,
-      the parallel isolate pool, property generators. `docs/TESTING.md` §9.1. **First.**
+- [x] Finish the test runner (`tests/runner` — W1 runner+driver lane, 2026-08-24; **3 review
+      commits**, 2026-08-24): `NEAR_FX`, `SPAN_EQ`/`MEM_EQ`, `TL_TEST_EXPECT_FATAL` (always via a
+      child process, isolate or not), the parallel `--isolate` pool (one child per test,
+      `core_count` workers, sorted deterministic replay of failures), property-test seeding
+      (`tl_seed_for(global_seed, index)`), `TL_SKIP`, TSV + JUnit. `docs/TESTING.md` §9.1.
+      **Adversarial review verdict (fresh context, 2026-08-24): FIX FIRST → fixed and shipped.**
+      Five silent-pass paths and two untested-code findings; ranked list and the reasoning are in
+      the `W1 runner review 1/2/3` commit messages, the residue is the three open items below.
+      **Still not implemented, and now they say so:** `TL_ASSERT_NO_ALLOC` (needs `VMemArena`'s
+      mark pair + `alloc_shim.cpp`, mem lane) and `TL_ASSERT_DETERMINISTIC` (needs a `World`)
+      **refuse to compile** rather than pass — they shipped as no-op stubs that ran the statement
+      and asserted nothing, which is the W0 "a gate that cannot fail" shape (`LESSONS.md`).
+      Replace each body with the real check the day its dependency lands, and delete the
+      `static_assert` (`tests/runner/tl_test.h`).
+      **Ruling recorded**: the isolate pool's process-spawn + core-count primitives
+      (`CreateProcess`/`fork`+`exec`, `GetSystemInfo`/`sysconf`) are read as covered by
+      `docs/TESTING.md` §8 R-2's "printf-class io + clock + filesystem access" exemption, since
+      the feature §9.1 specifies cannot exist without them; `tests/runner/tl_test.h`'s contract
+      block states this. The POSIX (`fork`/`execv`/`waitpid`) leg is written to the same contract
+      as the Windows leg but **untested on this machine** (Windows-only dev PC) — exercise it the
+      first time the Linux PR lane runs `tl_tests --isolate`.
+- [ ] **Tighten `TL_TEST_EXPECT_FATAL` to the real contract.** Today `tl_child_verdict`
+      (`tests/runner/runner_core.h`) passes a fatal-expected row on "the child spawned and then
+      terminated abnormally", which cannot tell an expected assert from a stack overflow, a
+      missing DLL, or `kill -9`. Two prerequisites, then one mechanical edit — do not tighten
+      before both, or every fatal-expected test fails by construction:
+      1. **`tl_fatal` must be the real one.** This tree still links the trap stub
+         (`src/foundation/tl_assert.cpp`, `__builtin_trap()`). The real writer already exists on
+         `w1-tooling-rt` (`src/foundation/crash.cpp`, commit `1c894ce`) and emits, verbatim:
+         `TL_FATAL origin=%s %s:%u: %s\n` to stderr, then `exit(2)`. `origin` is one of
+         `TL_FATAL`/`TL_CHECK`/`TL_ASSERT`; the literal `TL_FATAL` prefix is fixed regardless of
+         origin *precisely so these tests can grep one string*. `TL_FATAL_MARKER` in
+         `tests/runner/tl_test.h` is that prefix, `"TL_FATAL origin="` — it read `"TL_FATAL:"`
+         until review 1 compared the two lanes, and the colon would have made the "mechanical"
+         tightening compile and then match nothing.
+      2. **The runner must capture the child's stderr**, which it does not — it inherits the
+         parent's handles, so the marker is unreachable and parallel children interleave onto the
+         console. `docs/TESTING.md` §9.1 already says "exit code + **captured** stderr → status";
+         this is the missing half. Windows: `CreatePipe` + `STARTF_USESTDHANDLES` per child, drain
+         before `WaitForMultipleObjects` returns the slot. POSIX: `pipe()` + `dup2` in the child.
+      Then the edit is: `expect_fatal && dev_tier` passes iff `cr.exit_code == 2` **and** the
+      captured stderr contains `TL_FATAL_MARKER`, **and** the marker's `file:line` is the one the
+      test names — a fatal-expected test asserts WHICH assert fired, not merely that something
+      did. That last part needs a per-test expectation: extend `TL_TEST_EXPECT_FATAL` to take the
+      expected source file (`__FILE__` of the header the assert lives in) or a substring of the
+      failing expression, and pin it in `tests/foundation/fx_fatal.test.cpp`'s six rows. Delete
+      the KNOWN GAP notes in `tl_test.h`, `runner_core.h` and `fx_fatal.test.cpp` in the same
+      commit. Cover it with a negative test: a child that exits 0, a child that exits 2 with no
+      marker, and a child that exits 2 with the marker naming the WRONG file:line, must all FAIL.
+- [ ] **Ruling request — a per-child timeout.** `docs/TESTING.md` is silent, and the runner has
+      none: `WaitForMultipleObjects(..., INFINITE)` / `waitpid(pid, &status, 0)`
+      (`tests/runner/main.cpp`). A test that hangs — or a fatal-expected test whose assert does
+      not fire and whose body loops — stalls the PR lane forever with no output, and
+      `LESSONS.md` already records one incident of a straggler being misread as a deadlock. The
+      value is the decision: §6 budgets the PR lane at < 10 min total, but the `slow` exhaustive
+      rows (2^30 iterations) run for minutes on their own, so one number cannot serve both.
+      Proposal to rule on: `--timeout-ms`, default 0 (off) in a local run and set explicitly by
+      each CI lane (PR: 120000; nightly: off), a timed-out child reported as its own `TIMEOUT`
+      status that fails the run and names the test. Not improvised in this review, per CLAUDE.md
+      ("silence in the spec is not permission").
+- [ ] **`to<R>` out of range has no release-value test.** `tests/foundation/fx_fatal.test.cpp`
+      pairs each dev-tier assert with `fx_review_release_error_values`'s netcode/ship value —
+      for five of its six rows. `to<q_t>(fx_raw<pos_t>(1 << 19))` asserts in dev and, with the
+      assert compiled out, narrows `2^31` through `i32` (well-defined wrap in C++20, so
+      `INT32_MIN`: a positive value comes back as the most negative one). Nothing documents or
+      tests that. Either give `to<R>` a documented out-of-range return in `src/foundation/fx.h`
+      and a row in `fx_review_release_error_values`, or state in `fx.h` that the release
+      behaviour is undefined-by-contract and callers must range-check — but not silence. Owner:
+      the fx lane.
+- [x] `tests/driver` skeleton (W1 runner+driver lane, 2026-08-24; parser extracted and tested in
+      review 2): the full `--scene/--seed/--ticks/--workers|--workers-sweep/--record|--replay/
+      --verify/--dual/--dump-probes/--csv/--snapshot-every/--ballast` contract of
+      `docs/TESTING.md` §9.2, in `tests/driver/driver_args.h` (a closed `ErrCode` set + name
+      table, `docs/CPP-SUBSET.md` §3) with `tests/driver/driver_args.test.cpp` over it. The boot
+      itself (headless platform init, `app/wiring.cpp`'s scene load, the Script/Replay producer,
+      `engine_tick_once`, CSV + hash output) is a named stub (`driver_boot_headless_STUB`,
+      `tests/driver/main.cpp`) until the platform lane's headless impl and `app/wiring.cpp` land
+      — a valid invocation today exits **70** (EX_SOFTWARE, the W0 stub convention), never the
+      real contract's 0/3, so nothing downstream can mistake "not implemented" for "ran clean" or
+      "diverged"; a malformed one exits 1. `tl_gate0`/`tl_hovel` stay on the W0 `stub_main.cpp`
+      (their own lanes).
+- [ ] **Property generators + the shrinker** (`docs/TESTING.md` §1: "a seeded `rng_key` generator
+      + shrinking by halving the op sequence"). What the runner lane shipped is the *seed*:
+      `tl_seed_for(--seed, row index)`, reproducible and now passed down to `--isolate` children.
+      Nothing reads `TestCtx::seed` yet and there is no generator and no shrinker — the existing
+      property tests roll their own. Build it on `rng_for` (`src/foundation/rng.h`, merged to
+      main 2026-08-24) so a generator is keyed, not seeded ad hoc.
+- [ ] **The isolate pool's fault paths have no test.** `tl_child_verdict`'s spawn-failure rule is
+      covered (`runner_core.test.cpp`), and a mid-run `kill` of one child was verified by hand
+      (pool drains, the row is FAIL, the other 76 still run, exit 1, the P0 flake line prints).
+      What is still only a `LESSONS.md` line is the `WAIT_FAILED` drain and the absolute-cwd
+      requirement that produced it — both need fault injection (a forced bad handle, a forced
+      relative cwd) that the runner has no seam for. Add the seam when the pool next changes.
 - [ ] Delete the W0 placeholder TUs as each module gets real sources (`src/*/…_unit`), and give
-      `tl_driver` / `tl_gate0` / `tl_hovel` real mains (they exit 70 today).
+      `tl_driver` (replace `driver_boot_headless_STUB`) / `tl_gate0` / `tl_hovel` real mains.
 - [ ] `platform/` contract + **headless impl** (file/clock/vmem/entropy/threads real; window/draw/
       events null). `docs/PLATFORM.md`.
 - [ ] `VMemArena` + scratch + `ArenaRegistry` (hash-all, snapshot/restore, ring) + arena-offset guard
