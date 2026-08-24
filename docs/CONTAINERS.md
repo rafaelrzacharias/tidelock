@@ -227,11 +227,11 @@ same commit"):
   (`H::IDX_MASK + 1`) — cheap, since address-space reservation is free, and it lets `live`
   (fixed-size at init, §4) need no separate growth policy. Four ids are required, not derived, so
   the app's `ArenaRegistry` can register each column under its own name (all four are part of the
-  pool's authoritative state). **Known interaction:** `vmem_arena_init` (as shipped) rounds a
-  reserve to the OS page size only, not `COMMIT_GRANULE` — the exact gap `TODO.md`'s W1 mem review
-  already names and assigns to a ruling-closeout lane. Every small-cap domain trips it on its first
-  `arena_push` until that lands, so `slotmap_init` floors each column's reserve at
-  `COMMIT_GRANULE`, forward-compatible with the eventual fix.
+  pool's authoritative state). Each column's reserve is its exact byte size: `vmem_arena_init`
+  rounds every reserve up to `COMMIT_GRANULE` (`MEMORY.md` §8.2), so a small-cap domain needs no
+  caller-side floor — the one this lane shipped against the pre-ruling `vmem_arena_init` was
+  deleted by the W1 containers review, guarded by
+  `slotmap_small_cap_domain_needs_no_caller_reserve_floor`.
 
 ### 8.6b `fmt_buf` ships as a stub (W1 containers, 2026-08-24)
 
@@ -256,4 +256,5 @@ idempotence, collision fatal-expected with a crafted pair, `fmt_buf` truncation 
 container (the `TL_ASSERT_NO_ALLOC` macro does not compile yet — a `static_assert` stub pending
 the runner lane's `alloc_shim.cpp` wiring, `TODO.md`).
 
-*Rev 1 — 2026-08-22; §8.6a/§8.6b, §8.7 path correction added by the W1 containers lane, 2026-08-24.*
+*Rev 1 — 2026-08-22; §8.6a/§8.6b, §8.7 path correction added by the W1 containers lane, 2026-08-24;
+§8.6a reserve-floor paragraph retired by the W1 containers review, 2026-08-24.*

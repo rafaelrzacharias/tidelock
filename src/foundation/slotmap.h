@@ -59,26 +59,22 @@ ErrCode slotmap_init(SlotMap<T, H>* sm, NameHash id_slots, NameHash id_gen, Name
                       NameHash id_live, const VMemApi* os) {
     static_assert(__is_trivially_copyable(T), "SlotMap<T,H> requires trivially-copyable T (docs/CONTAINERS.md section 0)");
     u64 cap = (u64)H::IDX_MASK + 1u;
-    // Floored at COMMIT_GRANULE: vmem_arena_init (as shipped) rounds the reserve up to the OS
-    // page size only, but arena_push's first commit always rounds its want up to a full
-    // COMMIT_GRANULE - a reserve smaller than one granule then fails "over reserve" on its very
-    // first push. This is the exact gap MEMORY.md §7 R-2's sibling ruling already names
-    // ("vmem_arena_init rounds the reserve UP to COMMIT_GRANULE", TODO.md, W1 mem review) and
-    // assigns to the ruling-closeout lane; every small-cap domain (not just tests - resource
-    // handles are 4K slots x a few bytes) hits it until that lands, so the floor is applied here
-    // rather than worked around by inflating callers' domain sizes.
-    u64 reserve_floor = COMMIT_GRANULE;
+    // No reserve floor here: vmem_arena_init rounds every reserve UP to COMMIT_GRANULE (ruled
+    // 2026-08-24, docs/MEMORY.md section 8.2), so a small-cap domain's columns are already
+    // granule-sized and every reserved byte is pushable. The floor this lane shipped as a
+    // forward-compatible workaround is dead code now that the ruling has landed (TODO.md, W1
+    // containers review 1).
     ErrCode e;
-    u64 slots_bytes = cap * sizeof(T); if (slots_bytes < reserve_floor) { slots_bytes = reserve_floor; }
-    u64 gen_bytes = cap * sizeof(u16); if (gen_bytes < reserve_floor) { gen_bytes = reserve_floor; }
-    u64 free_bytes = cap * sizeof(u32); if (free_bytes < reserve_floor) { free_bytes = reserve_floor; }
+    u64 slots_bytes = cap * sizeof(T);
+    u64 gen_bytes   = cap * sizeof(u16);
+    u64 free_bytes  = cap * sizeof(u32);
     e = vmem_arena_init(&sm->_slots_arena, id_slots, slots_bytes, ARENA_ZERO_ON_PUSH, os);
     if (e != ERR_OK) { return e; }
     e = vmem_arena_init(&sm->_gen_arena, id_gen, gen_bytes, ARENA_ZERO_ON_PUSH, os);
     if (e != ERR_OK) { return e; }
     e = vmem_arena_init(&sm->_free_arena, id_free, free_bytes, ARENA_ZERO_ON_PUSH, os);
     if (e != ERR_OK) { return e; }
-    u64 live_bytes = ((cap + 63u) / 64u) * 8u; if (live_bytes < reserve_floor) { live_bytes = reserve_floor; }
+    u64 live_bytes = ((cap + 63u) / 64u) * 8u;
     e = vmem_arena_init(&sm->_live_arena, id_live, live_bytes, ARENA_ZERO_ON_PUSH, os);
     if (e != ERR_OK) { return e; }
 

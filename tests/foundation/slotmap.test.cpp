@@ -165,3 +165,27 @@ TL_TEST(slotmap_two_instance_determinism, "foundation,containers,determinism,fas
     u64 hash_b = tl_hash64(b.slots.data, (usize)slotmap_slot_cap(&b) * sizeof(Payload), TL_HASH_SEED);
     TL_EXPECT_EQ(hash_a, hash_b);
 }
+
+// Regression guard for the reserve floor this lane shipped and W1 containers review 1 deleted:
+// a small-cap domain (SmH is 16 slots -> 128 bytes of `slots`) must survive slotmap_init and its
+// first push on vmem_arena_init's own COMMIT_GRANULE rounding (ruled 2026-08-24, docs/MEMORY.md
+// section 8.2) - no caller-side floor. Before that ruling landed, the first arena_push here
+// TL_FATALed "arena over reserve"; the floor was the workaround, and this test is what proves it
+// is no longer needed rather than merely unused.
+TL_TEST(slotmap_small_cap_domain_needs_no_caller_reserve_floor, "foundation,containers,mem,edge,fast") {
+    VMemApi api = test_vmem_api();
+    SlotMap<Payload, SmH> sm;
+    TL_ASSERT_EQ(slotmap_init(&sm, "test.sm8.slots"_id, "test.sm8.gen"_id, "test.sm8.free"_id, "test.sm8.live"_id, &api), ERR_OK);
+    // Every column's stated budget is its usable budget: reserved is a COMMIT_GRANULE multiple.
+    TL_EXPECT_EQ(sm._slots_arena.reserved % (u64)COMMIT_GRANULE, (u64)0);
+    TL_EXPECT_EQ(sm._gen_arena.reserved % (u64)COMMIT_GRANULE, (u64)0);
+    TL_EXPECT_EQ(sm._free_arena.reserved % (u64)COMMIT_GRANULE, (u64)0);
+    TL_EXPECT_EQ(sm._live_arena.reserved % (u64)COMMIT_GRANULE, (u64)0);
+    // 16 slots * 8 bytes = 128 bytes asked for; the granule rounding is what makes the first push
+    // legal at all.
+    TL_EXPECT_TRUE(sm._slots_arena.reserved >= (u64)COMMIT_GRANULE);
+    Payload p = { 5u, 6u };
+    SmH h = slotmap_insert(&sm, &p);   // the first arena_push on each column
+    TL_EXPECT_FALSE(handle_is_null(h));
+    TL_EXPECT_NOT_NULL(slotmap_get(&sm, h));
+}

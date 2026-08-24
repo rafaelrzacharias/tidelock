@@ -452,16 +452,14 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       vmem fixture until `sort.test.cpp` (via `rng.h` → `fx_palette.h` → `fx.h`) did. Fixed in the
       shared fixture, not worked around per-TU, since any future test pairing the two would hit
       the same break; owner-neutral (the fixture predates any one lane's ownership).
-- [ ] **Cross-lane interaction: `slotmap_init` floors each column's `VMemArena` reserve at
-      `COMMIT_GRANULE`**, working around a gap `TODO.md`'s own W1 mem review already ruled on
-      (2026-08-24: "`vmem_arena_init` rounds the reserve UP to `COMMIT_GRANULE`") but which has
-      not landed in `vmem_arena.cpp` yet - it still rounds to the OS page size only. Every
-      small-cap domain (not just `SlotMap`'s test geometries - any real domain whose
-      `sizeof(element) * (IDX_MASK+1)` is under 64 KB, e.g. some resource-handle pools) hits
-      "arena over reserve" on its very first push until that lands. The floor in `slotmap_init` is
-      forward-compatible with the eventual fix (harmless once `vmem_arena_init` does its own
-      rounding) - not a substitute ruling, just corroborating evidence the gap is real in
-      production shapes, not only in this lane's tiny test domains.
+- [x] **CLOSED (W1 containers review 1, 2026-08-24): `slotmap_init`'s `COMMIT_GRANULE` reserve
+      floor is deleted.** It was a forward-compatible workaround for `vmem_arena_init` rounding a
+      reserve to the OS page size only; the ruling landed on `main` (`vmem_arena_init` rounds every
+      reserve UP to `COMMIT_GRANULE`, `docs/MEMORY.md` §8.2), so the floor was dead code. Verified
+      by merging `main` into the lane and reading `vmem_arena.cpp`, then deleted from `slotmap.h`
+      and from `CONTAINERS.md` §8.6a. `slotmap_small_cap_domain_needs_no_caller_reserve_floor`
+      pins the property the floor used to provide (16-slot domain, 128-byte column, first push
+      legal); `LESSONS.md`'s entry now says to delete such floors on merge rather than leave them.
 - [ ] **Finding for the luau-bindings lane (W3), not fixed here - out of this lane's scope:**
       `LUAU-LAYER.md` §4's `sortedpairs` wants a sort over MIXED numeric/string keys (`{ kind: u8;
       double n; const char* s; u32 len; }`, "numbers before strings; numbers ascending by value;
