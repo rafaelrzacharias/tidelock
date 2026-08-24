@@ -12,11 +12,13 @@ u32 he_pump(void*, RingBuffer<RawEvent>*) {
 }
 
 // Not a separate counter: nothing headless ever pops this ring (persistent-mode consumption is
-// peek-based), so every `tail` advance is an overflow eviction - `head - cap` (once `head > cap`)
-// is exactly the drop count. Both are monotonic counters, not wrapped indices (foundation/ring.h).
+// peek-based), so every overwrite-push past cap is an overflow eviction. In the containers
+// lane's canonical ring (the W1 merge - foundation/ring.h) TAIL is the monotonic push counter
+// and head the pop counter, the inverse of the stopgap ring this file was written against;
+// `tail - cap` (once `tail > cap`) is exactly the drop count.
 u32 he_dropped_total(void* ctx) {
     RingBuffer<RawEvent>* r = &((HeadlessState*)ctx)->events;
-    return r->head > r->cap ? r->head - r->cap : 0u;
+    return r->tail > r->cap ? r->tail - r->cap : 0u;
 }
 
 }  // namespace

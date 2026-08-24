@@ -187,6 +187,7 @@ Span<const DrawCall> headless_draw_log(const PlatformApi* api) {
     // present() resets head/tail to 0, so a live log can only wrap the physical array if a single
     // frame pushes >= HEADLESS_DRAW_LOG_CAP calls without an intervening present() - not reached
     // by anything landing today; documented rather than handled, since Span<T> needs contiguity.
+    // Canonical ring fields (W1 containers merge): head = next pop/peek slot, tail = next push.
     const RingBuffer<DrawCall>& r = s->draw_log;
-    return Span<const DrawCall>{ r.data + (r.tail & (r.cap - 1u)), r.head - r.tail };
+    return Span<const DrawCall>{ r.data + (r.head & (r.cap - 1u)), r.tail - r.head };
 }
