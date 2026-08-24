@@ -55,6 +55,32 @@ def names(lines, undefined):
     return out
 
 
+def tooling_stems(root):
+    """RR-7 (docs/CPP-SUBSET.md §1): the ONE non-det stem set allowed writable static storage - the
+    tooling plane is never hashed, snapshotted, or part of a world's registered arena set. Parsed
+    from src/foundation/CMakeLists.txt's TL_FOUNDATION_TOOLING line, the same single home
+    tools/audit/includes.py reads, so the two lists cannot drift apart. Returns the empty set (no
+    exemption) when --root is not given, so this check is opt-in, never accidentally silent."""
+    if not root:
+        return set()
+    path = os.path.join(root, "src", "foundation", "CMakeLists.txt")
+    text = open(path, encoding="utf-8").read()
+    m = re.search(r"set\(TL_FOUNDATION_TOOLING([^)]*)\)", text)
+    if not m:
+        sys.exit("symbols: src/foundation/CMakeLists.txt has no set(TL_FOUNDATION_TOOLING ...)")
+    return set(m.group(1).split())
+
+
+def stem_of_member(member):
+    """The source stem an archive member's object file was compiled from, independent of the
+    object-naming convention the generator used (CMake+Ninja nests it under CMakeFiles/<target>.dir/
+    and spells the extension .o on the GNU driver, .obj on the MSVC one)."""
+    base = os.path.basename(member.replace("\\", "/"))
+    base = re.sub(r"\.(o|obj)$", "", base, flags=re.IGNORECASE)
+    base = re.sub(r"\.(cpp|cc|cxx)$", "", base, flags=re.IGNORECASE)
+    return base
+
+
 def writable_static(section):
     """True for sections that are writable static storage (docs/CPP-SUBSET.md §1)."""
     if section.startswith(".data.rel.ro"):
@@ -100,6 +126,10 @@ def main():
                     help="a src/ lib that gets the writable-static check but not the symbol-"
                          "layering check - docs/CPP-SUBSET.md §1 bans static mutable state in all "
                          "of src/")
+    ap.add_argument("--root", default=None,
+                    help="repo root - locates src/foundation/CMakeLists.txt's TL_FOUNDATION_TOOLING "
+                         "list (RR-7's writable-static exemption for the non-audited tooling "
+                         "plane). Omit to run with no exemption at all.")
     ap.add_argument("--sanitized", action="store_true",
                     help="declare that this build has sanitizers on; the audit then refuses to "
                          "run rather than reporting the sanitizer runtime's own globals")
@@ -144,8 +174,11 @@ def main():
                               % (name, member, size, section))
         below |= defined
 
+    tooling = tooling_stems(a.root)
     for name, path in data_only:
         for member, section, size in data_bss_offenders(a.objdump, path):
+            if stem_of_member(member) in tooling:
+                continue   # RR-7: the tooling plane, named in TL_FOUNDATION_TOOLING, is exempt
             violations.append("%s: %s has %d bytes of %s - writable static storage in src/ "
                               "(docs/CPP-SUBSET.md §1)" % (name, member, size, section))
 

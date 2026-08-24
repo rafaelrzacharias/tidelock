@@ -123,10 +123,15 @@ arena-offset guard's last report. Luau VM panel: pool usage, GC step time, instr
 
 Scope: the four macro headers, the runtimes behind them, `src/editor/`, the crash and replay
 pipelines, tests. `f32`/`f64` are legal in `editor/` and in the non-det foundation runtimes
-(`log.cpp`, `prof.cpp`, `probe.cpp`); the macro *headers* contain no float token so a sim TU may
-include them (`CPP-SUBSET.md` §4 grep). Tier gates: `TL_DEV` (1 in `dev`/`debug`, 0 otherwise,
-`BUILD.md` §3) and `TL_LOG_MIN` (`debug`/`dev` 0, `netcode` 2, `ship` 3). Nothing here is hashed;
-every mutation of sim state is a command (§0).
+(`log.cpp`, `prof.cpp`, `probe.cpp`); the macro *headers* contain no float token, though only
+`tl_assert.h` is the one a sim TU may actually include (`CPP-SUBSET.md` §9 R-3) - `tl_log.h`/
+`tl_prof.h`/`tl_probe.h` stay barred by the non-det-stem rule like any other tooling header. Those
+runtimes' real io and their ring/frame/key-table state are the named exception of `CPP-SUBSET.md`
+§1 and §9 R-4 (RR-7): `tl_log`, `tl_prof`, `tl_probe`, `crash` and `tl_assert` are the one non-det
+stem set allowed writable static storage and `<stdio.h>`/`<stdlib.h>`, because none of them is
+hashed, snapshotted, or part of a world's registered arena set. Tier gates: `TL_DEV` (1 in
+`dev`/`debug`, 0 otherwise, `BUILD.md` §3) and `TL_LOG_MIN` (`debug`/`dev` 0, `netcode` 2, `ship`
+3). Nothing here is hashed; every mutation of sim state is a command (§0).
 
 ### 9.1 File layout
 

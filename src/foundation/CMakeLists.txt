@@ -12,6 +12,22 @@
 set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim
                          tl_assert tl_log tl_prof tl_probe crash)
 
+# RR-7 ruling (docs/CPP-SUBSET.md §1, docs/TOOLING.md §9): the tooling plane - never hashed, never
+# snapshotted, never part of a world's registered arena set - is the only non-det stem set allowed
+# real io and namespace-scope mutable state (a ring buffer, the crash-writer install slot). A
+# strict subset of TL_FOUNDATION_NONDET above; both tools/audit/includes.py and
+# tools/audit/symbols.py parse THIS line, so the exemption can only widen by editing it here, never
+# by a second hand-typed copy drifting out of sync (LESSONS.md: that drift class has bitten twice).
+# Adding a stem here is the ruling, not a convenience - it is read by every future det/tooling
+# boundary question the same way.
+set(TL_FOUNDATION_TOOLING tl_assert tl_log tl_prof tl_probe crash)
+foreach(stem IN LISTS TL_FOUNDATION_TOOLING)
+  if(NOT stem IN_LIST TL_FOUNDATION_NONDET)
+    message(FATAL_ERROR "TL_FOUNDATION_TOOLING stem '${stem}' is not in TL_FOUNDATION_NONDET - "
+                        "the tooling exemption only ever narrows the non-det set, never escapes it")
+  endif()
+endforeach()
+
 file(GLOB TL_FOUNDATION_SRC CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 set(TL_DET_SRC "")
 set(TL_HOST_SRC "")
