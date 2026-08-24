@@ -95,7 +95,9 @@ memmove shows up.**
   `peek(i)`; consumers: event queues' persistent mode, the netcode redundancy window, the log
   ring, Alloy's event stream.
 - `Bitset`: `u64` words, fixed bit count at init; `set/clear/test/find_first/popcount`; walk
-  order = bit order. Used for sleep flags, dirty chunks, action-map masks.
+  order = bit order. Used for sleep flags, dirty chunks, action-map masks, and `SlotMap`'s live
+  column — which is authoritative state, so the struct carries an explicit zeroed `_pad0` per
+  `CPP-SUBSET.md` §5 rather than four bytes of compiler tail padding (W1 containers review).
 - **Sorting:** `sort_u32_kv(keys, vals, n, scratch)` — LSD radix, base 256, stable, integer keys
   only. `sort_u64_kv` likewise. A comparison sort exists only for tools (`tools/` may use
   `qsort`). There is no generic `sort<T, Cmp>` in the runtime: sim sorts are on integer keys by
@@ -208,7 +210,7 @@ template <typename T> struct RingBuffer { T* data; u32 cap /* pow2 */; u32 head,
 // (Rev 1 wrote the two roles the other way round — "peek/pop from tail, overwrite bumps tail";
 // the behaviour it describes is the same, the field names were swapped. Corrected against the
 // shipped header by the W1 containers review, 2026-08-24.)
-struct Bitset { u64* words; u32 bit_count; };   // set/clear/test/find_first(from)/popcount/clear_all; words on the owning arena
+struct Bitset { u64* words; u32 bit_count; u32 _pad0; };   // set/clear/test/find_first(from)/popcount/clear_all; words on the owning arena
 void sort_u32_kv(u32* keys, u32* vals, u32 n, Scratch* s);   // LSD radix base 256, 4 passes, stable
 void sort_u64_kv(u64* keys, u32* vals, u32 n, Scratch* s);   // 8 passes; early-out on a pass whose histogram has one bucket
 // pass: hist[256] over byte b of keys; prefix sum; scatter keys/vals into scratch copies; swap buffers. n ≤ 2^32-1.

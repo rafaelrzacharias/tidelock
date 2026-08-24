@@ -139,3 +139,21 @@ TL_TEST(bitset_bit_count_63_64_65, "foundation,containers,edge,fast") {
         TL_EXPECT_EQ(bitset_find_first(&b, 0u), counts[c]);
     }
 }
+
+// A Bitset is embedded in SlotMap's `live` column, so the STRUCT's own bytes - padding included -
+// can land inside a hashed arena. docs/CPP-SUBSET.md section 5 requires every pad to be named and
+// zeroed at construction; this compares the whole struct, not just the words it points at.
+TL_TEST(bitset_struct_padding_is_zeroed, "foundation,containers,determinism,edge,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, "test.bitset_pad"_id, 1ull * 1024 * 1024, 0, &api), ERR_OK);
+    Bitset b;
+    for (u32 i = 0; i < sizeof(Bitset); ++i) { ((u8*)&b)[i] = 0xDDu; }   // dirty every byte first
+    bitset_init(&b, &arena, 40u);
+    TL_EXPECT_EQ(b._pad0, (u32)0);
+    // Everything after bit_count in the struct must be zero - no 0xDD survivor in the tail.
+    const u8* raw = (const u8*)&b;
+    for (u32 i = (u32)(sizeof(u64*) + sizeof(u32)); i < (u32)sizeof(Bitset); ++i) {
+        TL_EXPECT_EQ(raw[i], (u8)0);
+    }
+}

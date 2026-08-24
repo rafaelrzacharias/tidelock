@@ -20,10 +20,20 @@
 #include "foundation/tl_assert.h"
 #include "foundation/vmem_arena.h"
 
+// _pad0 is explicit and zeroed at init because a Bitset is EMBEDDED in SlotMap (the `live`
+// column), which is authoritative pool state: docs/CPP-SUBSET.md section 5 requires hashed
+// state to use explicitly-padded structs with every pad named _pad0 and zeroed at construction.
+// A bare { u64*; u32; } has four bytes of tail padding the compiler never writes, which is
+// exactly the class of stale byte that rule exists to close. Added over docs/CONTAINERS.md
+// section 8.5's shorthand struct by the W1 containers review, folded into the doc in the same
+// commit.
 struct Bitset {
     u64* words;
     u32 bit_count;
+    u32 _pad0;
 };
+static_assert(sizeof(Bitset) == 16, "explicit padding, no implicit tail (docs/CPP-SUBSET.md section 5)");
+static_assert(__is_trivially_copyable(Bitset), "");
 
 // Words needed to hold bit_count bits. Pure, never fails.
 inline u32 bitset_word_count(u32 bit_count) { return (bit_count + 63u) / 64u; }
@@ -32,6 +42,7 @@ inline u32 bitset_word_count(u32 bit_count) { return (bit_count + 63u) / 64u; }
 // be 0 (words = null, every operation is a no-op / false).
 inline void bitset_init(Bitset* b, VMemArena* arena, u32 bit_count) {
     b->bit_count = bit_count;
+    b->_pad0 = 0;
     b->words = bit_count == 0 ? nullptr : (u64*)arena_push(arena, (u64)bitset_word_count(bit_count) * 8u, 8u);
 }
 
