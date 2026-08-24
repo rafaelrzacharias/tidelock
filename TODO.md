@@ -193,8 +193,9 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       out/tools`), ~4 min in full. Add a nightly step (`fxcheck` + `oracle.py check-coeffs` +
       `oracle.py verify worst.tsv`) with RR-2's `nightly.yml`; `--quick` (~3 s) could sit in the
       PR lane today.
-- [ ] `tests/foundation/fx_test_util.h` carries a local splitmix64 - replace with `rng_for`
-      from the rng/hash lane when it lands (same mix; the seeds are arbitrary).
+- [x] `tests/foundation/fx_test_util.h` carried a local splitmix64 - it now calls `rng.h`'s
+      `mix64` (same mix, so the pinned trace hashes did not move; both fx_trace tests still pass).
+      (W1 rng/hash.)
 - [ ] **For alloy-substrate / alloy-solver (W2/W3) - three facts the headers state and the
       ALLOY pseudocode does not yet respect:**
       (a) `len2_wide`/`dot<pos2_wide_t>` saturate and assert when `|d|^2 >= 2^63` raw, i.e.
@@ -219,6 +220,73 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `mul_int<vel_t>`; `fx.div_q` is `div<q_t>(A, A)` and is only in the table for
       `pos_t/vel_t/q_t/scalar_t` formats; `fx.atan2` takes `pos_t`, `fx.atan2_q` takes `q_t`.
 
+## W1 rng/hash - the adversarial review (2026-08-24)
+- [x] **Adversarial review of W1 rng/hash (`8bdc6ee`) - DONE 2026-08-24 (Opus 5 high, fresh
+      context), fixes in reviews 1-3 on `w1-rng-hash`. **Verdict: fix first -> shipped.** What
+      held up under attack, measured not assumed: `vendor/rapidhash/rapidhash.h` is byte-identical
+      to upstream `bc4b4baa` (the pin is a real commit SHA and is the `rapidhash_v3` tag; LICENSE
+      identical too) and is included only from `hash.cpp`; `rng_for`/`mix64`/`K0`/the
+      `(system_id << 32 | draw)` packing match `DETERMINISM.md` §3 token for token, and all seven
+      `rng_for` goldens plus all five rapidhash goldens re-derive exactly in an independent Python
+      implementation; `__SIZEOF_INT128__` is defined for all three triples (measured), so
+      rapidhash's MSVC `_umul128` path really is dead code everywhere; `rng_q` is the top 30 bits
+      in `[0, 1)`; `rng_below` is Lemire with the documented `~n/2^64` bias and is correct at
+      `n = 1` and `n = 2^32-1`; the four `R`s `rng_range` admits are exactly `FX-PALETTE.md`
+      §3.1's `q_t x row` lines; the `fx_test_util.h` splitmix replacement is the same mix and both
+      pinned fx trace hashes still pass (run, not trusted: 65/65 green before the review's fixes).
+      Ranked defects, all fixed:
+      1. **High (gate)** `tools/audit/targets.py`: `-U_MSC_VER` in `BASE_FLAGS` did not remove the
+         `<intrin.h>` noise, it removed the gate's ability to see the one platform macro clang
+         predefines for a triple we ship. Measured: a `src/sim` TU with `#ifdef _MSC_VER` around
+         two different structs passed with "0 divergences", both legs blind. Fixed by stubbing
+         `<intrin.h>` in the temp include dir (the mechanism `<string.h>` already uses) and
+         leaving `_MSC_VER` defined - `hash.cpp` still reports 0 divergences and the planted TU
+         now fails both the preprocess and the layout leg.
+      2. **High (gate)** no negative fixture landed with the gate change, against the standing
+         rule. `tools/audit/selftest.py` gains two: a `_MSC_VER` two-programs case (fails as it
+         must) and a vendor-shaped `#include <intrin.h>` case (clean, so the false positive the
+         flag was reaching for stays fixed). The existing `__GNUC__` case did not cover this -
+         `__GNUC__` is undefined for the win triple, so it never exercised the win-vs-linux leg.
+      3. **High** `rng.h`'s `rng_range` had no preconditions: `hi - lo` is the row's WRAPPING
+         subtract, so `rng_range<pos_t>(r, -WORLD_HALF, WORLD_HALF)` - a uniform world position,
+         the most obvious call there is - wrapped the span to `INT32_MIN` and returned positions
+         thousands of metres outside the world, silently, in a dev build with asserts on
+         (measured: raw 2124193170 = +8103 m for a +-4096 m range). Now two `TL_ASSERT`s.
+      4. **Medium** `rng_range` is CLOSED at both ends and neither the header, `DETERMINISM.md`
+         §3, nor the test said so: `rng_q` maxes at `1 - 2^-30` and `mul<R>` rounds RNE, so any
+         span under 2^29 raw units rounds its top draw to exactly `hi` (measured:
+         `rng_range<scalar_t>(~0, -10, +10) == +10`). The test asserted `<= hi` and therefore
+         encoded the behaviour without documenting it. Contract stated in both places; the
+         endpoint is now pinned by `rng_range_closed_at_both_ends`.
+      5. **Medium** the goldens were circular: both sets were "computed from the pinned
+         implementation", i.e. proof that the code equals itself, and `DETERMINISM.md` §9.5's
+         "from upstream" names a source that does not exist (rapidhash ships no vectors at the
+         pin). `tools/rapidhash_ref.py` now re-derives both families from the algorithm in Python
+         (`--check`); every vector agrees, and §9.5 says where goldens come from.
+      6. **Medium** `DETERMINISM.md` §9.5 asks for `rng_below` uniformity over 2^24 draws within
+         0.5%; the lane shipped 2^16 within 10% - 256x fewer draws at 20x the tolerance. Now
+         2^24 at 0.5% for `n = 8` and `n = 5` (the non-power-of-two, where Lemire's bias lives),
+         counted per `n`, 305 ms.
+      7. **Medium** the `u8` cast in `fnv1a64` is the whole cross-ISA claim of `NameHash` and had
+         no test. `name_hash_high_bytes_are_unsigned` pins the unsigned reading of a 5-byte input
+         with three bytes >= 0x80; deleting the cast gives `0xd05320c608f3293b` on this
+         signed-`char` host and fails.
+      8. **Low** `[docs:none]` was wrong: the gate edit silently falsified `TESTING.md` §5 ("a
+         per-target `#if` ... in any spelling") and `CPP-SUBSET.md` §5's matching claim. Fixing
+         the gate rather than the docs is what makes those sentences true again, so no wording
+         change was needed - but the commit could not have known that without checking.
+      9. **Low** thin edge coverage: `carrier_id = 2^64-1`, `n = 2^32-1`, and the
+         `(system_id, draw)` packing's injectivity at the field boundary were all untested.
+         `rng_edge_matrix` and `rng_for_system_id_draw_packing_is_injective` cover them.
+- [x] **Ruling (2026-08-24, Rafael): `system_id == 0` is RESERVED and is a precondition.**
+      `rng_for` gains `TL_ASSERT(system_id != 0)` (fail-loud, compiled out in netcode/ship like
+      every `TL_ASSERT`); the six goldens that used `system_id` 0 were recomputed on a real enum
+      id (`RNG_SYS_LUAU_BASE`) by `tools/rapidhash_ref.py`, independently, never by re-running the
+      header; the ruling's home is `DETERMINISM.md` §3 and `rng_systems.h` cites it. The other
+      option on the table - reading the reservation as registration policy only and softening the
+      header's wording - was rejected: it would have left a default-initialised `system_id`
+      aliasing whatever registration puts first.
+
 ## Foundation week(s) (`docs/MEMORY.md`, `CONTAINERS.md`, `DETERMINISM.md`, `TESTING.md`)
 - [ ] Finish the test runner (`tests/runner`; W0 shipped the stub — generated list, tags/filter,
       `--isolate` one child per test, TSV + JUnit): `NEAR_FX`, `SPAN_EQ`/`MEM_EQ`,
@@ -234,8 +302,11 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [ ] Containers: `Array/Span`, `SlotMap+Handle` (gen-wrap quarantine), `Map`, `SortedMap/Set`,
       `RingBuffer`, `Bitset`, radix `sort_u32_kv/u64_kv`; `StrView`, interner, `fmt`. Rubric tests
       + two-instance determinism tests.
-- [ ] Keyed RNG (`rng_for/below/q/range`) + pinned rapidhash + `constexpr` FNV-1a `NameHash` with the
-      debug side-table. Vendor rapidhash.
+- [x] Keyed RNG (`rng_for/below/q/range`) + pinned rapidhash + `constexpr` FNV-1a `NameHash`.
+      Vendor rapidhash. (W1 rng/hash.) The debug side-table (hash -> literal) is NOT built here:
+      `CONTAINERS.md` §8.6 already rules it as the interner's job in dev tiers - foundation has no
+      runtime table to register into without static mutable state (`CPP-SUBSET.md` §1 bans it
+      engine-wide), so there is nothing for this lane to add beyond `operator""_id` itself.
 - [ ] Determinism harness in the runner: `TL_ASSERT_DETERMINISTIC`, per-arena hash trace compare.
 - [ ] Symbol audit + include firewall wired into CI against the det libs.
 

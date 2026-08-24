@@ -70,7 +70,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ARCHITECTURE.md` -> §4
 - `BUILD.md` -> §1, §6, §7, §9
 - `CANON.md` -> §4
-- `DETERMINISM.md` -> §4, §5
+- `DETERMINISM.md` -> §1, §4, §5
 - `ECS.md` -> §9
 - `FX-PALETTE.md` -> §1, §2, §4, §5, §6, §7, §9
 - `LUAU-LAYER.md` -> §6
