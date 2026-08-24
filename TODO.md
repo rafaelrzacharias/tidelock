@@ -1272,6 +1272,55 @@ right; it is the template the others now follow.
 - [ ] Atomic-counter pool, `parallel_for`/`parallel_levels`, per-worker scratch, chunk-tagged
       command/event merge; shuffle mode; 1/2/8/16 gate in CI.
 
+## W1 jobs - notes and ruling requests (2026-08-24, w1-jobs lane)
+- [ ] **Ruling request (granted in-lane; the doc fix is still owed): `ThreadApi` needs one
+      foundation-visible home.** `PLATFORM.md` §9.1/§9.2 define `ThreadHandle`/`SemHandle`/
+      `MutexHandle`/`ThreadFn`/`ThreadApi` in `platform/platform.h`, but foundation is a leaf
+      (`ARCHITECTURE.md` §1 rule 1, enforced by `tools/audit/includes.py`'s `MODULE_DAG`) and
+      `JOBS.md` §6.2's `Jobs` holds `ThreadHandle`s and calls through the table - so `jobs.h` can
+      never include `platform.h`. This is the `VMemApi` case verbatim (see the W1 mem entry
+      above): transcribed to **`foundation/thread_api.h`**, and `platform.h` now includes it
+      instead of redefining it (include-plus-delete only, this lane, platform suite re-run green).
+      **Owner edit outstanding:** `PLATFORM.md` §9.1's file table needs a `thread_api.h` row and
+      §9.2 should say the struct is `foundation/thread_api.h`'s - the way §9 already says it for
+      `VMemApi`.
+- [ ] **Ruling request: `PLATFORM.md` §9.2 restates `foundation/atomic.h`'s API** on top of its
+      real home (`JOBS.md` §6.1), in a different and incompatible spelling - rev 1 had
+      `tl_atomic_load/store/fetch_add/cas` in `JOBS.md` and `atomic_load32/64`/`atomic_add32/64`/
+      `atomic_cas32/64`/`atomic_fence_*` in `PLATFORM.md`. One header, two names: the drift class
+      the doc protocol exists to stop. `JOBS.md` §6.1 now carries the full API (the §9.2 spelling
+      won - it states widths and orders); `PLATFORM.md` §9.2 should cite `JOBS.md` §6.1 and name
+      no verbs, the way `CPP-SUBSET.md` §9 R-4 cites `TL_FOUNDATION_TOOLING` and names no stems.
+- [ ] **Ruling request: `TOOLING.md` §9.1 claims `Scratch` carries `u8 worker`** ("so worker code
+      names its buffer without `thread_local`"), and the shipped `foundation/scratch.h` has no
+      such field. Nothing needs it yet - jobs passes `Scratch*` explicitly and never hands a
+      worker index to a chunk fn (`JOBS.md` §0), and the prof/probe per-worker buffers the claim
+      exists for do not. Either mem's header gains the field when that consumer lands, or
+      `TOOLING.md` §9.1 drops the claim. Not built on spec (pulled by a real consumer, never
+      pushed).
+- [ ] **`tools/audit/includes.py`'s `THREAD_LOCAL_EXEMPT` (jobs.h/jobs.cpp) is unusable and should
+      probably be deleted.** `symbols.py`'s `writable_static` fails any `.tbss`/`.tdata`/`.tls$`
+      section in every `src/` lib and `tl_foundation` is registered for that check - so a
+      `thread_local` in jobs passes the grep and fails the link gate. That is the correct outcome
+      (`JOBS.md` §1, `PLATFORM.md` §6 and `MEMORY.md` §1.3 all say the worker index and scratch are
+      passed explicitly, which is what shipped), but an exemption no code can use reads as
+      permission that is not there. One line in another lane's tool, so: a request, not a patch.
+- [ ] **Gate hole, reported not fixed: `allow.txt`'s `__aarch64_*` line is a Pi-only tripwire.**
+      It names outline atomics as the detector for "concurrency inside det code", but on x86-64 a
+      32-bit fetch-add inlines to `lock xadd` and emits no undefined symbol at all, and the symbol
+      audit does not run on the cross-built aarch64 leg (`.github/workflows/pr.yml` builds it and
+      checks `file`). Closed from this lane's side by `#if defined(TL_SIM_TU)` + `#error` in
+      `atomic.h` and `jobs.h`, which fires on every target; the audit-side fix (run `symbols.py`
+      over the pi4 archives, or add a positive fixture) belongs to the audit's owner.
+- [ ] **Signatures and names added over the rev-1 spec are folded into `JOBS.md` in the same
+      commit** (this lane's own doc); announced here for the wave merge: §5 R-3..R-6 (per-worker
+      wake semaphores; the barrier counting participants rather than chunks; `LevelFn`/`struct
+      Level`; the `JOBS_MAX_WORKERS` clamp), plus `JobsConfig`, `jobs_default_worker_count`,
+      `jobs_worker_count`, `jobs_shuffle_set`, `jobs_scratch`, `jobs_scratch_reset_all`,
+      `ERR_JOBS_*` (module range 0x02xx), and the `jobs_chunk_count`/`JOBS_MAX_WORKERS`
+      module-prefix spellings. R-3 and R-4 are a hang and a wrong-`fn` execution in rev 1's own
+      §6.3 pseudocode, not style - read them before reviewing the pool.
+
 ## Reserved (design complete, build on first consumer — `docs/RESERVED-SEAMS.md`)
 Audio · game UI (Luau) · spatial index · tilemap · nav/AI · frame animation · replay UI/cinematics ·
 modding (Luau profiles) · game-logic substrate · streaming/cook · SDL_GPU path · editor shell.
