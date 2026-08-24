@@ -11,6 +11,15 @@
 // Invariants: load factor <= 0.75; tombstone-free (backward-shift deletion, docs/CONTAINERS.md
 //   §8.3); hash = tl_hash64(&k, sizeof k, TL_HASH_SEED). Growth is a full rehash into a fresh
 //   arena_push - registries and editor only, TL_ASSERT(!in_tick) in debug (never in a tick).
+//   map_init/map_grow zero the three blocks they push (never assume arena_push returns zeros -
+//   it does so only above high_water or under ARENA_ZERO_ON_PUSH), and map_remove zeroes the
+//   slot it empties.
+// Arena: a growing Map ORPHANS its old keys/vals/state blocks inside the arena, below `used`, so
+//   the arena a Map may grow in must NOT be ARENA_HASHED - orphaned blocks would be hashed
+//   forever and the hash would encode growth history. A never-growing Map (sized at init) is
+//   fine anywhere. Derived from bump allocation + "hashes cover [base, used)"
+//   (docs/MEMORY.md §1.2); stated by the W1 containers review, TODO.md carries the ruling
+//   request for whether Map should be usable on hashed arenas at all.
 // Determinism: bucket order is a pure function of the insertion sequence and the pinned hash
 //   (docs/DETERMINISM.md §4); this is exactly the "order-fragile" property the header above
 //   warns about - two instances fed the same op sequence produce identical bucket layout.
@@ -22,6 +31,7 @@
 #include "foundation/tl_assert.h"
 #include "foundation/vmem_arena.h"
 #include "foundation/hash.h"
+#include <string.h>   // memset - state must start empty and a vacated slot is zeroed
 
 enum : u8 { MAP_SLOT_EMPTY = 0, MAP_SLOT_FULL = 1 };
 
@@ -57,6 +67,14 @@ void map_init(Map<K, V>* m, VMemArena* arena, u32 cap) {
     m->keys = (K*)arena_push(arena, (u64)p * sizeof(K), alignof(K));
     m->vals = (V*)arena_push(arena, (u64)p * sizeof(V), alignof(V));
     m->state = (u8*)arena_push(arena, (u64)p, 1u);
+    // Explicitly zeroed, never assumed zero. arena_push returns OS-zero pages only ABOVE the
+    // arena's high_water; below it, bytes are zero only under ARENA_ZERO_ON_PUSH. A Map built
+    // from a reused plain or scratch arena therefore starts with garbage `state`, every slot
+    // reads MAP_SLOT_FULL, and map_probe spins forever looking for an empty slot - a hang, not a
+    // wrong answer (W1 containers review 2).
+    memset(m->state, MAP_SLOT_EMPTY, (usize)p);
+    memset(m->keys, 0, (usize)p * sizeof(K));
+    memset(m->vals, 0, (usize)p * sizeof(V));
     m->cap = p;
     m->count = 0;
     m->arena = arena;
@@ -129,6 +147,11 @@ bool map_remove(Map<K, V>* m, K k) {
         }
         j = (j + 1u) & mask;
     }
+    // The final gap's key/value bytes are stale - the removed entry's, or the last entry the
+    // shift moved out. Zero them so a Map's bytes are a function of its live contents and not of
+    // its deletion history (docs/CPP-SUBSET.md §5; §2's dead-slot rule applied to this container).
+    m->keys[i] = (K)0;
+    memset(&m->vals[i], 0, sizeof(V));
     return true;
 }
 
@@ -166,6 +189,9 @@ void map_grow(Map<K, V>* m) {
     m->keys = (K*)arena_push(m->arena, (u64)new_cap * sizeof(K), alignof(K));
     m->vals = (V*)arena_push(m->arena, (u64)new_cap * sizeof(V), alignof(V));
     m->state = (u8*)arena_push(m->arena, (u64)new_cap, 1u);
+    memset(m->state, MAP_SLOT_EMPTY, (usize)new_cap);   // same reason as map_init
+    memset(m->keys, 0, (usize)new_cap * sizeof(K));
+    memset(m->vals, 0, (usize)new_cap * sizeof(V));
     m->cap = new_cap;
     m->count = 0;
     for (u32 i = 0; i < old_cap; ++i) {

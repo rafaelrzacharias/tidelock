@@ -4,6 +4,7 @@
 #include "foundation/map.h"
 #include "foundation/vmem_test_api.h"
 #include "foundation/hash.h"
+#include <string.h>
 
 TL_TEST(map_put_get_overwrite, "foundation,containers,smoke,fast") {
     VMemApi api = test_vmem_api();
@@ -109,6 +110,9 @@ TL_TEST(map_edge_zero_one_full_cycle, "foundation,containers,edge,fast") {
 
 // Two instances fed the same op sequence produce identical bucket layout (docs/CONTAINERS.md §7 -
 // "order-fragile per insertion sequence" is still a DETERMINISTIC function of that sequence).
+// NOTE the limit of this shape: same ops twice proves only that nothing address- or
+// uninitialised-memory-dependent leaks into bucket choice. The load-bearing property lives in
+// map_deletion_is_history_equivalent below.
 TL_TEST(map_two_instance_determinism, "foundation,containers,determinism,fast") {
     VMemApi api = test_vmem_api();
     VMemArena arena_a = {}, arena_b = {};
@@ -131,4 +135,81 @@ TL_TEST(map_two_instance_determinism, "foundation,containers,determinism,fast") 
             TL_EXPECT_EQ(a.vals[i], b.vals[i]);
         }
     }
+}
+
+// DIVERGENT histories that converge: backward-shift deletion (Knuth algorithm R) must leave the
+// table byte-identical to one built by inserting only the survivors, in the same relative order.
+// That is what "tombstone-free means no order dependence on deleted keys" actually asserts, and
+// it is the property the same-ops-twice shape above cannot see. Keys are chosen to collide on one
+// probe run at cap 16 (every key congruent mod nothing - the collisions come from the hash, so a
+// dense block of small keys is used and the run is checked to be non-trivial by count).
+TL_TEST(map_deletion_is_history_equivalent, "foundation,containers,determinism,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena arena_a = {}, arena_b = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena_a, "test.map_hist_a"_id, 4ull * 1024 * 1024, 0, &api), ERR_OK);
+    TL_ASSERT_EQ(vmem_arena_init(&arena_b, "test.map_hist_b"_id, 4ull * 1024 * 1024, 0, &api), ERR_OK);
+    Map<u32, u32> a, b;
+    map_init(&a, &arena_a, 64u);   // fixed cap on both: no grow, so layout is comparable
+    map_init(&b, &arena_b, 64u);
+
+    // A: insert 0..23 then remove every third.  B: insert only the survivors, same relative order.
+    for (u32 i = 0; i < 24u; ++i) { map_put(&a, i, i * 7u); }
+    for (u32 i = 0; i < 24u; ++i) { if (i % 3u == 0u) { TL_EXPECT_TRUE(map_remove(&a, i)); } }
+    for (u32 i = 0; i < 24u; ++i) { if (i % 3u != 0u) { map_put(&b, i, i * 7u); } }
+
+    TL_EXPECT_EQ(a.count, b.count);
+    TL_EXPECT_EQ(a.cap, b.cap);
+    // Byte-identical across all three parallel arrays - keys and vals included, which only holds
+    // because map_remove zeroes the slot it empties (W1 containers review 2).
+    TL_EXPECT_MEM_EQ(a.state, b.state, (usize)a.cap);
+    TL_EXPECT_MEM_EQ(a.keys, b.keys, (usize)a.cap * sizeof(u32));
+    TL_EXPECT_MEM_EQ(a.vals, b.vals, (usize)a.cap * sizeof(u32));
+    // ... and therefore identical iteration order, which is the consumer-visible form.
+    u32 ita = 0, itb = 0; u32 ka = 0, kb = 0, va = 0, vb = 0; u32 walked = 0;
+    while (map_iter(&a, &ita, &ka, &va)) {
+        TL_ASSERT_TRUE(map_iter(&b, &itb, &kb, &vb));
+        TL_EXPECT_EQ(ka, kb); TL_EXPECT_EQ(va, vb);
+        walked += 1u;
+    }
+    TL_EXPECT_FALSE(map_iter(&b, &itb, &kb, &vb));
+    TL_EXPECT_EQ(walked, a.count);
+}
+
+// map_init must not assume arena_push hands back zeros: below high_water they are zero only under
+// ARENA_ZERO_ON_PUSH. A garbage `state` array reads every slot as MAP_SLOT_FULL and map_probe
+// then spins forever hunting an empty slot - a hang, not a wrong answer (W1 containers review 2).
+TL_TEST(map_init_zeroes_state_on_a_dirty_arena, "foundation,containers,edge,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, "test.map_dirty"_id, 1ull * 1024 * 1024, 0, &api), ERR_OK);
+    void* p = arena_push(&arena, 64u * 1024u, 8u);
+    memset(p, 0xDD, 64u * 1024u);       // dirty the range the map is about to be pushed into
+    arena_reset_to(&arena, 0);
+    Map<u32, u32> m;
+    map_init(&m, &arena, 8u);
+    u32 nonempty = 0;
+    for (u32 i = 0; i < m.cap; ++i) { if (m.state[i] != MAP_SLOT_EMPTY) { nonempty += 1u; } }
+    TL_EXPECT_EQ(nonempty, (u32)0);
+    TL_EXPECT_TRUE(map_get(&m, 12345u) == nullptr);   // terminates only because state is clean
+    map_put(&m, 12345u, 1u);
+    TL_EXPECT_EQ(*map_get(&m, 12345u), (u32)1);
+}
+
+// The same dirty-arena rule for the rehash path: map_grow pushes three fresh blocks and must zero
+// them, or a map that grows into reused arena bytes hits the same spin.
+TL_TEST(map_grow_zeroes_state_on_a_dirty_arena, "foundation,containers,edge,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, "test.map_grow_dirty"_id, 1ull * 1024 * 1024, 0, &api), ERR_OK);
+    void* p = arena_push(&arena, 128u * 1024u, 8u);
+    memset(p, 0xDD, 128u * 1024u);
+    arena_reset_to(&arena, 0);
+    Map<u32, u32> m;
+    map_init(&m, &arena, 2u);
+    for (u32 i = 0; i < 100u; ++i) { map_put(&m, i, i); }   // several grows, all into dirty bytes
+    u32 full = 0;
+    for (u32 i = 0; i < m.cap; ++i) { if (m.state[i] == MAP_SLOT_FULL) { full += 1u; } }
+    TL_EXPECT_EQ(full, (u32)100);
+    TL_EXPECT_EQ(map_count(&m), (u32)100);
+    TL_EXPECT_TRUE(map_get(&m, 99999u) == nullptr);
 }

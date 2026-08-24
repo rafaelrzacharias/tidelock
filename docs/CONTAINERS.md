@@ -34,6 +34,15 @@ template <typename T> struct Span  { T* data; u32 count; };
   bug class stable bases exist to kill.
 - API: `push`, `pop`, `swap_remove(i)`, `last`, `clear`, `span()`, `slice(a,b)`; `at(i)` is
   bounds-checked at `TL_CHECK` level (all tiers).
+- **Every operation that vacates a slot zeroes it** (`pop`, `swap_remove`, `clear`). A vmem-backed
+  array's arena `used` covers its whole committed capacity, so `[count, cap)` sits inside the
+  hashed extent; leaving a removed element's bytes there would make a hashed array's hash a
+  function of removal history, which `CPP-SUBSET.md` §5 forbids and which `SlotMap` (§2) already
+  avoids the same way. Rev 1 said the tail was "re-zeroed by arena policy on reuse" — that
+  mechanism does not exist for an in-place refill (`ARENA_ZERO_ON_PUSH` only re-zeroes bytes an
+  `arena_push` walks over, and a cleared array pushes nothing until `count` climbs back past
+  `cap`). Corrected by the W1 containers review, 2026-08-24; cost is `O(count·sizeof T)` on
+  `clear` and `O(sizeof T)` on the other two.
 - Walk order: `0..count`, packed. `swap_remove` changes order deterministically (it's a pure
   function of the call sequence) — callers that need stable order use `SlotMap` or tombstones.
 
@@ -63,7 +72,12 @@ bool slotmap_remove(SlotMap*, H h);            // bumps gen; gen wrap → slot q
 
 **`Map<K,V>`** — open addressing, linear probing, power-of-two capacity, rapidhash with the pinned
 seed, integer or `NameHash` keys only (no string keys — intern first). Tombstone-free (backward-
-shift deletion). Walk order is deterministic per insertion sequence but **order-fragile across
+shift deletion): removing a key leaves the table byte-identical to one built from the survivors in
+the same relative insertion order, so nothing about a *deleted* key survives in the walk order.
+`map_init`/`map_grow` zero the blocks they push (never assume `arena_push` returns zeros — it does
+so only above `high_water` or under `ARENA_ZERO_ON_PUSH`) and `map_remove` zeroes the slot it
+empties. A **growing** `Map` orphans its old blocks below the arena's `used`, so its arena must not
+be `ARENA_HASHED` (W1 containers review; `TODO.md` carries the ruling request). Walk order is deterministic per insertion sequence but **order-fragile across
 refactors** → `Map` is for registries, editor, caches — anything whose order outlives the binary
 uses a sorted walk. **Sim code keys on integers and never iterates a `Map`**
 (`DETERMINISM.md` §2.7; LESSONS finding G).

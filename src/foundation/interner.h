@@ -59,7 +59,11 @@ inline void interner_init(Interner* in, VMemArena* chars_arena, VMemArena* meta_
 // NameHash collision with a DIFFERENT string (docs/CONTAINERS.md §8.6); returns the same StrId on
 // a repeated intern of an identical string (idempotent).
 inline StrId intern(Interner* in, StrView s) {
-    TL_ASSERT(s.len <= 0xFFFFu);   // lens[] is u16 (docs/CONTAINERS.md section 8.6)
+    // TL_CHECK, not TL_ASSERT: `lens[]` is u16, so an over-long string does not "fail an
+    // assertion" in dev and behave in release - it silently truncates to (u16)s.len and
+    // intern_name hands back a shorter string than was interned. Caller-input validation is
+    // all-tier by docs/CPP-SUBSET.md §3 (W1 containers review 2).
+    TL_CHECK(s.len <= 0xFFFFu);   // lens[] is u16 (docs/CONTAINERS.md section 8.6)
     NameHash h = sv_hash(s);
     StrId* existing = map_get(&in->by_hash, h);
     if (existing != nullptr) {

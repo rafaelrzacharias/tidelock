@@ -89,6 +89,8 @@ TL_TEST(array_slice_and_span, "foundation,containers,fast") {
     array_clear(&a);
     TL_EXPECT_EQ(a.count, (u32)0);
     TL_EXPECT_EQ(a.cap, (u32)10);   // clear does not release capacity (docs/CONTAINERS.md section 8.1)
+    const u32 zeros[10] = {};
+    TL_EXPECT_SPAN_EQ(a.data, zeros, 10);   // ...but it DOES zero what it cleared
 }
 
 // Two instances fed the same op sequence produce identical walk order and identical bytes
@@ -109,4 +111,51 @@ TL_TEST(array_two_instance_determinism, "foundation,containers,determinism,fast"
 
     TL_EXPECT_EQ(a.count, b.count);
     TL_EXPECT_SPAN_EQ(a.data, b.data, a.count);
+}
+
+// The hashed extent of a vmem-backed Array is its arena's [base, used), which covers the WHOLE
+// committed capacity - [count, cap) included. So "hashed bytes are a pure function of state, never
+// of allocation history" (vmem_arena.h; docs/CPP-SUBSET.md §5) is a claim about pop/swap_remove/
+// clear, not only about arena_push. Divergent histories that converge on the same logical contents
+// must hash identically. Before the W1 containers review these three left their vacated elements
+// intact and both of the tests below failed on the hash line.
+TL_TEST(array_pop_and_swap_remove_hash_is_a_pure_function_of_state, "foundation,containers,determinism,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena a = {}, b = {};
+    TL_ASSERT_EQ(vmem_arena_init(&a, "test.array_pure_a"_id, 1ull * 1024 * 1024, 0, &api), ERR_OK);
+    TL_ASSERT_EQ(vmem_arena_init(&b, "test.array_pure_b"_id, 1ull * 1024 * 1024, 0, &api), ERR_OK);
+    Array<u32> aa, ab;
+    array_init_vmem(&aa, &a);
+    array_init_vmem(&ab, &b);
+
+    // A: push 1..5, pop twice, then swap_remove the middle.  B: reach the same contents directly.
+    for (u32 i = 1; i <= 5u; ++i) { array_push(&aa, i); }
+    array_pop(&aa); array_pop(&aa);          // 1,2,3
+    array_swap_remove(&aa, 0u);              // 3,2
+    array_push(&ab, 3u); array_push(&ab, 2u);
+
+    TL_EXPECT_EQ(aa.count, ab.count);
+    TL_EXPECT_SPAN_EQ(aa.data, ab.data, aa.count);
+    TL_EXPECT_EQ(a.used, b.used);            // same page-granular commit on both
+    TL_EXPECT_EQ(tl_hash64(a.base, (usize)a.used, TL_HASH_SEED),
+                 tl_hash64(b.base, (usize)b.used, TL_HASH_SEED));
+}
+
+TL_TEST(array_clear_then_refill_hashes_like_a_fresh_array, "foundation,containers,determinism,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena a = {}, b = {};
+    TL_ASSERT_EQ(vmem_arena_init(&a, "test.array_clear_a"_id, 1ull * 1024 * 1024, 0, &api), ERR_OK);
+    TL_ASSERT_EQ(vmem_arena_init(&b, "test.array_clear_b"_id, 1ull * 1024 * 1024, 0, &api), ERR_OK);
+    Array<u32> aa, ab;
+    array_init_vmem(&aa, &a);
+    array_init_vmem(&ab, &b);
+
+    for (u32 i = 1; i <= 100u; ++i) { array_push(&aa, i); }
+    array_clear(&aa);
+    for (u32 i = 1; i <= 3u; ++i) { array_push(&aa, i); }
+    for (u32 i = 1; i <= 3u; ++i) { array_push(&ab, i); }
+
+    TL_EXPECT_EQ(a.used, b.used);
+    TL_EXPECT_EQ(tl_hash64(a.base, (usize)a.used, TL_HASH_SEED),
+                 tl_hash64(b.base, (usize)b.used, TL_HASH_SEED));
 }

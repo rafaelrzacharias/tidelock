@@ -11,9 +11,11 @@
 // Invariants: static_assert(__is_trivially_copyable(T)) in every function template (memcpy-safe
 //   is what makes snapshot/hash legal, docs/CONTAINERS.md §0). Walk order is 0..count, packed;
 //   swap_remove reorders (a pure function of the call sequence) - callers needing stable order
-//   use SlotMap or tombstones. array_clear does NOT release or zero - a hashed array's re-used
-//   tail is re-zeroed by the owning arena's ARENA_ZERO_ON_PUSH policy on the next growth past the
-//   old high-water mark, not by this file (docs/MEMORY.md §1.1's asymmetry).
+//   use SlotMap or tombstones. Every operation that vacates a slot (pop, swap_remove, clear)
+//   ZEROES it: a vmem-backed array's arena `used` covers [0, cap), so [count, cap) is inside the
+//   hashed extent and stale bytes would make a hashed array's hash a function of removal history
+//   (docs/CPP-SUBSET.md §5, and the rule SlotMap's dead-slot zeroing already follows). clear does
+//   NOT release capacity.
 // Determinism: no floats, no padding beyond T's own (T is the caller's contract). Vmem-backed
 //   growth commits whole pages via arena_push, which is itself deterministic (docs/MEMORY.md
 //   §8.2); the array never reads arena->used as an element count - cap tracks committed capacity,
@@ -24,6 +26,7 @@
 #include "foundation/tl_types.h"
 #include "foundation/tl_assert.h"
 #include "foundation/vmem_arena.h"
+#include <string.h>   // memset - vacated elements are zeroed (docs/CPP-SUBSET.md section 5)
 
 template <typename T>
 struct Span {
@@ -84,13 +87,20 @@ T* array_push(Array<T>* a, T v) {
     return &a->data[a->count++];
 }
 
-// Removes and returns the last element. TL_ASSERT(count > 0).
+// Removes and returns the last element, ZEROING the vacated slot. TL_ASSERT(count > 0).
+// The zero is not bookkeeping: an Array's own vmem range is committed to `cap`, so the arena's
+// `used` - and therefore the hashed extent [base, used) - covers [count, cap). Leaving the popped
+// element's bytes there makes a HASHED array's hash a function of removal history, which
+// docs/CPP-SUBSET.md section 5 ("hashed state ... zero-filled arenas") and vmem_arena.h's own
+// determinism block forbid, and which SlotMap already honours by zeroing dead slots.
 template <typename T>
 T array_pop(Array<T>* a) {
     static_assert(__is_trivially_copyable(T), "Array<T> requires trivially-copyable T (docs/CONTAINERS.md section 0)");
     TL_ASSERT(a->count > 0);
     a->count -= 1;
-    return a->data[a->count];
+    T v = a->data[a->count];
+    memset(&a->data[a->count], 0, sizeof(T));
+    return v;
 }
 
 // Removes index i by moving the last element into its place (order is NOT preserved - a pure
@@ -100,7 +110,8 @@ void array_swap_remove(Array<T>* a, u32 i) {
     static_assert(__is_trivially_copyable(T), "Array<T> requires trivially-copyable T (docs/CONTAINERS.md section 0)");
     TL_CHECK(i < a->count);
     a->count -= 1;
-    a->data[i] = a->data[a->count];
+    a->data[i] = a->data[a->count];       // self-copy when i was the last element
+    memset(&a->data[a->count], 0, sizeof(T));   // the vacated tail slot - see array_pop
 }
 
 // Bounds-checked element access, TL_CHECK(i < count) in all tiers (docs/CONTAINERS.md §8.1).
@@ -126,10 +137,15 @@ Span<T> array_slice(Array<T>* a, u32 lo, u32 hi) {
     return Span<T>{ a->data + lo, hi - lo };
 }
 
-// count = 0. Does NOT release capacity and does NOT zero the tail (docs/CONTAINERS.md §8.1) - a
-// hashed array's reused bytes are re-zeroed by the owning arena's ARENA_ZERO_ON_PUSH policy.
+// count = 0, ZEROING the cleared elements. Does NOT release capacity (docs/CONTAINERS.md §8.1).
+// Rev 1 said the tail was "re-zeroed by the owning arena's ARENA_ZERO_ON_PUSH policy on reuse";
+// that mechanism does not exist for an in-place refill - ARENA_ZERO_ON_PUSH only re-zeroes bytes
+// an arena_push walks over, and a cleared array pushes nothing until count climbs back past cap.
+// The stale range sits below `used` and is hashed. Corrected in CONTAINERS.md §8.1 by the W1
+// containers review; O(count * sizeof T), paid only by callers that actually clear.
 template <typename T>
 void array_clear(Array<T>* a) {
     static_assert(__is_trivially_copyable(T), "Array<T> requires trivially-copyable T (docs/CONTAINERS.md section 0)");
+    if (a->count != 0u) { memset(a->data, 0, (usize)a->count * sizeof(T)); }
     a->count = 0;
 }
