@@ -177,17 +177,25 @@ TL_TEST(pool_reserve_edge_on_misaligned_base_returns_null, "foundation,mem,fast"
     api.decommit = mv_decommit; api.release = mv_release;
     api.page_size = ctx.real.page_size; api._pad0 = 0;
 
-    // 192512 = the first carve's 60 KB alignment gap + two 64 KB pages, sized so the SECOND
-    // carve's extent fits the reserve exactly but its COMMIT rounding does not: end = 192512,
-    // align_up(end, 64K) = 196608 > reserved. The old check passed the extent and arena_push
-    // then TL_FATALed - a crash where the vendor-heap contract promises null.
+    // Two granules of reserve. On a 64 KB-misaligned base the FIRST carve burns a 60 KB
+    // alignment gap before its 64 KB class page (end = 126976), so the second carve's extent
+    // (end = 192512) is past the reserve and must come back null rather than reaching
+    // arena_push's over-reserve TL_FATAL - a crash where the vendor-heap contract promises null.
+    // The reserve is spelled as an exact granule multiple because vmem_arena_init rounds up to
+    // COMMIT_GRANULE (ruled 2026-08-24): this test used to request 192512 and rely on
+    // `align_up(end, 64K) > reserved` with `end <= reserved`, which a page-rounded reserve made
+    // possible and a granule-rounded one makes UNREACHABLE by construction. carve_aligned's
+    // commit_end half is therefore dead code now - kept as a defensive mirror of arena_push,
+    // recorded in TODO.md rather than deleted by this lane.
     MemPool p;
-    TL_ASSERT_EQ(pool_init(&p, 0x9002u, 192512u, 1u << 20, &api), ERR_OK);
+    TL_ASSERT_EQ(pool_init(&p, 0x9002u, (u64)COMMIT_GRANULE * 2u, 1u << 20, &api), ERR_OK);
+    TL_ASSERT_EQ(p.arena.reserved, (u64)COMMIT_GRANULE * 2u);
     TL_ASSERT_TRUE(((u64)p.arena.base & 65535u) != 0u);   // the fixture really is misaligned
 
-    void* a = pool_alloc(&p, 100u);    // first carve: gap + one 64 KB class page
+    void* a = pool_alloc(&p, 100u);    // first carve: 60 KB gap + one 64 KB class page
     TL_ASSERT_TRUE(a != nullptr);
-    void* b = pool_alloc(&p, 5000u);   // second carve: commit rounding would cross the reserve
+    TL_EXPECT_EQ(p.arena.used, (u64)COMMIT_GRANULE * 2u - 4096u);   // the gap really was burned
+    void* b = pool_alloc(&p, 5000u);   // a different class, so a second carve - past the reserve
     TL_EXPECT_NULL(b);
     // The refusal left the pool intact: the first page still serves its class.
     void* c = pool_alloc(&p, 120u);

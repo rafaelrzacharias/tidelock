@@ -23,7 +23,10 @@
 
 TL_TEST(tl_assert_forced_fatal_trigger, "foundation,slow") {
     (void)t;
-    if (getenv(TL_FATAL_PROBE_ENV) == nullptr) { return; }
+    // A bare `return` here recorded zero checks, which the runner scores FAIL by design - a
+    // bare `tl_tests` run (no tags) was red on main and CI never saw it because both triggers
+    // are slow-tagged (the W1 ruling-closeout lane's finding A). The honest form is TL_SKIP.
+    if (getenv(TL_FATAL_PROBE_ENV) == nullptr) { TL_SKIP("trigger runs only under " TL_FATAL_PROBE_ENV " (set by the checker test)"); }
     TL_FATAL("forced by tl_assert_forced_fatal_trigger");
 }
 
@@ -31,7 +34,7 @@ TL_TEST(tl_assert_forced_fatal_trigger, "foundation,slow") {
 // not - the property docs/TESTING.md §9.1's one check depends on.
 TL_TEST(tl_assert_forced_check_trigger, "foundation,slow") {
     (void)t;
-    if (getenv(TL_FATAL_PROBE_ENV) == nullptr) { return; }
+    if (getenv(TL_FATAL_PROBE_ENV) == nullptr) { TL_SKIP("trigger runs only under " TL_FATAL_PROBE_ENV " (set by the checker test)"); }
     TL_CHECK(1 == 2);
 }
 

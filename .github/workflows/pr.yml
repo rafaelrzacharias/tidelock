@@ -86,7 +86,9 @@ jobs:
       - name: symbol audit
         run: cmake --build --preset ${{ env.PRESET }} --target tl_audit_symbols
       - name: unit tests
-        run: ./out/${{ env.PRESET }}/bin/tl_tests --isolate --tag '!slow' --junit tl_tests.xml
+        # --timeout-ms 120000: docs/TESTING.md section 6's PR-lane value (ruled 2026-08-24). One
+        # number serves because this job already runs --tag '!slow'; nightly runs without it.
+        run: ./out/${{ env.PRESET }}/bin/tl_tests --isolate --tag '!slow' --timeout-ms 120000 --junit tl_tests.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
