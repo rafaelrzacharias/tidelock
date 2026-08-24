@@ -46,6 +46,20 @@ void registry_seal(ArenaRegistry* r) {
     TL_CHECK(r != nullptr);
     TL_CHECK(r->sealed == 0u);
     r->sealed = 1u;
+    // docs/MEMORY.md section 8.3: seal folds the sealed ids into session_fingerprint. This is
+    // what makes restore's id check real BEFORE the app stamps the full BLAKE2b fingerprint
+    // (registry_set_fingerprint overwrites this fold). Without it the fingerprint stayed zero
+    // until set, and restore accepted a snapshot from ANY same-count registry - the "the
+    // fingerprint check IS the id check" claim was vacuous (W1 mem review 2). Bytes are spelled
+    // little-endian explicitly so the fold is one value on every target.
+    NameHash ids[MAX_ARENAS];
+    for (u32 i = 0; i < r->count; ++i) { ids[i] = r->e[i].id; }
+    for (u32 k = 0; k < 4u; ++k) {
+        const u64 h = tl_hash64(ids, (usize)r->count * 8u, TL_HASH_SEED + (u64)k);
+        for (u32 b = 0; b < 8u; ++b) {
+            r->session_fingerprint[k * 8u + b] = (u8)(h >> (b * 8u));
+        }
+    }
 }
 
 void registry_set_fingerprint(ArenaRegistry* r, const u8 fingerprint[32]) {

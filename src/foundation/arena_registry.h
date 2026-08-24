@@ -40,9 +40,10 @@ struct ArenaEntry { NameHash id; VMemArena* arena; u32 flags; u32 _pad0; };
 static_assert(sizeof(ArenaEntry) == 24, "docs/MEMORY.md section 8.3; explicit padding");
 
 // `session_fingerprint` is stamped after seal via registry_set_fingerprint (the app computes it
-// over the sealed ids per docs/BUILD.md section 5); zero until then. It is copied into every
-// Snapshot and checked on restore. Field added over the section 8.3 struct - recorded in
-// TODO.md (W1 mem notes).
+// over the sealed ids per docs/BUILD.md section 5). Until then it holds registry_seal's own fold
+// of the sealed ids (docs/MEMORY.md section 8.3), so restore's id/order gate is real even before
+// the app stamps the full fingerprint (W1 mem review 2). It is copied into every Snapshot and
+// checked on restore. Field added over the section 8.3 struct - recorded in TODO.md (W1 mem notes).
 struct ArenaRegistry {
     ArenaEntry e[MAX_ARENAS];
     u32 count;
@@ -57,6 +58,9 @@ static_assert(__is_trivially_copyable(ArenaRegistry), "");
 void registry_add(ArenaRegistry* r, NameHash id, VMemArena* a, u32 flags);
 
 // Freezes count and order; further registry_add is TL_FATAL. Called once at end of init.
+// Folds the sealed ids into session_fingerprint (docs/MEMORY.md section 8.3) so restore refuses
+// a snapshot whose registry had different ids or a different order even before the app calls
+// registry_set_fingerprint (which overwrites the fold with the full BLAKE2b value).
 void registry_seal(ArenaRegistry* r);
 
 // Stores the 32-byte session fingerprint (docs/BUILD.md section 5) stamped into snapshots and

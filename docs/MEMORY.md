@@ -253,7 +253,7 @@ struct ArenaEntry { NameHash id; VMemArena* arena; u32 flags; u32 _pad0; };
 struct ArenaRegistry { ArenaEntry e[MAX_ARENAS]; u32 count; u8 sealed; u8 _pad[3]; u8 session_fingerprint[32]; };
 void registry_add(ArenaRegistry* r, NameHash id, VMemArena* a, u32 flags);   // TL_FATAL if sealed, count == MAX_ARENAS, or duplicate id
 void registry_seal(ArenaRegistry* r);                                       // after init; registration order frozen; its ids fold into session_fingerprint
-void registry_set_fingerprint(ArenaRegistry* r, const u8 fp[32]);           // after seal (the app computes the fingerprint OVER the sealed ids, BUILD.md §5, then hands it back); stamped into every snapshot, checked on restore; zero until set
+void registry_set_fingerprint(ArenaRegistry* r, const u8 fp[32]);           // after seal (the app computes the fingerprint OVER the sealed ids, BUILD.md §5, then hands it back); stamped into every snapshot, checked on restore; until set it holds seal's own id fold, so the restore id/order gate is never vacuous (W1 mem review 2)
 u64  registry_hash_all(const ArenaRegistry* r, u64 out_per_arena[MAX_ARENAS]) {
     for i in 0..count: out[i] = (e[i].flags & HASHED) ? tl_hash64(e[i].arena->base, e[i].arena->used, TL_HASH_SEED) : 0;
     return tl_hash64(out, count * 8, TL_HASH_SEED);

@@ -133,6 +133,45 @@ TL_TEST(registry_restore_gates_on_fingerprint_and_count, "foundation,mem,smoke")
     world_release(&w);
 }
 
+TL_TEST(registry_restore_refuses_wrong_ids_before_app_fingerprint, "foundation,mem,smoke,fast") {
+    // W1 mem review 2: before the app stamps the BLAKE2b fingerprint, restore's id gate rests
+    // entirely on registry_seal's own id fold (docs/MEMORY.md section 8.3). A same-count
+    // registry with one different id, or the same ids in a different order, must be refused -
+    // registration order is the lockstep contract.
+    TestWorld w;
+    TL_ASSERT_TRUE(world_init(&w));
+    fill(&w.a, 64u, 3u);
+
+    SnapshotRing ring;
+    TL_ASSERT_EQ(ring_init(&ring, 1u << 16, &w.backing), ERR_OK);
+    Snapshot* s = ring_push(&ring, 9u);
+    TL_ASSERT_EQ(registry_snapshot(&w.reg, s, 9u), ERR_OK);
+
+    // Same count, same shapes, one different id: refused with no app fingerprint ever set.
+    TestWorld v;
+    TL_ASSERT_TRUE(world_init(&v));
+    ArenaRegistry wrong_id = {};
+    registry_add(&wrong_id, 0xAAu, &v.a, ARENA_HASHED | ARENA_SNAPSHOT);
+    registry_add(&wrong_id, 0xBBu, &v.b, ARENA_SNAPSHOT | ARENA_GROWS_AT_BARRIER);
+    registry_add(&wrong_id, 0xDDu, &v.c, ARENA_HASHED);   // 0xDD, not 0xCC
+    registry_seal(&wrong_id);
+    TL_EXPECT_EQ(registry_restore(&wrong_id, s), ERR_SNAPSHOT_MISMATCH);
+
+    // Same ids, different ORDER: also refused (the fold is order-sensitive by design).
+    ArenaRegistry wrong_order = {};
+    registry_add(&wrong_order, 0xBBu, &v.b, ARENA_SNAPSHOT | ARENA_GROWS_AT_BARRIER);
+    registry_add(&wrong_order, 0xAAu, &v.a, ARENA_HASHED | ARENA_SNAPSHOT);
+    registry_add(&wrong_order, 0xCCu, &v.c, ARENA_HASHED);
+    registry_seal(&wrong_order);
+    TL_EXPECT_EQ(registry_restore(&wrong_order, s), ERR_SNAPSHOT_MISMATCH);
+
+    // The matching registry (v's own, same ids in the same order) is accepted.
+    TL_EXPECT_EQ(registry_restore(&v.reg, s), ERR_OK);
+
+    world_release(&v);
+    world_release(&w);
+}
+
 TL_TEST(registry_restore_into_fresh_world_commits, "foundation,mem,smoke") {
     // Late-join/resync shape (docs/DETERMINISM.md §5): the target arenas have never committed
     // a page; restore must commit on demand and land byte-identical extents.
