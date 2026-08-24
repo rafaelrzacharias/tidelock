@@ -8,9 +8,12 @@
 //   key. This header is the ONE closed list; nothing else declares a system_id.
 // Invariants: `RNG_SYS_LUAU_BASE` reserves a 256-wide block (.. +255) for Luau-registered
 //   systems, assigned by registration ordinal (docs/LUAU-LAYER.md §10.6) so a script's draws are
-//   keyed without editing this header. Engine systems register BELOW the block, starting at 1
-//   (0 is reserved: an accidentally-default-initialised system_id must never alias a real
-//   system). Rev 1 has no engine systems yet - Alloy's SYS_BASIN..SYS_PROMOTE (docs/ALLOY.md
+//   keyed without editing this header. Engine systems register BELOW the block, starting at 1.
+//   **0 is reserved, and that is a precondition rather than a convention**: rng_for asserts
+//   `system_id != 0`, so a default-initialised or forgotten system_id traps in dev instead of
+//   silently keying its draws as whatever registration put first (ruled 2026-08-24,
+//   docs/DETERMINISM.md §3 - this header stated the invariant and nothing enforced it, while the
+//   lane's own tests drew with 0). Rev 1 has no engine systems yet - Alloy's SYS_BASIN..SYS_PROMOTE (docs/ALLOY.md
 //   §14.5, values 1..10) are the first consumer and fit comfortably under the 256 reserved here;
 //   that lane adds its own names to this enum when it lands (one registration each), not a
 //   parallel file - docs/CANON.md "one fact, one home" for the enum's storage.

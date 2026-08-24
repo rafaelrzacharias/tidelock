@@ -507,7 +507,24 @@ TARGET_CASES = [
     ("a compiler-macro branch is two programs", "gnuc",
      "#ifdef __GNUC__\nu32 k(void) { return 1u; }\n#else\nu32 k(void) { return 2u; }\n#endif\n",
      "preprocessed source differs"),
+    # The W1 rng/hash review's finding. Vendoring rapidhash put `-U_MSC_VER` in BASE_FLAGS to
+    # silence clang's resource-dir <intrin.h>, which made the gate blind to the ONE platform macro
+    # clang predefines for a triple we actually ship: this fixture passed with "0 divergences"
+    # until <intrin.h> was stubbed instead. It gets its own case rather than riding on __GNUC__
+    # for exactly that reason - __GNUC__ is undefined for the win triple, so it never exercised
+    # the win-vs-linux leg at all (two of four "the gate missed it" findings were wrong fixtures).
+    ("a _MSC_VER branch is two programs", "mscver",
+     "#ifdef _MSC_VER\nstruct M { u32 a; };\n#else\nstruct M { u64 a; };\n#endif\n"
+     "u32 m_use(void) { return (u32)sizeof(M); }\n",
+     "preprocessed source differs"),
 ]
+# The false positive the -U_MSC_VER flag was reaching for, and the evidence that stubbing
+# <intrin.h> keeps it fixed: a vendor-shaped header that includes <intrin.h> under _MSC_VER pulls
+# ~90 SIMD-intrinsic records into the win layout dump and none into linux/pi. The gate must see
+# zero divergences here AND still fail the mscver case above - one flag could not do both.
+TARGET_INTRIN = ("#ifdef _MSC_VER\n#include <intrin.h>\n#endif\n"
+                 "struct Plain { u32 a; u64 b; };\n"
+                 "u32 use(void) { return (u32)sizeof(Plain); }\n")
 TARGET_CLEAN = ("struct OK { u32 a; u64 b; };\n"
                 "// Ordinary sim code must not read as a divergence.\n"
                 "inline u32 ok_sum(u32 a, u32 b) { return a + b; }\n"
@@ -569,6 +586,10 @@ def test_targets(tmp, cxx):
 
     rc, out = run_one("fxlike", TARGET_FX_HEADER)
     record("targets: a realistic fx.h is not 18 false positives", rc == 0, out.strip()[:400])
+
+    rc, out = run_one("intrin", TARGET_INTRIN)
+    record("targets: a vendor <intrin.h> include is not ~90 false divergences", rc == 0,
+           out.strip()[:400])
 
     # The filter that reads our own lines out of the preprocessor output is the whole gate: when it
     # was wrong, every comparison was between two empty lists and everything passed.

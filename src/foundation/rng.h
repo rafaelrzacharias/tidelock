@@ -10,10 +10,12 @@
 //   rng_for and (per docs/TODO.md) tests/foundation/fx_test_util.h's seeded generator - same
 //   mix, so replacing the test's inline copy with a call to this one must not move its pinned
 //   trace hashes.
-// Invariants: `system_id` values come from the closed enum in rng_systems.h. `draw` is a
+// Invariants: `system_id` values come from the closed enum in rng_systems.h and are never 0 -
+//   a precondition of rng_for, asserted (docs/DETERMINISM.md §3, ruled 2026-08-24). `draw` is a
 //   per-carrier counter the CALLER owns locally within the tick - never stored across ticks
 //   (docs/DETERMINISM.md §3). `rng_below`'s Lemire step has no rejection loop: a ~n/2^64 bias is
-//   accepted so draw count never depends on the value drawn.
+//   accepted so draw count never depends on the value drawn. `rng_range` is CLOSED at both ends
+//   and its span must fit R - see its contract comment.
 // Determinism: pure integer functions, no state, no floats, no libm. `rng_below` reuses
 //   fx::mulhi64u (fx.h) rather than a second widening-multiply implementation - one fact, one
 //   home for "high 64 bits of an unsigned 128-bit product".
@@ -34,8 +36,13 @@ constexpr u64 mix64(u64 x) {
 constexpr u64 RNG_K0 = 0x9e3779b97f4a7c15ull;
 
 // The one entry point every doc uses. A pure function of the five key fields; `draw` defaults to
-// 0 for a carrier that draws once per tick. Never fails, never allocates.
+// 0 for a carrier that draws once per tick. Never allocates.
+// Precondition: `system_id != 0` (asserted). 0 is reserved so that a default-initialised or
+// forgotten system_id traps instead of silently keying its draws as whatever system registration
+// put first - ruled 2026-08-24, docs/DETERMINISM.md §3. Like every TL_ASSERT it compiles out in
+// the netcode/ship tiers, so it is a development guard, not a runtime check.
 constexpr u64 rng_for(u64 seed, u64 tick, u32 system_id, u64 carrier_id, u32 draw = 0) {
+    TL_ASSERT(system_id != 0);
     u64 r = mix64(seed ^ RNG_K0);
     r = mix64(r + tick);
     r = mix64(r + ((u64(system_id) << 32) | u64(draw)));
@@ -55,10 +62,24 @@ constexpr q_t rng_q(u64 r) {
     return fx::fx_raw<q_t>(i32(r >> 34));
 }
 
-// lo + a uniform fraction of (hi - lo), via rng_q and the closed mixed-op table - compiles only
-// for an R the table lists a q_t product for (docs/FX-PALETTE.md §3.1: pos_t/invmass_t,
-// vel_t/omega_t, q_t/stiff_t/angle_t/dt_t, scalar_t/lambda_t). Never through doubles.
+// A uniform draw in the CLOSED interval [lo, hi] (docs/DETERMINISM.md §3): lo + a uniform
+// fraction of (hi - lo), via rng_q and the closed mixed-op table. `hi` IS attainable even though
+// rng_q is [0, 1): the largest q is 1 - 2^-30 and mul<R> rounds RNE, so any span narrower than
+// 2^29 raw units rounds its top draw up to exactly hi (measured: rng_range<scalar_t>(~0ull,
+// -10, +10) == +10). Callers that need a half-open range must reject hi themselves.
+//
+// Preconditions, both asserted: lo <= hi, and `hi - lo` is representable in R. The second is not
+// pedantry - `hi - lo` is R's WRAPPING subtract, so rng_range<pos_t>(r, -WORLD_HALF, WORLD_HALF)
+// (a uniform world position, the most obvious call there is) wrapped the span to INT32_MIN and
+// returned values metres outside the world with no diagnostic at all until this check
+// (W1 rng/hash review 2). A span that does not fit R needs a wider row, not a wrap.
+//
+// Compiles only for an R the table lists a q_t product for (docs/FX-PALETTE.md §3.1:
+// pos_t/invmass_t, vel_t/omega_t, q_t/stiff_t/angle_t/dt_t, scalar_t/lambda_t). Never through
+// doubles.
 template <typename R>
 constexpr R rng_range(u64 r, R lo, R hi) {
+    TL_ASSERT(lo.v <= hi.v);
+    TL_ASSERT(i64(hi.v) - i64(lo.v) <= i64(INT32_MAX));
     return lo + fx::mul<R>(rng_q(r), hi - lo);
 }
