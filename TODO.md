@@ -54,6 +54,48 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       (`tl_assert.h` passes; `tl_assert.cpp` and `tl_log.h` still fail). Also: `static_assert`
       message literals are literals to the non-ASCII gate, so header messages spell "section 3.1",
       not "§3.1" - not a gate bug, noted so nobody "fixes" it.
+- [ ] **RR-7 W1 tooling-rt is blocked: `src/foundation`'s non-det stems have no sanctioned io or
+      storable state, but `TOOLING.md` §9 requires both.** Two gates, read together, make
+      `TOOLING.md` §9's foundation half unbuildable as specified, not just the `<stdio.h>` line
+      the lane brief expected:
+      (a) `tools/audit/includes.py`'s system-include allowlist for `src/foundation` is
+      `{stdint.h, stddef.h, string.h, limits.h}` with no exception for the non-det stems
+      (`tl_log tl_prof tl_probe crash` in `src/foundation/CMakeLists.txt`), so nothing in that
+      half can reach `<stdio.h>`/`<stdlib.h>`/an OS header - no `fprintf`, no `exit`, not even
+      `abort`.
+      (b) `tools/audit/symbols.py`'s writable-static check runs on the `--data-only` libs too
+      (read the tool: `--data-only` drops the undefined-symbol layering check but keeps the
+      `.data`/`.bss` zero check), and `CPP-SUBSET.md` §1 states the rule as "every object file
+      in every `src/` lib" - no carve-out for non-audited state. `TOOLING.md` §9.2's
+      `LogState`/`ProfState`/`ProbeState` (ring buffers, a TSV sink) cannot be namespace-scope
+      globals under that rule, and neither can a stored pointer for "the installed crash
+      writer" that `TL_FATAL` would call into.
+      Meanwhile `CPP-SUBSET.md` §9 R-3 says `tl_fatal`/`tl_check_failed`/`tl_assert_failed`
+      "are defined in `tl_foundation`... and reach io" - the ruling's own text assumes the io
+      path (a) forbids outright. `TOOLING.md` §9's macro catalogue (`TL_LOG_TRACE(...)`,
+      `TL_PROF_SCOPE(lit)`, `TL_PROBE_LOG(lit, v, n)`) takes no state/platform parameter at the
+      call site, by design (`TOOLING.md` §0's "zero cost by absence" tier-gates argument
+      *evaluation*, not argument *threading*).
+      **Consequence:** none of `tl_log.cpp`/`tl_prof.cpp`/`tl_probe.cpp`, the crash writer, or a
+      real (non-stub) `tl_assert.cpp` can be written today without either breaking a gate
+      silently or improvising an assumption CLAUDE.md reserves for a ruling.
+      **Options:** (A, recommended) two narrow exemptions, both scoped and justified the way R-3
+      already is: (i) a stem-aware io allowance in `includes.py` for foundation's non-det stems
+      only (the det/sim stems stay banned exactly as today); (ii) a bounded exemption from the
+      `.data`/`.bss` rule for named, non-hashed, non-snapshotted tooling-plane singleton state
+      (`LogState`, `ProfState`, `ProbeState`, the crash-writer install slot) - the tooling plane
+      is never part of a world's registered arena set, so it carries none of the rule's own
+      stated reason (the two-worlds-one-process test, rollback restoring only registered
+      arenas). (B) thread an explicit state/platform-api parameter through every macro call
+      site in the codebase - rejected as a default: touches every future consumer with no
+      consumer yet to shape it against, and contradicts the macro text `TOOLING.md` §9.1
+      already pins. (C) leave `foundation`'s macros header-only until `core`/`platform` exist to
+      own the state as `World` singletons (the way `CvarTable` is already specified to) -
+      rejected as a default: `TOOLING.md` §9.6's own build order puts `tl_log`/`tl_prof`/
+      `tl_probe` before any sim code, specifically so the Alloy harness can use them; Option C
+      inverts that order.
+      **Status:** nothing built this session beyond what the fx lane left (`tl_assert.cpp` is
+      still the trap stub). W1 tooling-rt resumes once this is ruled.
 - [ ] **fx tests that need the runner lane** (`TESTING.md` §9.1 `TL_TEST_EXPECT_FATAL`): `div`
       by zero, `sqrt` of a negative, `normalize` of a zero vector, `atan2(0,0)`, `to<R>` out of
       range, `clamp` with lo > hi - each asserts in dev and has a documented release value; the
