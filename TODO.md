@@ -193,8 +193,9 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       out/tools`), ~4 min in full. Add a nightly step (`fxcheck` + `oracle.py check-coeffs` +
       `oracle.py verify worst.tsv`) with RR-2's `nightly.yml`; `--quick` (~3 s) could sit in the
       PR lane today.
-- [ ] `tests/foundation/fx_test_util.h` carries a local splitmix64 - replace with `rng_for`
-      from the rng/hash lane when it lands (same mix; the seeds are arbitrary).
+- [x] `tests/foundation/fx_test_util.h` carried a local splitmix64 - it now calls `rng.h`'s
+      `mix64` (same mix, so the pinned trace hashes did not move; both fx_trace tests still pass).
+      (W1 rng/hash.)
 - [ ] **For alloy-substrate / alloy-solver (W2/W3) - three facts the headers state and the
       ALLOY pseudocode does not yet respect:**
       (a) `len2_wide`/`dot<pos2_wide_t>` saturate and assert when `|d|^2 >= 2^63` raw, i.e.
@@ -234,8 +235,11 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [ ] Containers: `Array/Span`, `SlotMap+Handle` (gen-wrap quarantine), `Map`, `SortedMap/Set`,
       `RingBuffer`, `Bitset`, radix `sort_u32_kv/u64_kv`; `StrView`, interner, `fmt`. Rubric tests
       + two-instance determinism tests.
-- [ ] Keyed RNG (`rng_for/below/q/range`) + pinned rapidhash + `constexpr` FNV-1a `NameHash` with the
-      debug side-table. Vendor rapidhash.
+- [x] Keyed RNG (`rng_for/below/q/range`) + pinned rapidhash + `constexpr` FNV-1a `NameHash`.
+      Vendor rapidhash. (W1 rng/hash.) The debug side-table (hash -> literal) is NOT built here:
+      `CONTAINERS.md` §8.6 already rules it as the interner's job in dev tiers - foundation has no
+      runtime table to register into without static mutable state (`CPP-SUBSET.md` §1 bans it
+      engine-wide), so there is nothing for this lane to add beyond `operator""_id` itself.
 - [ ] Determinism harness in the runner: `TL_ASSERT_DETERMINISTIC`, per-arena hash trace compare.
 - [ ] Symbol audit + include firewall wired into CI against the det libs.
 

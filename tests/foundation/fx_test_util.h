@@ -5,15 +5,13 @@
 // Spec: docs/FX-PALETTE.md §10.5; docs/TESTING.md §1 (property tests: seeded, never wall-clock).
 #include "runner/tl_test.h"
 #include "foundation/fx_palette.h"
+#include "foundation/rng.h"
 
-// splitmix64 - the test-side seeded generator (docs/DETERMINISM.md §3 names the same mix).
+// splitmix64 - the test-side seeded generator, built on rng.h's mix64 (the same finalizer, so
+// this must draw the identical stream it always has: replacing the inline copy with a call to
+// the shared one must NOT move any pinned trace hash - docs/TODO.md "same mix").
 struct FxRng { u64 s; };
-inline u64 fx_rng_next(FxRng* r) {
-    u64 z = (r->s += 0x9e3779b97f4a7c15ull);
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
-    return z ^ (z >> 31);
-}
+inline u64 fx_rng_next(FxRng* r) { return mix64(r->s += 0x9e3779b97f4a7c15ull); }
 inline i32 fx_rng_i32(FxRng* r) { return (i32)(u32)fx_rng_next(r); }
 inline i64 fx_rng_i64(FxRng* r) { return (i64)fx_rng_next(r); }
 // Uniform in [lo, hi] (inclusive), hi - lo < 2^63.

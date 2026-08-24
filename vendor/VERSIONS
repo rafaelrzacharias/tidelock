@@ -1,0 +1,5 @@
+# Pinned vendor library commits (docs/BUILD.md §4). The vendored tree hashes into build_id, so a
+# bump here is a ruling, not a drive-by update.
+#
+# name           pin                                                  note
+rapidhash        rapidhash_v3 (bc4b4baa48a15ff52ff4725e1ccdcda62815221c)   github.com/Nicoshev/rapidhash, MIT, vendored verbatim (RAPIDHASH_COMPACT + RAPIDHASH_FAST pinned in src/foundation/hash.cpp)
