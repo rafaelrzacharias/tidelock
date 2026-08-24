@@ -36,8 +36,9 @@ memcmp/**memmove** only - `memmove` is sanctioned because `CONTAINERS.md` §8's 
 need an overlapping move and it is as deterministic as the other three; the earlier list omitted
 it and contradicted that doc), `<limits.h>`. `platform/` additionally includes its OS/SDL headers inside its own
 TUs. `<math.h>` is allowed ONLY in `render/`, `editor/`, `platform/` (float is legal there). The
-named tooling-plane stems (§9 R-4) additionally get `<stdio.h>`/`<stdlib.h>` - still no OS header,
-no `<math.h>`; the real crash writer's raw OS calls stay `platform/`'s (`TOOLING.md` §9.3.9).
+named tooling-plane stems (§9 R-4) additionally get `<stdio.h>`/`<stdlib.h>`/`<stdarg.h>` - still
+no OS header, no `<math.h>`; the real crash writer's raw OS calls stay `platform/`'s
+(`TOOLING.md` §9.3.9).
 Type traits come from clang builtins, never `<type_traits>`: `__is_trivially_copyable(T)`,
 `__is_same(A,B)`, `__is_enum(T)`, `alignof`, `sizeof`, `offsetof` (from `<stddef.h>`). `tl_types.h`
 defines `u8..u64`, `i8..i64`, `f32`, `f64`, `usize` and `uint_fit<N>` (a `constexpr` width
@@ -280,7 +281,7 @@ if (r.err) { TL_LOG_ERR(ERR_NAME(r.err)); return r.err; }
   `offsetof` static_assert per field generated from the list, and the little-endian write/read
   pair). Same table, same kinds, same inspector; nothing is declared twice.
 - **R-4 (RR-7) The tooling plane is exempt from the writable-static ban and reaches io directly.**
-  `TOOLING.md` §9's runtimes (`tl_log`, `tl_prof`, `tl_probe`, `crash`, plus `tl_assert` for the
+  `TOOLING.md` §9's runtimes (`log`, `prof`, `probe`, `crash`, plus `tl_assert` for the
   panic path's own writes) are named, individually, on `TL_FOUNDATION_TOOLING`
   (`src/foundation/CMakeLists.txt`) — a strict subset of the non-det stem list `BUILD.md` §10.2
   already splits out. Both `tools/audit/includes.py` (the `<stdio.h>`/`<stdlib.h>` allowance) and

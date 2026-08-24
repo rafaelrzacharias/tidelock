@@ -288,7 +288,7 @@ INCLUDE_CLEAN = [
     # RR-7: the positive half - a stem named on TL_FOUNDATION_TOOLING gets real io and mutable
     # state. Without this fixture the negative ones above could pass for the wrong reason (the
     # whole gate silently broken) instead of the right one (the exemption is stem-keyed).
-    ("RR-7: a tooling stem gets real io and mutable state", "src/foundation/tl_log.cpp",
+    ("RR-7: a tooling stem gets real io and mutable state", "src/foundation/log.cpp",
      "#include <stdio.h>\n#include <stdlib.h>\n"
      "namespace { unsigned g_ring_head = 0; }\n"
      "void tl_log_bump(void) { g_ring_head += 1u; }\n"),
@@ -434,7 +434,7 @@ def test_symbols_tooling(tmp, nm, objdump, ar, cxx):
     base = [sys.executable, os.path.join(AUDIT, "symbols.py"), "--nm", nm, "--objdump", objdump,
             "--allow", allow]
 
-    tool_lib, err = build_lib_named(cxx, ar, root, "tool", "tl_log.cpp", MUTABLE_CPP)
+    tool_lib, err = build_lib_named(cxx, ar, root, "tool", "log.cpp", MUTABLE_CPP)
     nontool_lib, err2 = build_lib_named(cxx, ar, root, "nontool", "jobs.cpp", MUTABLE_CPP)
     clean_lib, err3 = build_lib(cxx, ar, root, "clean", [LOWER_CPP])   # --layer is mandatory
     if not tool_lib or not nontool_lib or not clean_lib:
@@ -443,7 +443,7 @@ def test_symbols_tooling(tmp, nm, objdump, ar, cxx):
     layer = ["--layer", "clean=" + clean_lib]
 
     rc, out = run(base + layer + ["--root", fixture, "--data-only", "tool=" + tool_lib])
-    record("symbols: RR-7 exempts a TL_FOUNDATION_TOOLING stem (tl_log)", rc == 0, out.strip()[:200])
+    record("symbols: RR-7 exempts a TL_FOUNDATION_TOOLING stem (log)", rc == 0, out.strip()[:200])
 
     rc, out = run(base + layer + ["--root", fixture, "--data-only", "nontool=" + nontool_lib])
     record("symbols: RR-7 does not exempt a non-tooling non-det stem (jobs)",

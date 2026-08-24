@@ -39,14 +39,18 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       explicit `to<R>` at every unit change (`invmass_t → scalar_t` is already one) and a larger
       op table. Rev-1 ships format-keyed, as the doc now states; decide before Gate 0's solver is
       promoted (W3 alloy-solver), because that is the last point where the retag is a header edit.
-- [ ] **`foundation/tl_assert.h` landed from the fx lane, not tooling-rt.** `fx.h` needs
+- [x] **`foundation/tl_assert.h` landed from the fx lane, not tooling-rt.** `fx.h` needs
       `TL_ASSERT` on its first line of arithmetic and the tooling-rt lane had not published its
       header; the header's content is pinned by `TOOLING.md` §9 + `CPP-SUBSET.md` §9 R-3 +
       `tools/audit/allow.txt`, so it was transcribed (each tier routed to its own R-3 symbol;
-      `TOOLING.md` §9 snippet aligned). **`tl_assert.cpp` is a stub** - every entry
-      `__builtin_trap`s with file/line/msg live in the frame for a debugger; foundation has no
-      sanctioned io. The tooling-rt lane replaces it with the crash writer (`TOOLING.md` §9.3.9)
-      and owns both files from then on.
+      `TOOLING.md` §9 snippet aligned). **DONE 2026-08-24 (W1 tooling-rt):** `tl_assert.cpp` is
+      real - `tl_fatal`/`tl_check_failed`/`tl_assert_failed` log then call `foundation/crash.h`'s
+      `tl_crash_raise` seam (RR-7, `CPP-SUBSET.md` §9 R-4), whose built-in fallback (today's only
+      path - `platform/` has not landed) prints the `TL_FATAL origin=<TL_FATAL|TL_CHECK|
+      TL_ASSERT> <file>:<line>: <msg>` stderr marker and `exit(2)` - the exact contract
+      `TESTING.md` §9.1's fatal-expected tests match on. Proven by
+      `tests/foundation/tl_assert.test.cpp` (relaunches `tl_tests` itself via `--filter`, since
+      `TL_TEST_EXPECT_FATAL` is not built yet). tooling-rt owns both files from here on.
 - [ ] **Gate finding (fixed in the same commit, for the record):** `tools/audit/includes.py`
       rejected `fx.h` → `tl_assert.h` as "a sim TU includes a non-det foundation header" because
       the det/non-det split is by *stem* and `tl_assert` is non-det for its runtime. R-3 mandates
@@ -54,7 +58,7 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       (`tl_assert.h` passes; `tl_assert.cpp` and `tl_log.h` still fail). Also: `static_assert`
       message literals are literals to the non-ASCII gate, so header messages spell "section 3.1",
       not "§3.1" - not a gate bug, noted so nobody "fixes" it.
-- [ ] **RR-7 W1 tooling-rt is blocked: `src/foundation`'s non-det stems have no sanctioned io or
+- [x] **RR-7 W1 tooling-rt is blocked: `src/foundation`'s non-det stems have no sanctioned io or
       storable state, but `TOOLING.md` §9 requires both.** Two gates, read together, make
       `TOOLING.md` §9's foundation half unbuildable as specified, not just the `<stdio.h>` line
       the lane brief expected:
@@ -94,13 +98,28 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       rejected as a default: `TOOLING.md` §9.6's own build order puts `tl_log`/`tl_prof`/
       `tl_probe` before any sim code, specifically so the Alloy harness can use them; Option C
       inverts that order.
-      **Status:** nothing built this session beyond what the fx lane left (`tl_assert.cpp` is
-      still the trap stub). W1 tooling-rt resumes once this is ruled.
+      **Status: RULED 2026-08-24 - Option A.** `TL_FOUNDATION_TOOLING` (`src/foundation/
+      CMakeLists.txt`) names the exempt stems (`log prof probe crash tl_assert` - not `tl_log`/
+      `tl_prof`/`tl_probe`; `TOOLING.md` §9.1's file table names the `.cpp` implementations
+      `log.cpp`/`prof.cpp`/`probe.cpp`, only the headers keep the `tl_` prefix, which this line
+      originally missed). `docs/CPP-SUBSET.md` §1 amended, §9 gained R-4; `tools/audit/
+      includes.py`/`symbols.py` read the one list; selftest fixtures prove the exemption is
+      stem-keyed, not directory-keyed, and opt-in (`--root` required). `tl_assert.cpp` and
+      `foundation/crash.h`/`.cpp` are real now (`17dd4da` the ruling, next commit the runtime).
 - [ ] **fx tests that need the runner lane** (`TESTING.md` §9.1 `TL_TEST_EXPECT_FATAL`): `div`
       by zero, `sqrt` of a negative, `normalize` of a zero vector, `atan2(0,0)`, `to<R>` out of
       range, `clamp` with lo > hi - each asserts in dev and has a documented release value; the
       release values are testable today only by building the test against a non-dev tier. Land
       them in `tests/foundation/fx_fatal.test.cpp` the day the macro exists.
+      **The exit-2/marker contract `TL_TEST_EXPECT_FATAL` needs is real (W1 tooling-rt, 2026-08-24):**
+      a fatal (any of `TL_FATAL`/`TL_CHECK`/`TL_ASSERT`) exits the process with code 2 and writes
+      exactly one line to stderr, `TL_FATAL origin=<TL_FATAL|TL_CHECK|TL_ASSERT> <file>:<line>:
+      <msg>\n` (`foundation/crash.h`'s `tl_crash_raise`, `foundation/crash.cpp`'s fallback) - match
+      on the literal leading token `TL_FATAL`, never on `origin`, so all three tiers of the panic
+      ABI satisfy one check. `tests/foundation/tl_assert.test.cpp` proves this today by relaunching
+      `tl_tests` itself (`--filter <name>`, `TL_TESTS_EXE` from `tests/CMakeLists.txt`) - a pattern
+      usable as a stopgap for any fatal-expected test until `TL_TEST_EXPECT_FATAL`/`--isolate`
+      grow the same child-process-inspection support natively.
 - [ ] **RR-1 Pi 4 sysroot + the aarch64 leg of `BUILD.md` §10.5.** Rafael has a Pi 4 on the LAN,
       so this is now an execution task, not a decision. Lane: W0 skeleton (**Opus 5 high**). It
       touches only `toolchain/`, `cmake/toolchain-pi4.cmake`, `tools/sysroot.sh|deploy.sh` and this

@@ -5,12 +5,15 @@
 # The split is by an explicit NON-det stem list, so anything a later lane adds defaults to the
 # audited half: a file that does not belong there fails the symbol audit loudly, whereas the
 # inverse default would let it escape the gate silently (docs/CPP-SUBSET.md §4).
-# The non-det half of docs/BUILD.md §10.2, plus the tooling runtimes: tl_assert/tl_log/tl_prof/
-# tl_probe/crash all reach io, so the panic ABI of docs/CPP-SUBSET.md §9 R-3 is *defined* here and
-# only *referenced* from the audited half. Left off this list they would default into
-# tl_foundation_det and fail its own audit - which is what R-3 claimed was impossible.
+# The non-det half of docs/BUILD.md §10.2, plus the tooling runtimes: tl_assert/log/prof/probe/
+# crash all reach io, so the panic ABI of docs/CPP-SUBSET.md §9 R-3 is *defined* here and only
+# *referenced* from the audited half. Left off this list they would default into tl_foundation_det
+# and fail its own audit - which is what R-3 claimed was impossible.
+# Stems are the .cpp FILENAME (this list is matched against, per source file, below) - docs/
+# TOOLING.md §9.1's file table names the implementations log.cpp/prof.cpp/probe.cpp, not
+# tl_log.cpp/tl_prof.cpp/tl_probe.cpp; only the HEADERS carry the tl_ prefix.
 set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim
-                         tl_assert tl_log tl_prof tl_probe crash)
+                         tl_assert log prof probe crash)
 
 # RR-7 ruling (docs/CPP-SUBSET.md §1, docs/TOOLING.md §9): the tooling plane - never hashed, never
 # snapshotted, never part of a world's registered arena set - is the only non-det stem set allowed
@@ -20,7 +23,7 @@ set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim
 # by a second hand-typed copy drifting out of sync (LESSONS.md: that drift class has bitten twice).
 # Adding a stem here is the ruling, not a convenience - it is read by every future det/tooling
 # boundary question the same way.
-set(TL_FOUNDATION_TOOLING tl_assert tl_log tl_prof tl_probe crash)
+set(TL_FOUNDATION_TOOLING tl_assert log prof probe crash)
 foreach(stem IN LISTS TL_FOUNDATION_TOOLING)
   if(NOT stem IN_LIST TL_FOUNDATION_NONDET)
     message(FATAL_ERROR "TL_FOUNDATION_TOOLING stem '${stem}' is not in TL_FOUNDATION_NONDET - "

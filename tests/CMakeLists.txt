@@ -6,6 +6,10 @@ add_executable(tl_tests runner/main.cpp ${TL_TEST_SOURCES})
 target_link_libraries(tl_tests PRIVATE tl_flags_common
   tl_foundation tl_core tl_sim tl_script tl_platform_headless)
 target_include_directories(tl_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+# tests/foundation/tl_assert.test.cpp relaunches this same binary (--filter) to prove the panic
+# ABI's real exit-2/marker contract in a child process, without a bespoke probe exe or the
+# not-yet-built TL_TEST_EXPECT_FATAL (docs/TESTING.md §9.1, TODO.md).
+target_compile_definitions(tl_tests PRIVATE TL_TESTS_EXE="$<TARGET_FILE:tl_tests>")
 if(MSVC)
   # The runner uses fopen/system - the io exemption of docs/TESTING.md §8 R-2. The MSVC CRT
   # marks them deprecated in favour of the _s variants, which do not exist elsewhere.
