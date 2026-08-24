@@ -774,7 +774,7 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       **2 failed**, 2 skipped. CI never saw it because both are tagged `slow` and the PR lane runs
       `--tag !slow`. The fix is one line each - `TL_SKIP("inert without TL_FATAL_PROBE; ...")`
       instead of `return`, which is what `runner_timeout_hang_trigger` does.
-- [ ] **`to<R>` out of range has no release-value test.** `tests/foundation/fx_fatal.test.cpp`
+- [x] **`to<R>` out of range has no release-value test.** `tests/foundation/fx_fatal.test.cpp`
       pairs each dev-tier assert with `fx_review_release_error_values`'s netcode/ship value —
       for five of its six rows. `to<q_t>(fx_raw<pos_t>(1 << 19))` asserts in dev and, with the
       assert compiled out, narrows `2^31` through `i32` (well-defined wrap in C++20, so
@@ -783,6 +783,15 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       and a row in `fx_review_release_error_values`, or state in `fx.h` that the release
       behaviour is undefined-by-contract and callers must range-check — but not silence. Owner:
       the fx lane.
+      **DONE 2026-08-24 (W1 ruling-closeout, the first branch of the two).** `fx.h`'s `to<R>`
+      documents the out-of-range release behaviour: the intermediate is converted to `R::rep` by
+      C++20's well-defined MODULAR conversion, so it wraps - it does not saturate and does not
+      clamp - and callers on a slim tier must range-check. `fx_review_release_error_values` gains
+      the sixth row (`to<q_t>(fx_raw<pos_t>(1 << 19)).v == INT32_MIN`), so `fx_fatal.test.cpp`'s
+      six dev-tier asserts are now paired six for six. Also stated in `fx.h` rather than left
+      implied: the OTHER assert on the widening path (`|x.v| < 2^(63 - D)`) has no defined
+      release value at all - past it the multiply is signed overflow, i.e. UB on every tier - so
+      it is not a wrap and gets no row.
 - [x] `tests/driver` skeleton (W1 runner+driver lane, 2026-08-24; parser extracted and tested in
       review 2): the full `--scene/--seed/--ticks/--workers|--workers-sweep/--record|--replay/
       --verify/--dual/--dump-probes/--csv/--snapshot-every/--ballast` contract of
