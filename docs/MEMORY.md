@@ -67,6 +67,16 @@ ErrCode registry_restore(ArenaRegistry*, const Snapshot*);                 // fa
   restoring bytes that never mutated is a no-op-equivalent `memcpy`. `SNAPSHOT` without `HASHED`
   stays legal (state that is restored but deliberately outside the hash), as does membership with
   neither flag (`GROWS_AT_BARRIER` alone — the guard's business, §2).
+- **Every container on an `ARENA_HASHED` arena is SIZED AT INIT** (ruled 2026-08-24). A container
+  that grows by bump-allocating a new block orphans its old one below `used`, where the arena's
+  hash covers it forever — so the hash encodes allocation history, not state. This does *not*
+  desync a session (lockstep peers run identical op histories, so their orphans are identical, and
+  checkpoints are raw arena images — `DETERMINISM.md` §5 — so a joiner inherits the exact bytes);
+  what it costs is hygiene: unbounded hashed garbage, and a hash that moves for a reason no state
+  change explains. `Array<T>` already had the fixed mode (`CONTAINERS.md` §8.1); `Map<K,V>` gained
+  `map_init_fixed` to match (`CONTAINERS.md` §3), and that *is* the enforcement — a container
+  cannot see its own arena's registry flags, but a fixed-mode container cannot grow anywhere, so
+  sizing at init is checked where the growth would happen rather than where the flag lives.
 - **Snapshot ring (T-F-04):** `N = CONFIRMATION_HORIZON_TICKS` slots allocated **once** from a
   dedicated arena at init; each slot sized at `Σ reserved` of snapshotted arenas at the *budget*,
   with the used extents recorded per slot so a restore copies only `[base, used)`. Cannot be sized

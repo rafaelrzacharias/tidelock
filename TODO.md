@@ -602,7 +602,7 @@ right; it is the template the others now follow.
   freezes `gen[idx]` at `GEN_MAX`, so the retired handle's generation still matches); the
   gen-comparison workaround in `slotmap_lifo_reuse_and_zeroed_dead_slot` is replaced by the
   direct query; `CONTAINERS.md` §8.2 carries the signature and the why.
-- **R2 — may a `Map` live on an `ARENA_HASHED` arena at all?** A growing `Map` orphans its old
+- [x] **R2 — may a `Map` live on an `ARENA_HASHED` arena at all?** A growing `Map` orphans its old
   keys/vals/state blocks below the arena's `used`, so they are hashed forever and the hash encodes
   growth history. Stated in `map.h`'s contract block and `CONTAINERS.md` §3 as a derived constraint
   (bump allocation + "hashes cover `[base, used)`"), not a new decision. The open question is
@@ -617,6 +617,24 @@ right; it is the template the others now follow.
   insert that would grow) - which is also the only honest enforcement, since a fixed-mode Map
   cannot grow anywhere. MEMORY.md §1.2 + CONTAINERS.md §3 carry the ruling. Implementation:
   the W2-prep closeout lane.
+  **DONE 2026-08-24 (w2-prep):** `map_init_fixed` pushes the same three blocks and drops the grow
+  arena; the guard sits at the single growth choke point (`map_grow`, so a direct call is covered
+  too) and `TL_FATAL`s "fixed map overflow" in every tier.
+  `map_fixed_serves_its_full_load_factor_without_growing` proves a cap-16 map takes all 12 entries
+  (0.75 × 16, the exact bar the grow condition sets) with `arena_mark` unmoved from init;
+  `map_fixed_overflow_is_fatal` proves the 13th dies, no dev-only skip.
+
+- [ ] **Found while implementing R2, NOT fixed (out of scope, for the next review sweep):
+      `map_put` tests the grow condition before it probes, so an OVERWRITE at exactly the full
+      load takes the grow path.** `map.h:107` — `if ((count + 1) * 4 > cap * 3) map_grow(m)` runs
+      whether or not `k` is already present. On a growing `Map` that is a spurious rehash of a
+      table that gained no entry; on a **fixed** `Map` it is a `TL_FATAL` for an operation that
+      adds nothing, which is a live trap for exactly the sized-at-init callers R2 just mandated
+      (repro: `map_init_fixed(cap 16)`, insert 12 keys, `map_put` any of those 12 again → fatal).
+      Not fixed here because probing before growing changes *when* a growing `Map` rehashes, and
+      therefore its bucket layout — reviewed behaviour, outside this closeout's contract. Fix is
+      one reorder (probe; grow and re-probe only if the slot is empty) plus a test for each mode.
+      Pinned meanwhile by a NOTE in `map_fixed_serves_its_full_load_factor_without_growing`.
 - **R3 — `CONTAINERS.md` §8.3 specifies `TL_ASSERT(!in_tick)` on `map_grow` and it is not
   implemented**, because no `in_tick` facility exists in foundation yet. Either the ArenaGuard's
   barrier window becomes readable from `map.h` or the clause moves to the guard. Filed rather than

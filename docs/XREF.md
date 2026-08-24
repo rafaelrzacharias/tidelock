@@ -64,7 +64,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `CPP-SUBSET.md` -> §8
 - `DETERMINISM.md` -> §3, §5
 - `LUAU-LAYER.md` -> §4
-- `MEMORY.md` -> §2, §5
+- `MEMORY.md` -> §2, §3, §5, §8.1
 - `RENDER2D.md` -> §1, §4
 - `ROADMAP.md` -> §8.7
 
@@ -95,7 +95,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `FX-PALETTE.md` -> §3
 - `GATE0-BENCH.md` -> §3, §4
 - `INPUT.md` -> §9.2
-- `MEMORY.md` -> §4
+- `MEMORY.md` -> §4, §5
 - `NETCODE.md` -> §4, §8
 - `ROADMAP.md` -> §9.5
 - `TESTING.md` -> §1, §6

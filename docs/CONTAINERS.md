@@ -77,7 +77,13 @@ the same relative insertion order, so nothing about a *deleted* key survives in 
 `map_init`/`map_grow` zero the blocks they push (never assume `arena_push` returns zeros — it does
 so only above `high_water` or under `ARENA_ZERO_ON_PUSH`) and `map_remove` zeroes the slot it
 empties. A **growing** `Map` orphans its old blocks below the arena's `used`, so its arena must not
-be `ARENA_HASHED` (W1 containers review; `TODO.md` carries the ruling request). Walk order is deterministic per insertion sequence but **order-fragile across
+be `ARENA_HASHED` — **fixed-shape on hashed arenas, not "never"** (ruled 2026-08-24): `Map` carries
+`Array`'s fixed mode, `map_init_fixed(m, arena, cap)`, which pushes the same three blocks and then
+drops the grow arena, so the insert that would grow `TL_FATAL`s ("fixed map overflow") in every
+tier instead. That is the only honest enforcement available — a `Map` cannot read its arena's
+registry flags, but a fixed-mode `Map` cannot grow anywhere. Size for the load: capacity is
+`round_pow2(max(cap, 2))` and the usable count is `0.75 ×` that. The rule this implements is
+`MEMORY.md` §1.2 ("every container on an `ARENA_HASHED` arena is sized at init"). Walk order is deterministic per insertion sequence but **order-fragile across
 refactors** → `Map` is for registries, editor, caches — anything whose order outlives the binary
 uses a sorted walk. **Sim code keys on integers and never iterates a `Map`**
 (`DETERMINISM.md` §2.7; LESSONS finding G).
@@ -199,9 +205,10 @@ Open addressing, linear probing, power-of-two capacity, load ≤ 0.75, backward-
 `K` is `u32`/`u64`/`NameHash` (static_assert integral); hash = `tl_hash64(&k, sizeof k, TL_HASH_SEED)`.
 Storage: parallel `Array<K> keys`, `Array<V> vals`, `Array<u8> state` (0 empty, 1 full) on the
 owning arena; grow by rehash into a fresh `arena_push` (registries and editor only — never in a
-tick; `TL_ASSERT(!in_tick)` in debug). API: `map_init(arena, cap)`, `map_put`, `map_get → V*`,
-`map_remove`, `map_count`, `map_iter(&it) → K,V*` (order-fragile by contract; `DETERMINISM.md`
-§2.7).
+tick; `TL_ASSERT(!in_tick)` in debug). API: `map_init(arena, cap)`, `map_init_fixed(arena, cap)`
+(§3 — retains no grow arena; `map_grow` `TL_FATAL`s "fixed map overflow" in every tier), `map_put`,
+`map_get → V*`, `map_remove`, `map_count`, `map_iter(&it) → K,V*` (order-fragile by contract;
+`DETERMINISM.md` §2.7).
 
 ### 8.4 `SortedMap<K,V>` / `SortedSet<K>` (`sorted.h`)
 
