@@ -101,6 +101,14 @@ successor of Ore's 43 M-tick run.
 Flakiness rules: **no PR-lane retries**; a flaky test is quarantined to nightly with an owner; a
 **determinism-gate flake is P0** — it is a nondeterminism bug by definition.
 
+**Per-child timeout** (ruled 2026-08-24; the flag is §9.1's `--timeout-ms`): the **PR** lane passes
+**`--timeout-ms=120000`** and **nightly runs without one** (`0`, off). One number serves the PR lane
+because it already runs `--tag !slow`, so the `slow` exhaustive rows — minutes each on their own —
+are not in it; nightly is where those live and where a wall-clock limit would be the wrong tool. A
+timed-out child is killed and reported `TIMEOUT`, its own status: it fails the run, names the test,
+and prints the P0-flake line above, because a test that hangs *is* a determinism-gate flake. Local
+runs default to `0`: a debugger session must not be shot.
+
 ---
 
 ## 7. The per-module rubric (every module's tests line)
@@ -138,11 +146,22 @@ struct TestInfo { const char* name; const char* tags; void (*fn)(TestCtx*); cons
 struct TestCtx { u32 failures; u32 soft_failures; Scratch scratch; VMemApi* os; const char* name; u8 expect_fatal; };
 ```
 
-CLI: `tl_tests [--filter glob] [--tag t|!t]* [--isolate] [--junit path] [--report path] [--list]
-[--seed n]`. `--isolate`: the parent enumerates, then re-executes itself with `--run-one <index>`
-per test on a worker pool of `core_count` processes; exit code + captured stderr → status; a
-`TL_TEST_EXPECT_FATAL` test passes iff the child exits with the fatal code (2) and prints the
-`TL_FATAL` marker. Assertions record file:line:expr and continue (`EXPECT`) or `longjmp`-free
+CLI: `tl_tests [--filter glob] [--tag t|!t]* [--isolate] [--workers n] [--junit path]
+[--report path] [--list] [--seed n] [--timeout-ms n]`. `--isolate`: the parent enumerates, then
+re-executes itself with `--run-one <index>` per test on a worker pool of `core_count` processes;
+exit code + captured stderr → status; a `TL_TEST_EXPECT_FATAL` test passes iff the child exits with
+the fatal code (2) and prints the `TL_FATAL` marker.
+
+`--timeout-ms n` (**ruled 2026-08-24**): a per-**child** wall-clock limit, `0` = off and the
+default. Both wait paths are bounded by it — the `--isolate` pool's (each slot carries its own
+deadline; the pool's multi-wait is bounded by the soonest of them) and the single-child path a
+fatal-expected row takes without `--isolate`. At the deadline the child is **killed** and its row
+is `TIMEOUT`: its own status in the TSV, the JUnit XML and the summary, counted separately from
+`FAIL`, and it fails the run. `TIMEOUT` beats `expect_fatal` in `tl_child_verdict` — the exit code
+of a process the runner killed is the runner's own, so a hung fatal-expected row must never read as
+a satisfied expectation. A timed-out row is **not** re-run by the failure replay (it would only
+hang again for another full budget). The limit applies to children only: an ordinary test without
+`--isolate` runs in-process, where there is no separate process to kill. §6 carries the lane values. Assertions record file:line:expr and continue (`EXPECT`) or `longjmp`-free
 early return via a `return` in the macro (`ASSERT` macros are `if (!(cond)) { record; return; }` —
 so they are only usable at test-function top level; helpers return `bool`). `TL_ASSERT_NO_ALLOC`
 wraps a block: arena mark pair + CRT counter read. `TL_ASSERT_DETERMINISTIC(setup_fn, ticks)`
@@ -166,7 +185,7 @@ scenes and Hovel.
 
 | Job | Command |
 |---|---|
-| unit | `tl_tests --isolate --tag !slow --junit` |
+| unit | `tl_tests --isolate --tag !slow --timeout-ms 120000 --junit` (§6: nightly runs without the timeout) |
 | dual-sim / replay / sweep | `tl_driver --scene scenes/harness_*.luau --dual`, `--record` then `--replay --verify`, `--workers-sweep` |
 | sanitizers | same unit + harness jobs on the `-DTL_SANITIZE=ON` build (UBSan+ASan), timing ignored |
 | audits | `tl_audit_symbols`, `tl_audit_includes`, `tl_rebuild_budget`, fingerprint-stability (two clean builds, diff `build_id.txt`) |

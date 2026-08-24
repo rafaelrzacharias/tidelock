@@ -727,7 +727,7 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       the KNOWN GAP notes in `tl_test.h`, `runner_core.h` and `fx_fatal.test.cpp` in the same
       commit. Cover it with a negative test: a child that exits 0, a child that exits 2 with no
       marker, and a child that exits 2 with the marker naming the WRONG file:line, must all FAIL.
-- [ ] **Ruling request — a per-child timeout.** `docs/TESTING.md` is silent, and the runner has
+- [x] **Ruling request — a per-child timeout.** `docs/TESTING.md` is silent, and the runner has
       none: `WaitForMultipleObjects(..., INFINITE)` / `waitpid(pid, &status, 0)`
       (`tests/runner/main.cpp`). A test that hangs — or a fatal-expected test whose assert does
       not fire and whose body loops — stalls the PR lane forever with no output, and
@@ -744,6 +744,36 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       names the test, and prints TESTING.md §6's P0-flake line. Implementation (W1
       ruling-closeout lane): the flag + both wait paths + a test with a deliberately hanging
       child; TESTING.md §9.1 gains the flag, §6 the two lane values.
+      **DONE 2026-08-24 (W1 ruling-closeout).** `--timeout-ms n`, `0` = off and the default,
+      validated like `--workers` (a negative value is a loud refusal, never a `(DWORD)(-1)` that
+      reads as `INFINITE` and silently disarms the timeout). Both wait paths: the `--isolate`
+      pool carries a per-slot wall-clock deadline and bounds `WaitForMultipleObjects` by the
+      SOONEST of them (its timeout is per-call, the budget is per-child), and the single-child
+      path a fatal-expected row takes without `--isolate` bounds `WaitForSingleObject` /
+      replaces the blocking `waitpid` with a `WNOHANG` + `SIGKILL` poll loop. **The clock is
+      `GetTickCount64`/`clock_gettime(CLOCK_MONOTONIC)`, not `clock()`:** `clock()` is CPU time
+      on glibc and the parent of a hung child burns none of it, so a `clock()`-based deadline
+      would never fire on Linux (the report's `ms` columns keep `clock()` - a duration, not a
+      deadline). `TIMEOUT` is its own status in the TSV, the JUnit XML and the summary, counted
+      apart from `FAIL`, and it fails the run; it beats `expect_fatal` in `tl_child_verdict`
+      because the exit code of a process the runner killed is the runner's own. Timed-out rows
+      are not re-run by the failure replay. Tests: `tests/runner/runner_timeout.test.cpp` (a
+      hanging trigger through the pool; a hanging FATAL-EXPECTED trigger through the serial path
+      - the exact scenario this was filed for; the healthy-child and malformed-value negatives)
+      plus `runner_child_verdict_timeout_is_its_own_status` over the pure predicate.
+      `TESTING.md` §9.1 has the flag, §6 the lane values, §9.3 the unit-job command, and
+      `.github/workflows/pr.yml` passes `--timeout-ms 120000`.
+      **Not covered, stated rather than hidden:** the POSIX halves of both wait paths are written
+      but not executed - this lane has no Linux host. The PR lane's ubuntu job is the first run.
+- [ ] **A bare `tl_tests` run is RED on main: two env-gated triggers record zero checks.**
+      Found 2026-08-24 by the ruling-closeout lane (baseline measurement before any edit), filed
+      rather than fixed - `tests/foundation/tl_assert.test.cpp` is the tooling-rt lane's reviewed
+      code. `tl_assert_forced_fatal_trigger` and `tl_assert_forced_check_trigger` `return` early
+      when their env var is unset, so they record ZERO checks, and `tl_ctx_verdict` scores a
+      zero-check body FAIL by design. Measured: `tl_tests` in dev = 148 selected, 144 passed,
+      **2 failed**, 2 skipped. CI never saw it because both are tagged `slow` and the PR lane runs
+      `--tag !slow`. The fix is one line each - `TL_SKIP("inert without TL_FATAL_PROBE; ...")`
+      instead of `return`, which is what `runner_timeout_hang_trigger` does.
 - [ ] **`to<R>` out of range has no release-value test.** `tests/foundation/fx_fatal.test.cpp`
       pairs each dev-tier assert with `fx_review_release_error_values`'s netcode/ship value —
       for five of its six rows. `to<q_t>(fx_raw<pos_t>(1 << 19))` asserts in dev and, with the
