@@ -36,7 +36,11 @@ Result<Span<u8>> hf_read_all(void* ctx, StrView path, VMemArena* arena) {
         return Result<Span<u8>>{ Span<u8>{}, (ErrCode)ERR_PLATFORM_PATH_TOO_LONG };
     }
 #ifdef _WIN32
-    HANDLE h = CreateFileA(path_buf, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    wchar_t path_w[OS_PATH_MAX];
+    if (!os_path_to_wide(path, path_w, (u32)(sizeof(path_w) / sizeof(path_w[0])))) {
+        return Result<Span<u8>>{ Span<u8>{}, (ErrCode)ERR_PLATFORM_PATH_TOO_LONG };
+    }
+    HANDLE h = CreateFileW(path_w, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) {
         return Result<Span<u8>>{ Span<u8>{}, (ErrCode)ERR_PLATFORM_FILE_NOT_FOUND };
     }
@@ -87,7 +91,11 @@ Result<Span<u8>> hf_read_all(void* ctx, StrView path, VMemArena* arena) {
 
 ErrCode raw_write(const char* path, Span<const u8> data, bool append) {
 #ifdef _WIN32
-    HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, nullptr, append ? OPEN_ALWAYS : CREATE_ALWAYS,
+    wchar_t path_w[OS_PATH_MAX];
+    if (!os_path_to_wide(StrView{ path, (u32)strlen(path) }, path_w, (u32)(sizeof(path_w) / sizeof(path_w[0])))) {
+        return (ErrCode)ERR_PLATFORM_PATH_TOO_LONG;
+    }
+    HANDLE h = CreateFileW(path_w, GENERIC_WRITE, 0, nullptr, append ? OPEN_ALWAYS : CREATE_ALWAYS,
                             FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) { return (ErrCode)ERR_PLATFORM_FILE_IO; }
     if (append) { LARGE_INTEGER z{}; SetFilePointerEx(h, z, nullptr, FILE_END); }
@@ -134,7 +142,9 @@ u8 hf_exists(void*, StrView path) {
     char buf[OS_PATH_MAX];
     if (!os_path_to_cstr(path, buf, sizeof(buf))) { return 0u; }
 #ifdef _WIN32
-    return GetFileAttributesA(buf) != INVALID_FILE_ATTRIBUTES ? 1u : 0u;
+    wchar_t path_w[OS_PATH_MAX];
+    if (!os_path_to_wide(path, path_w, (u32)(sizeof(path_w) / sizeof(path_w[0])))) { return 0u; }
+    return GetFileAttributesW(path_w) != INVALID_FILE_ATTRIBUTES ? 1u : 0u;
 #else
     return access(buf, F_OK) == 0 ? 1u : 0u;
 #endif
@@ -161,30 +171,41 @@ Result<u32> hf_enumerate(void*, StrView dir, FileEntry* out, u32 cap) {
     }
     u32 count = 0u;
 #ifdef _WIN32
+    // "<dir>/*", built in UTF-8 and widened once. FindFirstFileA would decode the pattern in the
+    // process ANSI code page AND hand cFileName back transcoded through it, which makes the
+    // bytewise sort below a function of the machine's locale rather than of the directory
+    // (docs/PLATFORM.md §9.3 "file": paths UTF-8; §9.2: "sorted bytewise by name").
     char pattern[OS_PATH_MAX + 2];
     const u32 n = (u32)strlen(dir_buf);
     for (u32 i = 0; i < n; ++i) { pattern[i] = dir_buf[i]; }
-    pattern[n] = '\\'; pattern[n + 1u] = '*'; pattern[n + 2u] = 0;
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA(pattern, &fd);
-    if (h == INVALID_HANDLE_VALUE) { return Result<u32>{ 0u, ERR_OK }; }
+    pattern[n] = '/'; pattern[n + 1u] = '*'; pattern[n + 2u] = 0;
+    wchar_t pattern_w[OS_PATH_MAX + 4];
+    if (!os_path_to_wide(StrView{ pattern, n + 2u }, pattern_w,
+                         (u32)(sizeof(pattern_w) / sizeof(pattern_w[0])))) {
+        return Result<u32>{ 0u, (ErrCode)ERR_PLATFORM_PATH_TOO_LONG };
+    }
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(pattern_w, &fd);
+    if (h == INVALID_HANDLE_VALUE) { return Result<u32>{ 0u, (ErrCode)ERR_PLATFORM_FILE_NOT_FOUND }; }
     do {
-        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) { continue; }
+        if (fd.cFileName[0] == L'.' &&
+            (fd.cFileName[1] == 0 || (fd.cFileName[1] == L'.' && fd.cFileName[2] == 0))) { continue; }
         if (count >= cap) { FindClose(h); return Result<u32>{ count + 1u, (ErrCode)ERR_PLATFORM_FILE_TOO_LARGE }; }
         FileEntry& e = out[count];
-        u32 nl = (u32)strlen(fd.cFileName);
-        if (nl >= sizeof(e.name)) { nl = (u32)sizeof(e.name) - 1u; }
-        for (u32 i = 0; i < nl; ++i) { e.name[i] = fd.cFileName[i]; }
-        for (u32 i = nl; i < sizeof(e.name); ++i) { e.name[i] = 0; }
+        for (u32 i = 0; i < sizeof(e.name); ++i) { e.name[i] = 0; }
+        // A name that does not fit FileEntry::name - or is not well-formed UTF-16 (an unpaired
+        // surrogate is legal on NTFS) - is SKIPPED, not truncated: a truncated UTF-8 name is
+        // invalid UTF-8 and no longer identifies the file it came from.
+        if (os_path_from_wide(fd.cFileName, e.name, (u32)sizeof(e.name)) == 0u) { continue; }
         e.size = (u32)fd.nFileSizeLow;
         e.is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? 1u : 0u;
         e._pad0 = 0u; e._pad1 = 0u;
         ++count;
-    } while (FindNextFileA(h, &fd));
+    } while (FindNextFileW(h, &fd));
     FindClose(h);
 #else
     DIR* d = opendir(dir_buf);
-    if (d == nullptr) { return Result<u32>{ 0u, ERR_OK }; }
+    if (d == nullptr) { return Result<u32>{ 0u, (ErrCode)ERR_PLATFORM_FILE_NOT_FOUND }; }
     struct dirent* ent;
     while ((ent = readdir(d)) != nullptr) {
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) { continue; }
@@ -229,8 +250,15 @@ FileApi headless_file_api(HeadlessState* s) {
 void headless_init_paths(HeadlessState* s) {
     char cwd[OS_PATH_MAX];
 #ifdef _WIN32
-    DWORD n = GetCurrentDirectoryA((DWORD)sizeof(cwd) - 2u, cwd);
-    TL_CHECK(n > 0u && n < sizeof(cwd) - 1u);
+    // Wide, then transcoded to UTF-8 here: GetCurrentDirectoryA would hand back the ANSI-code-page
+    // rendering of a cwd that may not be representable in it at all (docs/PLATFORM.md §9.3 "file").
+    wchar_t cwd_w[OS_PATH_MAX];
+    const DWORD wn = GetCurrentDirectoryW((DWORD)(sizeof(cwd_w) / sizeof(cwd_w[0])), cwd_w);
+    TL_CHECK(wn > 0u && wn < sizeof(cwd_w) / sizeof(cwd_w[0]));
+    // Win32 answers in backslashes; the contract is '/' separators (docs/PLATFORM.md §9.3 "file").
+    for (DWORD i = 0; i < wn; ++i) { if (cwd_w[i] == L'\\') { cwd_w[i] = L'/'; } }
+    u32 n = os_path_from_wide(cwd_w, cwd, (u32)sizeof(cwd) - 2u);
+    TL_CHECK(n > 0u);
 #else
     TL_CHECK(getcwd(cwd, sizeof(cwd) - 2u) != nullptr);
     u32 n = (u32)strlen(cwd);

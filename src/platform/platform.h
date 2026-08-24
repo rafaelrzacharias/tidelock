@@ -143,7 +143,8 @@ struct FileApi {
     ErrCode (*write_atomic)(void* ctx, StrView path, Span<const u8>);           // §9.3
     ErrCode (*append)(void* ctx, StrView path, Span<const u8>);                 // log/TSV sinks
     u8      (*exists)(void* ctx, StrView path);
-    Result<u32> (*enumerate)(void* ctx, StrView dir, FileEntry* out, u32 cap); // non-recursive; sorted bytewise by name; count > cap -> ERR_PLATFORM_FILE_TOO_LARGE
+    Result<u32> (*enumerate)(void* ctx, StrView dir, FileEntry* out, u32 cap); // non-recursive; sorted bytewise by name;
+                                                                               // count > cap -> FILE_TOO_LARGE; missing dir -> FILE_NOT_FOUND, never an empty listing
     StrView (*base_path)(void* ctx);  StrView (*pref_path)(void* ctx);          // with trailing '/'
     Result<WatchHandle> (*watch)(void* ctx, StrView dir, WatchFn, void* wctx); // dev; netcode/ship: ERR_PLATFORM_UNSUPPORTED
     void    (*unwatch)(void* ctx, WatchHandle);

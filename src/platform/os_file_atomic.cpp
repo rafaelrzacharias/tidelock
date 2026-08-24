@@ -80,7 +80,16 @@ ErrCode os_write_atomic(StrView path, Span<const u8> data) {
     }
 
 #ifdef _WIN32
-    HANDLE h = CreateFileA(tmp_buf, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    // UTF-16 at the boundary, never the *A entry points: those decode in the process ANSI code
+    // page, not UTF-8 (docs/PLATFORM.md §9.3 "file", §9.4 "CreateFileW"). tmp_buf/path_buf are
+    // still UTF-8 c-strings - only the OS call is wide.
+    wchar_t tmp_w[OS_PATH_MAX + 32];
+    wchar_t path_w[OS_PATH_MAX];
+    if (!os_path_to_wide(StrView{ tmp_buf, (u32)strlen(tmp_buf) }, tmp_w, (u32)(sizeof(tmp_w) / sizeof(tmp_w[0]))) ||
+        !os_path_to_wide(path, path_w, (u32)(sizeof(path_w) / sizeof(path_w[0])))) {
+        return (ErrCode)ERR_PLATFORM_PATH_TOO_LONG;
+    }
+    HANDLE h = CreateFileW(tmp_w, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) { return (ErrCode)ERR_PLATFORM_FILE_IO; }
     const u8* p = data.data; u64 left = (u64)data.count; bool write_ok = true;
     while (left > 0u) {
@@ -89,15 +98,15 @@ ErrCode os_write_atomic(StrView path, Span<const u8> data) {
         if (!WriteFile(h, p, chunk, &wrote, nullptr) || wrote != chunk) { write_ok = false; break; }
         p += chunk; left -= chunk;
     }
-    if (!write_ok) { CloseHandle(h); DeleteFileA(tmp_buf); return (ErrCode)ERR_PLATFORM_FILE_IO; }
+    if (!write_ok) { CloseHandle(h); DeleteFileW(tmp_w); return (ErrCode)ERR_PLATFORM_FILE_IO; }
     maybe_kill(1);
     const bool flush_ok = FlushFileBuffers(h) != 0;
     CloseHandle(h);
-    if (!flush_ok) { DeleteFileA(tmp_buf); return (ErrCode)ERR_PLATFORM_FILE_IO; }
+    if (!flush_ok) { DeleteFileW(tmp_w); return (ErrCode)ERR_PLATFORM_FILE_IO; }
     maybe_kill(2);
     maybe_kill(3);
-    if (!MoveFileExA(tmp_buf, path_buf, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        DeleteFileA(tmp_buf);
+    if (!MoveFileExW(tmp_w, path_w, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileW(tmp_w);
         return (ErrCode)ERR_PLATFORM_FILE_IO;
     }
     return ERR_OK;

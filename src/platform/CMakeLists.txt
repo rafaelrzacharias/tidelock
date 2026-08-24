@@ -3,10 +3,14 @@
 file(GLOB TL_PLATFORM_COMMON CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 # os_win_vmem.cpp / os_posix_vmem.cpp: "one compiled per OS" (docs/PLATFORM.md §9.1) - the glob
 # above picks up both, so drop whichever one this target isn't building for.
+# os_path_win.cpp is the same story for the UTF-8 <-> UTF-16 path boundary (docs/PLATFORM.md §9.3
+# "file": paths are UTF-8, so the *A entry points - which decode in the ANSI code page - are never
+# used); it has no POSIX counterpart, since POSIX paths are already bytes.
 if(WIN32)
   list(REMOVE_ITEM TL_PLATFORM_COMMON "${CMAKE_CURRENT_SOURCE_DIR}/os_posix_vmem.cpp")
 else()
   list(REMOVE_ITEM TL_PLATFORM_COMMON "${CMAKE_CURRENT_SOURCE_DIR}/os_win_vmem.cpp")
+  list(REMOVE_ITEM TL_PLATFORM_COMMON "${CMAKE_CURRENT_SOURCE_DIR}/os_path_win.cpp")
 endif()
 file(GLOB TL_PLATFORM_HEADLESS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/impl_headless/*.cpp")
 file(GLOB TL_PLATFORM_SDL3 CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/impl_sdl3/*.cpp")
