@@ -239,7 +239,12 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `TL_FOUNDATION_NONDET` in `src/foundation/CMakeLists.txt` (it carries `f32`). The mem/
       containers/render2d lanes own these files outright the moment they start; a conflicting
       definition there wins over this stopgap.
-- [ ] **RR-7 W1 platform is blocked on MEMORY.md's `VMemArena`, not just `docs/ROADMAP.md`
+      *(Renumbered from RR-7 on 2026-08-24: `w1-tooling-rt` filed its own RR-7 - the tooling
+      plane's io/state exemption, now `CPP-SUBSET.md` §9 R-4 - on a branch that had not
+      merged, so both lanes minted the same number off the same base. RR-7 is the tooling
+      one; this is RR-8. Nothing else in the tree referenced this number. Wave merge: check
+      the next free RR number against every open W1 branch, not just `main`.)*
+- [ ] **RR-8 W1 platform is blocked on MEMORY.md's `VMemArena`, not just `docs/ROADMAP.md`
       says.** `PLATFORM.md` §9.5's init order allocates each impl's own state "from the platform's
       own `VMemArena`" from the FIRST step, and `FileApi::read_all` pushes into a caller-supplied
       one - not a peripheral use, the load-bearing allocation pattern for both impls. `ROADMAP.md`
