@@ -26,6 +26,7 @@
 #include <windows.h>
 #else
 #include <errno.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -86,6 +87,12 @@ static bool make_dir(const char* path) {
     return CreateDirectoryA(path, nullptr) != 0 || GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
+// A monotonic WALL clock in milliseconds, for --timeout-ms only. Not clock(): that is CPU time
+// on glibc, and the parent of a hung child spends no CPU at all, so a clock()-based timeout
+// would never fire on Linux. (The `ms` columns in the report keep using clock() - a duration
+// measurement, not a deadline.)
+static u64 now_ms(void) { return (u64)GetTickCount64(); }
+
 static u32 core_count(void) {
     SYSTEM_INFO si; GetSystemInfo(&si);
     return si.dwNumberOfProcessors ? (u32)si.dwNumberOfProcessors : 1u;
@@ -104,17 +111,27 @@ static void child_cmdline(char* cmd, usize cap, const char* self, u32 test_index
 }
 
 // Blocking single spawn+wait (serial path: non-isolate fatal tests, and the failure replay).
-static void spawn_and_wait(const char* self, u32 test_index, u32 seed, const char* cwd, ChildResult* out) {
+// `timeout_ms` == 0 waits forever (the local default); otherwise the child is killed at the
+// deadline and reported TIMEOUT (docs/TESTING.md §9.1).
+static void spawn_and_wait(const char* self, u32 test_index, u32 seed, const char* cwd, u64 timeout_ms, ChildResult* out) {
     char cmd[2048];
     child_cmdline(cmd, sizeof(cmd), self, test_index, seed);
     STARTUPINFOA si; memset(&si, 0, sizeof(si)); si.cb = sizeof(si);
     PROCESS_INFORMATION pi; memset(&pi, 0, sizeof(pi));
+    out->timed_out = false;
     out->spawned = CreateProcessA(nullptr, cmd, nullptr, nullptr, FALSE, 0, nullptr, cwd, &si, &pi) != 0;
     if (!out->spawned) {
         fprintf(stderr, "tl_tests: CreateProcess failed (%lu) for %s\n", GetLastError(), cmd);
         out->abnormal = false; out->exit_code = -1; return;
     }
-    WaitForSingleObject(pi.hProcess, INFINITE);
+    const DWORD wait_for = timeout_ms ? (DWORD)timeout_ms : INFINITE;
+    if (WaitForSingleObject(pi.hProcess, wait_for) == WAIT_TIMEOUT) {
+        // Kill it, then reap: leaving it running would leak a process per timed-out test and,
+        // under --isolate, keep a lock on its private cwd.
+        TerminateProcess(pi.hProcess, (UINT)TL_EXIT_FAIL);
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        out->timed_out = true;
+    }
     DWORD code = 0;
     GetExitCodeProcess(pi.hProcess, &code);
     CloseHandle(pi.hThread);
@@ -134,8 +151,8 @@ static HANDLE spawn_async(const char* self, u32 test_index, u32 seed, const char
     return pi.hProcess;
 }
 
-static ChildResult reap(HANDLE h) {
-    ChildResult r; r.spawned = true;
+static ChildResult reap(HANDLE h, bool timed_out) {
+    ChildResult r; r.spawned = true; r.timed_out = timed_out;
     DWORD code = 0;
     GetExitCodeProcess(h, &code);
     CloseHandle(h);
@@ -150,6 +167,22 @@ static bool make_dir(const char* path) {
     return mkdir(path, 0755) == 0 || errno == EEXIST;
 }
 
+// See the Windows note: clock() is CPU time here, and a parent waiting on a hung child burns
+// none of it, so --timeout-ms needs a monotonic WALL clock.
+static u64 now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (u64)ts.tv_sec * 1000u + (u64)(ts.tv_nsec / 1000000);
+}
+
+// The poll step for the waitpid timeout loops: short enough that a timeout is reported promptly,
+// long enough that a full suite of fast children does not spin a core. Only ever reached when
+// --timeout-ms is set; without it both loops block in waitpid as before.
+static void poll_sleep(void) {
+    struct timespec ts; ts.tv_sec = 0; ts.tv_nsec = 2 * 1000 * 1000;   // 2 ms
+    (void)nanosleep(&ts, nullptr);
+}
+
 static u32 core_count(void) {
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     return n > 0 ? (u32)n : 1u;
@@ -161,9 +194,10 @@ static void self_path(char* out, usize cap) {
     out[n] = 0;
 }
 
-static void spawn_and_wait(const char* self, u32 test_index, u32 seed, const char* cwd, ChildResult* out) {
+static void spawn_and_wait(const char* self, u32 test_index, u32 seed, const char* cwd, u64 timeout_ms, ChildResult* out) {
     char idx[16]; snprintf(idx, sizeof(idx), "%u", test_index);
     char sd[16];  snprintf(sd, sizeof(sd), "%u", seed);
+    out->timed_out = false;
     pid_t pid = fork();
     if (pid < 0) {
         fprintf(stderr, "tl_tests: fork failed (%d) for index %u\n", errno, test_index);
@@ -176,7 +210,25 @@ static void spawn_and_wait(const char* self, u32 test_index, u32 seed, const cha
         _exit(127);   // execv failed
     }
     int status = 0;
-    waitpid(pid, &status, 0);
+    if (timeout_ms == 0u) {
+        while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
+    } else {
+        // waitpid has no timeout, so this is the poll loop the ruling names: WNOHANG until the
+        // deadline, then SIGKILL and a blocking reap so no zombie is left behind.
+        const u64 deadline = now_ms() + timeout_ms;
+        for (;;) {
+            const pid_t r = waitpid(pid, &status, WNOHANG);
+            if (r == pid) { break; }
+            if (r < 0 && errno != EINTR) { break; }
+            if (now_ms() >= deadline) {
+                kill(pid, SIGKILL);
+                while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
+                out->timed_out = true;
+                break;
+            }
+            poll_sleep();
+        }
+    }
     out->spawned = true;
     if (WIFEXITED(status)) { out->exit_code = WEXITSTATUS(status); out->abnormal = false; }
     else { out->exit_code = -1; out->abnormal = true; }   // signalled (e.g. SIGILL from __builtin_trap)
@@ -196,8 +248,8 @@ static pid_t spawn_async_pid(const char* self, u32 test_index, u32 seed, const c
     return pid;
 }
 
-static ChildResult reap_status(int status) {
-    ChildResult r; r.spawned = true;
+static ChildResult reap_status(int status, bool timed_out) {
+    ChildResult r; r.spawned = true; r.timed_out = timed_out;
     if (WIFEXITED(status)) { r.exit_code = WEXITSTATUS(status); r.abnormal = false; }
     else { r.exit_code = -1; r.abnormal = true; }
     return r;
@@ -234,7 +286,8 @@ static TestVerdict run_in_process(const TestInfo& ti, u32 seed, const char** ski
 
 static void usage(void) {
     printf("tl_tests [--filter glob] [--tag t|!t]* [--isolate] [--workers n] [--list]\n"
-           "         [--report path.tsv] [--junit path.xml] [--run-one index] [--seed n]\n");
+           "         [--report path.tsv] [--junit path.xml] [--run-one index] [--seed n]\n"
+           "         [--timeout-ms n]   per-CHILD timeout; 0 (default) = off\n");
 }
 
 int main(int argc, char** argv) {
@@ -246,6 +299,12 @@ int main(int argc, char** argv) {
     i64 run_one = -1;
     u32 global_seed = 0;
     i64 workers_arg = 0;   // 0 = auto (core_count); a command-line value must be >= 1
+    // Per-CHILD timeout (docs/TESTING.md §9.1, ruled 2026-08-24). 0 = off, which is the local
+    // default: a debugger session or a deliberately long run must not be shot. Each CI lane sets
+    // it explicitly - the PR lane 120000, nightly none (docs/TESTING.md §6). It applies to child
+    // processes only; an ordinary test run in-process (no --isolate) has no separate process to
+    // kill, so the flag cannot help there and the run hangs as it always did.
+    i64 timeout_ms_arg = 0;
 
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
@@ -263,6 +322,7 @@ int main(int argc, char** argv) {
         }
         else if (strcmp(a, "--isolate") == 0) { isolate = true; }
         else if (strcmp(a, "--workers") == 0 && has_next) { workers_arg = atoll(argv[++i]); }
+        else if (strcmp(a, "--timeout-ms") == 0 && has_next) { timeout_ms_arg = atoll(argv[++i]); }
         else if (strcmp(a, "--list") == 0) { list_only = true; }
         else if (strcmp(a, "--report") == 0 && has_next) { report_path = argv[++i]; }
         else if (strcmp(a, "--junit") == 0 && has_next) { junit_path = argv[++i]; }
@@ -277,6 +337,13 @@ int main(int argc, char** argv) {
     if (workers_arg > 0x7fffffff || workers_arg < 0) {
         fprintf(stderr, "tl_tests: --workers must be 0 (auto) or a positive count\n"); return TL_EXIT_FAIL;
     }
+    // Same rule as --workers, for the same reason: a negative or absurd value must be a loud
+    // refusal, never a (DWORD)(-1) that reads as INFINITE and silently disarms the timeout.
+    if (timeout_ms_arg < 0 || timeout_ms_arg > 0x7fffffff) {
+        fprintf(stderr, "tl_tests: --timeout-ms must be 0 (off) or a positive millisecond count\n");
+        return TL_EXIT_FAIL;
+    }
+    const u64 timeout_ms = (u64)timeout_ms_arg;
 
     // --run-one: the child entry point. Runs the test body in-process (this IS the isolated
     // process); a fatal-expected test that actually fatals ends this process here, which is the
@@ -366,6 +433,11 @@ int main(int argc, char** argv) {
         for (u32 s = 0; s < workers; ++s) { active_pid[s] = -1; }
 #endif
         clock_t* slot_t0 = (clock_t*)xalloc(sizeof(clock_t) * workers, "the worker timers");
+        // Per-slot wall-clock deadline for --timeout-ms (unused when it is 0).
+        u64* slot_deadline = (u64*)xalloc(sizeof(u64) * workers, "the worker deadlines");
+#if !defined(_WIN32)
+        bool* slot_killed = (bool*)xalloc(sizeof(bool) * workers, "the worker kill flags");
+#endif
         u32 next_job = 0;
         u32 in_flight = 0;
         char cwd[576];
@@ -389,7 +461,9 @@ int main(int argc, char** argv) {
                 for (u32 s = 0; s < workers; ++s) {
                     if (!active[s].used) {
                         active[s].used = true; active[s].job_index = idx; active[s].process = h;
-                        handles[s] = h; slot_t0[s] = clock(); ++in_flight;
+                        handles[s] = h; slot_t0[s] = clock();
+                        slot_deadline[s] = now_ms() + timeout_ms;
+                        ++in_flight;
                         break;
                     }
                 }
@@ -403,7 +477,10 @@ int main(int argc, char** argv) {
                 for (u32 s = 0; s < workers; ++s) {
                     if (active_pid[s] < 0) {
                         active_pid[s] = pid;
-                        active_idx[s] = idx; slot_t0[s] = clock(); ++in_flight;
+                        active_idx[s] = idx; slot_t0[s] = clock();
+                        slot_deadline[s] = now_ms() + timeout_ms;
+                        slot_killed[s] = false;
+                        ++in_flight;
                         break;
                     }
                 }
@@ -417,11 +494,42 @@ int main(int argc, char** argv) {
             u32 wait_n = 0;
             for (u32 s = 0; s < workers; ++s) { if (active[s].used) { wait_h[wait_n] = handles[s]; wait_slot[wait_n] = s; ++wait_n; } }
             if (wait_n == 0) { continue; }
-            DWORD w = WaitForMultipleObjects(wait_n, wait_h, FALSE, INFINITE);
-            if (w >= WAIT_OBJECT_0 && w < WAIT_OBJECT_0 + wait_n) {
+            // WaitForMultipleObjects' timeout is for the WHOLE call, but --timeout-ms is
+            // per child, so the wait is bounded by the SOONEST deadline among the in-flight
+            // slots. Waking early is harmless (the loop just waits again); waking late would
+            // let a slot overrun its budget by up to one other slot's remaining time.
+            DWORD wait_for = INFINITE;
+            if (timeout_ms) {
+                const u64 t = now_ms();
+                u64 soonest = 0;
+                bool first = true;
+                for (u32 k = 0; k < wait_n; ++k) {
+                    const u64 dl = slot_deadline[wait_slot[k]];
+                    if (first || dl < soonest) { soonest = dl; first = false; }
+                }
+                wait_for = (t >= soonest) ? 0u : (DWORD)(soonest - t);
+            }
+            DWORD w = WaitForMultipleObjects(wait_n, wait_h, FALSE, wait_for);
+            if (w == WAIT_TIMEOUT) {
+                // Kill every slot that is actually past ITS deadline (usually one; more if the
+                // machine stalled). A slot that is not is simply waited on again.
+                const u64 t = now_ms();
+                for (u32 k = 0; k < wait_n; ++k) {
+                    const u32 s = wait_slot[k];
+                    if (t < slot_deadline[s]) { continue; }
+                    const u32 idx = active[s].job_index;
+                    TerminateProcess(active[s].process, (UINT)TL_EXIT_FAIL);
+                    WaitForSingleObject(active[s].process, INFINITE);
+                    ChildResult cr = reap(active[s].process, true);
+                    results[idx].verdict = (u8)tl_child_verdict(TL_TESTS[idx].expect_fatal != 0, TL_DEV != 0, cr);
+                    results[idx].ms = 1000.0 * (double)(clock() - slot_t0[s]) / (double)CLOCKS_PER_SEC;
+                    active[s].used = false;
+                    --in_flight;
+                }
+            } else if (w >= WAIT_OBJECT_0 && w < WAIT_OBJECT_0 + wait_n) {
                 const u32 s = wait_slot[w - WAIT_OBJECT_0];
                 const u32 idx = active[s].job_index;
-                ChildResult cr = reap(active[s].process);
+                ChildResult cr = reap(active[s].process, false);
                 results[idx].verdict = (u8)tl_child_verdict(TL_TESTS[idx].expect_fatal != 0, TL_DEV != 0, cr);
                 results[idx].ms = 1000.0 * (double)(clock() - slot_t0[s]) / (double)CLOCKS_PER_SEC;
                 active[s].used = false;
@@ -442,7 +550,29 @@ int main(int argc, char** argv) {
             }
 #else
             int status = 0;
-            pid_t done = waitpid(-1, &status, 0);
+            pid_t done = -1;
+            if (timeout_ms == 0u) {
+                done = waitpid(-1, &status, 0);
+            } else {
+                // The waitpid half of the same rule: WNOHANG poll, and on each trip kill every
+                // slot past its own deadline. The killed child is then reaped by this very loop
+                // on a later trip, so there is one reaping path, not two.
+                for (;;) {
+                    done = waitpid(-1, &status, WNOHANG);
+                    if (done > 0) { break; }
+                    if (done < 0 && errno != EINTR) { break; }
+                    const u64 t = now_ms();
+                    bool killed_any = false;
+                    for (u32 s = 0; s < workers; ++s) {
+                        if (active_pid[s] >= 0 && !slot_killed[s] && t >= slot_deadline[s]) {
+                            kill(active_pid[s], SIGKILL);
+                            slot_killed[s] = true;
+                            killed_any = true;
+                        }
+                    }
+                    if (!killed_any) { poll_sleep(); }
+                }
+            }
             if (done < 0) {
                 if (errno == EINTR) { continue; }
                 // No child left to wait for, yet in_flight > 0: the pool lost track. Fail every
@@ -457,10 +587,11 @@ int main(int argc, char** argv) {
             for (u32 s = 0; s < workers; ++s) {
                 if (active_pid[s] == done) {
                     const u32 idx = active_idx[s];
-                    ChildResult cr = reap_status(status);
+                    ChildResult cr = reap_status(status, slot_killed[s]);
                     results[idx].verdict = (u8)tl_child_verdict(TL_TESTS[idx].expect_fatal != 0, TL_DEV != 0, cr);
                     results[idx].ms = 1000.0 * (double)(clock() - slot_t0[s]) / (double)CLOCKS_PER_SEC;
                     active_pid[s] = -1;
+                    slot_killed[s] = false;
                     --in_flight;
                     break;
                 }
@@ -470,9 +601,9 @@ int main(int argc, char** argv) {
 #if defined(_WIN32)
         free(active); free(handles);
 #else
-        free(active_pid); free(active_idx);
+        free(active_pid); free(active_idx); free(slot_killed);
 #endif
-        free(slot_t0);
+        free(slot_t0); free(slot_deadline);
 
         // --- sorted deterministic replay of failures: re-run each failure alone, serially, in
         // ascending index order, so the report attributes clean (non-interleaved) stderr to each
@@ -481,12 +612,14 @@ int main(int argc, char** argv) {
         // (docs/TESTING.md §6 - P0), so the FAIL stands and the flake is printed.
         for (u32 i = 0; i < order_count; ++i) {
             const u32 idx = order[i];
+            // TIMEOUT rows are deliberately NOT replayed: the replay would hang for another full
+            // --timeout-ms and tell us only what we already know. The status stands.
             if (results[idx].verdict != VERDICT_FAIL) { continue; }
             char rcwd[576];
             snprintf(rcwd, sizeof(rcwd), "%s/%u", isolate_root, idx);
             const clock_t t0 = clock();
             ChildResult cr;
-            spawn_and_wait(self_exe, idx, tl_seed_for(global_seed, idx), rcwd, &cr);
+            spawn_and_wait(self_exe, idx, tl_seed_for(global_seed, idx), rcwd, timeout_ms, &cr);
             results[idx].ms = 1000.0 * (double)(clock() - t0) / (double)CLOCKS_PER_SEC;
             if (tl_child_verdict(TL_TESTS[idx].expect_fatal != 0, TL_DEV != 0, cr) != VERDICT_FAIL) {
                 fprintf(stderr, "tl_tests: %s: failed in the parallel pool and PASSED on serial replay - "
@@ -502,7 +635,7 @@ int main(int argc, char** argv) {
             const clock_t t0 = clock();
             if (ti.expect_fatal) {
                 ChildResult cr;
-                spawn_and_wait(self_exe, idx, tl_seed_for(global_seed, idx), nullptr, &cr);
+                spawn_and_wait(self_exe, idx, tl_seed_for(global_seed, idx), nullptr, timeout_ms, &cr);
                 results[idx].verdict = (u8)tl_child_verdict(true, TL_DEV != 0, cr);
             } else {
                 const char* reason = nullptr;
@@ -521,7 +654,7 @@ int main(int argc, char** argv) {
     FILE* junit = junit_path ? fopen(junit_path, "wb") : nullptr;
     if (junit_path && !junit) { fprintf(stderr, "cannot write %s\n", junit_path); return TL_EXIT_FAIL; }
 
-    u32 passed = 0, failed = 0, skipped = 0, lost = 0;
+    u32 passed = 0, failed = 0, skipped = 0, lost = 0, timed_out = 0;
     double total_ms = 0.0;
     const usize junit_cap = 1u << 20;
     char* junit_body = (char*)xalloc(junit_cap, "the JUnit body");
@@ -539,6 +672,16 @@ int main(int argc, char** argv) {
         if (r.verdict == VERDICT_PASS) { status = "PASS"; ++passed; }
         else if (r.verdict == VERDICT_SKIP) { status = "SKIP"; ++skipped; }
         else if (r.verdict == VERDICT_FAIL) { status = "FAIL"; ++failed; }
+        else if (r.verdict == VERDICT_TIMEOUT) {
+            // Its own status, and it fails the run. The test is NAMED here and not only in the
+            // TSV, because the timed-out child's own stderr may be empty - it was killed
+            // mid-test - so this line is the only record of which test hung.
+            status = "TIMEOUT"; ++timed_out;
+            fprintf(stderr, "tl_tests: %s TIMED OUT after %llu ms and was killed. A hanging test "
+                            "is a determinism-gate flake, which is P0 (docs/TESTING.md section 6: "
+                            "no PR-lane retries; a determinism-gate flake is a nondeterminism bug "
+                            "by definition).\n", ti.name, (unsigned long long)timeout_ms);
+        }
         else {
             // A selected test that produced no verdict. Never silently omitted from the report:
             // the whole point of the summary is that `run` accounts for every selected row.
@@ -555,6 +698,7 @@ int main(int argc, char** argv) {
         if (junit) {
             const char* inner = "";
             if (r.verdict == VERDICT_SKIP) { inner = "<skipped/>"; }
+            else if (r.verdict == VERDICT_TIMEOUT) { inner = "<failure message=\"TIMEOUT - killed by --timeout-ms\"/>"; }
             else if (r.verdict != VERDICT_PASS) { inner = "<failure message=\"see stderr\"/>"; }
             const int n = snprintf(junit_body + junit_used, junit_cap - junit_used,
                                    "  <testcase classname=\"%s\" name=\"%s\" time=\"%.3f\">%s</testcase>\n",
@@ -567,7 +711,7 @@ int main(int argc, char** argv) {
     if (junit) {
         fprintf(junit, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
                        "<testsuite name=\"tl_tests\" tests=\"%u\" failures=\"%u\" skipped=\"%u\" time=\"%.3f\">\n%.*s</testsuite>\n",
-                order_count, failed + lost, skipped, total_ms / 1000.0, (int)junit_used, junit_body);
+                order_count, failed + lost + timed_out, skipped, total_ms / 1000.0, (int)junit_used, junit_body);
         fclose(junit);
     }
     if (report) { fclose(report); }
@@ -582,9 +726,10 @@ int main(int argc, char** argv) {
                 (unsigned long long)junit_cap);
     }
 
-    printf("tl_tests: %u selected, %u passed, %u failed, %u skipped, %u lost (%u in the list, %.1f ms)\n",
-           order_count, passed, failed, skipped, lost, TEST_COUNT, total_ms);
-    const bool clean = (failed == 0) && (lost == 0) && !junit_truncated
+    printf("tl_tests: %u selected, %u passed, %u failed, %u timed out, %u skipped, %u lost "
+           "(%u in the list, %.1f ms)\n",
+           order_count, passed, failed, timed_out, skipped, lost, TEST_COUNT, total_ms);
+    const bool clean = (failed == 0) && (lost == 0) && (timed_out == 0) && !junit_truncated
                        && (passed + skipped == order_count);
     return clean ? TL_EXIT_OK : TL_EXIT_FAIL;
 }

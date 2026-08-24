@@ -264,6 +264,17 @@ constexpr bool is_zero(fx<Rep, F> a) { return a.v == 0; }
 // The ONLY conversion between formats (greppable). Widening is exact (shift left); narrowing is
 // RNE. Precondition: the value fits R - asserted (a wider row narrowed out of range is a bug at
 // the call site, not a saturation).
+//
+// Out of range with the assert compiled out (netcode/ship), documented rather than left silent
+// (W1 runner review 1, TODO.md): the intermediate i64 is converted to R::rep, which since C++20
+// is a WELL-DEFINED MODULAR conversion - it WRAPS, it does not saturate and it does not clamp.
+// to<q_t>(fx_raw<pos_t>(1 << 19)) is the smallest case: the intermediate is 2^31 and comes back
+// as INT32_MIN, a positive value arriving as the most negative one. That is a returned value,
+// not a contract: callers on a slim tier must range-check, and the value is pinned by
+// fx_review_release_error_values so a change to it cannot pass unnoticed. The other assert on
+// the widening path (|x.v| < 2^(63 - D)) has no defined release value at all - past it the
+// multiply is signed overflow, which is UB, so a call site that can reach it is a bug on every
+// tier, not a wrap.
 template <typename R, typename A>
 constexpr R to(A x) {
     constexpr int D = R::FRAC_BITS - A::FRAC_BITS;

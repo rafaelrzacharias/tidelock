@@ -7,6 +7,17 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 `LESSONS.md`; rationale → the doc named on each line. Governing rules: `CLAUDE.md` principles,
 `docs/ARCHITECTURE.md` §0/§4, test-infra-first.
 
+> **Pending review, 2026-08-24 — the W1 ruling-closeout lane (`w1-closeout`).** Its five commits
+> are POST-REVIEW EDITS to already-reviewed code (`tl_log.h`, `arena_registry`, `vmem_arena`,
+> `mem_pool`, the runner, `fx.h`), each implementing a decision already RULED on 2026-08-24 rather
+> than making one. **They are folded into the next wave-boundary review sweep** — no lane-level
+> adversarial review of their own, because the rulings are the contract and the diffs are minimal
+> by instruction. What the sweep must look at first: the `registry.test.cpp` fixture rework (its
+> arena `c` WAS the newly refused flag combination), the re-derived
+> `pool_reserve_edge_on_misaligned_base_returns_null` (its old premise is unreachable now), and
+> the runner's POSIX wait paths, which are written but **never executed on this lane** — no Linux
+> host; the PR lane's ubuntu job is their first run.
+
 ## Gate 0 — the pivot gate (`docs/GATE0-BENCH.md`, `docs/FX-PALETTE.md`)
 - [x] `src/foundation/fx.h` — `fx<Rep,FRAC>`, `mul<R>`/`div<R>` with RNE + widened intermediates,
       sat/wrap helpers, comparisons; exhaustive tests on small formats, property tests on 32-bit.
@@ -221,7 +232,7 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       **Merge note:** `w1-tooling-rt` merges cleanly into `main` as of `e2f4b17`
       (`git merge-tree --write-tree` reports no conflict); `TODO.md` is a both-sides edit that
       resolves.
-- [ ] **`TL_LOG_MIN` for `netcode` vs `ship` is a live tension between two docs, not resolved by
+- [x] **`TL_LOG_MIN` for `netcode` vs `ship` is a live tension between two docs, not resolved by
       the fix above. Ruling request.** `TOOLING.md` §9 wants the two tiers to differ (2 vs 3);
       `BUILD.md` §3 wants them to differ only by stripping, and `tools/audit/tier_parity.py`
       enforces the allowed define list. Deriving `TL_LOG_MIN` inside `tl_log.h` from the tier
@@ -239,6 +250,15 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       Implementation (W1 ruling-closeout lane): tl_log.h's derivation makes both tiers 2;
       TOOLING.md §9/§7b table and CPP-SUBSET.md §7b's TL_LOG row change "INFO+ (ship: WARN+)"
       to "INFO+ (both; ship quiets via cvar)"; the compile-out test's per-tier arms follow.
+      **DONE 2026-08-24 (W1 ruling-closeout).** `tl_log.h` derives 2 for both slim tiers in one
+      `#if defined(TL_TIER_SHIP) || defined(TL_TIER_NETCODE)` arm; `TOOLING.md` §9 and
+      `CPP-SUBSET.md` §7b carry the ruling; `tl_log.test.cpp`'s `log_levels_compile_out` now pins
+      the FLOOR per tier (`TL_LOG_MIN == 2` and `info_n == 1` on netcode/ship, `== 0` on
+      debug/dev) instead of only mirroring the header's own `#if`, which would have followed a
+      wrong derivation just as happily. `tier_parity.py` is untouched and still passes (measured,
+      netcode-win vs ship-win). No shipped tier compiles out `TL_LOG_WARN` any more, so
+      `tl_log_compileout.test.cpp`'s pinned `TL_LOG_MIN 4` is the only thing that reaches the
+      barred branch - which is exactly why that TU exists.
 
 - [x] **fx tests that need the runner lane** (`TESTING.md` §9.1 `TL_TEST_EXPECT_FATAL`) - landed
       in `tests/foundation/fx_fatal.test.cpp` (W1 runner+driver lane, 2026-08-24): `div` by zero,
@@ -559,7 +579,7 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       agree field-for-field today, so the fix is mechanical - delete platform.h's definition,
       include the foundation header - but until then any TU including both headers is an ODR
       violation waiting at the merge.
-- [ ] **Ruling request: is `ARENA_HASHED` without `ARENA_SNAPSHOT` legal for MUTABLE state?**
+- [x] **Ruling request: is `ARENA_HASHED` without `ARENA_SNAPSHOT` legal for MUTABLE state?**
       A hashed-but-not-snapshotted arena that mutates cannot be rolled back, so a mid-run
       restore CANNOT reproduce the hash trace (section 8.8) - a desync trap wired at
       registration, caught only weeks later. Legit use is immutable data (compiled tables,
@@ -572,7 +592,30 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       bytes is a no-op-equivalent memcpy). Implementation (W1 ruling-closeout lane): the fatal
       in registry_add + a fatal-expected test; MEMORY.md §1.2/§5 carry the ruling; the fixture's
       hazard note becomes a citation of it.
-- [ ] **Ruling request (spec gap, behavior matches spec pseudocode): a reserve that is not a
+      **DONE 2026-08-24 (W1 ruling-closeout).** The `TL_FATAL` sits after the duplicate-id loop in
+      `registry_add` (`arena_registry.cpp`), so no existing fatal's precedence moved;
+      `arena_registry.h`'s flag-enum comment and `registry_add`'s contract carry it; `MEMORY.md`
+      §1.2 states the rule and §5's compiled-data-tables row cites it. `registry.test.cpp`'s
+      fixture had to change - its arena `c` WAS the refused combination - so `c` is now
+      `HASHED | SNAPSHOT` (keeping the two-hashed-arena per-arena bisection property) and a new
+      arena `d` (`GROWS_AT_BARRIER` only) carries `c`'s old "restore must not touch it" role;
+      `sim_step`'s hazard note is a citation of the ruling now.
+      `registry_add_hashed_without_snapshot_is_fatal` is the `TL_TEST_EXPECT_FATAL` row (passes
+      in dev/debug, exit 2 + the marker measured), and
+      `registry_add_accepts_every_legal_flag_combination` is its negative half so the fatal
+      cannot be over-broad without a test noticing.
+- [ ] **`TL_TEST_EXPECT_FATAL` cannot express a `TL_FATAL`/`TL_CHECK`-expected row outside dev**
+      (found 2026-08-24 by the ruling-closeout lane, filed rather than improvised). Owner: the
+      runner lane. `tl_child_verdict` (`tests/runner/runner_core.h`) inverts the pass condition
+      only when `dev_tier` is true, with the stated rationale that "on netcode/ship the call under
+      test cannot fatal" - true for `TL_ASSERT`, which compiles out there, and false for
+      `TL_FATAL`/`TL_CHECK`, which do not. `registry_add_hashed_without_snapshot_is_fatal` is the
+      first such row: its fatal is live on netcode/ship, the child really does exit 2, and the
+      runner would score that an ordinary FAIL - so the body `TL_SKIP`s there and the ruling is
+      only proved on two of four tiers. The fix is a per-test "fatals in every tier" bit on
+      `TestInfo` (`cmake/testlist.cmake` + `tl_test.h` + `tl_child_verdict`), which is more than
+      this lane's rulings name.
+- [x] **Ruling request (spec gap, behavior matches spec pseudocode): a reserve that is not a
       COMMIT_GRANULE multiple has an unusable tail** - `arena_push` TL_FATALs "over reserve"
       when `align_up(end, 64K) > reserved` even though `end <= reserved`, so the effective
       budget is `round_down(reserved, 64K)` and a sub-64K reserve can never push. Recommend:
@@ -585,6 +628,30 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       unusable, and the over-reserve fatal coincides with the real edge). Implementation (W1
       ruling-closeout lane): the init rounding + tests at a sub-64K and a non-multiple reserve;
       MEMORY.md §8.2's "rounded up to page" becomes "rounded up to COMMIT_GRANULE".
+      **DONE 2026-08-24 (W1 ruling-closeout).** `vmem_arena_init` rounds to `COMMIT_GRANULE` and
+      `TL_CHECK`s `page <= COMMIT_GRANULE` (both powers of two, so that IS "page divides the
+      granule" - what keeps the granule rounding also a page rounding). `MEMORY.md` §8.2's
+      pseudocode comment and the `reserved` field comment carry the ruling; `vmem_arena.h`'s
+      Invariants block states `reserved` is itself a granule multiple.
+      `vmem_reserve_rounds_up_to_commit_granule` covers both filed cases (100 bytes, and
+      2·64K+100) and writes the last requested byte plus the last reserved byte;
+      `vmem_push_one_byte_past_reserve_is_fatal` is the other side of the edge. Measured, not
+      asserted: `vmem_init_happy_and_errors` previously asserted `reserved == page_size` for a
+      100-byte request and now asserts `== COMMIT_GRANULE`.
+- [ ] **`mem_pool.cpp` `carve_aligned`'s `commit_end > reserved` half is now DEAD CODE**
+      (consequence of the reserve ruling, found and recorded 2026-08-24 by the ruling-closeout
+      lane; NOT deleted by it - that is the mem lane's call). W1 mem review 1 added it because a
+      page-rounded reserve let `align_up(end, COMMIT_GRANULE) > reserved` hold while
+      `end <= reserved`. With `reserved` a granule multiple that is impossible: `end <= reserved`
+      implies `align_up(end, granule) <= reserved`. It is a harmless defensive mirror of
+      `arena_push` and costs one compare per carve. Its regression test
+      (`pool_reserve_edge_on_misaligned_base_returns_null`) had to be re-derived in the same
+      commit - it requested 192512 bytes precisely to reach the now-unreachable sub-case, so it
+      failed. It now reserves exactly 2 granules and proves the property that IS still live on a
+      64K-misaligned base: the first carve burns a 60 KB alignment gap, so the second carve is
+      past the reserve and comes back null instead of tripping `arena_push`'s fatal. Either
+      delete the dead half with a note, or keep it and say in `MEMORY.md` §8.2 that it is
+      defence-in-depth against a future non-granule reserve path.
 
 ## W1 rng/hash - the adversarial review (2026-08-24)
 - [x] **Adversarial review of W1 rng/hash (`8bdc6ee`) - DONE 2026-08-24 (Opus 5 high, fresh
@@ -709,7 +776,7 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       the KNOWN GAP notes in `tl_test.h`, `runner_core.h` and `fx_fatal.test.cpp` in the same
       commit. Cover it with a negative test: a child that exits 0, a child that exits 2 with no
       marker, and a child that exits 2 with the marker naming the WRONG file:line, must all FAIL.
-- [ ] **Ruling request — a per-child timeout.** `docs/TESTING.md` is silent, and the runner has
+- [x] **Ruling request — a per-child timeout.** `docs/TESTING.md` is silent, and the runner has
       none: `WaitForMultipleObjects(..., INFINITE)` / `waitpid(pid, &status, 0)`
       (`tests/runner/main.cpp`). A test that hangs — or a fatal-expected test whose assert does
       not fire and whose body loops — stalls the PR lane forever with no output, and
@@ -726,7 +793,37 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       names the test, and prints TESTING.md §6's P0-flake line. Implementation (W1
       ruling-closeout lane): the flag + both wait paths + a test with a deliberately hanging
       child; TESTING.md §9.1 gains the flag, §6 the two lane values.
-- [ ] **`to<R>` out of range has no release-value test.** `tests/foundation/fx_fatal.test.cpp`
+      **DONE 2026-08-24 (W1 ruling-closeout).** `--timeout-ms n`, `0` = off and the default,
+      validated like `--workers` (a negative value is a loud refusal, never a `(DWORD)(-1)` that
+      reads as `INFINITE` and silently disarms the timeout). Both wait paths: the `--isolate`
+      pool carries a per-slot wall-clock deadline and bounds `WaitForMultipleObjects` by the
+      SOONEST of them (its timeout is per-call, the budget is per-child), and the single-child
+      path a fatal-expected row takes without `--isolate` bounds `WaitForSingleObject` /
+      replaces the blocking `waitpid` with a `WNOHANG` + `SIGKILL` poll loop. **The clock is
+      `GetTickCount64`/`clock_gettime(CLOCK_MONOTONIC)`, not `clock()`:** `clock()` is CPU time
+      on glibc and the parent of a hung child burns none of it, so a `clock()`-based deadline
+      would never fire on Linux (the report's `ms` columns keep `clock()` - a duration, not a
+      deadline). `TIMEOUT` is its own status in the TSV, the JUnit XML and the summary, counted
+      apart from `FAIL`, and it fails the run; it beats `expect_fatal` in `tl_child_verdict`
+      because the exit code of a process the runner killed is the runner's own. Timed-out rows
+      are not re-run by the failure replay. Tests: `tests/runner/runner_timeout.test.cpp` (a
+      hanging trigger through the pool; a hanging FATAL-EXPECTED trigger through the serial path
+      - the exact scenario this was filed for; the healthy-child and malformed-value negatives)
+      plus `runner_child_verdict_timeout_is_its_own_status` over the pure predicate.
+      `TESTING.md` §9.1 has the flag, §6 the lane values, §9.3 the unit-job command, and
+      `.github/workflows/pr.yml` passes `--timeout-ms 120000`.
+      **Not covered, stated rather than hidden:** the POSIX halves of both wait paths are written
+      but not executed - this lane has no Linux host. The PR lane's ubuntu job is the first run.
+- [ ] **A bare `tl_tests` run is RED on main: two env-gated triggers record zero checks.**
+      Found 2026-08-24 by the ruling-closeout lane (baseline measurement before any edit), filed
+      rather than fixed - `tests/foundation/tl_assert.test.cpp` is the tooling-rt lane's reviewed
+      code. `tl_assert_forced_fatal_trigger` and `tl_assert_forced_check_trigger` `return` early
+      when their env var is unset, so they record ZERO checks, and `tl_ctx_verdict` scores a
+      zero-check body FAIL by design. Measured: `tl_tests` in dev = 148 selected, 144 passed,
+      **2 failed**, 2 skipped. CI never saw it because both are tagged `slow` and the PR lane runs
+      `--tag !slow`. The fix is one line each - `TL_SKIP("inert without TL_FATAL_PROBE; ...")`
+      instead of `return`, which is what `runner_timeout_hang_trigger` does.
+- [x] **`to<R>` out of range has no release-value test.** `tests/foundation/fx_fatal.test.cpp`
       pairs each dev-tier assert with `fx_review_release_error_values`'s netcode/ship value —
       for five of its six rows. `to<q_t>(fx_raw<pos_t>(1 << 19))` asserts in dev and, with the
       assert compiled out, narrows `2^31` through `i32` (well-defined wrap in C++20, so
@@ -735,6 +832,15 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       and a row in `fx_review_release_error_values`, or state in `fx.h` that the release
       behaviour is undefined-by-contract and callers must range-check — but not silence. Owner:
       the fx lane.
+      **DONE 2026-08-24 (W1 ruling-closeout, the first branch of the two).** `fx.h`'s `to<R>`
+      documents the out-of-range release behaviour: the intermediate is converted to `R::rep` by
+      C++20's well-defined MODULAR conversion, so it wraps - it does not saturate and does not
+      clamp - and callers on a slim tier must range-check. `fx_review_release_error_values` gains
+      the sixth row (`to<q_t>(fx_raw<pos_t>(1 << 19)).v == INT32_MIN`), so `fx_fatal.test.cpp`'s
+      six dev-tier asserts are now paired six for six. Also stated in `fx.h` rather than left
+      implied: the OTHER assert on the widening path (`|x.v| < 2^(63 - D)`) has no defined
+      release value at all - past it the multiply is signed overflow, i.e. UB on every tier - so
+      it is not a wrap and gets no row.
 - [x] `tests/driver` skeleton (W1 runner+driver lane, 2026-08-24; parser extracted and tested in
       review 2): the full `--scene/--seed/--ticks/--workers|--workers-sweep/--record|--replay/
       --verify/--dual/--dump-probes/--csv/--snapshot-every/--ballast` contract of

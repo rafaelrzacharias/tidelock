@@ -30,6 +30,9 @@ enum : u32 { MAX_ARENAS = 64 };  // docs/CANON.md "Sizes and caps"
 // Registry membership flags (docs/MEMORY.md section 1.2): HASHED = folded into the world hash;
 // SNAPSHOT = copied by registry_snapshot; GROWS_AT_BARRIER = may grow inside the barrier-apply
 // window (ECS columns, Alloy pools during pass 5) without tripping the guard.
+// HASHED IMPLIES SNAPSHOT: registry_add TL_FATALs on the combination without it (ruled
+// 2026-08-24, docs/MEMORY.md section 1.2). SNAPSHOT without HASHED stays legal - state that is
+// restored but deliberately outside the hash.
 enum : u32 {
     ARENA_HASHED           = 1u << 0,
     ARENA_SNAPSHOT         = 1u << 1,
@@ -54,7 +57,9 @@ struct ArenaRegistry {
 static_assert(__is_trivially_copyable(ArenaRegistry), "");
 
 // Registers `a` under `id` with ARENA_* registry flags. Init only: TL_FATAL if sealed, if
-// count == MAX_ARENAS, or if `id` is already registered (ids must be unique - they key restore).
+// count == MAX_ARENAS, if `id` is already registered (ids must be unique - they key restore), or
+// if `flags` sets ARENA_HASHED without ARENA_SNAPSHOT (docs/MEMORY.md section 1.2: hashed state
+// that cannot be rolled back breaks the section 8.8 hash-trace contract).
 void registry_add(ArenaRegistry* r, NameHash id, VMemArena* a, u32 flags);
 
 // Freezes count and order; further registry_add is TL_FATAL. Called once at end of init.

@@ -10,10 +10,12 @@
 //   items, not built here; `LogRecord.tick` reads 0 until that lane wires it.
 // Invariants: a level below the tier's `TL_LOG_MIN` compiles to `((void)0)` - the argument list is
 //   never evaluated, so a call site with a side effect in its arguments is a bug (the two tiers
-//   would run different programs). `TL_LOG_ERR` is never compiled out. `TL_LOG_MIN` is DERIVED
-//   from the tier markers below, never passed as its own `-D` (docs/BUILD.md §3: netcode and ship
-//   must differ only by the stripping defines, and `tools/audit/tier_parity.py` enforces exactly
-//   that list - a `TL_LOG_MIN=2` vs `=3` on the command line would fail that gate).
+//   would run different programs). `TL_LOG_ERR` is never compiled out. **netcode and ship share
+//   ONE compiled floor, INFO+ (2)** - the ruling of 2026-08-24 (TODO.md): the two slim tiers do
+//   not compile different log code at all, so `docs/BUILD.md` §3's parity stays absolute and
+//   `tools/audit/tier_parity.py` needs no exemption; ship quiets further at RUNTIME through the
+//   log-level cvar (`docs/TOOLING.md` §3, a non-SIM cvar). `TL_LOG_MIN` is still DERIVED from the
+//   tier markers below rather than passed as its own `-D`, so no define enters the tier delta.
 // Determinism: never hashed, never snapshotted, never part of a world's registered arena
 //   (docs/CPP-SUBSET.md §9 R-4) - a log line records but never feeds sim state.
 // Threading: `tl_log_write` is NOT synchronized, and that is a known gap, not a contract: the
@@ -34,17 +36,16 @@ enum LogLevel : u8 { LOG_TRACE = 0, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERR };
 // capacity itself is the doc's, not a number this file gets to choose.
 enum { TL_LOG_MSG_CAP = 224 };   // ring/stderr message capacity, including the NUL
 
-// The tier's lowest compiled-in level (docs/TOOLING.md §9: debug/dev 0, netcode 2, ship 3).
+// The tier's lowest compiled-in level (docs/TOOLING.md §9: debug/dev 0, netcode AND ship 2).
 // Derived, for the reason the Invariants note gives. Left undefined the preprocessor reads it as
 // 0 in `#if TL_LOG_MIN <= 0`, silently - which is what shipped: every tier, ship included,
 // compiled in `TL_LOG_TRACE`, and no tier existed in which the compile-out test's `#else` arm
 // ran. An explicit `-DTL_LOG_MIN=n` still wins, which is how the unconditional compile-out test
-// (`tests/foundation/tl_log_compileout.test.cpp`) reaches the barred branch in any tier.
+// (`tests/foundation/tl_log_compileout.test.cpp`) reaches the barred branch in any tier - no
+// SHIPPED tier compiles out `TL_LOG_WARN`, so that branch has no tier of its own to run in.
 #ifndef TL_LOG_MIN
-#  if defined(TL_TIER_SHIP)
-#    define TL_LOG_MIN 3
-#  elif defined(TL_TIER_NETCODE)
-#    define TL_LOG_MIN 2
+#  if defined(TL_TIER_SHIP) || defined(TL_TIER_NETCODE)
+#    define TL_LOG_MIN 2        // one floor for both slim tiers; ship quiets at runtime (cvar)
 #  else
 #    define TL_LOG_MIN 0        // debug/dev, and a tier-less standalone preprocess (targets.py)
 #  endif
