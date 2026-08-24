@@ -28,6 +28,9 @@ Snapshot* ring_push(SnapshotRing* g, u64 tick) {
     g->head = (g->head + 1u) % (u32)CONFIRMATION_HORIZON_TICKS;
     if (g->count < (u32)CONFIRMATION_HORIZON_TICKS) { g->count += 1u; }
     s->tick = tick;   // registry_snapshot re-stamps on success and clears on overflow
+    s->count = 0u;    // invisible to ring_find until registry_snapshot fills it - a claimed slot
+                      // must never surface the EVICTED snapshot's payload under the new tick
+                      // (W1 mem review 3)
     return s;
 }
 

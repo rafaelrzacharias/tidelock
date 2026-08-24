@@ -239,7 +239,7 @@ void* arena_push(VMemArena* a, u64 bytes, u32 align) {
     return p;
 }
 u64  arena_mark(const VMemArena* a) { return a->used; }
-void arena_reset_to(VMemArena* a, u64 mark) { TL_ASSERT(mark <= a->used); #if TL_DEBUG memset(base+mark, 0xDD, used-mark); #endif a->used = mark; }
+void arena_reset_to(VMemArena* a, u64 mark) { TL_ASSERT(mark <= a->used); #if TL_DEBUG if (flags & ARENA_POISON) memset(base+mark, 0xDD, used-mark); #endif a->used = mark; }   // poison is gated on the flag: unconditional poison synchronised every arena's dev-tier dirt to 0xDD, defeating §8.8's divergent-dirt criterion (W1 mem review 3)
 void arena_decommit_above(VMemArena* a, u64 mark) { u64 p = align_up(mark, COMMIT_GRANULE); if (p < committed) { os->decommit(base+p, committed-p); committed = p; high_water = min(high_water, p); } used = min(used, mark); }
 ```
 

@@ -47,7 +47,9 @@ struct SnapshotRing { Snapshot slot[CONFIRMATION_HORIZON_TICKS]; u32 head; u32 c
 ErrCode ring_init(SnapshotRing* g, u64 slot_cap_bytes, VMemArena* backing);
 
 // Claims the next slot (evicting the oldest once full), stamps `tick`, and returns it for
-// registry_snapshot to fill. Never null after a successful ring_init.
+// registry_snapshot to fill. The claimed slot is invalidated (count = 0) until that fill
+// succeeds, so ring_find can never surface the evicted snapshot's payload under the new tick.
+// Never null after a successful ring_init.
 Snapshot* ring_push(SnapshotRing* g, u64 tick);
 
 // The slot holding `tick`, or null if it has been evicted / never pushed.

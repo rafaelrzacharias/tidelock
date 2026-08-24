@@ -163,6 +163,21 @@ TL_TEST(vmem_decommit_then_repush_is_zero, "foundation,mem,smoke") {
     api.release(api.ctx, a.base, a.reserved);
 }
 
+TL_TEST(vmem_commit_exactly_at_reserve_edge, "foundation,mem,fast") {
+    // Edge matrix: a push whose commit lands EXACTLY on the reserve boundary is legal - the
+    // over-reserve fatal is strictly `>`, not `>=` (docs/MEMORY.md §8.2).
+    VMemApi api = test_vmem_api();
+    VMemArena a = {};
+    TL_ASSERT_EQ(vmem_arena_init(&a, 0x8888u, (u64)COMMIT_GRANULE * 4u, 0u, &api), ERR_OK);
+    u8* p = (u8*)arena_push(&a, (u64)COMMIT_GRANULE * 4u, 1u);
+    TL_ASSERT_TRUE(p != nullptr);
+    TL_EXPECT_EQ(a.used, a.reserved);
+    TL_EXPECT_EQ(a.committed, a.reserved);
+    p[a.reserved - 1u] = 0x7Fu;   // the last byte is really committed
+    TL_EXPECT_EQ(a.base[a.reserved - 1u], (u8)0x7F);
+    api.release(api.ctx, a.base, a.reserved);
+}
+
 TL_TEST(vmem_mark_reset_round_trip, "foundation,mem,fast") {
     VMemApi api = test_vmem_api();
     VMemArena a = {};

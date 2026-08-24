@@ -212,9 +212,14 @@ TL_TEST(ring_push_find_wrap_and_eviction, "foundation,mem,smoke,fast") {
     TL_EXPECT_NULL(ring_find(&ring, 0u));
     TL_EXPECT_NULL(ring_find(&ring, 100u));
 
-    // Push CONFIRMATION_HORIZON_TICKS + 2: the oldest two are evicted by wrap. (`tk`, not `t` -
-    // the runner's TestCtx parameter is named t and the macros reference it.)
+    // Push CONFIRMATION_HORIZON_TICKS + 2: the oldest two are evicted by wrap. The arena grows
+    // each tick so every slot's payload differs - restore-from-oldest below is then a real
+    // check, not a comparison of identical snapshots. (`tk`, not `t` - the runner's TestCtx
+    // parameter is named t and the macros reference it.)
+    u64 used_at_102 = 0u;
     for (u64 tk = 100u; tk < 100u + (u64)CONFIRMATION_HORIZON_TICKS + 2u; ++tk) {
+        fill(&w.a, 8u, (u8)tk);
+        if (tk == 102u) { used_at_102 = w.a.used; }
         Snapshot* s = ring_push(&ring, tk);
         TL_ASSERT_TRUE(s != nullptr);
         TL_ASSERT_EQ(registry_snapshot(&w.reg, s, tk), ERR_OK);
@@ -228,6 +233,61 @@ TL_TEST(ring_push_find_wrap_and_eviction, "foundation,mem,smoke,fast") {
     }
     TL_EXPECT_EQ(ring.count, (u32)CONFIRMATION_HORIZON_TICKS);
 
+    // Restore from the OLDEST live slot - the deepest rollback the horizon permits.
+    const Snapshot* oldest = ring_find(&ring, 102u);
+    TL_ASSERT_TRUE(oldest != nullptr);
+    TL_ASSERT_EQ(registry_restore(&w.reg, oldest), ERR_OK);
+    TL_EXPECT_EQ(w.a.used, used_at_102);
+
+    // A slot claimed by ring_push but never filled is invisible: the evicted snapshot's payload
+    // must not surface under the new tick (W1 mem review 3).
+    (void)ring_push(&ring, 999u);
+    TL_EXPECT_NULL(ring_find(&ring, 999u));
+
+    world_release(&w);
+}
+
+TL_TEST(registry_edges_tick0_empty_and_max_arenas, "foundation,mem,fast") {
+    // Edge matrix (docs/TESTING.md §7): tick 0 as a legitimate snapshot key, the empty
+    // registry, and a MAX_ARENAS-full registry round trip.
+    TestWorld w;
+    TL_ASSERT_TRUE(world_init(&w));
+    fill(&w.a, 48u, 2u);
+
+    SnapshotRing ring;
+    TL_ASSERT_EQ(ring_init(&ring, 1u << 16, &w.backing), ERR_OK);
+    Snapshot* s0 = ring_push(&ring, 0u);
+    TL_ASSERT_EQ(registry_snapshot(&w.reg, s0, 0u), ERR_OK);
+    TL_EXPECT_TRUE(ring_find(&ring, 0u) == s0);   // tick 0 is findable (not a sentinel)
+    TL_EXPECT_EQ(registry_restore(&w.reg, s0), ERR_OK);
+
+    // Empty registry: sealing and hashing zero arenas is legal, and two empty registries agree.
+    ArenaRegistry e1 = {}; registry_seal(&e1);
+    ArenaRegistry e2 = {}; registry_seal(&e2);
+    u64 pa[MAX_ARENAS];
+    const u64 he = registry_hash_all(&e1, pa);
+    TL_EXPECT_EQ(registry_hash_all(&e2, pa), he);
+
+    // MAX_ARENAS registered: hash, snapshot, trash, restore - the full-house round trip.
+    VMemArena arr[MAX_ARENAS];
+    ArenaRegistry full = {};
+    for (u32 i = 0; i < MAX_ARENAS; ++i) {
+        TL_ASSERT_EQ(vmem_arena_init(&arr[i], (NameHash)(0x5000u + i), 64u * 1024u,
+                                     ARENA_ZERO_ON_PUSH, &w.api), ERR_OK);
+        registry_add(&full, (NameHash)(0x5000u + i), &arr[i], ARENA_HASHED | ARENA_SNAPSHOT);
+    }
+    registry_seal(&full);
+    TL_EXPECT_EQ(full.count, (u32)MAX_ARENAS);
+    for (u32 i = 0; i < MAX_ARENAS; ++i) { fill(&arr[i], (u64)(i * 7u + 1u), (u8)i); }
+    const u64 hf = registry_hash_all(&full, pa);
+    Snapshot* sf = ring_push(&ring, 3u);
+    TL_ASSERT_EQ(registry_snapshot(&full, sf, 3u), ERR_OK);
+    arr[MAX_ARENAS - 1u].base[0] = (u8)(arr[MAX_ARENAS - 1u].base[0] ^ 0xFFu);
+    TL_EXPECT_NE(registry_hash_all(&full, pa), hf);
+    TL_ASSERT_EQ(registry_restore(&full, sf), ERR_OK);
+    TL_EXPECT_EQ(registry_hash_all(&full, pa), hf);
+
+    for (u32 i = 0; i < MAX_ARENAS; ++i) { w.api.release(w.api.ctx, arr[i].base, arr[i].reserved); }
     world_release(&w);
 }
 
@@ -306,16 +366,39 @@ TL_TEST(registry_hash_region_integrity, "foundation,mem,determinism,smoke") {
 
 TL_TEST(registry_two_worlds_hash_identically, "foundation,mem,determinism,smoke") {
     // docs/MEMORY.md §8.8: two worlds' registries in one process hash identically. The two
-    // worlds take DIFFERENT dirt histories (different pre-reset fills), then perform identical
-    // logical operations - zero-on-push must make the hashed bytes converge, including the
-    // alignment gap (docs/CPP-SUBSET.md §5: hashed memory is a pure function of state).
+    // worlds take DIFFERENT dirt histories, then perform identical logical operations -
+    // zero-on-push must make the hashed bytes converge, including the alignment gap
+    // (docs/CPP-SUBSET.md §5: hashed memory is a pure function of state).
+    // W1 mem review 3 hardened the divergence: the first shipping of this test derived its
+    // "divergent dirt" only from pre-reset fills, which the then-unconditional dev poison
+    // rewrote to identical 0xDD in BOTH worlds - the criterion passed even with zero-on-push
+    // deleted. The dirt is now written directly (different bytes, different extents), and the
+    // two histories also diverge structurally: w1 restores from a snapshot of its own past,
+    // w2 decommits and regrows.
     TestWorld w1, w2;
     TL_ASSERT_TRUE(world_init(&w1));
     TL_ASSERT_TRUE(world_init(&w2));
-    fill(&w1.a, 300u, 9u);   // divergent history...
+    fill(&w1.a, 300u, 9u);   // divergent fills...
     fill(&w2.a, 200u, 4u);
+
+    // w1's structural history: snapshot at used=300, grow, restore back (rollback-shaped dirt).
+    SnapshotRing r1;
+    TL_ASSERT_EQ(ring_init(&r1, 1u << 16, &w1.backing), ERR_OK);
+    Snapshot* s1 = ring_push(&r1, 1u);
+    TL_ASSERT_EQ(registry_snapshot(&w1.reg, s1, 1u), ERR_OK);
+    fill(&w1.a, 5000u, 21u);
+    TL_ASSERT_EQ(registry_restore(&w1.reg, s1), ERR_OK);
     arena_reset_to(&w1.a, 0u);
+
+    // w2's structural history: decommit-then-regrow (streaming-shaped dirt).
+    arena_decommit_above(&w2.a, 0u);
+    fill(&w2.a, 200u, 4u);
     arena_reset_to(&w2.a, 0u);
+
+    // Divergent dirt written directly above used: different bytes, different extents. This is
+    // exactly what a hashed arena may NEVER leak into [base, used).
+    memset(w1.a.base, 0x11, 4096u);
+    memset(w2.a.base, 0x22, 2048u);
 
     TestWorld* worlds[2] = { &w1, &w2 };
     for (u32 i = 0; i < 2u; ++i) {
@@ -348,10 +431,16 @@ namespace {
 // A deterministic synthetic tick: mutate the HASHED|SNAPSHOT arena as a pure function of
 // (state, tick) - growth AND in-place. (c is HASHED-but-not-SNAPSHOT by this fixture's design,
 // so a rollback cannot reproduce a trace that mutates it: hashed authoritative state must also
-// be snapshotted, which is the real registry wiring.)
+// be snapshotted, which is the real registry wiring.) The second push is deliberately odd-sized
+// and only partially written (W1 mem review 3): each tick's first 16-aligned push then leaves
+// an alignment gap, and after a mid-run restore those gaps and the unwritten tail bytes land on
+// rollback dirt - the replayed trace matches the original only if zero-on-push re-zeroes every
+// such byte, which is the section 8.8 property the fully-written first shipping never exercised.
 void sim_step(TestWorld* w, u64 tick) {
     u8* p = (u8*)arena_push(&w->a, 16u, 16u);
     for (u32 i = 0; i < 16u; ++i) { p[i] = (u8)(tick * 31u + i); }
+    u8* q = (u8*)arena_push(&w->a, 3u, 1u);
+    q[0] = (u8)(tick + 1u);   // bytes 1..2 stay zero - zero-on-push must supply them over dirt
     w->a.base[tick % 8u] = (u8)(w->a.base[tick % 8u] ^ (u8)(tick * 7u + 1u));
 }
 }  // namespace

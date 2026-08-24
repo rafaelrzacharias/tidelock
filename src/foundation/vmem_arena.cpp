@@ -46,6 +46,13 @@ void* arena_push(VMemArena* a, u64 bytes, u32 align) {
     TL_CHECK(end >= start);  // a wrapped extent is a bug, not a big allocation
 
     if (end > a->committed) {
+        // Checked on `end` BEFORE the granule rounding: align_up of an end within one granule
+        // of 2^64 wraps to a small value and would sail past a want-only check with no fatal
+        // (W1 mem review 3). With end <= reserved (reserves are far below 2^63) the rounding
+        // below cannot wrap.
+        if (end > a->reserved) {
+            TL_FATAL("arena over reserve - a blown budget is a bug, not silent growth (docs/MEMORY.md section 1.1)");
+        }
         const u64 want = mem::align_up_u64(end, (u64)COMMIT_GRANULE);
         if (want > a->reserved) {
             TL_FATAL("arena over reserve - a blown budget is a bug, not silent growth (docs/MEMORY.md section 1.1)");
@@ -80,9 +87,12 @@ void arena_reset_to(VMemArena* a, u64 mark) {
     TL_ASSERT(a != nullptr);
     TL_ASSERT(mark <= a->used);
 #if TL_DEV
-    // Poison so a stale read shows as garbage (docs/MEMORY.md section 8.2). Safe on registered
-    // arenas: the poison sits above `used` (unhashed) and ARENA_ZERO_ON_PUSH re-zeroes on reuse.
-    if (a->used > mark) {
+    // Poison so a stale read shows as garbage - gated on ARENA_POISON as the header and the
+    // section 8.2 flag table say, not unconditional as first shipped: poisoning EVERY arena made
+    // dev-tier dirt identical (0xDD) across worlds, which silently synchronised the "divergent
+    // dirt histories" the section 8.8 two-worlds criterion is supposed to hash across
+    // (W1 mem review 3). Registered arenas rely on ARENA_ZERO_ON_PUSH for reuse instead.
+    if ((a->flags & ARENA_POISON) != 0u && a->used > mark) {
         memset(a->base + mark, 0xDD, a->used - mark);
     }
 #endif

@@ -6,8 +6,19 @@
 // nonzero CRT delta - each is the guard's TL_FATAL by design.
 #include "runner/tl_test.h"
 #include "foundation/arena_registry.h"
+#include "foundation/alloc_shim.h"
 #include "foundation/scratch.h"
 #include "vmem_test_api.h"
+
+TL_TEST(alloc_shim_vacuity_is_visible, "foundation,mem,smoke,fast") {
+    // W1 mem review 3: the guard's CRT-delta check (guard_tick_end) is VACUOUS until the
+    // writable-static ruling lands (TODO.md, W1 mem notes) - install refuses and the counter
+    // reads 0 forever, so a zero delta proves nothing. Pinned here so the vacuity is visible in
+    // the test list, and so implementing the ruling MUST flip this test: install returning
+    // ERR_OK is the signal that the CRT check went live and needs its own positive test.
+    TL_EXPECT_EQ(tl_alloc_shim_install(), ERR_MEM_UNSUPPORTED);
+    TL_EXPECT_EQ(tl_crt_alloc_count(), (u64)0);
+}
 
 TL_TEST(guard_sanctioned_windows_pass, "foundation,mem,smoke,fast") {
 #if TL_DEV
