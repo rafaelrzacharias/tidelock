@@ -723,8 +723,33 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       relative cwd) that the runner has no seam for. Add the seam when the pool next changes.
 - [ ] Delete the W0 placeholder TUs as each module gets real sources (`src/*/…_unit`), and give
       `tl_driver` (replace `driver_boot_headless_STUB`) / `tl_gate0` / `tl_hovel` real mains.
-- [ ] `platform/` contract + **headless impl** (file/clock/vmem/entropy/threads real; window/draw/
-      events null). `docs/PLATFORM.md`.
+- [x] **W1 platform - the headless impl, 2026-08-24.** `os_win_vmem.cpp`/`os_posix_vmem.cpp`
+      (page-multiple `TL_CHECK`, `ERR_PLATFORM_VMEM` on OS failure), `os_entropy.cpp`
+      (BCryptGenRandom/getrandom, `TL_FATAL` on failure), `os_file_atomic.cpp` (tmp-write/fsync/
+      rename, dev-only `TL_TEST_ATOMIC_KILL_AT` self-terminate hook for
+      `write_atomic_crash_safety`), `os_path.h` (the shared 1024 B path-to-cstr helper), and the
+      full `impl_headless/` (window/events/draw validating stub/file/clock/thread/vmem/entropy) -
+      all real per `PLATFORM.md` §9.4, all state in one arena-allocated `HeadlessState`, zero
+      static/global mutable state (`tl_audit_symbols`: 0 violations). `CrashApi` is a named
+      `TL_FATAL("unimplemented")` stub - step 5 of §9.7, waits on `TOOLING.md` §9.3.9's writer,
+      not a silent gap. `tex`/`thread`/`sem`/`mutex` slot tables are hand-rolled arrays with
+      `Handle`'s generation math, not `SlotMap<T>` - containers hasn't landed. Full `tests/
+      platform/` suite (`vmem_reserve_commit`, `vmem_page_size`, the non-page-multiple fatal,
+      `entropy_nonrepeat`, `clock_monotonic`, `thread_primitives`, `read_all_contract`,
+      `enumerate_sorted`, `write_atomic_crash_safety`, `event_ring_overflow`,
+      `headless_draw_validates` split into four tests, `abi_and_layout`) - 153/153 passing under
+      the PR lane's own `--isolate --tag !slow`, every slow test green standalone. `tl_audit`
+      green throughout (0 includes/symbols violations, 103/103 selftest).
+      Two findings worth recording: (1) `arena_push` aligns a push's START, not its SIZE
+      (`MEMORY.md` §8.2) - `read_all` must round `len+1` up to 16 itself, or the "`used` grows by
+      exactly `align16(len+1)`" contract in §9.6 is off by up to 15 B whenever the file length
+      isn't already a multiple of 16. (2) the §9.6 `write_atomic_crash_safety` "no stray `.tmp.*`"
+      clause is a promise about the FINAL uninstrumented call only - a kill at point 1 or 2
+      legitimately leaves the tmp file on disk (the process died before the rename that would
+      remove it); the per-kill loop only checks the target file, matching what a crash can
+      actually guarantee. `docs/PLATFORM.md`.
+- [ ] `platform/impl_sdl3`: window, events ring, draw verbs, SDL3 + stb vendored per `BUILD.md`
+      §4. `docs/PLATFORM.md` §9.7 steps 4-5.
 - [x] **W1 platform - the contract header (`src/platform/platform.h`), 2026-08-24.** Every struct
       and the layout `static_assert`s from `PLATFORM.md` §9.2, transcribed verbatim; 0 violations
       on `tl_audit_includes` and a clean `/W4 /WX` standalone compile. Landed alongside it, because
