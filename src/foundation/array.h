@@ -81,6 +81,7 @@ T* array_push(Array<T>* a, T v) {
         if (grow_elems == 0) { grow_elems = 1; }
         void* p = arena_push(a->grow_arena, (u64)grow_elems * sizeof(T), alignof(T));
         TL_ASSERT(p == (void*)(a->data + a->cap));   // the array owns the whole arena range (R-1) - no interloper pushed here
+        (void)p;                                     // the push itself is load-bearing in every tier; only the check compiles out
         a->cap += grow_elems;
     }
     a->data[a->count] = v;
