@@ -11,7 +11,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ECS.md` -> §1.1, §9.2
 - `FRAME-LOOP.md` -> §0.4
 - `FX-PALETTE.md` -> §5, §10, §13, §14, §14.4, §14.4.3
-- `GATE0-BENCH.md` -> §2.1
+- `GATE0-BENCH.md` -> §2.1, §14.4.3
 - `INPUT.md` -> §8.2
 - `JOBS.md` -> §8.1
 - `LUAU-LAYER.md` -> §1.1, §9.2
