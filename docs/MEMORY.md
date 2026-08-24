@@ -301,6 +301,19 @@ void guard_tick_end(ArenaGuard*, const ArenaRegistry*);   // for each arena: if 
 nonzero → `TL_FATAL` in `dev` (vendor libs allocate only through pools, so a CRT malloc during a
 tick is a leak of discipline somewhere).
 
+**"Never inside a tick" is the guard's clause, and only the guard's** (ruled 2026-08-24). Container
+growth that bump-allocates — `map_grow`'s rehash is the case that raised it (`CONTAINERS.md` §8.3)
+— must not happen mid-tick, but the container cannot check it: tick-window knowledge lives here,
+not in `map.h`, and no `in_tick` facility exists in foundation for a container to read. It needs
+none. The rule is already enforced from this side and in the right currency: `guard_tick_end`
+`TL_FATAL`s on any arena whose `used` moved during a tick without `GROWS_AT_BARRIER`, and
+`guard_barrier_begin` `TL_FATAL`s if a barrier-flagged arena already grew this tick — a growing
+container's `arena_push` *is* that `used` movement, so it is caught by name, at the tick boundary,
+for every container at once rather than one assert per container. With `MEMORY.md` §1.2's
+sized-at-init rule, growth exists only on non-hashed arenas, where `GROWS_AT_BARRIER` is exactly
+the discipline these two calls police. The hook itself lands when the barrier-window API exists
+(the guard owner's lane, `TODO.md`); this section is its home from now on.
+
 ### 8.5 `Handle`
 
 ```cpp

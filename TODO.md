@@ -635,7 +635,7 @@ right; it is the template the others now follow.
       therefore its bucket layout — reviewed behaviour, outside this closeout's contract. Fix is
       one reorder (probe; grow and re-probe only if the slot is empty) plus a test for each mode.
       Pinned meanwhile by a NOTE in `map_fixed_serves_its_full_load_factor_without_growing`.
-- **R3 — `CONTAINERS.md` §8.3 specifies `TL_ASSERT(!in_tick)` on `map_grow` and it is not
+- [x] **R3 — `CONTAINERS.md` §8.3 specifies `TL_ASSERT(!in_tick)` on `map_grow` and it is not
   implemented**, because no `in_tick` facility exists in foundation yet. Either the ArenaGuard's
   barrier window becomes readable from `map.h` or the clause moves to the guard. Filed rather than
   improvised.
@@ -643,6 +643,11 @@ right; it is the template the others now follow.
   the guard's; map.h cites it. With R2's fixed-shape rule, growth exists only on non-hashed
   arenas, where GROWS_AT_BARRIER is the discipline the guard enforces. Doc move now (W2-prep
   closeout); the guard hook lands when the window API exists (the guard owner's lane).
+  **DONE 2026-08-24 (w2-prep), doc-only:** `MEMORY.md` §8.4 is the clause's home and states why the
+  guard needs no new `in_tick` facility (a grow's `arena_push` moves `used`, which `guard_tick_end`
+  already fatals on by arena name); `CONTAINERS.md` §8.3 says "moved, not dropped" instead of
+  claiming an assert that was never implementable; `map.h`'s contract block cites §8.4. The guard
+  hook itself stays filed for the guard owner's lane — nothing to build here.
 - [x] **R4 — `CANON.md:22` says Entity gets "1024 gens"; the slot actually yields 1023.**
   (CLOSED 2026-08-24: CANON corrected to "1023 usable gens" at the containers wave merge.)
   Original finding: Generation 0

@@ -10,7 +10,10 @@
 //   must outlive the binary (saves, wire, Luau-visible) uses SortedMap/SortedSet instead.
 // Invariants: load factor <= 0.75; tombstone-free (backward-shift deletion, docs/CONTAINERS.md
 //   §8.3); hash = tl_hash64(&k, sizeof k, TL_HASH_SEED). Growth is a full rehash into a fresh
-//   arena_push - registries and editor only, TL_ASSERT(!in_tick) in debug (never in a tick).
+//   arena_push - registries and editor only, NEVER inside a tick. That clause is the ArenaGuard's
+//   to enforce, not this header's (docs/MEMORY.md §8.4, ruled 2026-08-24): map.h has no way to see
+//   the tick window, and needs none - a grow's arena_push moves the arena's `used`, which is what
+//   guard_tick_end already TL_FATALs on, by arena name, for every container at once.
 //   map_init/map_grow zero the three blocks they push (never assume arena_push returns zeros -
 //   it does so only above high_water or under ARENA_ZERO_ON_PUSH), and map_remove zeroes the
 //   slot it empties.

@@ -204,8 +204,11 @@ freezes `gen[idx]` at `GEN_MAX`, so the retired handle's generation still matche
 Open addressing, linear probing, power-of-two capacity, load ≤ 0.75, backward-shift deletion.
 `K` is `u32`/`u64`/`NameHash` (static_assert integral); hash = `tl_hash64(&k, sizeof k, TL_HASH_SEED)`.
 Storage: parallel `Array<K> keys`, `Array<V> vals`, `Array<u8> state` (0 empty, 1 full) on the
-owning arena; grow by rehash into a fresh `arena_push` (registries and editor only — never in a
-tick; `TL_ASSERT(!in_tick)` in debug). API: `map_init(arena, cap)`, `map_init_fixed(arena, cap)`
+owning arena; grow by rehash into a fresh `arena_push` (registries and editor only — **never in a
+tick**, which is the ArenaGuard's clause to enforce and not `map.h`'s: `MEMORY.md` §8.4. Rev 1
+specified `TL_ASSERT(!in_tick)` here; no `in_tick` facility exists in foundation for a container to
+read, and none is needed — a growing container's `arena_push` moves its arena's `used`, which is
+precisely what `guard_tick_end` already fatals on. Moved, not dropped; ruled 2026-08-24). API: `map_init(arena, cap)`, `map_init_fixed(arena, cap)`
 (§3 — retains no grow arena; `map_grow` `TL_FATAL`s "fixed map overflow" in every tier), `map_put`,
 `map_get → V*`, `map_remove`, `map_count`, `map_iter(&it) → K,V*` (order-fragile by contract;
 `DETERMINISM.md` §2.7).
