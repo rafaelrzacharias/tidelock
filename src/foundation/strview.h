@@ -1,79 +1,71 @@
 #pragma once
 // ---------------------------------------------------------------------------------------------
-// strview.h - StrView, the non-owning string every string parameter in the codebase speaks.
+// strview.h - StrView: the non-owning string parameter every runtime string touches.
 //
-// Spec: docs/CONTAINERS.md §8.6 (pinned shape); docs/CANON.md ("Types").
-// Purpose: `{ ptr, len }` over caller-owned bytes; no allocation, no ownership, no NUL assumption.
-// Invariants: `ptr` may be null only when `len == 0`. Content is not required to be NUL-terminated;
-//   callers that need one (platform file paths) copy into a NUL-terminated buffer at the call site.
-// Determinism: `sv_hash` is the same FNV-1a 64 as `NameHash` (docs/CANON.md), so an interned name
-//   hash and a StrId lookup agree. `char` is legal in sim code for message literals only
-//   (docs/CPP-SUBSET.md §5) - sv_hash reads bytes as `u8` specifically to stay signedness-safe.
-// Threading: none - a value type, no state.
-// Includes: foundation/tl_types.h only.
-//
-// Landed from the W1 platform lane (2026-08-24), not the containers lane: PLATFORM.md §9's
-// contract header (PlatformConfig, FileApi paths) needs the type and the containers lane had not
-// started. Transcribed verbatim from the pinned shape in CONTAINERS.md §8.6 - same precedent as
-// tl_assert.h landing from the fx lane (LESSONS.md). The containers lane owns this file, and its
-// Interner/fmt neighbours, from the moment it starts.
+// Spec: docs/CONTAINERS.md §5 (design), §8.6 (this header); docs/CANON.md "Types" (the struct
+//   shape - `StrView { const char* ptr; u32 len; }` - is CANON, not this lane's to redefine).
+// Purpose: no `String` class anywhere in the runtime - StrView is every string parameter; owning
+//   copies are `arena_copy` (docs/MEMORY.md §4), long-lived names go through the interner
+//   (docs/CONTAINERS.md §5).
+// Invariants: non-owning - the caller's bytes must outlive the view. Not necessarily
+//   NUL-terminated (len is authoritative, never strlen). Sim-TU string literals must stay ASCII
+//   (docs/CPP-SUBSET.md §5) - sv_hash reuses hash.h's fnv1a64, which already closes the signed-
+//   char hole with an explicit u8 cast.
+// Determinism: sv_hash is the same FNV-1a family as NameHash - pure function of bytes, target-
+//   invariant. No strings or string-hash ORDER may enter authoritative sim state
+//   (docs/DETERMINISM.md §2.7/§8) - interned ids and integers only inside the tick.
+// Threading: none - values.
+// Includes: foundation/tl_types.h, foundation/hash.h.
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
+#include "foundation/tl_assert.h"
+#include "foundation/hash.h"
 
 struct StrView {
     const char* ptr;
     u32 len;
 };
+static_assert(__is_trivially_copyable(StrView), "");
 
-// Compile-time view over a string literal - `sv("lit")`. N includes the trailing NUL; len excludes it.
-template <usize N>
-constexpr StrView sv(const char (&lit)[N]) {
-    return StrView{ lit, (u32)(N - 1) };
+// A StrView over a NUL-terminated literal/C string. Not constexpr-under-clang for an arbitrary
+// `const char*` (no constexpr strlen without <string.h>, which is not sim-legal to include here
+// for a runtime function) - callers with a literal use `sv_lit` for the compile-time form.
+inline StrView sv(const char* s) {
+    u32 n = 0;
+    while (s[n] != '\0') { n += 1u; }
+    return StrView{ s, n };
 }
 
-// Byte-exact equality; two different-length views are never equal regardless of content.
-constexpr bool sv_eq(StrView a, StrView b) {
-    if (a.len != b.len) return false;
+// The constexpr form for a string literal, where the array bound is known at compile time.
+template <usize N>
+constexpr StrView sv_lit(const char (&s)[N]) { return StrView{ s, (u32)(N - 1u) }; }
+
+// Byte-for-byte equality. Pure, never fails.
+inline bool sv_eq(StrView a, StrView b) {
+    if (a.len != b.len) { return false; }
     for (u32 i = 0; i < a.len; ++i) {
-        if (a.ptr[i] != b.ptr[i]) return false;
+        if (a.ptr[i] != b.ptr[i]) { return false; }
     }
     return true;
 }
 
-// FNV-1a 64 over the raw bytes, unsigned - the same algorithm and seed as `NameHash` (docs/CANON.md).
-constexpr u64 sv_hash(StrView s) {
-    u64 h = 0xcbf29ce484222325ull;
-    for (u32 i = 0; i < s.len; ++i) {
-        h ^= (u64)(u8)s.ptr[i];
-        h *= 0x100000001b3ull;
+// Same family as NameHash (docs/CANON.md "Types") - the FNV-1a byte loop already reads through an
+// explicit u8 cast, so this is target-invariant for the same reason fnv1a64 is (docs/CPP-SUBSET.md
+// section 5).
+inline NameHash sv_hash(StrView s) { return fnv1a64(s.ptr, s.len); }
+
+// True iff s begins with prefix (the empty prefix always matches). Pure, never fails.
+inline bool sv_starts_with(StrView s, StrView prefix) {
+    if (prefix.len > s.len) { return false; }
+    for (u32 i = 0; i < prefix.len; ++i) {
+        if (s.ptr[i] != prefix.ptr[i]) { return false; }
     }
-    return h;
+    return true;
 }
 
-// True iff `s` is at least as long as `prefix` and matches it byte for byte.
-constexpr bool sv_starts_with(StrView s, StrView prefix) {
-    if (s.len < prefix.len) return false;
-    return sv_eq(StrView{ s.ptr, prefix.len }, prefix);
+// Splits at byte index `at` into [0,at) and [at,len). TL_CHECK(at <= len) in all tiers.
+inline void sv_split_at(StrView s, u32 at, StrView* out_lo, StrView* out_hi) {
+    TL_CHECK(at <= s.len);
+    *out_lo = StrView{ s.ptr, at };
+    *out_hi = StrView{ s.ptr + at, s.len - at };
 }
-
-// Splits at the first occurrence of `sep` (an ASCII byte - `u8`, not `char`: signedness differs
-// between x86-64 and aarch64, docs/CPP-SUBSET.md §5). On a match, `*head` excludes `sep` and
-// `*tail` starts just past it; returns false (head/tail untouched) when `sep` does not occur.
-constexpr bool sv_split_at(StrView s, u8 sep, StrView* head, StrView* tail) {
-    for (u32 i = 0; i < s.len; ++i) {
-        if ((u8)s.ptr[i] == sep) {
-            *head = StrView{ s.ptr, i };
-            *tail = StrView{ s.ptr + i + 1, s.len - i - 1 };
-            return true;
-        }
-    }
-    return false;
-}
-
-static_assert(__is_trivially_copyable(StrView), "");
-static_assert(sizeof(StrView) == 16, "const char* (8) + u32 (4) + 4 pad on a 64-bit target");
-static_assert(sv("abc").len == 3, "");
-static_assert(sv_eq(sv("abc"), sv("abc")), "");
-static_assert(!sv_eq(sv("abc"), sv("abd")), "");
-static_assert(sv_starts_with(sv("abcdef"), sv("abc")), "");
-static_assert(!sv_starts_with(sv("ab"), sv("abc")), "");

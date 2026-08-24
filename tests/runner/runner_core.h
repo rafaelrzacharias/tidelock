@@ -129,7 +129,7 @@ inline TestVerdict tl_ctx_verdict(u32 failures, u32 checks, bool skipped) {
 // Until both land, "terminated abnormally" stands in for it. What is NOT deferred: a child that
 // never spawned is a FAIL on every path - the earlier code returned "expected fatal, PASS" for a
 // failed CreateProcess, so a broken exe path turned every fatal-expected test green (review 1).
-inline TestVerdict tl_child_verdict(bool expect_fatal, bool dev_tier, const ChildResult& cr) {
+inline TestVerdict tl_child_verdict(bool expect_fatal, const ChildResult& cr) {
     if (!cr.spawned) { return VERDICT_FAIL; }
     // Before the fatal-expected inversion, deliberately: a killed child's exit code is the
     // RUNNER's, not the test's, and on Windows TerminateProcess(h, code) can be made to look
@@ -137,10 +137,17 @@ inline TestVerdict tl_child_verdict(bool expect_fatal, bool dev_tier, const Chil
     // TIMEOUT is its own status and fails the run (docs/TESTING.md §9.1).
     if (cr.timed_out) { return VERDICT_TIMEOUT; }
     // Since the wave merge linked the real tl_fatal (exit(2) + stderr marker), a controlled
-    // fatal is a NORMAL exit with TL_EXIT_FATAL; an abnormal exit is an UNcontrolled crash
-    // (segfault, stack overflow) and fails. The marker + file:line half of the tightening still
-    // needs child-stderr capture (TODO.md, "the TL_TEST_EXPECT_FATAL tightening").
-    if (expect_fatal && dev_tier) { return (!cr.abnormal && cr.exit_code == TL_EXIT_FATAL) ? VERDICT_PASS : VERDICT_FAIL; }
+    // fatal is a NORMAL exit with TL_EXIT_FATAL in EVERY tier - TL_FATAL and TL_CHECK never
+    // compile out, so the verdict is tier-agnostic (the W1 ruling-closeout lane's finding B):
+    // a fatal-expected test whose trigger is dev-only (TL_ASSERT) must TL_SKIP outside dev in
+    // its own body, and that skip is honored here. An abnormal exit is an UNcontrolled crash
+    // (segfault, stack overflow) and fails. The marker + file:line half of the tightening
+    // still needs child-stderr capture (TODO.md, "the TL_TEST_EXPECT_FATAL tightening").
+    if (expect_fatal) {
+        if (!cr.abnormal && cr.exit_code == TL_EXIT_FATAL) { return VERDICT_PASS; }
+        if (!cr.abnormal && cr.exit_code == TL_EXIT_SKIP)  { return VERDICT_SKIP; }
+        return VERDICT_FAIL;
+    }
     if (cr.abnormal) { return VERDICT_FAIL; }
     if (cr.exit_code == TL_EXIT_OK)   { return VERDICT_PASS; }
     if (cr.exit_code == TL_EXIT_SKIP) { return VERDICT_SKIP; }

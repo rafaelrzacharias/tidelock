@@ -34,6 +34,15 @@ template <typename T> struct Span  { T* data; u32 count; };
   bug class stable bases exist to kill.
 - API: `push`, `pop`, `swap_remove(i)`, `last`, `clear`, `span()`, `slice(a,b)`; `at(i)` is
   bounds-checked at `TL_CHECK` level (all tiers).
+- **Every operation that vacates a slot zeroes it** (`pop`, `swap_remove`, `clear`). A vmem-backed
+  array's arena `used` covers its whole committed capacity, so `[count, cap)` sits inside the
+  hashed extent; leaving a removed element's bytes there would make a hashed array's hash a
+  function of removal history, which `CPP-SUBSET.md` §5 forbids and which `SlotMap` (§2) already
+  avoids the same way. Rev 1 said the tail was "re-zeroed by arena policy on reuse" — that
+  mechanism does not exist for an in-place refill (`ARENA_ZERO_ON_PUSH` only re-zeroes bytes an
+  `arena_push` walks over, and a cleared array pushes nothing until `count` climbs back past
+  `cap`). Corrected by the W1 containers review, 2026-08-24; cost is `O(count·sizeof T)` on
+  `clear` and `O(sizeof T)` on the other two.
 - Walk order: `0..count`, packed. `swap_remove` changes order deterministically (it's a pure
   function of the call sequence) — callers that need stable order use `SlotMap` or tombstones.
 
@@ -63,7 +72,12 @@ bool slotmap_remove(SlotMap*, H h);            // bumps gen; gen wrap → slot q
 
 **`Map<K,V>`** — open addressing, linear probing, power-of-two capacity, rapidhash with the pinned
 seed, integer or `NameHash` keys only (no string keys — intern first). Tombstone-free (backward-
-shift deletion). Walk order is deterministic per insertion sequence but **order-fragile across
+shift deletion): removing a key leaves the table byte-identical to one built from the survivors in
+the same relative insertion order, so nothing about a *deleted* key survives in the walk order.
+`map_init`/`map_grow` zero the blocks they push (never assume `arena_push` returns zeros — it does
+so only above `high_water` or under `ARENA_ZERO_ON_PUSH`) and `map_remove` zeroes the slot it
+empties. A **growing** `Map` orphans its old blocks below the arena's `used`, so its arena must not
+be `ARENA_HASHED` (W1 containers review; `TODO.md` carries the ruling request). Walk order is deterministic per insertion sequence but **order-fragile across
 refactors** → `Map` is for registries, editor, caches — anything whose order outlives the binary
 uses a sorted walk. **Sim code keys on integers and never iterates a `Map`**
 (`DETERMINISM.md` §2.7; LESSONS finding G).
@@ -81,7 +95,9 @@ memmove shows up.**
   `peek(i)`; consumers: event queues' persistent mode, the netcode redundancy window, the log
   ring, Alloy's event stream.
 - `Bitset`: `u64` words, fixed bit count at init; `set/clear/test/find_first/popcount`; walk
-  order = bit order. Used for sleep flags, dirty chunks, action-map masks.
+  order = bit order. Used for sleep flags, dirty chunks, action-map masks, and `SlotMap`'s live
+  column — which is authoritative state, so the struct carries an explicit zeroed `_pad0` per
+  `CPP-SUBSET.md` §5 rather than four bytes of compiler tail padding (W1 containers review).
 - **Sorting:** `sort_u32_kv(keys, vals, n, scratch)` — LSD radix, base 256, stable, integer keys
   only. `sort_u64_kv` likewise. A comparison sort exists only for tools (`tools/` may use
   `qsort`). There is no generic `sort<T, Cmp>` in the runtime: sim sorts are on integer keys by
@@ -179,14 +195,22 @@ tick; `TL_ASSERT(!in_tick)` in debug). API: `map_init(arena, cap)`, `map_put`, `
 ### 8.4 `SortedMap<K,V>` / `SortedSet<K>` (`sorted.h`)
 
 `Array<K> keys` + `Array<V> vals` kept sorted; `lower_bound` binary search; insert = memmove;
-`sorted_iter` walks `0..count`. Integral `K` only.
+`sorted_iter` walks `0..count`. Integral `K` only. **Keys are unique — there is no tie:**
+`sorted_map_put` on a present key overwrites its value and leaves `count` unchanged;
+`sorted_set_insert` on a present key returns `false` and changes nothing. (Stated by the W1
+containers review; rev 1 gave the operations but not the duplicate policy the tests must pin.)
 
 ### 8.5 `RingBuffer<T>`, `Bitset`, sorting (`ring.h`, `bitset.h`, `sort.h`)
 
 ```cpp
-template <typename T> struct RingBuffer { T* data; u32 cap /* pow2 */; u32 head, tail; u8 overwrite_oldest; };
-// push: if full → overwrite_oldest ? tail++ : return false; peek(i) from tail; pop from tail.
-struct Bitset { u64* words; u32 bit_count; };   // set/clear/test/find_first(from)/popcount/clear_all; words on the owning arena
+template <typename T> struct RingBuffer { T* data; u32 cap /* pow2 */; u32 head, tail; u8 overwrite_oldest, _pad0[3]; };
+// head = next pop / peek(0); tail = next push. Both are FREE-RUNNING u32 counters, masked only at
+// the point of indexing, so count = tail - head is a wrapping subtract that stays exact across the
+// u32 boundary. push: if full → overwrite_oldest ? head++ (drop the oldest), else return false.
+// (Rev 1 wrote the two roles the other way round — "peek/pop from tail, overwrite bumps tail";
+// the behaviour it describes is the same, the field names were swapped. Corrected against the
+// shipped header by the W1 containers review, 2026-08-24.)
+struct Bitset { u64* words; u32 bit_count; u32 _pad0; };   // set/clear/test/find_first(from)/popcount/clear_all; words on the owning arena
 void sort_u32_kv(u32* keys, u32* vals, u32 n, Scratch* s);   // LSD radix base 256, 4 passes, stable
 void sort_u64_kv(u64* keys, u32* vals, u32 n, Scratch* s);   // 8 passes; early-out on a pass whose histogram has one bucket
 // pass: hist[256] over byte b of keys; prefix sum; scatter keys/vals into scratch copies; swap buffers. n ≤ 2^32-1.
@@ -207,7 +231,42 @@ u32  fmt_buf(Span<char> out, const char* fmt, ...);   // stb_sprintf; returns le
 side-table (hash → literal) is the interner itself in dev tiers: every `"x"_id` that is also
 registered by name (components, actions, events, arenas) goes through `intern` at registration.
 
-### 8.7 Tests (`tests/foundation/containers/`)
+### 8.6a Construction signatures added over rev-1 (W1 containers, 2026-08-24)
+
+Rev-1 gave every container's struct and operations but not always its constructor — filed here per
+`docs/ROADMAP.md` §0 rule 1 ("header first… signatures added over spec are folded into the doc,
+same commit"):
+
+- `bitset_init(Bitset*, VMemArena* arena, u32 bit_count)`, `ring_init(RingBuffer<T>*, VMemArena*
+  arena, u32 cap, bool overwrite_oldest)`, `sorted_map_init`/`sorted_set_init(…, VMemArena* arena,
+  u32 cap)` — one `arena_push` each, the same shape as `array_init_fixed`.
+- `interner_init(Interner*, VMemArena* chars_arena, VMemArena* meta_arena, u32 max_strings)` —
+  `chars` stays the caller-owned pointer §5 already specifies; `offsets`/`lens`/`by_hash` are fixed
+  at `max_strings` (< 65535) from `meta_arena`. `StrId` (`= u16`) is declared in `interner.h`, not
+  `tl_types.h` — `CANON.md`'s "Types" row names the alias, not its file.
+- `slotmap_init(SlotMap<T,H>*, NameHash id_slots, NameHash id_gen, NameHash id_free, NameHash
+  id_live, const VMemApi*)`. `SlotMap<T,H>` gains four `VMemArena` members
+  (`_slots_arena/_gen_arena/_free_arena/_live_arena`) beyond §8.2's four columns: each column is
+  its own VMem range per `MEMORY.md` §1.2 R-1, reserved to the handle domain's full capacity
+  (`H::IDX_MASK + 1`) — cheap, since address-space reservation is free, and it lets `live`
+  (fixed-size at init, §4) need no separate growth policy. Four ids are required, not derived, so
+  the app's `ArenaRegistry` can register each column under its own name (all four are part of the
+  pool's authoritative state). Each column's reserve is its exact byte size: `vmem_arena_init`
+  rounds every reserve up to `COMMIT_GRANULE` (`MEMORY.md` §8.2), so a small-cap domain needs no
+  caller-side floor — the one this lane shipped against the pre-ruling `vmem_arena_init` was
+  deleted by the W1 containers review, guarded by
+  `slotmap_small_cap_domain_needs_no_caller_reserve_floor`.
+
+### 8.6b `fmt_buf` ships as a stub (W1 containers, 2026-08-24)
+
+`fmt.h`/`fmt.cpp` carry the full contract (§8.6) but `fmt_buf` is `TL_FATAL("unimplemented")`:
+`vendor/CMakeLists.txt` assigns `stb_sprintf`'s arrival to the W1 platform lane ("SDL3 + stb arrive
+with the W1 platform lane"), which had not landed it as of this commit. Vendoring it from this lane
+instead was rejected — it would duplicate a decision already owned elsewhere and risk a second
+`vendor/stb_sprintf/` tree. Replace the stub the day the vendor tree lands (`TODO.md`).
+
+### 8.7 Tests (`tests/foundation/`, flat — matching every sibling lane's layout, not the
+`containers/` subdirectory this section originally named)
 
 `array.test.cpp` (vmem growth across page boundary keeps `data` stable; fixed overflow fatal-
 expected; swap_remove order model), `slotmap.test.cpp` (LIFO reuse, stale handle null, gen wrap →
@@ -216,7 +275,10 @@ quarantine, zeroed dead slot → hash equals a fresh map with the same live set)
 sequence → identical iteration), `sorted.test.cpp`, `ring.test.cpp` (wrap, overwrite flag),
 `bitset.test.cpp`, `sort.test.cpp` (stability with duplicate keys; 1M random keys vs a reference
 insertion sort on a sample; all-equal keys early-out), `strview_interner_fmt.test.cpp` (intern
-idempotence, collision fatal-expected with a crafted pair, `fmt_buf` truncation). Every file:
-`TL_ASSERT_NO_ALLOC` around the hot op.
+idempotence, collision fatal-expected with a crafted pair, `fmt_buf` truncation deferred — see
+§8.6b). Every file: a manual `arena_mark`-before/after check around one representative hot op per
+container (the `TL_ASSERT_NO_ALLOC` macro does not compile yet — a `static_assert` stub pending
+the runner lane's `alloc_shim.cpp` wiring, `TODO.md`).
 
-*Rev 1 — 2026-08-22.*
+*Rev 1 — 2026-08-22; §8.6a/§8.6b, §8.7 path correction added by the W1 containers lane, 2026-08-24;
+§8.6a reserve-floor paragraph retired by the W1 containers review, 2026-08-24.*

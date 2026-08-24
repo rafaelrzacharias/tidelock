@@ -15,7 +15,7 @@
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
 #include "foundation/strview.h"
-#include "foundation/span.h"
+#include "foundation/array.h"   // Span lives with Array (containers lane; the span.h stopgap is gone)
 
 // tmp = path + ".tmp." + pid; write data; fsync; rename over path. Returns ERR_PLATFORM_PATH_TOO_LONG
 // for an over-length path, ERR_PLATFORM_FILE_IO on any step's failure (temp deleted, target untouched).

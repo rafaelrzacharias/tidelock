@@ -17,7 +17,7 @@
 #include "platform/platform.h"
 #include "foundation/ring.h"
 #include "foundation/rect.h"
-#include "foundation/span.h"
+#include "foundation/array.h"   // Span lives with Array (containers lane; the span.h stopgap is gone)
 
 // docs/PLATFORM.md §9.4: the call-log record. 32 B, matches the sdl3 spec's DrawCall shape.
 enum HeadlessDrawVerb : u8 {

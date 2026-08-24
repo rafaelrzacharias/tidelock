@@ -39,7 +39,7 @@
 #include "foundation/strview.h"
 #include "foundation/ring.h"
 #include "foundation/rect.h"
-#include "foundation/span.h"
+#include "foundation/array.h"   // Span lives with Array (containers lane; the span.h stopgap is gone)
 #include "foundation/vmem_api.h"
 
 // Defined in entropy.h, whose include path is restricted to net/ and app/ (docs/PLATFORM.md §5).

@@ -434,6 +434,178 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `mul_int<vel_t>`; `fx.div_q` is `div<q_t>(A, A)` and is only in the table for
       `pos_t/vel_t/q_t/scalar_t` formats; `fx.atan2` takes `pos_t`, `fx.atan2_q` takes `q_t`.
 
+## W1 containers - notes (2026-08-24, w1-containers lane)
+- [x] All ten containers shipped, `tl_audit` and the full `tl_tests` suite green (190 selected,
+      187 passed, 3 skipped [`fmt_buf_truncation` + two vacuous macros elsewhere], 0 failed).
+      Construction signatures the rev-1 spec left implicit are folded into `CONTAINERS.md` §8.6a
+      in the same commit (`bitset_init`, `ring_init`, `sorted_map_init`/`sorted_set_init`,
+      `interner_init`, and `slotmap_init`'s four-owned-arena shape).
+- [ ] **`fmt_buf` is a `TL_FATAL("unimplemented")` stub** (`CONTAINERS.md` §8.6b): `stb_sprintf`
+      is owned by the W1 platform lane (`vendor/CMakeLists.txt`: "SDL3 + stb arrive with the W1
+      platform lane") and had not landed as of this commit. Not vendored here to avoid a second
+      `vendor/stb_sprintf/` tree colliding with that lane's own vendoring. Replace the stub and
+      the `fmt_buf_truncation` SKIP row in `strview_interner_fmt.test.cpp` the day it lands.
+- [ ] **Cross-lane fix: `tests/foundation/vmem_test_api.h` needed `NOMINMAX`** before its
+      `#include <windows.h>`. `fx.h` declares free functions named `min`/`max`
+      (`docs/FX-PALETTE.md`); windows.h's raw macros of the same names mangle those declarations
+      in any TU that includes both. No existing test paired an fx-family header with this shared
+      vmem fixture until `sort.test.cpp` (via `rng.h` → `fx_palette.h` → `fx.h`) did. Fixed in the
+      shared fixture, not worked around per-TU, since any future test pairing the two would hit
+      the same break; owner-neutral (the fixture predates any one lane's ownership).
+- [x] **CLOSED (W1 containers review 1, 2026-08-24): `slotmap_init`'s `COMMIT_GRANULE` reserve
+      floor is deleted.** It was a forward-compatible workaround for `vmem_arena_init` rounding a
+      reserve to the OS page size only; the ruling landed on `main` (`vmem_arena_init` rounds every
+      reserve UP to `COMMIT_GRANULE`, `docs/MEMORY.md` §8.2), so the floor was dead code. Verified
+      by merging `main` into the lane and reading `vmem_arena.cpp`, then deleted from `slotmap.h`
+      and from `CONTAINERS.md` §8.6a. `slotmap_small_cap_domain_needs_no_caller_reserve_floor`
+      pins the property the floor used to provide (16-slot domain, 128-byte column, first push
+      legal); `LESSONS.md`'s entry now says to delete such floors on merge rather than leave them.
+- [ ] **Finding for the luau-bindings lane (W3), not fixed here - out of this lane's scope:**
+      `LUAU-LAYER.md` §4's `sortedpairs` wants a sort over MIXED numeric/string keys (`{ kind: u8;
+      double n; const char* s; u32 len; }`, "numbers before strings; numbers ascending by value;
+      strings bytewise"), but `CONTAINERS.md` §4's decided sort is `sort_u32_kv`/`sort_u64_kv` -
+      LSD radix, integer keys only, by explicit rule ("no generic `sort<T, Cmp>` in the runtime").
+      `sortedpairs`'s key set cannot be radix-sorted as specified; either it needs its own small
+      comparison sort (own file, `tools/`-style exemption or a documented sim exception) or
+      `LUAU-LAYER.md` §4 needs to route through an integer encoding of its sort key before calling
+      `sort_u64_kv`. Not decided here - the luau-bindings lane owns `LUAU-LAYER.md` §4.
+
+## W1 containers - adversarial review (2026-08-24, fresh context, Opus 5 high)
+
+**Verdict: FIX FIRST — done, now SHIP.** Scope `e16e3f3` + `f78a661`, reviewed after merging
+`main` (the ruling-closeout). Nine defects, ranked; the eight that were this lane's to fix are
+fixed with tests in `W1 containers review 1..4`; the ruling requests are below. Baseline was
+198/194/0/4; after the review 221/217/0/4, `tl_audit` green, `docaudit` 0 errors.
+
+The two structural findings: **Array and Map were making hashed bytes a function of history**
+(D1–D3), and **every "two instances" test fed both instances the same op sequence** (D6), so none
+of them could have caught D1–D3. `sorted.test.cpp` was the one file that got the determinism shape
+right; it is the template the others now follow.
+
+### Defects found (ranked, all fixed unless marked)
+
+- **D1 — `map.h:57-63,166-172` (fixed, review 2): `map_init`/`map_grow` assumed `arena_push`
+  returns zeros.** It does so only ABOVE `high_water`, or under `ARENA_ZERO_ON_PUSH`. Trigger: a
+  `Map` pushed into reused plain/scratch arena bytes gets a garbage `state` array, every slot reads
+  `MAP_SLOT_FULL`, and `map_probe`'s "walk until an empty slot" **never terminates** — a hang, not a
+  wrong answer, in the one container the registries and the interner are built on. Fix: `memset` all
+  three blocks. Tests `map_init_zeroes_state_on_a_dirty_arena`,
+  `map_grow_zeroes_state_on_a_dirty_arena`.
+- **D2 — `array.h:88-134` (fixed, review 2): `array_pop`/`array_swap_remove`/`array_clear` left the
+  vacated elements intact.** A vmem-backed array's arena `used` covers its whole committed
+  capacity, so `[count, cap)` is inside the hashed extent `[base, used)`. Trigger: two worlds
+  reaching the same column contents by different removal histories hash differently — against
+  `vmem_arena.h`'s own "hashed bytes are a pure function of state, never of allocation history",
+  `CPP-SUBSET.md` §5, and the rule `SlotMap` already followed by zeroing dead slots. Fix: all three
+  zero. Tests `array_pop_and_swap_remove_hash_is_a_pure_function_of_state`,
+  `array_clear_then_refill_hashes_like_a_fresh_array`.
+- **D3 — `CONTAINERS.md` §8.1 (fixed, review 2): the doc named a mechanism that does not exist.**
+  "a hashed array's tail is re-zeroed by arena policy on reuse" — `ARENA_ZERO_ON_PUSH` only
+  re-zeroes bytes an `arena_push` walks over, and a cleared array pushes nothing until `count`
+  climbs back past `cap`. This sentence is why D2 shipped. Corrected.
+- **D4 — `map.h:113-133` (fixed, review 2): `map_remove` left the removed key/value bytes in the
+  emptied slot**, so a `Map`'s bytes encoded its deletion history. Fix: zero the final gap. The real
+  backward-shift claim is now pinned by `map_deletion_is_history_equivalent` — insert 0..23, remove
+  every third, byte-identical to inserting only the survivors (state, keys, vals, iteration order).
+- **D5 — `sort.test.cpp` (fixed, review 3): the 1M "reference oracle" validated nothing.** It
+  generated a SECOND random array with a different RNG stream, insertion-sorted that, and asserted
+  the result was sorted. It never read `sort_u32_kv`'s output. Trigger: any radix bug at all — a
+  lost element, a duplicated one, a broken early-out — passed. Replaced with four oracles over the
+  real output (ascending; the value column is a permutation of `0..N-1`; stability across every
+  duplicate run; a 200-pair sample compared key-and-val against a stable insertion sort written in
+  the test). Added `n=2`, already-sorted, reverse-sorted, high-byte-only (three passes early-out,
+  one swap, the copy-back path), `sort_u64_kv` equal-key stability, and the sort called with a
+  `Scratch` that already holds the caller's arrays.
+- **D6 — five `*_two_instance_determinism` tests (fixed, review 3): same ops twice.** Proves only
+  that nothing address- or uninitialised-memory-dependent leaks into layout — which is worth
+  something, so they stay, each with a note saying what it cannot see. The property that matters is
+  now pinned per container in the strongest form its contract supports:
+  `map_deletion_is_history_equivalent`, `slotmap_divergent_histories_converge_to_one_hash`,
+  `bitset_divergent_histories_converge_bit_for_bit`, and — deliberately the opposite —
+  `ring_state_is_history_dependent_by_design`, because a ring's state IS its two counters and
+  identical contents after different histories are NOT byte-identical. Better written down than
+  rediscovered by whoever first puts a ring on a hashed arena.
+- **D7 — `interner.h:62` (fixed, review 2): the `s.len <= 0xFFFF` bound was `TL_ASSERT`.**
+  `lens[]` is `u16`, so in netcode/ship — where the assert compiles out — an over-long string
+  truncates silently and `intern_name` hands back a shorter string than was interned. Caller-input
+  validation is `TL_CHECK` (`CPP-SUBSET.md` §3). Test
+  `interner_over_long_string_is_fatal_in_every_tier`.
+- **D8 — `bitset.h:23-26` (fixed, review 4): `Bitset` had four bytes of implicit tail padding.**
+  It is embedded in `SlotMap`'s `live` column — authoritative pool state — and `CPP-SUBSET.md` §5
+  requires hashed state to use explicitly-padded structs, every pad named `_pad0` and zeroed at
+  construction. Now `{ u64* words; u32 bit_count; u32 _pad0; }` with a `sizeof == 16` assert, zeroed
+  in `bitset_init`; folded into `CONTAINERS.md` §4/§8.5. Test `bitset_struct_padding_is_zeroed`.
+- **D9 — `CONTAINERS.md` §8.5 / §8.4 (fixed, review 3): two doc drifts.** §8.5 described the ring
+  with `head` and `tail` swapped relative to the shipped header ("peek/pop from tail, overwrite
+  bumps tail") — same behaviour, wrong field names, and the next reader writes against the doc.
+  §8.4 never stated `SortedMap`'s duplicate policy the §8.7 test list is supposed to pin.
+
+### Cleared on inspection (no defect)
+
+- **Radix stability is real and load-bearing-safe.** Counting sort places in ascending input order
+  with a running prefix; every pass is stable, so LSD is stable overall. The single-bucket early-out
+  is sound: a skipped pass moves nothing and leaves `src` pointing at the live buffer, so the
+  odd/even copy-back stays correct — now pinned by the high-byte-only case. All-equal keys skip
+  every pass and return the input untouched. `0xFFFFFFFF` and `0xFFFFFFFFFFFFFFFF` keys, `n` of
+  0/1/2, and scratch carved above the caller's own arrays all behave.
+- **Gen-wrap quarantine matches CANON.** At `gen == GEN_MAX` on remove the slot is never pushed to
+  the free list and never reissued; the payload is zeroed and stays zeroed (nothing will ever
+  overwrite it, and it is inside the hashed `[0, slot_cap)` range for the rest of the world's life).
+  Pinned by `slotmap_quarantined_slot_stays_zero_and_hashed`.
+- **Null handles and generation 0 are never minted** — now over 40 rounds of churn, not one sample
+  (`slotmap_never_mints_null_or_gen_zero`).
+- **Template discipline is clean** (`CPP-SUBSET.md` §2): no SFINAE, no concepts, no `requires`, no
+  recursion, no `std::`, no `<type_traits>` anywhere in the ten headers. `sort.cpp`'s instantiation
+  set is enumerated by its two explicit wrappers. `map_key_ok`/`sorted_key_ok` are plain `constexpr`
+  predicates in `static_assert`, not SFINAE.
+- **No pointer-keyed ordering anywhere**; no floats; `StrId` is serialized nowhere (it has no user
+  outside `interner.h` and its own test); `fmt_buf` has no caller on the branch, so the `TL_FATAL`
+  stub is honest and unreachable rather than a trap someone is walking into.
+- **The `NOMINMAX` cross-lane fix is correct and minimal** for what it can reach, and `LESSONS.md`
+  already carries the entry. Root cause is `fx.h`'s global `min`/`max` — see R6.
+- **The `sortedpairs` finding for the luau-bindings lane is filed, not half-fixed.** Correct call.
+
+### Ruling requests (not decided here)
+
+- **R1 — `slotmap_get` has no non-asserting liveness query, so "is this handle still alive?" is
+  un-askable in dev tiers.** `slotmap.h:128` fires `TL_ASSERT(false)` on any stale-but-in-range
+  handle, per §8.2. But "the entity I referenced last tick was destroyed" is the *normal* ECS
+  question, and `if (slotmap_get(h))` is the idiomatic way to ask it — which aborts in dev. The
+  lane's own test works around it by comparing generations instead of calling `get`, which is the
+  smell. Proposal: add `bool slotmap_alive(const SlotMap*, H)` — pure, no assert — and keep `get`'s
+  assert for the case where the caller has already asserted liveness. Alternatives: (b) drop the
+  assert from `get` and lose the stale-handle bug signal; (c) leave it and require every consumer to
+  hold a parallel liveness bit. Recommend (a). Blocks the ECS lane, not this one.
+- **R2 — may a `Map` live on an `ARENA_HASHED` arena at all?** A growing `Map` orphans its old
+  keys/vals/state blocks below the arena's `used`, so they are hashed forever and the hash encodes
+  growth history. Stated in `map.h`'s contract block and `CONTAINERS.md` §3 as a derived constraint
+  (bump allocation + "hashes cover `[base, used)`"), not a new decision. The open question is
+  whether the answer should be "never" (enforced how?) or "only if it never grows" (sized at init,
+  `TL_FATAL` on grow when the arena is hashed — but `Map` cannot see its arena's registry flags).
+- **R3 — `CONTAINERS.md` §8.3 specifies `TL_ASSERT(!in_tick)` on `map_grow` and it is not
+  implemented**, because no `in_tick` facility exists in foundation yet. Either the ArenaGuard's
+  barrier window becomes readable from `map.h` or the clause moves to the guard. Filed rather than
+  improvised.
+- **R4 — `CANON.md:22` says Entity gets "1024 gens"; the slot actually yields 1023.** Generation 0
+  is never issued and `GEN_MAX == 1023` triggers quarantine on the remove that would wrap, so
+  generations 1..1023 are issued and the slot retires — 1023 reuses, not 1024. No code states the
+  wrong number, so `docaudit` is silent, but the ECS lane will size its churn budget from that row.
+  One-word CANON correction, owned by whoever owns the Handle rows.
+- **R5 — `sorted_map_iter` (`sorted.h:106`) asserts `*it < count` and returns `void`**, so the
+  caller must bound the loop itself, unlike `map_iter` which returns `bool`. §8.4 says only
+  "`sorted_iter` walks `0..count`". Two iterators with two shapes in one module is a papercut the
+  Luau-facing lane will hit; align them or write the difference down.
+- **R6 — `fx.h:247,250` declare `min`/`max` as free functions in the global namespace.** That is the
+  root cause the `NOMINMAX` fix in `tests/foundation/vmem_test_api.h` treats at the symptom end: any
+  TU that reaches a Windows header before that fixture (or any future non-test TU pairing the two)
+  hits the same mangled-declaration break, and `NOMINMAX` only helps where it is defined first. The
+  fix at the root is `fx_min`/`fx_max` or a namespace, and it belongs to the fx lane. `LESSONS.md`
+  carries the trap; this is the request to close it rather than keep paying it.
+- **R7 — `Span<T>`, `StrView` and `Interner` carry implicit tail padding** (4 bytes each). None is
+  registered state today, and `StrView`'s shape is pinned by `CANON.md`, so nothing was changed.
+  If any of them ever enters a hashed arena, `CPP-SUBSET.md` §5 applies and CANON's `StrView` row
+  has to move with it. Recorded so it is a decision, not a discovery.
+
 ## W1 mem - notes and ruling requests (2026-08-24, w1-mem lane)
 - [ ] **Ruling request: `VMemApi`'s definition needs one foundation-visible home.**
       `PLATFORM.md` §9.1/§9.2 define it in `platform/platform.h`, but foundation is a leaf
@@ -1034,9 +1206,10 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [ ] `VMemArena` + scratch + `ArenaRegistry` (hash-all, snapshot/restore, ring) + arena-offset guard
       + CRT counting shim. Two-worlds test from line one.
 - [ ] `mem_pool` (vendor heaps only) + grep rule.
-- [ ] Containers: `Array/Span`, `SlotMap+Handle` (gen-wrap quarantine), `Map`, `SortedMap/Set`,
+- [x] Containers: `Array/Span`, `SlotMap+Handle` (gen-wrap quarantine), `Map`, `SortedMap/Set`,
       `RingBuffer`, `Bitset`, radix `sort_u32_kv/u64_kv`; `StrView`, interner, `fmt`. Rubric tests
-      + two-instance determinism tests.
+      + two-instance determinism tests. (W1 containers, 2026-08-24; `fmt_buf` ships as a
+      documented stub - see the notes section below and `CONTAINERS.md` §8.6b.)
 - [x] Keyed RNG (`rng_for/below/q/range`) + pinned rapidhash + `constexpr` FNV-1a `NameHash`.
       Vendor rapidhash. (W1 rng/hash.) The debug side-table (hash -> literal) is NOT built here:
       `CONTAINERS.md` §8.6 already rules it as the interner's job in dev tiers - foundation has no

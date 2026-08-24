@@ -19,7 +19,7 @@
 | `Rect_f32 / Rect_i32 / Rect_u16 { x, y, w, h }` | three concrete structs in `foundation/rect.h` (not a template); `min/max` derived; never `top/bottom` |
 | `Transform { pos_t x, y; angle_t rot; u32 flags }` | engine component; `flags` bit 0 = snap, bits 1..31 zero |
 | `Handle<Tag, IDX_BITS, GEN_BITS>` | `bits == 0` is null; generation 0 never issued; gen starts at 1 |
-| `Entity` = `Handle<EntityTag, 22, 10>` (u32) | 4M slots / 1024 gens; wrap → slot quarantined |
+| `Entity` = `Handle<EntityTag, 22, 10>` (u32) | 4M slots / 1023 usable gens (gen 0 never issued; the wrapping remove quarantines the slot - W1 containers review); wrap → slot quarantined |
 | resource handles `Handle<_, 12, 4>` (u16) | textures, fonts, audio clips, clips, data tables |
 | `ComponentId` = `u16` dense (< 1024) · `ActionId` = `u16` dense (< 32) · `EventTypeId` = `NameHash` | |
 | `w->sched.running = { index, label }` | published by `run_phase` before every system call (trampolines, profiler) | ECS §10.6 |

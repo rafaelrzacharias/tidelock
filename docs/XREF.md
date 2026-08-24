@@ -73,6 +73,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ARCHITECTURE.md` -> §4
 - `BUILD.md` -> §1, §6, §7, §9
 - `CANON.md` -> §4
+- `CONTAINERS.md` -> §5
 - `DETERMINISM.md` -> §1, §4, §5
 - `ECS.md` -> §9
 - `FX-PALETTE.md` -> §1, §2, §4, §5, §6, §7, §9
@@ -173,7 +174,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ARCHITECTURE.md` -> §1, §8.8
 - `ASSETS-AND-DATA.md` -> §3, §5
 - `BUILD.md` -> §1.5
-- `CONTAINERS.md` -> §3, §7
+- `CONTAINERS.md` -> §1.2, §3, §7, §8.2
 - `CPP-SUBSET.md` -> §1.1, §3
 - `DETERMINISM.md` -> §2
 - `ECS.md` -> §2
@@ -241,6 +242,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 
 ## ROADMAP.md
 - `BUILD.md` -> §0
+- `CONTAINERS.md` -> §0
 
 ## TESTING.md
 - `BUILD.md` -> §5, §8, §9.1

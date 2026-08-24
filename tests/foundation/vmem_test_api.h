@@ -9,6 +9,12 @@
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+// NOMINMAX: fx.h declares free functions named min/max (docs/FX-PALETTE.md); windows.h's raw
+// min/max macros mangle those declarations in any TU that includes both (found by the W1
+// containers lane, whose tests are the first to include both this fixture and an fx-family
+// header). Fixed here, not with a workaround in the including TU, since any future test pairing
+// the two would hit the same break.
+#define NOMINMAX
 #include <windows.h>
 
 static inline void* tv_reserve(void*, u64 bytes) {
