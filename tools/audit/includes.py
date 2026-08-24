@@ -39,6 +39,19 @@ SYS_ALLOW_DIRS = {                        # additional system headers, by path p
 }
 BACKEND_FREE = ("src/platform/impl_sdl3", "src/platform/impl_headless")   # OS headers live here
 
+
+def is_backend_free(rel):
+    """True where a real OS header is legal. The two impl_* dirs, plus - docs/PLATFORM.md §9.1 -
+    the os_*.cpp TUs that sit directly in src/platform/ (not under either impl_*): they are the
+    single implementation shared by both impls (os_win_vmem.cpp/os_posix_vmem.cpp,
+    os_entropy.cpp, os_file_atomic.cpp, os_crash_win.cpp/os_crash_posix.cpp), so they cannot live
+    under impl_sdl3 or impl_headless without being compiled twice or picking a fake owner. The
+    "os_" prefix is the doc's own naming convention, not a filename list to keep in sync here."""
+    if any(rel.startswith(p) for p in BACKEND_FREE):
+        return True
+    d, base = os.path.split(rel)
+    return d == "src/platform" and base.startswith("os_") and base.endswith(".cpp")
+
 BACKEND_HEADERS = {                       # token in the include path -> allowed path prefixes
     "SDL3": ("src/platform/impl_sdl3",),
     "SDL_ttf": ("src/platform/impl_sdl3",),
@@ -424,7 +437,7 @@ def check_file(root, path, nondet, tooling, errors):
     code_lines = strip_comments(raw, blank_strings=False).splitlines()   # includes keep their paths
     token_lines = strip_comments(raw, blank_strings=True).splitlines()   # bans ignore literals
     module = module_of(rel)
-    in_backend_free = any(rel.startswith(p) for p in BACKEND_FREE)
+    in_backend_free = is_backend_free(rel)
     stem = os.path.splitext(os.path.basename(rel))[0]
 
     is_det_tu = rel.startswith("src/sim/") or (

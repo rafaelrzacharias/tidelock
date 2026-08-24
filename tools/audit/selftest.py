@@ -248,6 +248,13 @@ INCLUDE_CASES = [
      '#pragma once\n// Spec: docs/ECS.md §1\n#include "foundation/tl_types.h"\n'
      "template <class T>\nT o_id(T x) { return x; }\n",
      "no contract comment"),
+    # docs/PLATFORM.md §9.1's os_*.cpp TUs sit directly in src/platform/ (not impl_sdl3/
+    # impl_headless) and need real OS headers - is_backend_free() scopes that to the "os_" prefix,
+    # not the whole directory. Without this fixture a bug that widened the exemption to every file
+    # in src/platform/ (platform.h included) would report 0 violations here too.
+    ("a non-os_ file in src/platform/ still bans raw OS headers", "src/platform/util.cpp",
+     "#include <windows.h>\n",
+     "not on the allowlist"),
 ]
 
 # Things that must NOT fire: the gates have to be usable, not just loud.
@@ -314,6 +321,11 @@ INCLUDE_CLEAN = [
      "#include <stdio.h>\n#include <stdlib.h>\n"
      "namespace { unsigned g_ring_head = 0; }\n"
      "void tl_log_bump(void) { g_ring_head += 1u; }\n"),
+    # is_backend_free() must actually grant the exemption it claims: an os_*.cpp directly in
+    # src/platform/ (not under impl_sdl3/impl_headless) with a real OS header.
+    ("an os_*.cpp in src/platform/ may include a real OS header", "src/platform/os_entropy.cpp",
+     "#include <windows.h>\n"
+     "void os_entropy_probe(void) {}\n"),
 ]
 
 

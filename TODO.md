@@ -759,6 +759,16 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       existing on `main`; W1 platform's remaining build (`os_*_vmem.cpp`, `os_entropy.cpp`,
       `impl_headless/{init,file,clock,thread,vmem,entropy}.cpp`, the step-1 test set) proceeds
       against it directly rather than a stopgap.
+- [x] **Gate finding (fixed in the same commit, for the record): `tools/audit/includes.py`'s
+      `BACKEND_FREE` only exempted `impl_sdl3/`/`impl_headless/` from the raw-OS-header ban, but
+      `PLATFORM.md` §9.1 names six `os_*.cpp` TUs (`os_win_vmem`, `os_posix_vmem`, `os_entropy`,
+      `os_file_atomic`, `os_crash_win`, `os_crash_posix`) sitting directly in `src/platform/` -
+      the single implementation shared by both impls, so they cannot live under either `impl_*`
+      without being compiled twice or picking a fake owner. `is_backend_free()` now also exempts
+      any `src/platform/os_*.cpp` (the doc's own naming convention, not a filename list to keep in
+      sync). Two selftest fixtures: a non-`os_`-prefixed file in `src/platform/` still bans a raw
+      OS header (the exemption is prefix-scoped, not directory-wide - `platform.h` itself must
+      stay clean); an `os_*.cpp` with a real OS header is clean.
 - [ ] `VMemArena` + scratch + `ArenaRegistry` (hash-all, snapshot/restore, ring) + arena-offset guard
       + CRT counting shim. Two-worlds test from line one.
 - [ ] `mem_pool` (vendor heaps only) + grep rule.
