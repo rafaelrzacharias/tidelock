@@ -220,12 +220,42 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `pos_t/vel_t/q_t/scalar_t` formats; `fx.atan2` takes `pos_t`, `fx.atan2_q` takes `q_t`.
 
 ## Foundation week(s) (`docs/MEMORY.md`, `CONTAINERS.md`, `DETERMINISM.md`, `TESTING.md`)
-- [ ] Finish the test runner (`tests/runner`; W0 shipped the stub — generated list, tags/filter,
-      `--isolate` one child per test, TSV + JUnit): `NEAR_FX`, `SPAN_EQ`/`MEM_EQ`,
-      `TL_TEST_EXPECT_FATAL` via child process, `TL_ASSERT_NO_ALLOC`, `TL_ASSERT_DETERMINISTIC`,
-      the parallel isolate pool, property generators. `docs/TESTING.md` §9.1. **First.**
+- [x] Finish the test runner (`tests/runner` — W1 runner+driver lane, 2026-08-24): `NEAR_FX`,
+      `SPAN_EQ`/`MEM_EQ`, `TL_TEST_EXPECT_FATAL` (always via a child process, isolate or not),
+      the parallel `--isolate` pool (one child per test, `core_count` workers, sorted
+      deterministic replay of failures), property-test seeding (`seed_for(global_seed, index)`),
+      TSV + JUnit (carried from W0). `docs/TESTING.md` §9.1.
+      **Two items shipped as documented stubs, not real checks** (`tests/runner/tl_test.h`):
+      `TL_ASSERT_NO_ALLOC` (no `VMemArena`/`alloc_shim.cpp` yet — mem lane, `w1-mem` carried no
+      commits past main as of 2026-08-24) and `TL_ASSERT_DETERMINISTIC` (no `World` yet). Both
+      compile against their eventual signature and assert nothing; wire the real bodies the day
+      `foundation/vmem_arena.h` and a `World` exist, and delete the "STUB" doc comments.
+      **`TL_TEST_EXPECT_FATAL`'s child-process contract is exit code 2 + a stderr marker
+      (`TL_FATAL_MARKER`, `tl_test.h`), not yet checkable**: `tl_fatal` is still the tooling-rt
+      lane's trap stub (`src/foundation/tl_assert.cpp`, `__builtin_trap()`, no message, no
+      controlled exit code) — the runner matches on "child exited abnormally" instead
+      (`tests/runner/main.cpp` `child_passes`/`ChildResult::abnormal`). Tighten it to the real
+      exit-2+marker check the day the tooling-rt lane's crash writer lands (`TOOLING.md` §9.3.9).
+      **Ruling recorded**: the isolate pool's process-spawn + core-count primitives
+      (`CreateProcess`/`fork`+`exec`, `GetSystemInfo`/`sysconf`) are read as covered by
+      `docs/TESTING.md` §8 R-2's "printf-class io + clock + filesystem access" exemption, since
+      the feature §9.1 specifies cannot exist without them; `tests/runner/tl_test.h`'s contract
+      block states this. The POSIX (`fork`/`execv`/`waitpid`) leg is written to the same contract
+      as the Windows leg but untested on this machine (Windows-only dev PC) — exercise it the
+      first time the Linux PR lane runs `tl_tests --isolate`.
+      **`fx_fatal.test.cpp` landed as this lane's handoff** (below) — ticked there too.
+- [x] `tests/driver` skeleton (W1 runner+driver lane, 2026-08-24): full `--scene/--seed/--ticks/
+      --workers|--workers-sweep/--record|--replay/--verify/--dual/--dump-probes/--csv/
+      --snapshot-every/--ballast` parsing + validation against `docs/TESTING.md` §9.2 (mutual
+      exclusions, `--verify` requires `--replay`). The boot itself (headless platform init,
+      `app/wiring.cpp`'s scene load, the Script/Replay producer, `engine_tick_once`, CSV + hash
+      output) is a named stub (`driver_boot_headless_STUB`, `tests/driver/main.cpp`) until the
+      platform lane's headless impl and `app/wiring.cpp` land — a valid invocation today exits
+      **70** (EX_SOFTWARE, the W0 stub convention), never the real contract's 0/3, so nothing
+      downstream can mistake "not implemented" for "ran clean" or "diverged". `tl_gate0`/
+      `tl_hovel` stay on the W0 `stub_main.cpp` (their own lanes).
 - [ ] Delete the W0 placeholder TUs as each module gets real sources (`src/*/…_unit`), and give
-      `tl_driver` / `tl_gate0` / `tl_hovel` real mains (they exit 70 today).
+      `tl_driver` (replace `driver_boot_headless_STUB`) / `tl_gate0` / `tl_hovel` real mains.
 - [ ] `platform/` contract + **headless impl** (file/clock/vmem/entropy/threads real; window/draw/
       events null). `docs/PLATFORM.md`.
 - [ ] `VMemArena` + scratch + `ArenaRegistry` (hash-all, snapshot/restore, ring) + arena-offset guard
