@@ -39,6 +39,12 @@ using f64 = double;
 // `size_t`'s width so a 32-bit target fails to compile rather than silently truncating.
 using usize = u64;
 
+// `NameHash` is the compile-time name id (docs/CANON.md "Types" homes the alias here). The value
+// is a constexpr FNV-1a 64 of a literal; the `""_id` operator that computes it lives in
+// foundation/hash.h (the rng/hash lane) - this is only the storage type, so the arena/registry
+// headers can carry ids without waiting on that lane.
+using NameHash = u64;
+
 // --- uint_fit<N>: the smallest unsigned type holding N bits (docs/CPP-SUBSET.md §1) ----------
 // Flat, non-recursive: a constexpr index function plus four explicit specialisations.
 namespace tl {

@@ -130,7 +130,8 @@ TL_TEST(fx_review_release_error_values, "foundation,fx,det,fast") {
     // netcode/ship run this body - before W1 fx review 3 none of them had a test anywhere.
     // (The generated test list registers every TL_TEST, so the #if is inside the body.)
 #if TL_DEV
-    TL_EXPECT_TRUE(true);                                                               // dev: the trap tier, see TODO.md
+    TL_SKIP("dev is the trap tier: these calls fatal here, and fx_fatal.test.cpp is the "
+            "TL_TEST_EXPECT_FATAL half of the same contract");
 #else
     TL_EXPECT_EQ(div<q_t>(fx_raw<pos_t>(5), fx_raw<pos_t>(0)).v, INT32_MAX);           // sign(a) * INT32_MAX
     TL_EXPECT_EQ(div<q_t>(fx_raw<pos_t>(-5), fx_raw<pos_t>(0)).v, -INT32_MAX);

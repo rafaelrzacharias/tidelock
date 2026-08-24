@@ -14,8 +14,10 @@
 // Determinism: __FILE__/__LINE__ are deterministic given the tree and never feed sim state
 //   (docs/CPP-SUBSET.md §5). TL_ASSERT compiles to ((void)0) in netcode/ship, so a condition with
 //   side effects is a bug: the two tiers would run different programs.
-// Threading: none - header-only. The runtime behind tl_fatal is the tooling-rt lane's
-//   (docs/TOOLING.md §9.3.9 crash writer); until it lands, tl_assert.cpp traps.
+// Threading: none - header-only. The runtime (tl_assert.cpp) logs then calls the crash-writer
+//   seam (foundation/crash.h, docs/TOOLING.md §9.3.9); the seam's built-in fallback prints the
+//   stderr marker docs/TESTING.md §9.1's fatal-expected tests match on and exits(2), until
+//   platform/ installs the real OS-level writer.
 // Includes: foundation/tl_types.h only.
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"

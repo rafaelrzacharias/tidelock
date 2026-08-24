@@ -1,5 +1,6 @@
 # Generated test list - the runner's one exemption from "no static registration"
-# (docs/TESTING.md §0, §9.1). Scans tests/**/*.test.cpp for TL_TEST( and emits test_list.inc.
+# (docs/TESTING.md §0, §9.1). Scans tests/**/*.test.cpp for TL_TEST(/TL_TEST_EXPECT_FATAL( and
+# emits test_list.inc.
 #
 # Two modes: included by the root CMakeLists (defines tl_add_test_list), or run as
 #   cmake -DTL_SCAN_DIR=<dir> -DTL_SCAN_OUT=<file> -P cmake/testlist.cmake
@@ -8,6 +9,10 @@
 # The regexes spell parentheses as the character classes [(] and [)]: CMake's regex engine and
 # its quoted-argument escaping disagree about backslashes often enough that avoiding them is
 # cheaper than getting them right twice.
+#
+# TL_TEST_EXPECT_FATAL is scanned separately (never matched by the TL_TEST pattern: that pattern
+# requires "TL_TEST" then only whitespace before "(", and "_EXPECT_FATAL" is neither) so a fatal-
+# expected test gets exactly one row, tagged expect_fatal=1 (docs/TESTING.md §9.1).
 
 if(CMAKE_SCRIPT_MODE_FILE AND DEFINED TL_SCAN_OUT)
   file(GLOB_RECURSE TL_TEST_SRC "${TL_SCAN_DIR}/*.test.cpp")
@@ -16,15 +21,24 @@ if(CMAKE_SCRIPT_MODE_FILE AND DEFINED TL_SCAN_OUT)
   set(rows "")
   foreach(src IN LISTS TL_TEST_SRC)
     file(READ "${src}" text)
-    string(REGEX MATCHALL "TL_TEST[ \t]*[(][ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*,[^)]*[)]" hits "${text}")
     file(RELATIVE_PATH rel "${TL_SCAN_DIR}/.." "${src}")
+    string(REGEX MATCHALL "TL_TEST[ \t]*[(][ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*,[^)]*[)]" hits "${text}")
     foreach(hit IN LISTS hits)
       string(REGEX REPLACE "TL_TEST[ \t]*[(][ \t]*([A-Za-z_][A-Za-z0-9_]*).*" "\\1" name "${hit}")
       string(REGEX REPLACE "TL_TEST[ \t]*[(][ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*,[ \t]*(.*)[)]" "\\1" tags "${hit}")
       string(REPLACE "\"" "" tags "${tags}")
       string(REPLACE " " "" tags "${tags}")
       string(APPEND decls "void test_${name}(TestCtx* t);\n")
-      string(APPEND rows "    { \"${name}\", \"${tags}\", test_${name}, \"${rel}\" },\n")
+      string(APPEND rows "    { \"${name}\", \"${tags}\", test_${name}, \"${rel}\", 0 },\n")
+    endforeach()
+    string(REGEX MATCHALL "TL_TEST_EXPECT_FATAL[ \t]*[(][ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*,[^)]*[)]" fhits "${text}")
+    foreach(hit IN LISTS fhits)
+      string(REGEX REPLACE "TL_TEST_EXPECT_FATAL[ \t]*[(][ \t]*([A-Za-z_][A-Za-z0-9_]*).*" "\\1" name "${hit}")
+      string(REGEX REPLACE "TL_TEST_EXPECT_FATAL[ \t]*[(][ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*,[ \t]*(.*)[)]" "\\1" tags "${hit}")
+      string(REPLACE "\"" "" tags "${tags}")
+      string(REPLACE " " "" tags "${tags}")
+      string(APPEND decls "void test_${name}(TestCtx* t);\n")
+      string(APPEND rows "    { \"${name}\", \"${tags}\", test_${name}, \"${rel}\", 1 },\n")
     endforeach()
   endforeach()
   if(rows STREQUAL "")

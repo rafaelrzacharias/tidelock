@@ -1,63 +1,62 @@
 #pragma once
 // ---------------------------------------------------------------------------------------------
-// handle.h - the generational handle: Handle<Tag,IDX_BITS,GEN_BITS>, handle_make/index/gen/is_null.
+// handle.h - Handle<Tag, IDX_BITS, GEN_BITS>: the generational id, the only cross-pool
+//   reference type.
 //
-// Spec: docs/MEMORY.md §3, §8.5 (pinned shape); docs/CANON.md ("Types").
-// Purpose: one generational-index template shared by every domain that reuses slots (entities,
-//   resources, Alloy bodies, platform's Tex/Thread/Sem/Mutex/Watch handles).
-// Invariants: `bits == 0` is always null; generation 0 is never issued, so zero-init memory is
-//   never a valid handle. `Tag` is a distinct empty struct per domain - it exists only so two
-//   domains of the same width never implicitly convert into each other.
-// Determinism: trivially copyable, one integer field; safe inside hashed/snapshotted state.
-// Threading: none - a value type, no state.
-// Includes: foundation/tl_types.h, foundation/tl_assert.h (the panic ABI, docs/CPP-SUBSET.md §9 R-3).
-//
-// Landed from the W1 platform lane (2026-08-24), not the mem lane: PLATFORM.md §9's contract
-// header needs the type and MEMORY.md's lane had not started. Transcribed verbatim from the
-// pinned shape in MEMORY.md §3/§8.5 - same precedent as tl_assert.h landing from the fx lane
-// (LESSONS.md). The mem lane owns this file from the moment it starts; a conflicting future
-// definition there wins and this note is stale.
+// Spec: docs/MEMORY.md §3 (design + the domain table), §8.5 (this header);
+//   docs/CANON.md "Types" (Entity = Handle<EntityTag, 22, 10>, resources Handle<_, 12, 4>).
+// Purpose: no pointers in authoritative state - handles/indices only (docs/MEMORY.md section 0
+//   rule 2). SlotMap is the only place a slot is freed and reused; it bumps the generation so a
+//   stale handle fails loudly (debug) or reads as absent (release).
+// Invariants: bits == 0 is the null handle; generation 0 is NEVER issued, so zero-initialised
+//   memory is never a valid handle (docs/CPP-SUBSET.md section 3). Layout: gen in the high
+//   GEN_BITS, index in the low IDX_BITS. Generation-wrap policy is per domain (Entity:
+//   quarantine on wrap - the SlotMap's job, docs/MEMORY.md section 3).
+// Determinism: handle bits are state - they survive snapshot/restore and are hashed wherever
+//   their pool is. Pure constexpr functions, no state here.
+// Threading: none - values.
+// Includes: foundation/tl_types.h, foundation/tl_assert.h.
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
 #include "foundation/tl_assert.h"
 
+// A closed value template (docs/CPP-SUBSET.md section 2). Instantiated per domain with a tag
+// struct (`struct EntityTag;`) declared by the domain's owner.
 template <typename Tag, int IDX_BITS, int GEN_BITS>
 struct Handle {
-    uint_fit<IDX_BITS + GEN_BITS> bits;
-    static constexpr u32 IDX_BITS_V = (u32)IDX_BITS;
-    static constexpr u32 GEN_BITS_V = (u32)GEN_BITS;
-    static constexpr u32 IDX_MASK = (1u << IDX_BITS) - 1u;
-    static constexpr u32 GEN_MAX  = (1u << GEN_BITS) - 1u;
+    static_assert(IDX_BITS >= 1 && GEN_BITS >= 1, "a handle needs both an index and a generation");
+    static_assert(IDX_BITS <= 31 && GEN_BITS <= 31, "masks are u32 (docs/MEMORY.md section 8.5)");
+    static_assert(IDX_BITS + GEN_BITS <= 64, "bits must fit one integer");
+
+    using rep = uint_fit<IDX_BITS + GEN_BITS>;
+    rep bits;   // 0 = null; otherwise gen << IDX_BITS | idx with gen >= 1
+
+    static constexpr u32 IDX_MASK = (1u << IDX_BITS) - 1;
+    static constexpr u32 GEN_MAX  = (1u << GEN_BITS) - 1;
+    static constexpr int IDX_BITS_N = IDX_BITS;
 };
 
-// Packs idx into the low IDX_BITS, gen into the bits above it. gen must be in [1, GEN_MAX] -
-// generation 0 is reserved for "never issued" so a zeroed Handle reads as null.
-template <typename H>
-constexpr H handle_make(u32 idx, u32 gen) {
+// Builds a handle from a slot index and a generation. Preconditions (TL_ASSERT): idx <=
+// IDX_MASK, gen in [1, GEN_MAX] - generation 0 is never issued.
+template <typename H> constexpr H handle_make(u32 idx, u32 gen) {
     TL_ASSERT(idx <= H::IDX_MASK);
     TL_ASSERT(gen >= 1u && gen <= H::GEN_MAX);
-    using Bits = decltype(H::bits);
-    return H{ (Bits)((gen << H::IDX_BITS_V) | idx) };
+    return H{ (typename H::rep)(((u64)gen << H::IDX_BITS_N) | (u64)idx) };
 }
 
-// Returns the low IDX_BITS of h.bits - undefined meaning on a null handle (check first).
-template <typename H>
-constexpr u32 handle_index(H h) {
-    return (u32)h.bits & H::IDX_MASK;
-}
+// The slot index; meaningful only for non-null handles.
+template <typename H> constexpr u32 handle_index(H h) { return (u32)(h.bits & H::IDX_MASK); }
 
-// Returns the generation field of h.bits - 0 only for a null handle.
-template <typename H>
-constexpr u32 handle_gen(H h) {
-    return ((u32)h.bits >> H::IDX_BITS_V) & H::GEN_MAX;
-}
+// The generation; 0 only for the null handle.
+template <typename H> constexpr u32 handle_gen(H h) { return (u32)(((u64)h.bits >> H::IDX_BITS_N) & H::GEN_MAX); }
 
-// bits == 0 is the one null representation; zero-init memory always reads as null.
-template <typename H>
-constexpr bool handle_is_null(H h) {
-    return h.bits == 0;
-}
+// True for the null handle (bits == 0 - zero-init memory is never valid).
+template <typename H> constexpr bool handle_is_null(H h) { return h.bits == 0; }
 
-static_assert(__is_trivially_copyable(Handle<struct HandleSelfTestTag, 22, 10>), "");
-static_assert(sizeof(Handle<struct HandleSelfTestTag2, 22, 10>) == 4, "22+10 bits fits u32");
-static_assert(sizeof(Handle<struct HandleSelfTestTag3, 12, 4>) == 2, "12+4 bits fits u16");
+// The shapes docs/CANON.md pins. (EntityTag itself is the ECS lane's; the asserts use local tags.)
+namespace mem {
+struct HandleShapeCheck32Tag;  struct HandleShapeCheck16Tag;
+static_assert(sizeof(Handle<HandleShapeCheck32Tag, 22, 10>) == 4, "Entity shape is u32 (docs/CANON.md)");
+static_assert(sizeof(Handle<HandleShapeCheck16Tag, 12, 4>) == 2, "resource shape is u16 (docs/CANON.md)");
+static_assert(__is_trivially_copyable(Handle<HandleShapeCheck32Tag, 22, 10>), "");
+}  // namespace mem

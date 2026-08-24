@@ -61,13 +61,31 @@ extern "C" void* memmove(void*, const void*, size_t);
 extern "C" void* memset(void*, int, size_t);
 extern "C" int memcmp(const void*, const void*, size_t);
 """
+# Clang predefines _MSC_VER for the windows-msvc triple whatever the driver, and a vendor header
+# may legally branch on it (rapidhash.h includes <intrin.h> under `#if defined(_MSC_VER)`,
+# unconditionally on __SIZEOF_INT128__). Clang's own resource-dir intrin.h then declares ~90
+# SIMD-intrinsic records the linux/pi triples never see, so the layout leg counts a different
+# number of records and reports a divergence that is real text but inert code.
+#
+# The first fix for that was `-U_MSC_VER` in BASE_FLAGS. That is the failure mode this file's
+# header warns about: it does not remove the noise, it removes the gate's ability to SEE the
+# macro at all - with it, a TU that is literally two programs (`#ifdef _MSC_VER` around two
+# different structs) passed with "0 divergences", and nothing outside `src/` is covered by
+# includes.py's token ban. So _MSC_VER stays defined and <intrin.h> is stubbed empty instead,
+# exactly as <string.h> is: the records disappear at their actual source, and every _MSC_VER
+# branch in our source AND in a vendor header is still measured on all three triples.
+INTRIN_H_STUB = "#pragma once\n"
 # Used to measure which records the sanctioned headers themselves define, per triple.
 SYSTEM_PROBE = '#include <stdint.h>\n#include <stddef.h>\n#include <limits.h>\n#include <string.h>\n'
 
 # -nostdlibinc, NOT -nostdinc: the latter drops clang's own resource dir too, which is where the
 # freestanding <stdint.h>/<stddef.h>/<limits.h> live.
 BASE_FLAGS = ["-std=c++20", "-ffreestanding", "-nostdlibinc", "-nostdinc++",
-              "-fno-exceptions", "-fno-rtti", "-DTL_SIM_TU=1"]
+              "-fno-exceptions", "-fno-rtti", "-DTL_SIM_TU=1",
+              # rapidhash.h's `#pragma intrinsic(_umul128)` names a function the stubbed
+              # <intrin.h> does not declare; the pragma is inert either way (the
+              # __SIZEOF_INT128__ branch is the one that compiles) but it must not be an error.
+              "-Wno-pragma-pack", "-Wno-ignored-pragmas"]
 LAYOUT_FLAGS = ["-fsyntax-only", "-Xclang", "-fdump-record-layouts-complete"]
 
 LINE_MARKER = re.compile(r'^#\s+\d+\s+"([^"]*)"')
@@ -279,7 +297,12 @@ def main():
     with tempfile.TemporaryDirectory(prefix="tl_targets_") as tmp:
         with open(os.path.join(tmp, "string.h"), "w", encoding="utf-8", newline="\n") as f:
             f.write(STRING_H_STUB)
-        incs = ["-I" + os.path.join(root, "src"), "-I" + tmp]
+        with open(os.path.join(tmp, "intrin.h"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(INTRIN_H_STUB)
+        # vendor/rapidhash: the one vendor header a det TU includes (src/foundation/hash.cpp),
+        # per its wrap-module restriction in tools/audit/includes.py's BACKEND_HEADERS.
+        incs = ["-I" + os.path.join(root, "src"), "-I" + tmp,
+                "-I" + os.path.join(root, "vendor", "rapidhash")]
 
         # The layout dump has to work for EVERY triple, not just the host's: clang 18 crashes
         # dumping layouts for x86_64-pc-windows-msvc from Linux, and a host-only probe walked past

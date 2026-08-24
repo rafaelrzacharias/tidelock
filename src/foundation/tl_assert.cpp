@@ -1,19 +1,21 @@
-// tl_assert.cpp - the panic ABI's runtime (docs/CPP-SUBSET.md §9 R-3). Non-det half of foundation
-// (src/foundation/CMakeLists.txt TL_FOUNDATION_NONDET), so it may reach io once the tooling-rt
-// lane lands the crash writer (docs/TOOLING.md §9.3.9). Until then this is the header-first stub
-// the W1 fx lane needed to link: every entry traps. The arguments are kept live in the frame so a
-// debugger shows file:line:msg at the trap site; nothing is written because foundation has no
-// sanctioned io path of its own (docs/CPP-SUBSET.md §1) - that path is the tooling lane's.
+// tl_assert.cpp - the panic ABI's runtime (docs/CPP-SUBSET.md §9 R-3). Tooling plane (RR-7, §9
+// R-4): real io and the crash-writer seam (foundation/crash.h) are sanctioned here. Each tier
+// routes to its own R-3 symbol so the report names which one fired (docs/TOOLING.md §9.1).
 #include "foundation/tl_assert.h"
+#include "foundation/crash.h"
+#include "foundation/tl_log.h"
 
-// Kept out of line and never inlined so the frame holding (file, line, msg) survives to the trap.
-__attribute__((noinline)) static void tl_panic_trap(const char* file, u32 line, const char* msg) {
-    (void)file; (void)line; (void)msg;
-    __builtin_trap();
+namespace {
+// TOOLING.md §9.3.9's chain is TL_FATAL -> tl_fatal -> TL_LOG_ERR -> crash.raise_fatal. Not the
+// TL_LOG_ERR macro itself: it would bind __FILE__/__LINE__ to this TU, not the caller's site.
+[[noreturn]] void log_then_crash(const char* origin, const char* file, u32 line, const char* msg) {
+    tl_log_write(LOG_ERR, file, line, "%s", msg);
+    tl_crash_raise(CRASH_FATAL, origin, file, line, msg);
 }
+}  // namespace
 
 extern "C" {
-void tl_fatal(const char* file, u32 line, const char* msg) { tl_panic_trap(file, line, msg); __builtin_unreachable(); }
-void tl_check_failed(const char* file, u32 line, const char* expr) { tl_panic_trap(file, line, expr); __builtin_unreachable(); }
-void tl_assert_failed(const char* file, u32 line, const char* expr) { tl_panic_trap(file, line, expr); __builtin_unreachable(); }
+void tl_fatal(const char* file, u32 line, const char* msg) { log_then_crash("TL_FATAL", file, line, msg); }
+void tl_check_failed(const char* file, u32 line, const char* expr) { log_then_crash("TL_CHECK", file, line, expr); }
+void tl_assert_failed(const char* file, u32 line, const char* expr) { log_then_crash("TL_ASSERT", file, line, expr); }
 }

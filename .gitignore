@@ -17,6 +17,9 @@ build/
 compile_commands.json
 out/
 
+# tl_tests --isolate private working directories, created under the invocation cwd
+tl_isolate/
+
 # python tooling
 __pycache__/
 *.pyc
