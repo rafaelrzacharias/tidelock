@@ -221,7 +221,7 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       **Merge note:** `w1-tooling-rt` merges cleanly into `main` as of `e2f4b17`
       (`git merge-tree --write-tree` reports no conflict); `TODO.md` is a both-sides edit that
       resolves.
-- [ ] **`TL_LOG_MIN` for `netcode` vs `ship` is a live tension between two docs, not resolved by
+- [x] **`TL_LOG_MIN` for `netcode` vs `ship` is a live tension between two docs, not resolved by
       the fix above. Ruling request.** `TOOLING.md` §9 wants the two tiers to differ (2 vs 3);
       `BUILD.md` §3 wants them to differ only by stripping, and `tools/audit/tier_parity.py`
       enforces the allowed define list. Deriving `TL_LOG_MIN` inside `tl_log.h` from the tier
@@ -239,6 +239,15 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       Implementation (W1 ruling-closeout lane): tl_log.h's derivation makes both tiers 2;
       TOOLING.md §9/§7b table and CPP-SUBSET.md §7b's TL_LOG row change "INFO+ (ship: WARN+)"
       to "INFO+ (both; ship quiets via cvar)"; the compile-out test's per-tier arms follow.
+      **DONE 2026-08-24 (W1 ruling-closeout).** `tl_log.h` derives 2 for both slim tiers in one
+      `#if defined(TL_TIER_SHIP) || defined(TL_TIER_NETCODE)` arm; `TOOLING.md` §9 and
+      `CPP-SUBSET.md` §7b carry the ruling; `tl_log.test.cpp`'s `log_levels_compile_out` now pins
+      the FLOOR per tier (`TL_LOG_MIN == 2` and `info_n == 1` on netcode/ship, `== 0` on
+      debug/dev) instead of only mirroring the header's own `#if`, which would have followed a
+      wrong derivation just as happily. `tier_parity.py` is untouched and still passes (measured,
+      netcode-win vs ship-win). No shipped tier compiles out `TL_LOG_WARN` any more, so
+      `tl_log_compileout.test.cpp`'s pinned `TL_LOG_MIN 4` is the only thing that reaches the
+      barred branch - which is exactly why that TU exists.
 
 - [x] **fx tests that need the runner lane** (`TESTING.md` §9.1 `TL_TEST_EXPECT_FATAL`) - landed
       in `tests/foundation/fx_fatal.test.cpp` (W1 runner+driver lane, 2026-08-24): `div` by zero,
