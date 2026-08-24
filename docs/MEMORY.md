@@ -233,8 +233,8 @@ void* arena_push(VMemArena* a, u64 bytes, u32 align) {
         a->committed = want;
     }
     u8* p = a->base + start;
-    if ((a->flags & ARENA_ZERO_ON_PUSH) && start < a->high_water)  // reused region: not zero
-        memset(p, 0, bytes);                                      // only the dirty part needs it: memset(p, 0, min(bytes, high_water - start))
+    if ((a->flags & ARENA_ZERO_ON_PUSH) && used < high_water)      // reused region: not zero
+        memset(base + used, 0, min(end, high_water) - used);       // from OLD used, not from start: the ALIGNMENT GAP [used, start) enters [base, used) and is hashed, so it must be re-zeroed with the block (W1 mem, 2026-08-24)
     a->used = end; if (end > a->high_water) a->high_water = end;
     return p;
 }

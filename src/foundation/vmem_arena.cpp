@@ -1,20 +1,106 @@
-// vmem_arena.cpp - VMemArena implementation. Spec: docs/MEMORY.md section 8.2.
-// HEADER-FIRST STUB (docs/ROADMAP.md section 0 rule 1): every entry is TL_FATAL until the
-// implementation slice lands; dependent lanes compile against vmem_arena.h from this commit.
+// vmem_arena.cpp - VMemArena implementation. Spec: docs/MEMORY.md §8.2.
+// Audited det half: no io, no OS symbol - every syscall goes through the injected VMemApi.
 #include "foundation/vmem_arena.h"
 
-ErrCode vmem_arena_init(VMemArena*, NameHash, u64, u32, const VMemApi*) {
-    TL_FATAL("unimplemented: vmem_arena_init (w1-mem, docs/MEMORY.md section 8.2)");
+#include <string.h>  // memset (docs/CPP-SUBSET.md §1 allowlist)
+
+namespace mem {
+
+// `a` must be a power of two; the sum cannot wrap for any in-reserve offset (reserves are far
+// below 2^63 and callers TL_CHECK their extents before arithmetic reaches here).
+static inline u64 align_up_u64(u64 v, u64 a) { return (v + (a - 1u)) & ~(a - 1u); }
+
+}  // namespace mem
+
+ErrCode vmem_arena_init(VMemArena* a, NameHash id, u64 reserve_bytes, u32 flags, const VMemApi* os) {
+    if (a == nullptr || os == nullptr || os->reserve == nullptr || os->commit == nullptr ||
+        reserve_bytes == 0u) {
+        return ERR_MEM_BAD_ARG;
+    }
+    const u64 page = (u64)os->page_size;
+    TL_CHECK(page != 0u && (page & (page - 1u)) == 0u);
+
+    const u64 reserve = mem::align_up_u64(reserve_bytes, page);
+    void* base = os->reserve(os->ctx, reserve);
+    if (base == nullptr) {
+        return ERR_MEM_OOM;
+    }
+    a->base       = (u8*)base;
+    a->reserved   = reserve;
+    a->committed  = 0u;
+    a->used       = 0u;
+    a->high_water = 0u;
+    a->page       = os->page_size;
+    a->flags      = flags;
+    a->id         = id;
+    a->os         = os;
+    return ERR_OK;
 }
 
-void* arena_push(VMemArena*, u64, u32) {
-    TL_FATAL("unimplemented: arena_push (w1-mem, docs/MEMORY.md section 8.2)");
+void* arena_push(VMemArena* a, u64 bytes, u32 align) {
+    TL_ASSERT(a != nullptr && a->base != nullptr);
+    TL_ASSERT(align != 0u && (align & (align - 1u)) == 0u && align <= a->page);
+
+    const u64 start = mem::align_up_u64(a->used, (u64)align);
+    const u64 end   = start + bytes;
+    TL_CHECK(end >= start);  // a wrapped extent is a bug, not a big allocation
+
+    if (end > a->committed) {
+        const u64 want = mem::align_up_u64(end, (u64)COMMIT_GRANULE);
+        if (want > a->reserved) {
+            TL_FATAL("arena over reserve - a blown budget is a bug, not silent growth (docs/MEMORY.md section 1.1)");
+        }
+        const ErrCode e = a->os->commit(a->os->ctx, a->base + a->committed, want - a->committed);
+        if (e != ERR_OK) {
+            TL_FATAL("vmem commit failed (docs/PLATFORM.md section 9.3)");
+        }
+        a->committed = want;
+    }
+
+    // Hashed memory must be a pure function of state: on a registered arena EVERY dirty byte
+    // that enters [base, used) must be re-zeroed - including the ALIGNMENT GAP [used, start),
+    // which the hash covers but the caller never writes. Zeroing [used, min(end, high_water))
+    // covers gap + block in one span; bytes at/above high_water are OS-zero already.
+    if ((a->flags & ARENA_ZERO_ON_PUSH) != 0u && a->used < a->high_water) {
+        const u64 z_end = (end < a->high_water) ? end : a->high_water;
+        if (z_end > a->used) {
+            memset(a->base + a->used, 0, z_end - a->used);
+        }
+    }
+
+    u8* p = a->base + start;
+    a->used = end;
+    if (end > a->high_water) {
+        a->high_water = end;
+    }
+    return p;
 }
 
-void arena_reset_to(VMemArena*, u64) {
-    TL_FATAL("unimplemented: arena_reset_to (w1-mem, docs/MEMORY.md section 8.2)");
+void arena_reset_to(VMemArena* a, u64 mark) {
+    TL_ASSERT(a != nullptr);
+    TL_ASSERT(mark <= a->used);
+#if TL_DEV
+    // Poison so a stale read shows as garbage (docs/MEMORY.md section 8.2). Safe on registered
+    // arenas: the poison sits above `used` (unhashed) and ARENA_ZERO_ON_PUSH re-zeroes on reuse.
+    if (a->used > mark) {
+        memset(a->base + mark, 0xDD, a->used - mark);
+    }
+#endif
+    a->used = mark;
 }
 
-void arena_decommit_above(VMemArena*, u64) {
-    TL_FATAL("unimplemented: arena_decommit_above (w1-mem, docs/MEMORY.md section 8.2)");
+void arena_decommit_above(VMemArena* a, u64 mark) {
+    TL_ASSERT(a != nullptr);
+    const u64 keep = mem::align_up_u64(mark, (u64)COMMIT_GRANULE);
+    if (keep < a->committed) {
+        const ErrCode e = a->os->decommit(a->os->ctx, a->base + keep, a->committed - keep);
+        TL_CHECK(e == ERR_OK);
+        a->committed = keep;
+        if (a->high_water > keep) {
+            a->high_water = keep;  // decommitted pages read zero on re-commit
+        }
+    }
+    if (a->used > mark) {
+        a->used = mark;
+    }
 }
