@@ -157,14 +157,19 @@ namespace {
 struct MisalignedCtx { VMemApi real; void* real_base; };
 void* mv_reserve(void* c, u64 bytes) {
     MisalignedCtx* m = (MisalignedCtx*)c;
-    u8* p = (u8*)m->real.reserve(m->real.ctx, bytes + 65536u);
+    u8* p = (u8*)m->real.reserve(m->real.ctx, bytes + 2u * 65536u);
     if (p == nullptr) { return nullptr; }
     m->real_base = p;
-    return p + 4096u;
+    // Force base % 64K == 4096 REGARDLESS of the OS: VirtualAlloc reserves are 64K-aligned so
+    // `p + 4096` was deterministic on Windows, but mmap bases are only page-aligned and land
+    // anywhere mod 64K - the first ubuntu run of this test failed on exactly that. Align up
+    // first, then offset; the two extra granules reserved above cover the shift.
+    u8* aligned = (u8*)(((u64)p + 65535u) & ~65535ull);
+    return aligned + 4096u;
 }
 ErrCode mv_commit(void* c, void* b, u64 n) { MisalignedCtx* m = (MisalignedCtx*)c; return m->real.commit(m->real.ctx, b, n); }
 ErrCode mv_decommit(void* c, void* b, u64 n) { MisalignedCtx* m = (MisalignedCtx*)c; return m->real.decommit(m->real.ctx, b, n); }
-void mv_release(void* c, void*, u64 n) { MisalignedCtx* m = (MisalignedCtx*)c; m->real.release(m->real.ctx, m->real_base, n + 65536u); }
+void mv_release(void* c, void*, u64 n) { MisalignedCtx* m = (MisalignedCtx*)c; m->real.release(m->real.ctx, m->real_base, n + 2u * 65536u); }
 }  // namespace
 
 TL_TEST(pool_reserve_edge_on_misaligned_base_returns_null, "foundation,mem,fast") {

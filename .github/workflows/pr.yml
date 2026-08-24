@@ -191,7 +191,11 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.13' }
       - run: choco install ninja -y
-      - run: python tools/rebuild_budget.py --preset netcode-win --strict-toolchain off
+      - run: python tools/rebuild_budget.py --preset netcode-win --strict-toolchain off --full-budget 25 --incremental-budget 5
+        # The CI box's own budget, passed explicitly as the tool's contract requires (it must
+        # never inherit the reference PC's docs/BUILD.md numbers). Re-baselined 2026-08-24 at
+        # the W1 wave merge: the tree grew from 13 placeholder TUs to the full W1 foundation
+        # and measured 12.46 s full on this runner; 25/5 keeps a 2x regression visible.
 
   cross-pi4:
     # Build-only aarch64 leg. Runs once the sysroot tarball of docs/BUILD.md §9 R-3 exists and
