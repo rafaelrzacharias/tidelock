@@ -7,6 +7,17 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 `LESSONS.md`; rationale → the doc named on each line. Governing rules: `CLAUDE.md` principles,
 `docs/ARCHITECTURE.md` §0/§4, test-infra-first.
 
+> **Pending review, 2026-08-24 — the W1 ruling-closeout lane (`w1-closeout`).** Its five commits
+> are POST-REVIEW EDITS to already-reviewed code (`tl_log.h`, `arena_registry`, `vmem_arena`,
+> `mem_pool`, the runner, `fx.h`), each implementing a decision already RULED on 2026-08-24 rather
+> than making one. **They are folded into the next wave-boundary review sweep** — no lane-level
+> adversarial review of their own, because the rulings are the contract and the diffs are minimal
+> by instruction. What the sweep must look at first: the `registry.test.cpp` fixture rework (its
+> arena `c` WAS the newly refused flag combination), the re-derived
+> `pool_reserve_edge_on_misaligned_base_returns_null` (its old premise is unreachable now), and
+> the runner's POSIX wait paths, which are written but **never executed on this lane** — no Linux
+> host; the PR lane's ubuntu job is their first run.
+
 ## Gate 0 — the pivot gate (`docs/GATE0-BENCH.md`, `docs/FX-PALETTE.md`)
 - [x] `src/foundation/fx.h` — `fx<Rep,FRAC>`, `mul<R>`/`div<R>` with RNE + widened intermediates,
       sat/wrap helpers, comparisons; exhaustive tests on small formats, property tests on 32-bit.
