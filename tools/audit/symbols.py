@@ -60,7 +60,13 @@ def tooling_stems(root):
     tooling plane is never hashed, snapshotted, or part of a world's registered arena set. Parsed
     from src/foundation/CMakeLists.txt's TL_FOUNDATION_TOOLING line, the same single home
     tools/audit/includes.py reads, so the two lists cannot drift apart. Returns the empty set (no
-    exemption) when --root is not given, so this check is opt-in, never accidentally silent."""
+    exemption) when --root is not given, so this check is opt-in, never accidentally silent.
+
+    A stem alone is NOT the exemption - see --tooling-lib. `log`, `prof`, `probe` and `crash` are
+    ordinary words; keying only on the archive member's stem exempted a `log.o` in ANY --data-only
+    lib (measured: a fabricated tl_platform with 4 bytes of .data in log.o reported 0 violations),
+    which is the whole of src/ minus the audited libs. includes.py's twin exemption was already
+    scoped to src/foundation/; this one was not."""
     if not root:
         return set()
     path = os.path.join(root, "src", "foundation", "CMakeLists.txt")
@@ -130,6 +136,11 @@ def main():
                     help="repo root - locates src/foundation/CMakeLists.txt's TL_FOUNDATION_TOOLING "
                          "list (RR-7's writable-static exemption for the non-audited tooling "
                          "plane). Omit to run with no exemption at all.")
+    ap.add_argument("--tooling-lib", default=None, metavar="NAME",
+                    help="the ONE --data-only lib RR-7's stem exemption applies to (the non-det "
+                         "half of src/foundation/). Both this and --root are required for any "
+                         "exemption at all: a stem named log/prof/probe/crash in any OTHER lib is "
+                         "an ordinary writable-static violation (docs/CPP-SUBSET.md §9 R-4).")
     ap.add_argument("--sanitized", action="store_true",
                     help="declare that this build has sanitizers on; the audit then refuses to "
                          "run rather than reporting the sanitizer runtime's own globals")
@@ -174,10 +185,14 @@ def main():
                               % (name, member, size, section))
         below |= defined
 
-    tooling = tooling_stems(a.root)
+    tooling = tooling_stems(a.root) if a.tooling_lib else set()
     for name, path in data_only:
+        # RR-7 is a LIB + STEM exemption, never a stem alone: only the named non-det foundation
+        # lib may hold the tooling plane, so a `log.o` that turns up in core/, platform/ or
+        # editor/ is reported exactly like any other writable static storage.
+        exempt = tooling if name == a.tooling_lib else set()
         for member, section, size in data_bss_offenders(a.objdump, path):
-            if stem_of_member(member) in tooling:
+            if stem_of_member(member) in exempt:
                 continue   # RR-7: the tooling plane, named in TL_FOUNDATION_TOOLING, is exempt
             violations.append("%s: %s has %d bytes of %s - writable static storage in src/ "
                               "(docs/CPP-SUBSET.md §1)" % (name, member, size, section))

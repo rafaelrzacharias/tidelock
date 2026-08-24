@@ -430,7 +430,13 @@ def check_file(root, path, nondet, tooling, errors):
     # RR-7: the tooling plane is the one non-det stem set exempted from the io and .data/.bss
     # bans - never the directory, always the named stem, so a sibling non-det stem (jobs,
     # mem_pool, ...) that is not on the list inherits nothing just by living next to one that is.
-    is_tooling_tu = rel.startswith("src/foundation/") and stem_matches(stem, tooling)
+    # ...and never the panic-ABI HEADER, even though its stem is on the list. tl_assert.h is the
+    # one tooling header a sim TU may include (PANIC_ABI_HEADER above), so granting it io and
+    # mutable state would push both through R-3's hole into every det TU in the tree. Measured
+    # before this line existed: `#include <stdio.h>` + `static int g_ta = 0;` appended to
+    # tl_assert.h produced 0 violations. Only tl_assert.cpp is the tooling plane.
+    is_tooling_tu = (rel.startswith("src/foundation/") and stem_matches(stem, tooling)
+                     and rel != "src/" + PANIC_ABI_HEADER)
     # tl_types.h declares f32/f64 and StrView's `const char*`, and fx_float.h is the bridge, so
     # both are exempt from the TOKEN bans - but not from the layout and target-selection rules,
     # which apply to every sim TU including the leaf. Exempting them wholesale (as the first

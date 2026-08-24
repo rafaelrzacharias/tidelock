@@ -73,7 +73,7 @@ add_custom_target(tl_audit_symbols
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/audit/symbols.py"
           --nm "${TL_LLVM_NM}" --objdump "${TL_LLVM_OBJDUMP}"
           --allow "${CMAKE_SOURCE_DIR}/tools/audit/allow.txt"
-          --root "${CMAKE_SOURCE_DIR}"
+          --root "${CMAKE_SOURCE_DIR}" --tooling-lib tl_foundation
           ${TL_SYMBOL_ARGS}
   DEPENDS ${TL_AUDITED} ${TL_MODULES}
   COMMENT "audit: symbol layering + writable static storage"

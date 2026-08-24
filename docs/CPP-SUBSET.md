@@ -281,16 +281,27 @@ if (r.err) { TL_LOG_ERR(ERR_NAME(r.err)); return r.err; }
   `offsetof` static_assert per field generated from the list, and the little-endian write/read
   pair). Same table, same kinds, same inspector; nothing is declared twice.
 - **R-4 (RR-7) The tooling plane is exempt from the writable-static ban and reaches io directly.**
-  `TOOLING.md` §9's runtimes (`log`, `prof`, `probe`, `crash`, plus `tl_assert` for the
-  panic path's own writes) are named, individually, on `TL_FOUNDATION_TOOLING`
+  `TOOLING.md` §9's runtimes are named, individually, on `TL_FOUNDATION_TOOLING`
   (`src/foundation/CMakeLists.txt`) — a strict subset of the non-det stem list `BUILD.md` §10.2
-  already splits out. Both `tools/audit/includes.py` (the `<stdio.h>`/`<stdlib.h>` allowance) and
+  already splits out, and the only home the member names have: no doc, this one included,
+  restates them. Both `tools/audit/includes.py` (the `<stdio.h>`/`<stdlib.h>` allowance) and
   `tools/audit/symbols.py` (the `.data`/`.bss` exemption) parse that one line, so the exemption
   can only widen by editing it, never by a second hand-typed copy drifting out of sync
-  (`LESSONS.md` has that drift class twice already). A sibling non-det stem not on the list (e.g.
+  (`LESSONS.md` has that drift class twice already).
+  The exemption is **a stem inside a named scope, never a stem on its own** — the words `log`,
+  `prof`, `probe` and `crash` are too ordinary to carry a ruling by themselves. `includes.py`
+  grants it only under `src/foundation/`, and only to the `.cpp`: `tl_assert.h` is on the stem
+  list *and* is the one tooling header a sim TU may include (R-3), so granting the header io or
+  mutable state would push both through R-3's hole into every det TU in the tree. `symbols.py`
+  grants it only inside the one `--data-only` lib named by `--tooling-lib` (`tl_foundation`), so
+  a `log.o` compiled into `core/`, `platform/` or `editor/` is an ordinary violation. Both holes
+  were open in the first cut of this ruling and were measured, not argued (W1 tooling-rt review 1,
+  2026-08-24); `tools/audit/selftest.py` now carries a fixture for each. A sibling non-det stem not on the list (e.g.
   `jobs`, `mem_pool`) inherits nothing — the negative fixtures in `tools/audit/selftest.py` prove
   the same source under a non-tooling stem name still fails both gates, and a sim TU still cannot
-  include anything but `tl_assert.h` (R-3's exemption is unchanged). §1's row states *why* this is
+  include anything but `tl_assert.h`: one fixture per barred tooling header (`tl_log.h`,
+  `tl_prof.h`, `tl_probe.h`, `crash.h`), never one standing in for the rest (R-3's exemption is
+  unchanged). §1's row states *why* this is
   sound and not a hole: the tooling plane is never hashed, never snapshotted, and never part of a
   world's registered arena set, so it carries none of the two-worlds-one-process reasoning the ban
   exists for. This also settles the seam R-3 explicitly left unresolved for the *det* side ("a

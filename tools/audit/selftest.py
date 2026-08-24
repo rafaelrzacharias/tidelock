@@ -100,6 +100,28 @@ INCLUDE_CASES = [
     ("RR-7: a non-tooling non-det stem gets no static-state allowance", "src/foundation/mem_pool.cpp",
      "static int g_x = 0;\nint use(void) { return g_x; }\n",
      "static mutable state"),
+    # RR-7, the other direction: the exemption is stem-keyed and tl_assert's stem is ON the list -
+    # but tl_assert.h is also the ONE tooling header a sim TU may include (PANIC_ABI_HEADER), so
+    # granting the HEADER io/state pushes both straight through R-3's hole into every det TU in
+    # the tree. Both of these reported 0 violations before includes.py excluded it by path.
+    ("RR-7: the panic-ABI HEADER gets no io allowance", "src/foundation/tl_assert.h",
+     "#include <stdio.h>\n",
+     "not on the allowlist"),
+    ("RR-7: the panic-ABI HEADER gets no static-state allowance", "src/foundation/tl_assert.h",
+     "static int g_ta = 0;\nint ta_use(void) { return g_ta; }\n",
+     "static mutable state"),
+    # R-3 and R-4 read together: tl_assert.h is the ONLY tooling header a sim TU may include. One
+    # fixture per barred header - "tl_log.h already covers that case" is exactly how the __GNUC__
+    # fixture came to never exercise the win leg (LESSONS.md).
+    ("sim TU includes tl_prof.h (non-det, not the panic ABI)", "src/sim/c4.cpp",
+     '#include "foundation/tl_prof.h"\n',
+     "non-det foundation header"),
+    ("sim TU includes tl_probe.h (non-det, not the panic ABI)", "src/sim/c5.cpp",
+     '#include "foundation/tl_probe.h"\n',
+     "non-det foundation header"),
+    ("sim TU includes crash.h (non-det, not the panic ABI)", "src/sim/c6.cpp",
+     '#include "foundation/crash.h"\n',
+     "non-det foundation header"),
     ("banned system include", "src/sim/d.cpp",
      "#include <stdio.h>\n",
      "not on the allowlist"),
@@ -442,15 +464,30 @@ def test_symbols_tooling(tmp, nm, objdump, ar, cxx):
         return
     layer = ["--layer", "clean=" + clean_lib]
 
-    rc, out = run(base + layer + ["--root", fixture, "--data-only", "tool=" + tool_lib])
+    rc, out = run(base + layer + ["--root", fixture, "--tooling-lib", "tool",
+                                  "--data-only", "tool=" + tool_lib])
     record("symbols: RR-7 exempts a TL_FOUNDATION_TOOLING stem (log)", rc == 0, out.strip()[:200])
 
-    rc, out = run(base + layer + ["--root", fixture, "--data-only", "nontool=" + nontool_lib])
+    rc, out = run(base + layer + ["--root", fixture, "--tooling-lib", "nontool",
+                                  "--data-only", "nontool=" + nontool_lib])
     record("symbols: RR-7 does not exempt a non-tooling non-det stem (jobs)",
            rc == 1 and (".bss" in out or ".data" in out), out.strip()[:200])
 
     rc, out = run(base + layer + ["--data-only", "tool=" + tool_lib])   # no --root at all
     record("symbols: RR-7's exemption is opt-in - no --root means no exemption",
+           rc == 1 and (".bss" in out or ".data" in out), out.strip()[:200])
+
+    # RR-7 is a LIB + STEM exemption, never a stem alone. `log`/`prof`/`probe`/`crash` are ordinary
+    # words: keying on the archive member's stem alone exempted a log.o in ANY --data-only lib -
+    # i.e. every non-audited lib in src/. Measured before --tooling-lib existed: this exact object
+    # under the name tl_platform reported 0 violations.
+    rc, out = run(base + layer + ["--root", fixture, "--tooling-lib", "tl_foundation",
+                                  "--data-only", "tl_platform=" + tool_lib])
+    record("symbols: RR-7 does NOT exempt the same log.o in another lib",
+           rc == 1 and (".bss" in out or ".data" in out), out.strip()[:200])
+
+    rc, out = run(base + layer + ["--root", fixture, "--data-only", "tool=" + tool_lib])
+    record("symbols: --root without --tooling-lib grants no exemption",
            rc == 1 and (".bss" in out or ".data" in out), out.strip()[:200])
 
 
