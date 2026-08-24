@@ -18,11 +18,17 @@
 #define KILL_ENV "TL_TEST_ATOMIC_KILL_AT"
 #define TARGET_PATH "tl_platform_write_atomic_target.txt"
 
+// The trigger child. Inert without TL_TEST_ATOMIC_KILL_AT, and inert means SKIP, not a bare
+// return: a return with zero checks is a FAILURE verdict (runner_ctx_verdict_zero_checks_is_a_
+// failure), so `tl_tests` with no tag filter was red on this test. The PR lane runs --tag '!slow'
+// and hid it; the nightly run, which drops the filter, would not have. Same finding, same fix as
+// the tl_assert probe triggers (git 790f8fb).
 TL_TEST(write_atomic_crash_trigger, "platform,slow") {
-    (void)t;
-    if (getenv(KILL_ENV) == nullptr) { return; }   // inert without the env var, like the target
+    if (getenv(KILL_ENV) == nullptr) {
+        TL_SKIP("inert without TL_TEST_ATOMIC_KILL_AT; write_atomic_crash_safety sets it");
+    }
     const PlatformApi* api = platform_test_init();
-    if (api == nullptr) { return; }
+    TL_ASSERT_NOT_NULL(api);
     const u8 content[] = { 'A' };
     (void)api->file.write_atomic(api->file.ctx, sv(TARGET_PATH), Span<const u8>{ content, 1u });
 }
