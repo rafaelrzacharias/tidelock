@@ -79,7 +79,11 @@ Result<Span<u8>> hf_read_all(void* ctx, StrView path, VMemArena* arena) {
     while (got < len) {
         ssize_t r = read(fd, buf + got, (size_t)(len - got));
         if (r < 0) { if (errno == EINTR) { continue; } ok = false; break; }
-        if (r == 0) { break; }   // file shrank underneath us; treat as short read, not an error
+        // A 0-byte read before `len` means the file shrank underneath us. The Windows branch above
+        // already calls that FILE_IO; returning ERR_OK here with count == len would hand the
+        // caller a span whose tail was never read - the same input, two different contracts,
+        // and only one of the two OSes has ever executed. FILE_IO on both.
+        if (r == 0) { ok = false; break; }
         got += (u64)r;
     }
     close(fd);

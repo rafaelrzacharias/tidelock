@@ -38,7 +38,12 @@ ErrCode ov_decommit(void*, void* base, u64 bytes) {
     return mprotect(base, (size_t)bytes, PROT_NONE) == 0 ? ERR_OK : (ErrCode)ERR_PLATFORM_VMEM;
 }
 
+// Same TL_CHECK as its Windows twin: munmap DOES use `bytes`, so a wrong extent here unmaps the
+// wrong pages. The check lives on both sides so a Windows-only run cannot pass a value that only
+// breaks on Linux (docs/PLATFORM.md §9.3 "vmem": "base/n must be page multiples (TL_CHECK)").
 void ov_release(void*, void* base, u64 bytes) {
+    const u64 page = (u64)query_page_size();
+    TL_CHECK(((u64)base) % page == 0u && bytes % page == 0u);
     (void)munmap(base, (size_t)bytes);
 }
 

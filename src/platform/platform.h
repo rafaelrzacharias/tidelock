@@ -145,7 +145,8 @@ typedef void (*WatchFn)(void* ctx, StrView path);
 
 struct FileApi {
     void* ctx;
-    Result<Span<u8>> (*read_all)(void* ctx, StrView path, VMemArena* arena);   // pushes len+1 bytes (trailing NUL); count = len; <= 1 GB
+    Result<Span<u8>> (*read_all)(void* ctx, StrView path, VMemArena* arena);   // pushes align16(len+1) bytes (trailing NUL,
+                                                                               // then padding - docs/PLATFORM.md 9.4); count = len; <= 1 GB
     ErrCode (*write_all)(void* ctx, StrView path, Span<const u8>);
     ErrCode (*write_atomic)(void* ctx, StrView path, Span<const u8>);           // §9.3
     ErrCode (*append)(void* ctx, StrView path, Span<const u8>);                 // log/TSV sinks

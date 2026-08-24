@@ -38,7 +38,13 @@ ErrCode ov_decommit(void*, void* base, u64 bytes) {
     return VirtualFree(base, (SIZE_T)bytes, MEM_DECOMMIT) != 0 ? ERR_OK : (ErrCode)ERR_PLATFORM_VMEM;
 }
 
-void ov_release(void*, void* base, u64) {
+// MEM_RELEASE takes size 0 by Win32 contract, so `bytes` is unused HERE - which is exactly why
+// it is checked here: munmap on the POSIX side does use it, and a caller that passes a wrong
+// `bytes` would unmap the wrong extent there while this side silently succeeded. The asymmetry
+// is invisible on a Windows-only run, and the POSIX half of this seam has never executed.
+void ov_release(void*, void* base, u64 bytes) {
+    const u64 page = (u64)query_page_size();
+    TL_CHECK(((u64)base) % page == 0u && bytes % page == 0u);
     (void)VirtualFree(base, 0, MEM_RELEASE);
 }
 
