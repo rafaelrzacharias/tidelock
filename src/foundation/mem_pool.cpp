@@ -42,7 +42,13 @@ static u8* carve_aligned(MemPool* p, u64 bytes) {
     if (p->carved_bytes + bytes > p->budget_bytes) {
         return nullptr;   // Luau raises its own memory error; ImGui/SDL assert (section 1.5)
     }
-    if (p->arena.used + gap + bytes > p->arena.reserved) {
+    // The check must mirror arena_push's COMMIT rounding, not just the extent: on a base that
+    // is not 64 KB-aligned (mmap reserves are only page-aligned) a carve's end OFFSET is not a
+    // granule multiple, and arena_push would TL_FATAL rounding it past the reserve - the
+    // contract here is null, never fatal (W1 mem review 1).
+    const u64 end = p->arena.used + gap + bytes;
+    const u64 commit_end = (end + (u64)(COMMIT_GRANULE - 1u)) & ~(u64)(COMMIT_GRANULE - 1u);
+    if (end > p->arena.reserved || commit_end > p->arena.reserved) {
         return nullptr;   // reserve exhausted behaves as budget exhausted for a vendor heap
     }
     u8* q = (u8*)arena_push(&p->arena, gap + bytes, 1u) + gap;

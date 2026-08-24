@@ -149,6 +149,55 @@ TL_TEST(pool_realloc_same_and_cross_class, "foundation,mem,smoke") {
     pool_down(&p, &api);
 }
 
+namespace {
+// A VMemApi whose reserve is only PAGE-aligned, like mmap on Linux/Pi (VirtualAlloc reserves
+// happen to be 64 KB-aligned, which is why the plain fixture can never catch alignment bugs):
+// over-reserves one granule and hands back base + 4096. Regression fixture for W1 mem review 1 -
+// carve_aligned must return null at the reserve edge, never trip arena_push's over-reserve fatal.
+struct MisalignedCtx { VMemApi real; void* real_base; };
+void* mv_reserve(void* c, u64 bytes) {
+    MisalignedCtx* m = (MisalignedCtx*)c;
+    u8* p = (u8*)m->real.reserve(m->real.ctx, bytes + 65536u);
+    if (p == nullptr) { return nullptr; }
+    m->real_base = p;
+    return p + 4096u;
+}
+ErrCode mv_commit(void* c, void* b, u64 n) { MisalignedCtx* m = (MisalignedCtx*)c; return m->real.commit(m->real.ctx, b, n); }
+ErrCode mv_decommit(void* c, void* b, u64 n) { MisalignedCtx* m = (MisalignedCtx*)c; return m->real.decommit(m->real.ctx, b, n); }
+void mv_release(void* c, void*, u64 n) { MisalignedCtx* m = (MisalignedCtx*)c; m->real.release(m->real.ctx, m->real_base, n + 65536u); }
+}  // namespace
+
+TL_TEST(pool_reserve_edge_on_misaligned_base_returns_null, "foundation,mem,fast") {
+    MisalignedCtx ctx;
+    ctx.real = test_vmem_api();
+    ctx.real_base = nullptr;
+    VMemApi api = {};
+    api.ctx = &ctx;
+    api.reserve = mv_reserve; api.commit = mv_commit;
+    api.decommit = mv_decommit; api.release = mv_release;
+    api.page_size = ctx.real.page_size; api._pad0 = 0;
+
+    // 192512 = the first carve's 60 KB alignment gap + two 64 KB pages, sized so the SECOND
+    // carve's extent fits the reserve exactly but its COMMIT rounding does not: end = 192512,
+    // align_up(end, 64K) = 196608 > reserved. The old check passed the extent and arena_push
+    // then TL_FATALed - a crash where the vendor-heap contract promises null.
+    MemPool p;
+    TL_ASSERT_EQ(pool_init(&p, 0x9002u, 192512u, 1u << 20, &api), ERR_OK);
+    TL_ASSERT_TRUE(((u64)p.arena.base & 65535u) != 0u);   // the fixture really is misaligned
+
+    void* a = pool_alloc(&p, 100u);    // first carve: gap + one 64 KB class page
+    TL_ASSERT_TRUE(a != nullptr);
+    void* b = pool_alloc(&p, 5000u);   // second carve: commit rounding would cross the reserve
+    TL_EXPECT_NULL(b);
+    // The refusal left the pool intact: the first page still serves its class.
+    void* c = pool_alloc(&p, 120u);
+    TL_EXPECT_NOT_NULL(c);
+    pool_free(&p, a); pool_free(&p, c);
+    TL_EXPECT_EQ(pool_stats(&p)->live_bytes, (u64)0);
+
+    api.release(api.ctx, p.arena.base, p.arena.reserved);
+}
+
 TL_TEST(pool_budget_refuses_with_null, "foundation,mem,fast") {
     VMemApi api; MemPool p;
     TL_ASSERT_TRUE(pool_up(&p, &api, 256u * 1024u));   // budget: 4 granules
