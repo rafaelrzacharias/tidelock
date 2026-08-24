@@ -181,7 +181,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `JOBS.md` -> §1.3
 - `LUAU-LAYER.md` -> §6, §7
 - `NETCODE.md` -> §5
-- `PLATFORM.md` -> §1.1, §1.5, §8.2
+- `PLATFORM.md` -> §1.1, §1.5, §3, §8.2
 - `ROADMAP.md` -> §8.8
 - `TESTING.md` -> §2
 - `TOOLING.md` -> §1.3, §5

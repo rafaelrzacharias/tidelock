@@ -99,7 +99,8 @@ void hd_texture_destroy(void* ctx, TexHandle h) {
     HeadlessTexRec* rec = lookup_tex(s, h, &err);
     if (rec == nullptr) { return; }   // stale/null destroy is a no-op, not a crash
     rec->alive = 0u;
-    ++s->tex_gen[handle_index(h)];    // bumped NOW, so this same handle is stale even before reuse
+    // bumped NOW, so this same handle is stale even before reuse; wrap-to-1, not ++ (headless_state.h)
+    s->tex_gen[handle_index(h)] = headless_gen_next<TexHandle>(s->tex_gen[handle_index(h)]);
     --s->tex_live_count;
     log_call(s, DRAW_VERB_TEX_DESTROY, h, 0u, 0u, 0u);
 }

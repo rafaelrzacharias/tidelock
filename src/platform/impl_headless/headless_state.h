@@ -41,6 +41,20 @@ enum : u32 { HEADLESS_MAX_THREADS = 64, HEADLESS_MAX_SEMS = 256, HEADLESS_MAX_MU
 // contract) - this header includes it rather than redefining them, to avoid an ODR split.
 #include "platform/impl_headless/headless_test_api.h"
 
+// Generation-wrap policy for the four hand-rolled slot tables below (docs/MEMORY.md section 3:
+// "generation-wrap policy is per domain - the SlotMap's job"; these tables ARE that domain until
+// containers lands a SlotMap). TexHandle/ThreadHandle/SemHandle/MutexHandle are all
+// Handle<_,12,4>: FOUR generation bits, GEN_MAX 15. A bare `++gen` therefore overflows on a
+// slot's 16th release - handle_make TL_ASSERTs `gen <= GEN_MAX` in a dev tier, and with asserts
+// compiled out the shifted bit falls off the u16 rep, so handle_gen reads back 0: every handle
+// the slot issues from then on is instantly stale, and on slot 0 the handle IS the null handle.
+// The policy here is wrap-to-1, never to 0 (generation 0 is never issued, handle.h). ABA after
+// 15 reuses of one slot is accepted, not solved: a stale handle that survives 15 create/destroy
+// cycles on its own index is not a failure mode this seam can price. Entity's quarantine policy
+// is the ECS lane's and does not apply to platform resources.
+template <typename H>
+inline u16 headless_gen_next(u16 gen) { return (u16)(gen >= (u16)H::GEN_MAX ? 1u : gen + 1u); }
+
 struct HeadlessTexRec {
     u8 alive;
     u8 usage;    // TexUsage

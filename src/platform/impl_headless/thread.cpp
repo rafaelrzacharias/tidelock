@@ -75,7 +75,7 @@ void ht_join(void* ctx, ThreadHandle h) {
     pthread_join((pthread_t)s->threads[idx].os_thread, nullptr);
 #endif
     s->threads[idx].alive = 0u;
-    ++s->thread_gen[idx];
+    s->thread_gen[idx] = headless_gen_next<ThreadHandle>(s->thread_gen[idx]);   // wrap-to-1 (headless_state.h)
 }
 
 // ErrPlatform has no dedicated SEM/MUTEX "_LIMIT" code (docs/PLATFORM.md §9.2's enum); resource
@@ -148,7 +148,7 @@ void ht_sem_destroy(void* ctx, SemHandle h) {
     sem_destroy((sem_t*)s->sems[idx].os_sem);
 #endif
     s->sems[idx].alive = 0u;
-    ++s->sem_gen[idx];
+    s->sem_gen[idx] = headless_gen_next<SemHandle>(s->sem_gen[idx]);   // wrap-to-1 (headless_state.h)
 }
 
 Result<MutexHandle> ht_mutex_create(void* ctx) {
@@ -208,7 +208,7 @@ void ht_mutex_destroy(void* ctx, MutexHandle h) {
     pthread_mutex_destroy((pthread_mutex_t*)s->mutexes[idx].os_mutex);
 #endif
     s->mutexes[idx].alive = 0u;
-    ++s->mutex_gen[idx];
+    s->mutex_gen[idx] = headless_gen_next<MutexHandle>(s->mutex_gen[idx]);   // wrap-to-1 (headless_state.h)
 }
 
 void ht_yield(void*) {
