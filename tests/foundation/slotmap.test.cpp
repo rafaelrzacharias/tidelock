@@ -1,0 +1,167 @@
+// slotmap.h - LIFO reuse, stale handle null, gen wrap -> quarantine, zeroed dead slot (hash
+// purity), two-instance determinism. Spec: docs/CONTAINERS.md §2, §8.2, §8.7. Rubric: TESTING.md §7.
+#include "runner/tl_test.h"
+#include "foundation/slotmap.h"
+#include "foundation/vmem_test_api.h"
+#include "foundation/hash.h"
+
+struct SmTestTag;
+using SmH = Handle<SmTestTag, 4, 2>;   // 16 slots, GEN_MAX = 3 - small enough to exercise wrap directly
+
+struct Payload { u32 a; u32 b; };
+
+TL_TEST(slotmap_insert_get_basic, "foundation,containers,mem,smoke,fast") {
+    VMemApi api = test_vmem_api();
+    SlotMap<Payload, SmH> sm;
+    TL_ASSERT_EQ(slotmap_init(&sm, "test.sm.slots"_id, "test.sm.gen"_id, "test.sm.free"_id, "test.sm.live"_id, &api), ERR_OK);
+
+    Payload p1 = { 10u, 20u };
+    SmH h1 = slotmap_insert(&sm, &p1);
+    TL_EXPECT_FALSE(handle_is_null(h1));
+    TL_EXPECT_EQ(handle_index(h1), (u32)0);
+    TL_EXPECT_EQ(handle_gen(h1), (u32)1);
+
+    Payload* got = slotmap_get(&sm, h1);
+    TL_EXPECT_NOT_NULL(got);
+    if (got) { TL_EXPECT_EQ(got->a, (u32)10); TL_EXPECT_EQ(got->b, (u32)20); }
+    TL_EXPECT_EQ(sm.live_count, (u32)1);
+    TL_EXPECT_EQ(slotmap_slot_cap(&sm), (u32)1);
+}
+
+TL_TEST(slotmap_null_handle_get_is_null_no_assert, "foundation,containers,mem,edge,fast") {
+    VMemApi api = test_vmem_api();
+    SlotMap<Payload, SmH> sm;
+    TL_ASSERT_EQ(slotmap_init(&sm, "test.sm2.slots"_id, "test.sm2.gen"_id, "test.sm2.free"_id, "test.sm2.live"_id, &api), ERR_OK);
+    SmH null_h = {};
+    TL_EXPECT_TRUE(handle_is_null(null_h));
+    TL_EXPECT_TRUE(slotmap_get(&sm, null_h) == nullptr);        // documented absence, never asserts
+    TL_EXPECT_FALSE(slotmap_remove(&sm, null_h));
+}
+
+TL_TEST(slotmap_lifo_reuse_and_zeroed_dead_slot, "foundation,containers,mem,fast") {
+    VMemApi api = test_vmem_api();
+    SlotMap<Payload, SmH> sm;
+    TL_ASSERT_EQ(slotmap_init(&sm, "test.sm3.slots"_id, "test.sm3.gen"_id, "test.sm3.free"_id, "test.sm3.live"_id, &api), ERR_OK);
+
+    Payload p0 = { 1u, 1u }, p1 = { 2u, 2u }, p2 = { 3u, 3u };
+    SmH h0 = slotmap_insert(&sm, &p0);   // idx 0
+    SmH h1 = slotmap_insert(&sm, &p1);   // idx 1
+    SmH h2 = slotmap_insert(&sm, &p2);   // idx 2
+    TL_EXPECT_EQ(handle_index(h0), (u32)0);
+    TL_EXPECT_EQ(handle_index(h1), (u32)1);
+    TL_EXPECT_EQ(handle_index(h2), (u32)2);
+
+    TL_EXPECT_TRUE(slotmap_remove(&sm, h1));   // frees idx 1
+    Payload zero = {};
+    TL_EXPECT_MEM_EQ(&sm.slots.data[1], &zero, sizeof(Payload));   // zeroed dead slot - hash purity
+    TL_EXPECT_FALSE(bitset_test(&sm.live, 1u));
+
+    // zero-alloc on the hot path (docs/TESTING.md §7 item 7): a LIFO-reuse insert must not grow
+    // any of the four column arenas (manual arena_mark technique - TL_ASSERT_NO_ALLOC does not
+    // compile yet, runner lane, TODO.md).
+    u64 mark_slots_before = arena_mark(&sm._slots_arena);
+    u64 mark_gen_before = arena_mark(&sm._gen_arena);
+    u64 mark_free_before = arena_mark(&sm._free_arena);
+
+    Payload p3 = { 4u, 4u };
+    SmH h3 = slotmap_insert(&sm, &p3);         // LIFO: reuses idx 1, NOT a new idx 3
+    TL_EXPECT_EQ(arena_mark(&sm._slots_arena), mark_slots_before);
+    TL_EXPECT_EQ(arena_mark(&sm._gen_arena), mark_gen_before);
+    TL_EXPECT_EQ(arena_mark(&sm._free_arena), mark_free_before);   // pop, not push
+    TL_EXPECT_EQ(handle_index(h3), (u32)1);
+    TL_EXPECT_EQ(handle_gen(h3), (u32)2);       // gen bumped by the remove ("gen stays" across reuse - it already moved on remove)
+    TL_EXPECT_EQ(slotmap_slot_cap(&sm), (u32)3);   // no new slot was appended
+
+    // The stale handle h1 (gen 1) must now read as absent, and the runtime signals it in debug.
+    TL_EXPECT_TRUE(handle_gen(h1) != handle_gen(h3));
+}
+
+TL_TEST(slotmap_iteration_is_0_to_slot_cap_skipping_dead, "foundation,containers,mem,fast") {
+    VMemApi api = test_vmem_api();
+    SlotMap<Payload, SmH> sm;
+    TL_ASSERT_EQ(slotmap_init(&sm, "test.sm4.slots"_id, "test.sm4.gen"_id, "test.sm4.free"_id, "test.sm4.live"_id, &api), ERR_OK);
+    Payload zero = {};
+    for (u32 i = 0; i < 5u; ++i) { Payload p = { i, i }; slotmap_insert(&sm, &p); }
+    slotmap_remove(&sm, handle_make<SmH>(1u, 1u));
+    slotmap_remove(&sm, handle_make<SmH>(3u, 1u));
+
+    u32 visited = 0;
+    for (u32 i = 0; i < slotmap_slot_cap(&sm); ++i) {
+        if (bitset_test(&sm.live, i)) { visited += 1u; }
+    }
+    TL_EXPECT_EQ(visited, sm.live_count);
+    TL_EXPECT_EQ(visited, (u32)3);
+    TL_EXPECT_EQ(slotmap_slot_cap(&sm), (u32)5);   // NOT live_count - the dead-slot range is part of the walk
+    TL_EXPECT_MEM_EQ(&sm.slots.data[1], &zero, sizeof(Payload));
+    TL_EXPECT_MEM_EQ(&sm.slots.data[3], &zero, sizeof(Payload));
+}
+
+// Gen wrap: GEN_MAX = 3 for this domain. Cycle one slot through 3 remove()s; the third remove
+// hits gen == GEN_MAX and quarantines - never pushed back to free_list, never reissued.
+TL_TEST(slotmap_gen_wrap_quarantines_never_reissued, "foundation,containers,mem,fast") {
+    VMemApi api = test_vmem_api();
+    SlotMap<Payload, SmH> sm;
+    TL_ASSERT_EQ(slotmap_init(&sm, "test.sm5.slots"_id, "test.sm5.gen"_id, "test.sm5.free"_id, "test.sm5.live"_id, &api), ERR_OK);
+
+    Payload p = { 7u, 7u };
+    SmH ha = slotmap_insert(&sm, &p);   // idx 0, gen 1
+    TL_EXPECT_EQ(handle_gen(ha), (u32)1);
+    slotmap_remove(&sm, ha);            // gen -> 2, freed (LIFO)
+
+    SmH hb = slotmap_insert(&sm, &p);   // reuses idx 0, gen 2
+    TL_EXPECT_EQ(handle_index(hb), (u32)0);
+    TL_EXPECT_EQ(handle_gen(hb), (u32)2);
+    slotmap_remove(&sm, hb);            // gen -> 3 (== GEN_MAX), freed (LIFO, one more cycle left)
+
+    SmH hc = slotmap_insert(&sm, &p);   // reuses idx 0, gen 3 == GEN_MAX
+    TL_EXPECT_EQ(handle_index(hc), (u32)0);
+    TL_EXPECT_EQ(handle_gen(hc), (u32)SmH::GEN_MAX);
+    TL_EXPECT_EQ(sm.quarantined, (u32)0);
+    slotmap_remove(&sm, hc);            // gen == GEN_MAX -> quarantine, NOT freed
+    TL_EXPECT_EQ(sm.quarantined, (u32)1);
+    TL_EXPECT_EQ(sm.free_list.count, (u32)0);   // idx 0 is retired, not reusable
+
+    Payload q = { 9u, 9u };
+    SmH hd = slotmap_insert(&sm, &q);   // must allocate a brand-new slot, idx 1 - not idx 0
+    TL_EXPECT_EQ(handle_index(hd), (u32)1);
+    TL_EXPECT_EQ(handle_gen(hd), (u32)1);
+    TL_EXPECT_EQ(slotmap_slot_cap(&sm), (u32)2);
+}
+
+TL_TEST_EXPECT_FATAL(slotmap_stale_handle_asserts_in_dev, "foundation,containers,fatal") {
+    VMemApi api = test_vmem_api();
+    SlotMap<Payload, SmH> sm;
+    TL_ASSERT_EQ(slotmap_init(&sm, "test.sm6.slots"_id, "test.sm6.gen"_id, "test.sm6.free"_id, "test.sm6.live"_id, &api), ERR_OK);
+    Payload p = { 1u, 1u };
+    SmH h = slotmap_insert(&sm, &p);
+    slotmap_remove(&sm, h);
+    slotmap_get(&sm, h);   // stale (gen mismatch, idx dead): TL_ASSERT in dev
+}
+
+// Two instances fed the same op sequence (insert/remove/LIFO-reuse) hash identically over
+// [0, slot_cap) - the §8.7 test list item ("zeroed dead slot -> hash equals a fresh map with the
+// same live set", read as: two histories reaching the same state hash the same).
+TL_TEST(slotmap_two_instance_determinism, "foundation,containers,determinism,fast") {
+    VMemApi api = test_vmem_api();
+    SlotMap<Payload, SmH> a, b;
+    TL_ASSERT_EQ(slotmap_init(&a, "test.sm7a.slots"_id, "test.sm7a.gen"_id, "test.sm7a.free"_id, "test.sm7a.live"_id, &api), ERR_OK);
+    TL_ASSERT_EQ(slotmap_init(&b, "test.sm7b.slots"_id, "test.sm7b.gen"_id, "test.sm7b.free"_id, "test.sm7b.live"_id, &api), ERR_OK);
+
+    for (u32 i = 0; i < 6u; ++i) {
+        Payload p = { i, i * 2u };
+        slotmap_insert(&a, &p);
+        slotmap_insert(&b, &p);
+    }
+    slotmap_remove(&a, handle_make<SmH>(1u, 1u)); slotmap_remove(&b, handle_make<SmH>(1u, 1u));
+    slotmap_remove(&a, handle_make<SmH>(4u, 1u)); slotmap_remove(&b, handle_make<SmH>(4u, 1u));
+    Payload refill = { 99u, 99u };
+    slotmap_insert(&a, &refill); slotmap_insert(&b, &refill);   // LIFO reuse of idx 4 on both
+
+    TL_EXPECT_EQ(slotmap_slot_cap(&a), slotmap_slot_cap(&b));
+    TL_EXPECT_EQ(a.live_count, b.live_count);
+    TL_EXPECT_MEM_EQ(a.slots.data, b.slots.data, (usize)slotmap_slot_cap(&a) * sizeof(Payload));
+    TL_EXPECT_SPAN_EQ(a.gen.data, b.gen.data, slotmap_slot_cap(&a));
+    u64 hash_a = tl_hash64(a.slots.data, (usize)slotmap_slot_cap(&a) * sizeof(Payload), TL_HASH_SEED);
+    u64 hash_b = tl_hash64(b.slots.data, (usize)slotmap_slot_cap(&b) * sizeof(Payload), TL_HASH_SEED);
+    TL_EXPECT_EQ(hash_a, hash_b);
+}

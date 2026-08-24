@@ -207,7 +207,42 @@ u32  fmt_buf(Span<char> out, const char* fmt, ...);   // stb_sprintf; returns le
 side-table (hash → literal) is the interner itself in dev tiers: every `"x"_id` that is also
 registered by name (components, actions, events, arenas) goes through `intern` at registration.
 
-### 8.7 Tests (`tests/foundation/containers/`)
+### 8.6a Construction signatures added over rev-1 (W1 containers, 2026-08-24)
+
+Rev-1 gave every container's struct and operations but not always its constructor — filed here per
+`docs/ROADMAP.md` §0 rule 1 ("header first… signatures added over spec are folded into the doc,
+same commit"):
+
+- `bitset_init(Bitset*, VMemArena* arena, u32 bit_count)`, `ring_init(RingBuffer<T>*, VMemArena*
+  arena, u32 cap, bool overwrite_oldest)`, `sorted_map_init`/`sorted_set_init(…, VMemArena* arena,
+  u32 cap)` — one `arena_push` each, the same shape as `array_init_fixed`.
+- `interner_init(Interner*, VMemArena* chars_arena, VMemArena* meta_arena, u32 max_strings)` —
+  `chars` stays the caller-owned pointer §5 already specifies; `offsets`/`lens`/`by_hash` are fixed
+  at `max_strings` (< 65535) from `meta_arena`. `StrId` (`= u16`) is declared in `interner.h`, not
+  `tl_types.h` — `CANON.md`'s "Types" row names the alias, not its file.
+- `slotmap_init(SlotMap<T,H>*, NameHash id_slots, NameHash id_gen, NameHash id_free, NameHash
+  id_live, const VMemApi*)`. `SlotMap<T,H>` gains four `VMemArena` members
+  (`_slots_arena/_gen_arena/_free_arena/_live_arena`) beyond §8.2's four columns: each column is
+  its own VMem range per `MEMORY.md` §1.2 R-1, reserved to the handle domain's full capacity
+  (`H::IDX_MASK + 1`) — cheap, since address-space reservation is free, and it lets `live`
+  (fixed-size at init, §4) need no separate growth policy. Four ids are required, not derived, so
+  the app's `ArenaRegistry` can register each column under its own name (all four are part of the
+  pool's authoritative state). **Known interaction:** `vmem_arena_init` (as shipped) rounds a
+  reserve to the OS page size only, not `COMMIT_GRANULE` — the exact gap `TODO.md`'s W1 mem review
+  already names and assigns to a ruling-closeout lane. Every small-cap domain trips it on its first
+  `arena_push` until that lands, so `slotmap_init` floors each column's reserve at
+  `COMMIT_GRANULE`, forward-compatible with the eventual fix.
+
+### 8.6b `fmt_buf` ships as a stub (W1 containers, 2026-08-24)
+
+`fmt.h`/`fmt.cpp` carry the full contract (§8.6) but `fmt_buf` is `TL_FATAL("unimplemented")`:
+`vendor/CMakeLists.txt` assigns `stb_sprintf`'s arrival to the W1 platform lane ("SDL3 + stb arrive
+with the W1 platform lane"), which had not landed it as of this commit. Vendoring it from this lane
+instead was rejected — it would duplicate a decision already owned elsewhere and risk a second
+`vendor/stb_sprintf/` tree. Replace the stub the day the vendor tree lands (`TODO.md`).
+
+### 8.7 Tests (`tests/foundation/`, flat — matching every sibling lane's layout, not the
+`containers/` subdirectory this section originally named)
 
 `array.test.cpp` (vmem growth across page boundary keeps `data` stable; fixed overflow fatal-
 expected; swap_remove order model), `slotmap.test.cpp` (LIFO reuse, stale handle null, gen wrap →
@@ -216,7 +251,9 @@ quarantine, zeroed dead slot → hash equals a fresh map with the same live set)
 sequence → identical iteration), `sorted.test.cpp`, `ring.test.cpp` (wrap, overwrite flag),
 `bitset.test.cpp`, `sort.test.cpp` (stability with duplicate keys; 1M random keys vs a reference
 insertion sort on a sample; all-equal keys early-out), `strview_interner_fmt.test.cpp` (intern
-idempotence, collision fatal-expected with a crafted pair, `fmt_buf` truncation). Every file:
-`TL_ASSERT_NO_ALLOC` around the hot op.
+idempotence, collision fatal-expected with a crafted pair, `fmt_buf` truncation deferred — see
+§8.6b). Every file: a manual `arena_mark`-before/after check around one representative hot op per
+container (the `TL_ASSERT_NO_ALLOC` macro does not compile yet — a `static_assert` stub pending
+the runner lane's `alloc_shim.cpp` wiring, `TODO.md`).
 
-*Rev 1 — 2026-08-22.*
+*Rev 1 — 2026-08-22; §8.6a/§8.6b, §8.7 path correction added by the W1 containers lane, 2026-08-24.*
