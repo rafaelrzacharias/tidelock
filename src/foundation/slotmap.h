@@ -112,6 +112,23 @@ H slotmap_insert(SlotMap<T, H>* sm, const T* v) {
     return handle_make<H>(idx, sm->gen.data[idx]);
 }
 
+// True iff h names a live element right now: non-null, index in range, live bit set, generation
+// matching. PURE and ASSERT-FREE in every tier - this is the queryable-absence half of the error
+// model (docs/CPP-SUBSET.md section 3), so "is the entity I referenced last tick still alive?" is
+// answerable without tripping slotmap_get's stale-handle assert. False for: the null handle, a
+// generation-0 handle (never issued), an out-of-range index, a dead slot, a stale generation, and
+// a quarantined slot (gen frozen at GEN_MAX, so only the live bit separates it from its last
+// handle). The `idx < slots.count` term short-circuits before bitset_test, whose TL_CHECK is live
+// in every tier - so no in-range check is ever reached with an out-of-range index. A caller that
+// has already asserted liveness still uses slotmap_get, which keeps its assert (RULED 2026-08-24,
+// TODO.md R1; docs/CONTAINERS.md section 8.2).
+template <typename T, typename H>
+bool slotmap_alive(const SlotMap<T, H>* sm, H h) {
+    if (handle_is_null(h)) { return false; }
+    u32 idx = handle_index(h);
+    return idx < sm->slots.count && bitset_test(&sm->live, idx) && sm->gen.data[idx] == (u16)handle_gen(h);
+}
+
 // Null if h is the null handle, out of range, dead, or a stale generation (TL_ASSERT fires in
 // debug on the stale-but-in-range case - a genuine bug signal; a null handle is documented
 // absence and never asserts, docs/CPP-SUBSET.md §3).

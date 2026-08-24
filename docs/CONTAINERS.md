@@ -177,10 +177,21 @@ template <typename T, typename H> struct SlotMap {
     u32        live_count; u32 quarantined;
 };
 H    slotmap_insert(SlotMap*, const T* v);  // pop free_list (LIFO) else slots.count++; gen stays; live.set; memcpy; return handle_make(idx, gen[idx])
+bool slotmap_alive (const SlotMap*, H h);   // the same four terms, PURE and assert-free in every tier: false for null, gen 0, out-of-range idx, dead slot, stale gen, quarantined slot
 T*   slotmap_get   (SlotMap*, H h);         // idx < slots.count && live.test(idx) && gen[idx] == handle_gen(h) ? &slots[idx] : null (TL_ASSERT in debug on stale)
 bool slotmap_remove(SlotMap*, H h);         // get → memset(slot, 0) → live.clear → if gen == GEN_MAX { quarantined++ /* never pushed to free_list */ } else { gen++; free_list push }
 // iteration: for (u32 i = 0; i < slots.count; ++i) if (live.test(i)) …   — never 0..live_count
 ```
+
+`slotmap_alive` is the queryable-absence half of the error model (`CPP-SUBSET.md` §3) and
+`slotmap_get`'s assert is the bug-signal half: "is the handle I stored last tick still alive?" is a
+normal-flow question and must not abort, while dereferencing a handle the caller has *already*
+established is live and finding it stale is a bug. Without it `if (slotmap_get(h))` is the only
+idiom available and it aborts in dev on the ordinary case — the ECS lane's whole stale-reference
+path. The `idx < slots.count` term short-circuits ahead of `live.test(idx)`, whose `TL_CHECK` is
+live in every tier. A quarantined slot is the case only the live bit catches: the wrap remove
+freezes `gen[idx]` at `GEN_MAX`, so the retired handle's generation still matches.
+(Added by the W2-prep closeout lane, 2026-08-24; RULED 2026-08-24, `TODO.md` R1.)
 
 ### 8.3 `Map<K,V>` (`map.h`)
 

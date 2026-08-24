@@ -477,6 +477,22 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 fixed with tests in `W1 containers review 1..4`; the ruling requests are below. Baseline was
 198/194/0/4; after the review 221/217/0/4, `tl_audit` green, `docaudit` 0 errors.
 
+**W2-prep closeout (2026-08-24, `w2-prep`):** the five rulings below (R1, R2, R3, R5, R6) are
+implemented, one commit each, tests and the doc edit in the same commit. These are POST-review
+edits to reviewed code — **they fold into the next review sweep**, they are not covered by the
+review above. R4 and R7 needed no code.
+
+- [ ] **Out of scope, found by this lane's gate runs: `platform.entropy_nonrepeat` is a real
+      statistical flake, not a platform bug** (`tests/platform/entropy.test.cpp:38-51`). Its
+      histogram check demands all 256 buckets sit within 4σ of uniform over N*LEN = 32000 draws;
+      one-sided per-bucket tail is ~6.3e-5, so P(some bucket outside) ≈ 1 - (1 - 6.3e-5)^256 ≈
+      **1.6% per run** even for a perfect CSPRNG. Observed once in ~8 four-tier runs (ship-win,
+      `within` false, PASSED on serial replay). The runner correctly scores a pool-fail /
+      replay-pass as FAIL (`TESTING.md` §6), so this costs a re-run each time it fires. Fix is the
+      platform lane's: widen to a bound derived from a stated per-run false-positive budget
+      (Bonferroni over 256 buckets — ~4.8σ for 1e-4), or make the draw deterministic for the
+      histogram leg. Reproducer: run `tl_tests --isolate` on any tier ~60 times.
+
 The two structural findings: **Array and Map were making hashed bytes a function of history**
 (D1–D3), and **every "two instances" test fed both instances the same op sequence** (D6), so none
 of them could have caught D1–D3. `sorted.test.cpp` was the one file that got the determinism shape
@@ -567,7 +583,7 @@ right; it is the template the others now follow.
 
 ### Ruling requests (not decided here)
 
-- **R1 — `slotmap_get` has no non-asserting liveness query, so "is this handle still alive?" is
+- [x] **R1 — `slotmap_get` has no non-asserting liveness query, so "is this handle still alive?" is
   un-askable in dev tiers.** `slotmap.h:128` fires `TL_ASSERT(false)` on any stale-but-in-range
   handle, per §8.2. But "the entity I referenced last tick was destroyed" is the *normal* ECS
   question, and `if (slotmap_get(h))` is the idiomatic way to ask it — which aborts in dev. The
@@ -581,6 +597,11 @@ right; it is the template the others now follow.
   error model as designed (CPP-SUBSET §3): absence is queryable, a stale deref is a bug.
   Implementation: the W2-prep closeout lane, with the edge matrix (null handle, gen 0, wrapped
   slot, out-of-range index) and CONTAINERS.md §8.2 updated in the same commit.
+  **DONE 2026-08-24 (w2-prep):** `slotmap_alive` shipped; `slotmap_alive_edge_matrix` pins all
+  eight cases (the quarantined one is the only case the live bit catches alone — the wrap remove
+  freezes `gen[idx]` at `GEN_MAX`, so the retired handle's generation still matches); the
+  gen-comparison workaround in `slotmap_lifo_reuse_and_zeroed_dead_slot` is replaced by the
+  direct query; `CONTAINERS.md` §8.2 carries the signature and the why.
 - **R2 — may a `Map` live on an `ARENA_HASHED` arena at all?** A growing `Map` orphans its old
   keys/vals/state blocks below the arena's `used`, so they are hashed forever and the hash encodes
   growth history. Stated in `map.h`'s contract block and `CONTAINERS.md` §3 as a derived constraint

@@ -72,8 +72,11 @@ TL_TEST(slotmap_lifo_reuse_and_zeroed_dead_slot, "foundation,containers,mem,fast
     TL_EXPECT_EQ(handle_gen(h3), (u32)2);       // gen bumped by the remove ("gen stays" across reuse - it already moved on remove)
     TL_EXPECT_EQ(slotmap_slot_cap(&sm), (u32)3);   // no new slot was appended
 
-    // The stale handle h1 (gen 1) must now read as absent, and the runtime signals it in debug.
-    TL_EXPECT_TRUE(handle_gen(h1) != handle_gen(h3));
+    // The stale handle h1 (gen 1) must now read as absent. Asked directly, via slotmap_alive -
+    // before R1 landed this line compared generations by hand, because slotmap_get asserts on
+    // exactly this case in dev (TODO.md R1, RULED 2026-08-24).
+    TL_EXPECT_FALSE(slotmap_alive(&sm, h1));
+    TL_EXPECT_TRUE(slotmap_alive(&sm, h3));
 }
 
 TL_TEST(slotmap_iteration_is_0_to_slot_cap_skipping_dead, "foundation,containers,mem,fast") {
@@ -287,4 +290,77 @@ TL_TEST(slotmap_never_mints_null_or_gen_zero, "foundation,containers,mem,determi
         minted += 1u;
     }
     TL_EXPECT_EQ(minted, (u32)40);
+}
+
+// R1's edge matrix (RULED 2026-08-24, TODO.md; docs/CONTAINERS.md §8.2): slotmap_alive is pure and
+// assert-free, and answers false for every non-live shape a handle can take. It runs in EVERY tier
+// - if any of these cases reached an assert instead of returning, the dev-tier child would die
+// with the trap code rather than fail a check, which is the whole point of the query existing.
+TL_TEST(slotmap_alive_edge_matrix, "foundation,containers,mem,edge,fast") {
+    VMemApi api = test_vmem_api();
+    SlotMap<Payload, SmH> sm;
+    TL_ASSERT_EQ(slotmap_init(&sm, "test.smC.slots"_id, "test.smC.gen"_id, "test.smC.free"_id, "test.smC.live"_id, &api), ERR_OK);
+
+    // (1) null handle - bits == 0, documented absence.
+    TL_EXPECT_FALSE(slotmap_alive(&sm, SmH{}));
+
+    // (2) out-of-range index on an EMPTY map: idx 0 is inside the handle domain but past
+    // slots.count, so the short-circuit must stop before bitset_test's all-tier TL_CHECK.
+    TL_EXPECT_FALSE(slotmap_alive(&sm, handle_make<SmH>(0u, 1u)));
+
+    Payload p0 = { 1u, 2u }, p1 = { 3u, 4u };
+    SmH h0 = slotmap_insert(&sm, &p0);   // idx 0, gen 1
+    SmH h1 = slotmap_insert(&sm, &p1);   // idx 1, gen 1
+
+    // (3) the true case, twice - a live handle is live.
+    TL_EXPECT_TRUE(slotmap_alive(&sm, h0));
+    TL_EXPECT_TRUE(slotmap_alive(&sm, h1));
+
+    // (4) out-of-range index with the map non-empty: idx 15 is the top of SmH's domain
+    // (IDX_MASK == 15) and slot_cap is 2.
+    TL_EXPECT_EQ(slotmap_slot_cap(&sm), (u32)2);
+    TL_EXPECT_FALSE(slotmap_alive(&sm, handle_make<SmH>((u32)SmH::IDX_MASK, 1u)));
+
+    // (5) generation 0 - never issued, so a zeroed gen field with a non-zero index (which is NOT
+    // the null handle) must read as dead. Built raw: handle_make asserts gen >= 1 by contract.
+    SmH gen_zero = SmH{ (SmH::rep)1u };   // idx 1, gen 0
+    TL_EXPECT_FALSE(handle_is_null(gen_zero));
+    TL_EXPECT_EQ(handle_gen(gen_zero), (u32)0);
+    TL_EXPECT_FALSE(slotmap_alive(&sm, gen_zero));
+
+    // (6) dead slot, stale generation - removed, and the slot not yet reused.
+    TL_EXPECT_TRUE(slotmap_remove(&sm, h1));
+    TL_EXPECT_FALSE(slotmap_alive(&sm, h1));
+    TL_EXPECT_TRUE(slotmap_alive(&sm, h0));   // its neighbour is untouched
+
+    // (7) TRUE across a reuse, and false for the handle that owned the slot before it: the LIFO
+    // insert hands idx 1 back at gen 2.
+    Payload p2 = { 5u, 6u };
+    SmH h1b = slotmap_insert(&sm, &p2);
+    TL_EXPECT_EQ(handle_index(h1b), (u32)1);
+    TL_EXPECT_EQ(handle_gen(h1b), (u32)2);
+    TL_EXPECT_TRUE(slotmap_alive(&sm, h1b));
+    TL_EXPECT_FALSE(slotmap_alive(&sm, h1));   // the stale generation, after the reuse
+
+    // (8) a wrapped/quarantined slot. gen freezes at GEN_MAX on the wrap remove, so the retired
+    // handle's generation still MATCHES gen[idx] - the live bit is the only term that separates
+    // them, and this is the one case that proves the bitset term is load-bearing.
+    SmH hq = h1b;
+    while (handle_gen(hq) < (u32)SmH::GEN_MAX) {
+        TL_ASSERT_TRUE(slotmap_remove(&sm, hq));
+        hq = slotmap_insert(&sm, &p2);
+    }
+    TL_EXPECT_EQ(handle_index(hq), (u32)1);
+    TL_EXPECT_TRUE(slotmap_alive(&sm, hq));
+    TL_EXPECT_TRUE(slotmap_remove(&sm, hq));           // the wrap remove: quarantine
+    TL_EXPECT_EQ(sm.quarantined, (u32)1);
+    TL_EXPECT_EQ(sm.gen.data[1], (u16)SmH::GEN_MAX);   // gen unchanged - the handle still matches it
+    TL_EXPECT_EQ(handle_gen(hq), (u32)SmH::GEN_MAX);
+    TL_EXPECT_FALSE(slotmap_alive(&sm, hq));
+
+    // The query never mutates: slot_cap, live_count and quarantined are exactly where the ops left
+    // them after all fourteen calls above.
+    TL_EXPECT_EQ(slotmap_slot_cap(&sm), (u32)2);
+    TL_EXPECT_EQ(sm.live_count, (u32)1);
+    TL_EXPECT_EQ(sm.quarantined, (u32)1);
 }
