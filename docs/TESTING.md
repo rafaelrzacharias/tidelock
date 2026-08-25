@@ -85,7 +85,7 @@ successor of Ore's 43 M-tick run.
 | fingerprint stability | two clean builds of the same tree produce the same fingerprint | PR |
 | header contracts | every `module.h` has a contract block naming its spec section; every public function in a module header has a contract comment (`CPP-SUBSET.md` §6) — `tools/audit/includes.py` | PR, blocking |
 | `NOMINMAX` | every file including `<windows.h>` defines `NOMINMAX` on an earlier line (`PLATFORM.md` §9.1) — `tools/audit/includes.py` gate 7, the one gate that walks `tests/` as well as `src/` | PR, blocking |
-| cross-target divergence | `tools/audit/targets.py`: every sim TU preprocessed and its record layouts dumped for all three triples, then diffed. A per-target `#if`, a `#pragma pack`, an `alignas` or a bit-field is a finding, in any spelling - the class four W0 reviews kept finding holes in when it was a regex. Needs no sysroot | PR, blocking |
+| cross-target divergence | `tools/audit/targets.py`: every sim TU preprocessed and its record layouts dumped for the four `CANON.md` target triples, then diffed. A per-target `#if`, a `#pragma pack`, an `alignas` or a bit-field is a finding, in any spelling - the class four W0 reviews kept finding holes in when it was a regex. Needs no sysroot | PR, blocking |
 | **doc audit** | `tools/docaudit/docaudit.py`: dangling `NAME.md §x.y` refs, numbers contradicting `CANON.md`, docs missing from `docs/README.md`, stale markers; regenerates `docs/XREF.md`; a commit touching `src/<module>/` without its doc needs `[docs:none]` | PR, blocking |
 | warnings | `-Werror` across all tiers and all platforms incl. the cross target | PR |
 
@@ -95,8 +95,8 @@ successor of Ore's 43 M-tick run.
 
 | Lane | Contents | Budget |
 |---|---|---|
-| **PR** (blocking) | build all tiers (dev/netcode/ship) for Windows + Linux + aarch64 cross; unit/property (`--isolate`); dual-sim + replay + worker sweep on the scene set; sim tests under UBSan+ASan; static gates; descriptor-level render tests | < 10 min |
-| **nightly** | long-run fuzz; cross-ISA on the Pi + Deck; save cross-build load (yesterday's fixture); pixel goldens (software renderer, FLIP-compared, never blocking); fx exhaustive oracle runs | hours |
+| **PR** (blocking) | build all tiers on the `CANON.md` target matrix ({Windows, Linux} × {x86-64, arm64}, hosted native runners, per-leg binary-ISA assertion); unit/property (`--isolate`) on every leg — the fx trace pins inside are the cross-ISA gate; four-way `build_id` diff; dual-sim + replay + worker sweep on the scene set; sim tests under UBSan+ASan on both Linux ISAs; static gates; descriptor-level render tests | < 10 min |
+| **nightly** | long-run fuzz; physical perf/soak on the Pi + Deck (replay-diff against PR artifacts); save cross-build load (yesterday's fixture); pixel goldens (software renderer, FLIP-compared, never blocking); fx exhaustive oracle runs; G-06 cross-leg hash diff on the hosted runners | hours |
 | **weekly** | Hovel soak scenarios once Hovel exists; Gate 0 re-run if the palette or the solver changed | 10 h |
 
 Flakiness rules: **no PR-lane retries**; a flaky test is quarantined to nightly with an owner; a
@@ -130,8 +130,10 @@ net packet decode, Luau bytecode loader — under ASan in nightly.
 ## 8. Rulings (closed 2026-08-22 — nothing open)
 
 - **R-1 The runner emits TSV and `--junit` from day one** (the JUnit XML writer is ~40 lines over
-  stb_sprintf; every CI system reads it). CI is **GitHub Actions** for the Windows/Linux/cross
-  lanes, with the Pi and Deck as self-hosted runners for the nightly cross-ISA job.
+  stb_sprintf; every CI system reads it). CI is **GitHub Actions**: hosted native runners cover
+  the whole `CANON.md` target matrix in the PR lane (re-ruled 2026-08-25 — conformance no longer
+  waits on owned hardware); the Pi and Deck join as self-hosted runners for the nightly
+  perf/soak job only.
 - **R-2 `tests/` obeys the subset**, with two exemptions: the generated test list and
   `printf`-class io + clock + filesystem access (tests are not sim code). `tools/` is fully exempt.
 
@@ -192,4 +194,5 @@ scenes and Hovel.
 | audits | `tl_audit_symbols`, `tl_audit_includes`, `tl_rebuild_budget`, fingerprint-stability (two clean builds, diff `build_id.txt`) |
 | cross-ISA (nightly) | PC: `--record`; Pi/Deck: `--replay --verify` on the same tree's artifacts |
 
-*Rev 1 — 2026-08-22.*
+*Rev 1 — 2026-08-22; §5/§6/§8 R-1 re-ruled to the `CANON.md` target matrix (hosted native CI
+runners; Pi + Deck = nightly perf/soak only), 2026-08-25.*

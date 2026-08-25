@@ -185,9 +185,12 @@ Determinism bugs are silent until a player desyncs. Make them fail a test. Run c
 3. **Worker-count invariance:** 1 / 2 / 8 / 16 workers → identical trace. Blocking release gate
    (T-F-02), plus one mixed-pair run (A at 4, B at 16) once transport exists.
 4. **Long-run / fuzz:** seeded random input streams over long horizons (slow drift).
-5. **Cross-ISA:** PC x86-64 vs Pi 4 aarch64 (cross-compiled from the same tree), hash traces
-   compared. Infra-gated only on having the Pi on the bench; it is *required*, not optional. The
-   Deck (x86-64 Linux) separates OS effects from ISA effects.
+5. **Cross-ISA / cross-platform:** every leg of the `CANON.md` target matrix ({Windows, Linux} ×
+   {x86-64, arm64}) builds and runs the pinned-trace tests on hosted native runners in the PR
+   lane; traces and `build_id` must match bit-exactly across all four (§8 R-3). It is *required*,
+   not optional — and no longer infra-gated on owned hardware. The OS and ISA axes of the matrix
+   separate OS effects from ISA effects; the physical Pi 4 and Deck remain the nightly perf/soak
+   instances (`TESTING.md` §4).
 6. **Sanitizer runs:** the dual-sim and replay tests under UBSan+ASan (timing ignored).
 
 A failing hash pinpoints the first diverging tick; per-arena hashing pinpoints the arena; the
@@ -209,8 +212,15 @@ reflection field tables give a field-by-field diff of the diverging component (`
 
 ---
 
-## 8. Rulings (closed 2026-08-22 — nothing open)
+## 8. Rulings (closed 2026-08-25 — nothing open)
 
+- **R-3 The determinism target is the platform matrix, not a machine list (ruled 2026-08-25).**
+  The target set — home: `CANON.md`, Build tiers and targets — is **{Windows, Linux} ×
+  {x86-64, arm64}**. The PC, Steam Deck and Pi 4 are reference *hardware instances* for perf and
+  soak, no longer the definition; conformance (bit-exact traces, one `build_id`) is proven on any
+  conforming instance, which in practice is CI's hosted native runners on every PR-lane run
+  (`BUILD.md` §10.4). Supersedes the three-machine phrasing in item 5's original text; a new OS
+  or ISA enters by ruling in `CANON.md`, never by drift.
 - **R-1 Hash cadence:** every tick in the local harness (dual-sim, replay, worker sweep);
   `CHECKSUM_INTERVAL_TICKS = 30` on the wire for three-machine soaks (NETCODE App. B). The hash is
   *computed* every tick in every tier; only the exchange is sampled.
@@ -288,5 +298,6 @@ written out in Python from the algorithm; `--check` exits non-zero on disagreeme
 re-runs it; the vectors are never re-pinned to whatever the new code returns.
 
 *Rev 1 — 2026-08-22; §3 `rng_range` contract, §3 `system_id != 0` ruling and §9.5 golden
-provenance reconciled 2026-08-24 (W1 rng/hash review). Supersedes
+provenance reconciled 2026-08-24 (W1 rng/hash review); §6 item 5 and §8 R-3 re-ruled to the
+`CANON.md` target matrix (hosted native arm64 CI runners), 2026-08-25. Supersedes
 `../foundry/DETERMINISM-DESIGN.md` for this engine.*

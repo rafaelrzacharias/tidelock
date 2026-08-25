@@ -1,13 +1,17 @@
 # PR lane - blocking. Spec: docs/BUILD.md §10.4, docs/TESTING.md §5, §6 (budget < 10 min).
-# Jobs that need hardware or code this repo does not have yet are declared and gated, never
-# silently omitted: cross-pi4 needs the R-3 sysroot (docs/BUILD.md §9), the determinism harness
-# needs tl_driver (W1 runner+driver lane). Both are queued in TODO.md.
+# Targets are the CANON.md matrix, ruled 2026-08-25: {Windows, Linux} x {x86-64, arm64}, all four
+# on hosted native runners. Jobs that need hardware or code this repo does not have yet are
+# declared and gated, never silently omitted: cross-pi4 needs the R-3 sysroot (docs/BUILD.md §9),
+# the determinism harness needs tl_driver (W1 runner+driver lane). Both are queued in TODO.md.
+# workflow_dispatch exists so a session branch can be proven green before it merges (external PRs
+# are disabled on this repo, so pull_request alone cannot cover agent branches).
 name: pr
 
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -43,16 +47,21 @@ jobs:
       - name: audit selftest - the gates' own planted violations
         run: |
           python tools/audit/selftest.py --cxx "$TL_CXX"             --nm "$TL_LLVM_BIN/llvm-nm" --objdump "$TL_LLVM_BIN/llvm-objdump"             --ar "$TL_LLVM_BIN/llvm-ar"
-      - name: cross-target divergence (preprocess + record layouts, three triples)
+      - name: cross-target divergence (preprocess + record layouts, four triples)
         run: python tools/audit/targets.py --root . --clang "$TL_CXX"
       - name: a src/<module>/ change touches that module's doc (or says [docs:none])
-        run: python tools/audit/commit_docs.py --base "${{ github.event.pull_request.base.sha || github.event.before }}"
+        # workflow_dispatch has no event base; fall back to the previous commit so the gate still
+        # sees the head commit rather than silently passing an empty range.
+        run: python tools/audit/commit_docs.py --base "${{ github.event.pull_request.base.sha || github.event.before || 'HEAD~1' }}"
 
   build-test:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        # The CANON.md target matrix on hosted native runners: {Windows, Linux} x {x86-64, arm64}.
+        # The two arm64 legs are this repo's first-ever aarch64 executions - the fx trace pins
+        # inside tl_tests are the cross-ISA determinism gate (docs/FX-PALETTE.md, fx_trace.test.cpp).
+        os: [windows-latest, ubuntu-latest, ubuntu-24.04-arm, windows-11-arm]
         tier: [debug, dev, netcode, ship]
     runs-on: ${{ matrix.os }}
     steps:
@@ -65,6 +74,18 @@ jobs:
       - name: install ninja (windows)
         if: runner.os == 'Windows'
         run: choco install ninja -y
+      - name: install LLVM if the runner image lacks it (windows-arm64)
+        # The windows-11-arm image tool set is thinner than windows-latest's. If clang-cl is
+        # absent, install LLVM; choco ships the native woa64 build on arm64 hosts. An x64 LLVM
+        # under emulation would default to the x86_64 triple - the binarch step below turns that
+        # silent wrong-ISA build into a loud failure.
+        if: matrix.os == 'windows-11-arm'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
+            choco install llvm -y --no-progress
+            Add-Content $env:GITHUB_PATH "C:\Program Files\LLVM\bin"
+          }
       - name: preset name
         shell: bash
         run: echo "PRESET=${{ matrix.tier }}-$([ '${{ runner.os }}' = 'Windows' ] && echo win || echo linux)" >> $GITHUB_ENV
@@ -83,6 +104,12 @@ jobs:
         run: cmake --preset ${{ env.PRESET }} -DTL_STRICT_TOOLCHAIN=OFF
       - name: build
         run: cmake --build --preset ${{ env.PRESET }}
+      - name: binary matches the runner ISA (no silent host-arch fallback)
+        # The win/linux presets carry no --target: they build whatever the host toolchain is. On
+        # an arm64 runner an emulated x64 clang would quietly produce x86-64 binaries and this leg
+        # would test the wrong ISA. Measured, not assumed.
+        shell: bash
+        run: python tools/audit/binarch.py --file "out/${{ env.PRESET }}/bin/tl_tests$([ '${{ runner.os }}' = 'Windows' ] && echo .exe)" --expect "$([ '${{ runner.arch }}' = 'ARM64' ] && echo aarch64 || echo x86_64)"
       - name: symbol audit
         run: cmake --build --preset ${{ env.PRESET }} --target tl_audit_symbols
       - name: unit tests
@@ -92,8 +119,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: junit-${{ env.PRESET }}
+          name: junit-${{ env.PRESET }}-${{ matrix.os }}
           path: tl_tests.xml
+      - name: stage build_id for the four-way R-8 gate
+        if: matrix.tier == 'netcode'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-id-${{ matrix.os }}
+          path: out/${{ env.PRESET }}/build_id.txt
 
   tier-parity:
     # docs/BUILD.md §3: netcode and ship must differ only by the stripping defines. Enforced by
@@ -111,46 +144,26 @@ jobs:
       - run: cmake --preset ship-linux -DTL_STRICT_TOOLCHAIN=OFF
       - run: python tools/audit/tier_parity.py --netcode out/netcode-linux --ship out/ship-linux
 
-  build-id-win:
-    # R-8 says build_id is identical on every target. The selftest can only compare two command
-    # lines someone typed; these three jobs compare two real builds of one checkout.
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.13' }
-      - run: choco install ninja -y
-      - run: cmake --preset netcode-win -DTL_STRICT_TOOLCHAIN=OFF
-      - run: cmake --build --preset netcode-win
-      - uses: actions/upload-artifact@v4
-        with: { name: build-id-win, path: out/netcode-win/build_id.txt }
-
-  build-id-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.13' }
-      - run: sudo apt-get update && sudo apt-get install -y clang lld llvm ninja-build
-      - run: cmake --preset netcode-linux -DTL_STRICT_TOOLCHAIN=OFF
-      - run: cmake --build --preset netcode-linux
-      - uses: actions/upload-artifact@v4
-        with: { name: build-id-linux, path: out/netcode-linux/build_id.txt }
-
   build-id-cross-target:
-    needs: [build-id-win, build-id-linux]
+    # R-8 says build_id is identical on every target. The selftest can only compare two command
+    # lines someone typed; this job compares four real netcode builds of one checkout - one per
+    # leg of the CANON.md target matrix, staged by build-test (tier == netcode).
+    needs: [build-test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
-        with: { name: build-id-win, path: win }
-      - uses: actions/download-artifact@v4
-        with: { name: build-id-linux, path: linux }
-      - name: one build_id for every target (docs/BUILD.md §9 R-8)
+        with:
+          pattern: build-id-*
+          path: ids
+      - name: one build_id for every target (docs/BUILD.md §9 R-8, four legs)
         run: |
           set -eu
-          echo "win:   $(cat win/build_id.txt)"
-          echo "linux: $(cat linux/build_id.txt)"
-          diff win/build_id.txt linux/build_id.txt
+          ls ids/*/build_id.txt
+          n=$(ls ids/*/build_id.txt | wc -l)
+          [ "$n" -eq 4 ] || { echo "expected 4 build_id artifacts, found $n"; exit 1; }
+          for f in ids/*/build_id.txt; do echo "$(dirname "$f"): $(cat "$f")"; done
+          first=$(ls ids/*/build_id.txt | head -1)
+          for f in ids/*/build_id.txt; do diff "$first" "$f"; done
 
   fingerprint-stability:
     # Two clean builds of the same tree must produce the same build_id (docs/BUILD.md §10.5).
@@ -172,7 +185,13 @@ jobs:
           diff first.txt out/netcode-linux/build_id.txt
 
   sanitizers:
-    runs-on: ubuntu-latest
+    # Both Linux ISAs: UBSan findings can be arch-specific (alignment, shift lowering), and the
+    # sanitizer build is Linux-only by construction (TL_SANITIZE under clang-cl is FATAL_ERROR).
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -198,9 +217,11 @@ jobs:
         # and measured 12.46 s full on this runner; 25/5 keeps a 2x regression visible.
 
   cross-pi4:
-    # Build-only aarch64 leg. Runs once the sysroot tarball of docs/BUILD.md §9 R-3 exists and
-    # its URL is set as the repository variable TL_SYSROOT_URL; until then it is skipped, not
-    # red. TODO.md carries the ruling request.
+    # Build-only aarch64 leg against the Pi's own sysroot - since the target-matrix ruling
+    # (2026-08-25) this proves the DEPLOYABLE Pi artifact, not aarch64 conformance (the hosted
+    # ubuntu-24.04-arm leg carries that natively). Runs once the sysroot tarball of
+    # docs/BUILD.md §9 R-3 exists and its URL is set as the repository variable TL_SYSROOT_URL;
+    # until then it is skipped, not red. TODO.md carries the ruling request.
     if: vars.TL_SYSROOT_URL != ''
     runs-on: ubuntu-latest
     steps:

@@ -647,9 +647,15 @@ the drop heights), all declared in the README; no threshold, world constant or r
 
       *Still blocked on the above:* the cross-ISA nightly (`docs/TESTING.md` §4) and Gate 0's G-06
       run on the Pi (`docs/GATE0-BENCH.md`) — G-06 is a Gate 0 scenario, not a nice-to-have.
-- [ ] **RR-2 `nightly.yml` / `weekly.yml` (`docs/BUILD.md` §10.4).** Both need self-hosted `pi4`
-      and `deck` runners; committing them before the runners exist buys a nightly red build.
-      Land them with RR-1.
+- [ ] **RR-2 `nightly.yml` / `weekly.yml` (`docs/BUILD.md` §10.4). Re-scoped 2026-08-25 by the
+      target-matrix ruling (`CANON.md`):** cross-ISA *conformance* no longer waits on self-hosted
+      runners — the PR lane's hosted `ubuntu-24.04-arm` / `windows-11-arm` legs carry it natively.
+      `nightly.yml` can therefore land now on hosted runners: full `tl_tests --isolate` with no
+      `--timeout-ms` and no `!slow` filter on all four legs; `fxcheck` full + `oracle.py
+      check-coeffs` + `oracle.py verify` (the item below); `tl_gate0 --scenario G06` per leg with
+      a cross-leg `hash_lo64` diff (the first cross-ISA solver evidence). The self-hosted `pi4`
+      and `deck` runners remain the *perf/soak* half (replay-diff against PR artifacts, G-05 on
+      real hardware) and still land with RR-1. `weekly.yml` unchanged.
 - [ ] **RR-4 (b) is BUILT** (`tools/audit/targets.py`, `tl_audit_targets`, PR lane). Every sim TU
       is preprocessed and its record layouts dumped for `x86_64-pc-windows-msvc`,
       `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`, then diffed. Measured: 0
@@ -738,10 +744,13 @@ the drop heights), all declared in the README; no threshold, world constant or r
       Not attacked (waits for its lane): the Pi leg of both pins (RR-1); the fatal-expected halves
       (runner lane). Wart, not a defect: `fx_int<R>(-2^INT_BITS)` is representable but asserts
       (the contract says `|i| < 2^INT_BITS`; symmetric and documented, left as is).
-- [ ] **Cross-ISA half of `FX-PALETTE.md` §10.6 is open until RR-1**: `fx_trace_hash_pinned`
-      reproduces `0x1a1803512f224fad` on clang-cl (dev/debug/netcode/ship) and is in the PR lane
-      for ubuntu clang; the Pi leg runs the same test the day a Pi build exists. A mismatch
-      there is UB until proven otherwise (`TESTING.md` §4).
+- [ ] **Cross-ISA half of `FX-PALETTE.md` §10.6 — re-scoped 2026-08-25 (target-matrix ruling):**
+      `fx_trace_hash_pinned` reproduces `0x1a1803512f224fad` on clang-cl (dev/debug/netcode/ship)
+      and ubuntu clang x86-64. The aarch64 legs no longer wait on RR-1: the PR lane's hosted
+      `ubuntu-24.04-arm` and `windows-11-arm` jobs run both pins natively (ci-matrix lane).
+      Check this off when the first four-leg run is green — CI evidence, not a local claim
+      (`LESSONS.md`: check CI before writing "verified"). A mismatch is UB until proven otherwise
+      (`TESTING.md` §4); the Pi repeats the same test as a hardware instance when RR-1 lands.
 - [ ] `tools/fxcheck` is not in CI yet: it is a separate CMake project (`cmake -S tools -B
       out/tools`), ~4 min in full. Add a nightly step (`fxcheck` + `oracle.py check-coeffs` +
       `oracle.py verify worst.tsv`) with RR-2's `nightly.yml`; `--quick` (~3 s) could sit in the

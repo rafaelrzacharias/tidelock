@@ -46,9 +46,10 @@ tidelock readers never saw rev 2. The table exists so the reasoning is not re-li
   (§1.1). Every budget in §7, §10.4, §16 is a **model** pending Gate 0 (G-05) and Hovel.
 - Cross-ISA bit-exactness is delivered by fixed-point-by-construction (`DETERMINISM.md`), not by a
   compiler. The residual silent-desync class is UB, not FP — hence sanitizers stay in the gate.
-- The three-machine reference set is unchanged: PC x86-64 Windows, Steam Deck x86-64 Linux,
-  Pi 4 aarch64 Linux. G-05's severity split (PIVOT §10) decides whether the Pi stays a reference
-  peer or becomes best-effort.
+- The three machines — PC x86-64 Windows, Steam Deck x86-64 Linux, Pi 4 aarch64 Linux — remain
+  the physical perf/soak reference set; the *target* set is `CANON.md`'s {Windows, Linux} ×
+  {x86-64, arm64} matrix (ruled 2026-08-25). G-05's severity split (PIVOT §10) decides whether
+  the Pi stays a reference peer or becomes best-effort.
 
 ---
 

@@ -103,7 +103,8 @@ language is retired. **Design complete, pre-code.** Next milestone: **Gate 0** (
 - **Games are Luau** (`script/`, later their own repos): data + meaning. Authoritative state never
   lives in the Luau heap (`docs/LUAU-LAYER.md` §0).
 - **Determinism is fixed-point by construction** (`docs/FX-PALETTE.md`, `docs/DETERMINISM.md`): no
-  floats on any sim path; cross-ISA (PC x86-64 + Steam Deck x86-64 + Pi 4 aarch64) for free.
+  floats on any sim path; cross-platform for free — targets are `CANON.md`'s {Windows, Linux} ×
+  {x86-64, arm64} matrix (ruled 2026-08-25), machines are instances.
 
 ## PUBLIC REPOSITORY — world-readable, at all times (ruling 2026-08-25)
 This repo is **public**. Every commit, branch, doc, commit message, and CI log is visible to

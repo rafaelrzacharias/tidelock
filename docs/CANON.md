@@ -140,6 +140,15 @@ slots, allocated once. Registration order = lockstep contract.
 
 ## Build tiers and targets (`BUILD.md`)
 
+**Targets (ruled 2026-08-25 — the home of the target set):** the platform matrix
+**{Windows, Linux} × {x86-64, arm64}** — triples `x86_64-pc-windows-msvc`,
+`aarch64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`. Targets are
+OS × ISA pairs, not machines: any conforming hardware is a peer. CI's hosted native runners are
+the conformance instances (bit-exact traces, one `build_id` — `BUILD.md` §10.4); the dev PC,
+Steam Deck and Pi 4 remain the physical perf + soak reference set (`NETCODE.md` §19.4,
+`GATE0-BENCH.md` §4), and perf is graded only there — never on shared runners. A new OS or ISA
+enters this list by ruling, not by drift.
+
 Tiers `debug` (`-O0 -g`), `dev` (`-O1 -g`, `TL_DEV=1`), `netcode` (`-O2 -g1`), `ship`. Libs
 `tl_foundation`, `tl_foundation_det` (audited), `tl_core`, `tl_sim` (audited), `tl_net`,
 `tl_render`, `tl_platform_sdl3`, `tl_platform_headless`, `tl_editor` (dev only), `tl_script`. Exes

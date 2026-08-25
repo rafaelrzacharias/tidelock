@@ -726,7 +726,7 @@ def test_fingerprint(tmp):
 
 
 # --- targets.py -------------------------------------------------------------------------------
-# The constructs four reviews found and no regex caught. Each is measured on all three triples,
+# The constructs four reviews found and no regex caught. Each is measured on all four triples,
 # so these fixtures are the evidence that measurement beats enumeration - and the clean ones are
 # the evidence it does not cry wolf on ordinary sim code.
 TARGET_CASES = [

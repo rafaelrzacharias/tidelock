@@ -5,7 +5,7 @@ Spec: docs/CPP-SUBSET.md §5, docs/BUILD.md §9 R-8, docs/TESTING.md §5.
 Four adversarial reviews found target-variable constructs a regex missed, because the space cannot
 be enumerated: `#pragma pack`, `alignas`, `[[no_unique_address]]`, `#ifdef __GNUC__`, and every
 macro outside whatever denylist someone thought of. This gate measures instead. For every sim TU,
-on all three supported triples:
+on all four supported triples (the CANON.md target matrix, ruled 2026-08-25):
 
   1. **Preprocess** (`clang -E`) and diff, once per tier define set. Any line of OUR source that
      differs between targets is a per-target program - the violation, not noise. Lines from clang's
@@ -42,6 +42,7 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 TRIPLES = [
     ("win", "x86_64-pc-windows-msvc"),
+    ("winarm", "aarch64-pc-windows-msvc"),
     ("linux", "x86_64-unknown-linux-gnu"),
     ("pi", "aarch64-unknown-linux-gnu"),
 ]
@@ -73,7 +74,7 @@ extern "C" int memcmp(const void*, const void*, size_t);
 # different structs) passed with "0 divergences", and nothing outside `src/` is covered by
 # includes.py's token ban. So _MSC_VER stays defined and <intrin.h> is stubbed empty instead,
 # exactly as <string.h> is: the records disappear at their actual source, and every _MSC_VER
-# branch in our source AND in a vendor header is still measured on all three triples.
+# branch in our source AND in a vendor header is still measured on all four triples.
 INTRIN_H_STUB = "#pragma once\n"
 # Used to measure which records the sanctioned headers themselves define, per triple.
 SYSTEM_PROBE = '#include <stdint.h>\n#include <stddef.h>\n#include <limits.h>\n#include <string.h>\n'

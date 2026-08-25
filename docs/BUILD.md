@@ -7,11 +7,15 @@
 
 ## 1. Toolchain (DECIDED — clang everywhere, ruled 2026-08-21)
 
+The target set's home is `CANON.md` (Build tiers and targets, ruled 2026-08-25): the matrix
+**{Windows, Linux} × {x86-64, arm64}**; machines are instances of a target, never the target.
+
 | Target | Compiler | Notes |
 |---|---|---|
-| Windows x86-64 (dev PC) | **clang-cl** (LLVM release, pinned) | links the MSVC CRT; VS Build Tools / Windows SDK present |
-| Linux x86-64 (Steam Deck) | **clang** (same major version) | built on the PC as a cross target or natively in distrobox |
-| Linux aarch64 (Pi 4) | **clang `--target=aarch64-linux-gnu`** with a sysroot | cross-compiled from the PC; build once, deploy three |
+| Windows x86-64 | **clang-cl** (LLVM release, pinned) | links the MSVC CRT; VS Build Tools / Windows SDK present; the dev PCs |
+| Windows arm64 | **clang-cl** (native woa64 LLVM) | same driver and CRT; conformance instance is CI's hosted runner |
+| Linux x86-64 | **clang** (same major version) | Steam Deck is the physical reference; natively in distrobox or CI |
+| Linux aarch64 | **clang** — native, or `--target=aarch64-linux-gnu` + sysroot | CI builds natively on a hosted arm64 runner; the Pi 4 deploy artifact cross-compiles from the PC (§7) |
 
 One compiler family deletes MSVC-vs-clang codegen/UB behaviour as a determinism variable. MSVC
 stays available as an occasional second-opinion build, never a peer. Pinned versions live in
@@ -260,8 +264,8 @@ render/net when their tests are compiled in). `tl_sim` and `tl_foundation_det` c
   `toolchain/VERSIONS` before any cross build uses it (R-3).
 - `tools/audit/tier_parity.py`: the §3 netcode/ship flag-parity check, over `compile_commands.json`.
 - `tools/audit/targets.py`: the cross-target divergence gate - `clang -E` and
-  `-Xclang -fdump-record-layouts-complete` for `x86_64-pc-windows-msvc`,
-  `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`, diffed per sim TU. Resource-dir
+  `-Xclang -fdump-record-layouts-complete` for the four `CANON.md` target triples, diffed per
+  sim TU. Resource-dir
   headers are filtered out by following the `# N "file"` markers, integer-literal suffixes are
   normalised, and the dump's `dsize`/`nvsize` bookkeeping is stripped; measured 0 false
   positives on this tree. `-nostdlibinc` keeps clang's freestanding headers and `<string.h>` is
@@ -282,17 +286,22 @@ render/net when their tests are compiled in). `tl_sim` and `tl_foundation_det` c
 
 ### 10.4 CI (GitHub Actions — `TESTING.md` §8 R-1)
 
-`pr.yml`: matrix {windows-clang-cl, ubuntu-clang} × {dev, netcode} + ubuntu cross pi4 (build only)
-→ audits → `tl_tests --isolate --junit` → driver harness jobs → sanitizer job (ubuntu, `-DTL_SANITIZE=ON`,
-sim tests) → rebuild budget. `nightly.yml`: slow tests, fuzz, self-hosted `pi4` and `deck` runners
-pulling the PR-built artifacts for cross-ISA replay-diff, save cross-build, pixel goldens.
-`weekly.yml`: Hovel scenarios (when present), Gate 0 re-run on palette/solver changes.
+`pr.yml`: the `CANON.md` target matrix on hosted native runners — {windows-latest, ubuntu-latest,
+ubuntu-24.04-arm, windows-11-arm} × all four tiers → audits → `tl_tests --isolate --junit` (the fx
+trace pins inside it are the cross-ISA determinism gate, `DETERMINISM.md` §8 R-3) → a binary-ISA
+assertion per leg (`tools/audit/binarch.py`: no silent host-arch fallback) → the four-way R-8
+`build_id` diff → driver harness jobs → sanitizer job (both Linux ISAs, `-DTL_SANITIZE=ON`, sim
+tests) → rebuild budget. `nightly.yml`: slow tests, fuzz, fxcheck + oracle, G-06 cross-leg hash
+diff on the hosted runners; the self-hosted `pi4` and `deck` runners join it for the physical
+perf/soak half (replay-diff against PR artifacts, save cross-build, pixel goldens) once RR-1
+lands. `weekly.yml`: Hovel scenarios (when present), Gate 0 re-run on palette/solver changes.
 
 Built so far: `pr.yml` with audits (doc, include firewall, header contracts, doc-touch, symbols),
-the {windows, ubuntu} × {dev, netcode} build+test matrix, fingerprint stability, the sanitizer job
-and the rebuild budget. Its `cross-pi4` job is gated on the repository variable `TL_SYSROOT_URL`
-(R-3) and the harness jobs wait on `tl_driver`; `nightly.yml`/`weekly.yml` land with the
-self-hosted Pi and Deck runners. `TODO.md` carries both.
+the four-leg × four-tier build+test matrix with per-leg binary-ISA assertion, the four-way R-8
+`build_id` gate, fingerprint stability, the two-ISA sanitizer job, the rebuild budget, and
+`workflow_dispatch` so a session branch is proven green before merging. Its `cross-pi4` job
+(the deployable Pi artifact) is gated on the repository variable `TL_SYSROOT_URL` (R-3) and the
+harness jobs wait on `tl_driver`; `nightly.yml`/`weekly.yml` are queued in `TODO.md`.
 
 ### 10.5 Done criteria
 
@@ -316,4 +325,4 @@ The pi4 leg is **unmet and blocked on hardware**: clang emits aarch64 ELF and th
 loudly without `TL_SYSROOT`, but the R-3 sysroot tarball needs a live Pi. `TODO.md` carries it as a
 ruling request.
 
-*Rev 1 — 2026-08-22; §9 R-4..R-8 and §3/§5/§10.1/§10.3/§10.4/§10.5 reconciled with the W0 skeleton, its adversarial review and the R-8 ruling, 2026-08-22.*
+*Rev 1 — 2026-08-22; §9 R-4..R-8 and §3/§5/§10.1/§10.3/§10.4/§10.5 reconciled with the W0 skeleton, its adversarial review and the R-8 ruling, 2026-08-22. §1/§10.3/§10.4 re-ruled to the `CANON.md` target matrix ({Windows, Linux} × {x86-64, arm64}, hosted native CI runners), 2026-08-25.*

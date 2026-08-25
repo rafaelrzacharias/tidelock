@@ -116,8 +116,9 @@ surface — still the sdl3 impl, not headless.
 - Every vendored lib's allocator hook points at a `mem_pool` (`MEMORY.md` §1.5):
   `SDL_SetMemoryFunctions`, `lua_newstate(alloc)`, `ImGui::SetAllocatorFunctions`,
   `enet_initialize_with_callbacks`, `STBI_MALLOC`.
-- Platforms: Windows x86-64 (clang-cl), Linux x86-64 (Steam Deck), Linux aarch64 (Pi 4, cross-
-  compiled). Console/mobile: not planned; the seam is where they would go.
+- Platforms: the `CANON.md` target matrix (ruled 2026-08-25) — {Windows, Linux} × {x86-64, arm64},
+  clang-cl on Windows, clang on Linux; the Deck and Pi 4 are physical instances, not the
+  definition. Console/mobile: not planned; the seam is where they would go.
 
 ---
 
