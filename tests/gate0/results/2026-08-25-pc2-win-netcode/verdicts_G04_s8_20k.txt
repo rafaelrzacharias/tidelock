@@ -1,0 +1,1 @@
+VERDICT G-04 substeps=8 INVESTIGATE envelope_increases=4 energy_initial=32405202195 energy_max=32405202195 ticks=20000 run_twice=identical max_colors=66 max_nbr=76 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=66
