@@ -463,6 +463,13 @@ E-2 needs no W2 decision but blocks real game wiring later.
       **Recommend and built (a)**; `ECS.md` §10.3 reconciled in the world commit. Jobs-era note:
       reservation order under parallel systems is a W4 jobs-integration question (chunk-keyed
       reservation), filed with it there.
+      **Refined by review 1 (2026-08-25, D2/D3):** (i) fresh ids realize out of reservation
+      order when the external chunk is involved (it records first, applies last) - the realize
+      now loop-pushes to its own idx and decrements the pending counter once per gen-1 realize,
+      order-free; (ii) even the free-list POP moved hashed bytes mid-window, so a snapshot
+      captured with a reservation outstanding could not restore consistently - the reservation
+      is now a cursor (`World.reserved_free`) and the pops apply at the window's start, inside
+      the barrier. Both pinned by tests; `commands_discard` is now clean by construction.
 
 - [ ] **E-4 (ruling request) add-after-destroy inside one barrier window.** System A destroys
       entity e; system B - unaware, later in schedule order - records `world_add` on e in the
@@ -478,6 +485,11 @@ E-2 needs no W2 decision but blocks real game wiring later.
       how `CMD_DESTROY` of a dead entity already no-ops; (c) drop silently - banned by
       fail-loud policy. **Recommend (b)** once a real consumer hits it; (a) ships meanwhile
       (the strictest default is the reversible one). One switch statement either way.
+      **Extended by review 1 (2026-08-25, D4): the OPPOSITE order is in this ruling too** -
+      destroy-of-a-reserved-but-unrealized entity (its realize applies later in the window and
+      would resurrect a silently dropped destroy). Built: loud fatal via a pending-reservation
+      check (`spawn_pending`), pinned by `commands_destroy_before_realize_is_fatal`; whatever
+      is ruled for add-after-destroy should give both orders one consistent story.
 
 - [ ] **E-5 (finding for the netcode/rollback lanes - net-p2/hovel, W3; not this lane's to
       decide) rollback resim loses the restored tick's readable events.** The snapshot ring

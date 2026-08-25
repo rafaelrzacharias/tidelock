@@ -67,7 +67,6 @@ Result<u32> encoder_read_rows(ByteReader* r, const ComponentInfo* info,
     if (stored_count == 0u || stored_count > ENC_MAX_FIELDS) { res.err = ERR_ENC_MALFORMED; return res; }
 
     StoredField stored[ENC_MAX_FIELDS];
-    u64 stored_row_bytes = 0;
     for (u32 i = 0; i < stored_count; ++i) {
         stored[i].name_hash = br_get_u64(r);
         const u8 kind_byte = br_get_u8(r);
@@ -82,7 +81,6 @@ Result<u32> encoder_read_rows(ByteReader* r, const ComponentInfo* info,
             res.err = ERR_ENC_MALFORMED;
             return res;
         }
-        stored_row_bytes += stored[i].size;
         stored[i].live_index = enc_resolve(info, aliases, stored[i].name_hash);
         if (stored[i].live_index != ENC_NO_MATCH) {
             const FieldInfo* live = &info->fields[stored[i].live_index];
@@ -94,7 +92,6 @@ Result<u32> encoder_read_rows(ByteReader* r, const ComponentInfo* info,
             }
         }
     }
-    (void)stored_row_bytes;
 
     const u32 row_count = br_get_u32(r);
     if (!br_ok(r)) { res.err = r->err; return res; }

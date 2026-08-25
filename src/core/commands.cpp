@@ -50,31 +50,58 @@ void cmd_record(World* w, CmdKind kind, Entity e, u16 comp, const void* payload,
 }
 
 // CMD_SPAWN_REALIZE's applier: commits the reserved id into the slotmap (world.h E-3 design).
-// Fresh ids realize in reservation order, so each one is exactly the next slot to push.
+// Fresh ids realize once each but NOT necessarily in reservation order - the external chunk
+// records first and applies last (review 1 D2) - so a realize pushes zero slots up to its own
+// idx and a skipped-over id's later realize finds its slot already pushed (gen 1, dead). A
+// gen-1 handle is fresh by construction: a freed slot's gen is bumped at remove (>= 2) and a
+// quarantined slot never reissues, so gen 1 exists only on fresh reservations.
 void apply_spawn_realize(World* w, Entity e) {
     SlotMap<EntityRecord, Entity>* sm = &w->entities;
     const u32 idx = handle_index(e);
     const u32 gen = handle_gen(e);
-    if (idx >= sm->slots.count) {
-        TL_CHECK(idx == sm->slots.count);
-        TL_CHECK(gen == 1u);
-        EntityRecord zero = { 0u, 0u };
-        array_push(&sm->slots, zero);
-        array_push(&sm->gen, (u16)1);
-        TL_CHECK(w->pending_fresh > 0u);
-        w->pending_fresh -= 1u;
-    } else {
-        TL_CHECK(sm->gen.data[idx] == (u16)gen);   // the reserved generation is still current
+    if (gen == 1u && idx >= sm->slots.count) {
+        while (sm->slots.count <= idx) {
+            EntityRecord zero = { 0u, 0u };
+            array_push(&sm->slots, zero);
+            array_push(&sm->gen, (u16)1);
+        }
     }
+    TL_CHECK(idx < sm->slots.count);
+    TL_CHECK(sm->gen.data[idx] == (u16)gen);   // the reserved generation is still current
     TL_CHECK(!bitset_test(&sm->live, idx));
     bitset_set(&sm->live, idx);
     sm->live_count += 1u;
+    if (gen == 1u) {                            // one decrement per fresh reservation, any order
+        TL_CHECK(w->pending_fresh > 0u);
+        w->pending_fresh -= 1u;
+    }
 }
 
-// CMD_DESTROY's applier: a dead target is the normal stale-reference flow (no-op); a live one
-// leaves every column it was in (walk all tables - docs/ECS.md §10.5), then frees the slot.
+// True iff e is a reservation of THIS window awaiting its realize: a fresh id (gen 1) past or
+// inside the pushed range, or a dead slot whose CURRENT generation the handle carries - only
+// world_spawn mints such a handle (a stale handle's gen is always below the slot's, which the
+// remove bumped). Used to keep destroy/add appliers loud about pending targets (review 1 D4).
+bool spawn_pending(const World* w, Entity e) {
+    const SlotMap<EntityRecord, Entity>* sm = &w->entities;
+    const u32 idx = handle_index(e);
+    const u32 gen = handle_gen(e);
+    if (gen == 1u && idx >= sm->slots.count) { return true; }
+    return idx < sm->slots.count && !bitset_test(&sm->live, idx)
+        && sm->gen.data[idx] == (u16)gen;
+}
+
+// CMD_DESTROY's applier: a dead target is the normal stale-reference flow (no-op) UNLESS it is
+// a reserved-but-unrealized entity - its realize applies later in this window and would
+// resurrect a destroy we silently dropped, so that order is loud (review 1 D4; the policy
+// ruling is E-4's, filed with add-after-destroy). A live one leaves every column it was in
+// (walk all tables - docs/ECS.md §10.5), then frees the slot.
 void apply_destroy(World* w, Entity e) {
-    if (!slotmap_alive(&w->entities, e)) { return; }
+    if (!slotmap_alive(&w->entities, e)) {
+        if (spawn_pending(w, e)) {
+            TL_FATAL("commands: destroy of a reserved-but-unrealized entity (TODO.md E-4)");
+        }
+        return;
+    }
     for (u32 c = 0; c < w->comp_count; ++c) {
         ComponentTable* t = &w->comps[c];
         if ((t->info->flags & COMP_SINGLETON) != 0u) { continue; }
@@ -86,14 +113,16 @@ void apply_destroy(World* w, Entity e) {
 }  // namespace
 
 Entity world_spawn(World* w) {
-    // Reservation without registered-arena growth (TODO.md E-3): a free-list pop moves no
-    // `used` byte (destroys are deferred, so the free list only shrinks mid-window and the pop
-    // order is a pure function of the call sequence); a fresh id is the next count + pending.
+    // Reservation without touching ANY registered byte (TODO.md E-3, review 1 D3): the free
+    // list is READ through the reserved_free cursor - the actual pops apply at the next
+    // window's start, so a snapshot captured with a reservation outstanding holds bytes its
+    // derived counts still agree with. A fresh id is the next count + pending.
     SlotMap<EntityRecord, Entity>* sm = &w->entities;
     u32 idx;
     u32 gen;
-    if (sm->free_list.count > 0u) {
-        idx = array_pop(&sm->free_list);
+    if (w->reserved_free < sm->free_list.count) {
+        idx = sm->free_list.data[sm->free_list.count - 1u - w->reserved_free];
+        w->reserved_free += 1u;
         gen = sm->gen.data[idx];
     } else {
         const u64 fresh = (u64)sm->slots.count + w->pending_fresh;
@@ -152,6 +181,13 @@ void world_flush(World* w) {
 
 void apply_commands(World* w) {
     if (w->guard != nullptr) { guard_barrier_begin(w->guard, w->registry); }
+    // The window's deferred free-list pops land first, in reservation order - byte-identical
+    // to the recording-time pops the rev-1 design performed, but inside the barrier window
+    // (review 1 D3). Destroys applying below may push freed slots back afterwards as usual.
+    while (w->reserved_free != 0u) {
+        (void)array_pop(&w->entities.free_list);
+        w->reserved_free -= 1u;
+    }
     for (u32 ci = 0; ci < w->cmds.chunk_count; ++ci) {
         CmdChunk* c = &w->cmds.chunks[ci];
         if (c->active == 0u) { continue; }
@@ -229,8 +265,9 @@ void apply_commands(World* w) {
 }
 
 void commands_discard(World* w) {
-    // Valid only immediately before a registry_restore (world.h: reserved free-list pops are
-    // rewound by the restore itself; without one they would leak their slots).
+    // Reservations are cursors, not byte moves (review 1 D3), so a discard is clean on its
+    // own: nothing was mutated between recording and the barrier. The rollback path calls it
+    // before registry_restore (docs/FRAME-LOOP.md §8.3).
     for (u32 ci = 0; ci < w->cmds.chunk_count; ++ci) {
         CmdChunk* c = &w->cmds.chunks[ci];
         c->active = 0;
@@ -239,4 +276,5 @@ void commands_discard(World* w) {
     }
     arena_reset_to(&w->cmd_arena, 0u);
     w->pending_fresh = 0;
+    w->reserved_free = 0;
 }

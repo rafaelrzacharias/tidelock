@@ -189,3 +189,52 @@ TL_TEST_EXPECT_FATAL(world_column_of_a_singleton_is_fatal, "core,ecs,world,fatal
     ++t->checks;
     (void)world_column<WCfg>(&f.w);   // must TL_CHECK-fatal: singletons have no column
 }
+
+TL_TEST(world_snapshot_with_pending_reservation_restores_consistently, "core,ecs,world,determinism,fast") {
+    // Review 1 D3: a reservation is a cursor, never a byte move, so a snapshot captured while
+    // one is outstanding (FRAME-LOOP.md §2's own LAST-system capture shape) restores to a
+    // state whose derived free count agrees with the bytes - and the next spawn cannot alias
+    // a live entity.
+    WorldFixture& f = *wt_fixture(0u);
+    TL_ASSERT_TRUE(world_fixture_init(&f, 7u));
+    world_fixture_register_std(&f);
+    world_build_schedule(&f.w);
+    registry_seal(&f.reg);
+
+    Entity e0 = world_spawn(&f.w);
+    Entity e1 = world_spawn(&f.w);
+    world_flush(&f.w);
+    world_destroy(&f.w, e1);
+    world_flush(&f.w);
+    TL_ASSERT_EQ(f.w.entities.free_list.count, 1u);
+
+    Entity pend = world_spawn(&f.w);   // outstanding reservation of e1's slot - no flush
+    TL_EXPECT_EQ(handle_index(pend), handle_index(e1));
+    TL_EXPECT_EQ(f.w.reserved_free, 1u);
+    TL_EXPECT_EQ(f.w.entities.free_list.count, 1u);   // the bytes have not moved
+
+    VMemArena blob_arena;
+    TL_ASSERT_EQ(vmem_arena_init(&blob_arena, "wp.blob"_id, 64u * 1024u * 1024u, 0u, &f.api), ERR_OK);
+    Snapshot snap;
+    memset(&snap, 0, sizeof(snap));
+    snap.blob_cap = 64u * 1024u * 1024u;
+    snap.blob = (u8*)arena_push(&blob_arena, snap.blob_cap, 64u);
+    TL_ASSERT_EQ(registry_snapshot(&f.reg, &snap, f.w.state->tick), ERR_OK);
+
+    commands_discard(&f.w);   // the rollback order: discard, then restore
+    TL_ASSERT_EQ(registry_restore(&f.reg, &snap), ERR_OK);
+    world_post_restore(&f.w);
+    TL_EXPECT_EQ(f.w.entities.free_list.count, 1u);
+    TL_EXPECT_EQ(f.w.entities.free_list.data[0], handle_index(e1));
+    TL_EXPECT_EQ(f.w.entities.live_count, 1u);
+    TL_EXPECT_EQ(f.w.reserved_free, 0u);
+
+    // The regenerated spawn reuses e1's slot at its current generation - never e0's bits.
+    Entity e2 = world_spawn(&f.w);
+    world_flush(&f.w);
+    TL_EXPECT_EQ(handle_index(e2), handle_index(e1));
+    TL_EXPECT_NE(e2.bits, e0.bits);
+    TL_EXPECT_TRUE(world_entity_alive(&f.w, e2));
+    TL_EXPECT_TRUE(world_entity_alive(&f.w, e0));
+    TL_EXPECT_EQ(f.w.entities.free_list.count, 0u);
+}

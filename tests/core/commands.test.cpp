@@ -56,6 +56,16 @@ void sys_reader(World* w) {
 void sys_destroyer(World* w) {
     if (w->state->tick == 1u) { world_destroy(w, g_target); }
 }
+
+// Review 1 D2/D4 probes: a FIRST-phase fresh spawner (its chunk applies before the external
+// chunk that recorded first), and a FIRST-phase destroyer of the externally reserved target.
+Entity g_sys_spawned = Entity{ 0 };
+void sys_first_fresh_spawner(World* w) {
+    if (w->state->tick == 0u) { g_sys_spawned = world_spawn(w); }
+}
+void sys_first_destroys_target(World* w) {
+    if (w->state->tick == 0u) { world_destroy(w, g_target); }
+}
 void sys_adder(World* w) {
     if (w->state->tick == 1u) {
         WVel v = { 9, 9 };
@@ -241,4 +251,74 @@ TL_TEST_EXPECT_FATAL(commands_add_after_destroy_in_one_window_is_fatal, "core,ec
     wt_tick(&f.w);   // tick 0: spawn only
     ++t->checks;
     wt_tick(&f.w);   // tick 1: destroy (chunk 1) then add (chunk 2) -> TL_CHECK fatal
+}
+
+TL_TEST(commands_external_and_system_fresh_spawns_interleave, "core,ecs,commands,edge,fast") {
+    // Review 1 D2: the external chunk RECORDS first and APPLIES last, so fresh ids realize out
+    // of reservation order - the system's realize pushes both slots, the external realize
+    // finds its slot already pushed. Both entities land; pending returns to zero.
+    WorldFixture& f = *wt_fixture(0u);
+    TL_ASSERT_TRUE(world_fixture_init(&f, 3u));
+    world_fixture_register_std(&f);
+    g_sys_spawned = Entity{ 0 };
+    reg_sys(&f.w, sys_first_fresh_spawner, "ffspawn"_id, PHASE_FIRST, 0, 0);
+    world_build_schedule(&f.w);
+
+    Entity ext = world_spawn(&f.w);   // external: reserves fresh idx 0
+    TL_EXPECT_EQ(handle_index(ext), 0u);
+    TL_EXPECT_EQ(f.w.pending_fresh, 1u);
+    wt_tick(&f.w);                    // system reserves idx 1; realizes 1 then 0
+    TL_EXPECT_EQ(handle_index(g_sys_spawned), 1u);
+    TL_EXPECT_TRUE(world_entity_alive(&f.w, ext));
+    TL_EXPECT_TRUE(world_entity_alive(&f.w, g_sys_spawned));
+    TL_EXPECT_EQ(f.w.pending_fresh, 0u);
+    TL_EXPECT_EQ(f.w.entities.slots.count, 2u);
+    TL_EXPECT_EQ(f.w.entities.live_count, 2u);
+}
+
+TL_TEST(commands_same_window_reuse_spawn_then_destroy_keeps_the_free_list_exact, "core,ecs,commands,edge,fast") {
+    // Review 1 D3's interleaving hazard: a reused reservation realized AND destroyed in one
+    // window. The deferred pop applies at the window's start, the destroy pushes the slot
+    // back - the free list ends with exactly one entry and no aliasing is possible.
+    WorldFixture& f = *wt_fixture(0u);
+    TL_ASSERT_TRUE(world_fixture_init(&f, 3u));
+    world_fixture_register_std(&f);
+    world_build_schedule(&f.w);
+
+    Entity e = world_spawn(&f.w);
+    world_flush(&f.w);
+    world_destroy(&f.w, e);
+    world_flush(&f.w);
+    TL_ASSERT_EQ(f.w.entities.free_list.count, 1u);
+
+    Entity e2 = world_spawn(&f.w);            // reserves the freed slot - a cursor, no byte moves
+    TL_EXPECT_EQ(f.w.entities.free_list.count, 1u);
+    TL_EXPECT_EQ(f.w.reserved_free, 1u);
+    world_destroy(&f.w, e2);                  // same chunk, later record: realize then destroy
+    world_flush(&f.w);
+    TL_EXPECT_FALSE(world_entity_alive(&f.w, e2));
+    TL_ASSERT_EQ(f.w.entities.free_list.count, 1u);
+    TL_EXPECT_EQ(f.w.entities.free_list.data[0], handle_index(e));
+    TL_EXPECT_EQ(f.w.reserved_free, 0u);
+
+    Entity e3 = world_spawn(&f.w);
+    world_flush(&f.w);
+    TL_EXPECT_EQ(handle_index(e3), handle_index(e));
+    TL_EXPECT_EQ(handle_gen(e3), handle_gen(e) + 2u);   // two destroys, two bumps
+    TL_EXPECT_TRUE(world_entity_alive(&f.w, e3));
+    TL_EXPECT_EQ(f.w.entities.free_list.count, 0u);
+}
+
+TL_TEST_EXPECT_FATAL(commands_destroy_before_realize_is_fatal, "core,ecs,commands,fatal") {
+    // Review 1 D4: a reserved-but-unrealized target destroyed by an earlier-applying chunk is
+    // loud - a silent no-op would let the later realize resurrect a recorded destroy (the
+    // policy ruling is E-4's; today both orders fail loud).
+    WorldFixture& f = *wt_fixture(0u);
+    if (!world_fixture_init(&f, 3u)) { return; }
+    world_fixture_register_std(&f);
+    reg_sys(&f.w, sys_first_destroys_target, "fdestroy"_id, PHASE_FIRST, 0, 0);
+    world_build_schedule(&f.w);
+    g_target = world_spawn(&f.w);   // external reservation; the system's destroy applies first
+    ++t->checks;
+    wt_tick(&f.w);
 }

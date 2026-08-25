@@ -163,8 +163,10 @@ void world_events_swap(World* w) {
 }
 
 u64 world_reflection_hash(const World* w) {
-    // Per-table hashes folded LE in registration order: components, then event types
-    // (world.h: both are field tables; docs/BUILD.md §5 wants every one in the fingerprint).
+    // Per-table hashes folded LE in registration order: components, then event types.
+    // The event fold is docs/ECS.md §10.2's (as reconciled, review 1 D5): event types are the
+    // same POD tables and Luau-declared ones must match across peers (docs/LUAU-LAYER.md
+    // §10.6), so leaving them out would let two peers with different event schemas handshake.
     u64 h = TL_HASH_SEED;
     u8 buf[8];
     for (u32 i = 0; i < w->comp_count; ++i) {

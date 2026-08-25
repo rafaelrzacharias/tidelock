@@ -66,7 +66,11 @@ struct WorldDesc {
     u64 seed;
     u64 meta_reserve;         // schedule storage, maps, luau tables; 0 = 16 MB
     u64 event_half_reserve;   // per event half; 0 = 8 MB
-    u64 cmd_arena_reserve;    // chunk records + payloads per phase window; 0 = 16 MB
+    u64 cmd_arena_reserve;    // chunk records + payloads per phase window; 0 = 16 MB. Budget
+                              // arithmetic: each ACTIVE recorder chunk costs records_cap*16 B
+                              // + payload_cap (defaults: ~384 KB -> ~41 active chunks per
+                              // window before the over-reserve fatal). A blown budget is a
+                              // bug, not silent growth (docs/MEMORY.md §1.1).
     u32 cmd_records_cap;      // per chunk; 0 = 8192
     u32 cmd_payload_cap;      // per chunk, bytes; 0 = 256 KB
 };
@@ -83,6 +87,10 @@ struct World {
     u16 comp_count;
     u16 _pad0;
     u32 pending_fresh;          // fresh entity ids reserved this window (TODO.md E-3)
+    u32 reserved_free;          // free-list entries reserved this window - READ, not popped
+    u32 _pad2;                  // (review 1 D3: a mid-window pop moves hashed bytes, so a
+                                // snapshot captured with a reservation outstanding could not be
+                                // restored consistently; the pops apply at the window's start)
 
     SlotMap<EntityRecord, Entity> entities;
 
@@ -191,9 +199,12 @@ bool world_entity_alive(const World* w, Entity e);
 
 // --- the recording API (docs/ECS.md §4 - deferred, applied at the next barrier) --------------
 
-// Reserves a usable id NOW (no registered-arena growth: free-list pop or fresh-index counter -
-// TODO.md E-3) and records CMD_SPAWN_REALIZE. The id is stable and commandable immediately;
-// world_entity_alive turns true at the barrier. TL_FATAL when the domain is exhausted.
+// Reserves a usable id NOW without touching any registered byte (a free-list READ through the
+// reserved_free cursor, or the fresh-index counter - TODO.md E-3, review 1 D2/D3) and records
+// CMD_SPAWN_REALIZE. The reserved pops apply at the next window's start and fresh slots push
+// at their realize, both inside the barrier; realize order is free (the external chunk records
+// first and applies last). The id is stable and commandable immediately; world_entity_alive
+// turns true at the barrier. TL_FATAL when the domain is exhausted.
 Entity world_spawn(World* w);
 
 // Records CMD_DESTROY. Applying removes e from every column it is in, then frees the slot
@@ -265,8 +276,15 @@ struct LuauFieldDecl {
 constexpr ErrCode ERR_ECS_DUPLICATE_NAME = (ErrCode)0x0311;  // component/event name already registered
 constexpr ErrCode ERR_ECS_BAD_KIND      = (ErrCode)0x0312;   // kind outside the closed enum
 constexpr ErrCode ERR_ECS_BAD_COUNT     = (ErrCode)0x0313;   // field count 0 or > 255 (docs/LUAU-LAYER.md §10.6)
-constexpr ErrCode ERR_ECS_TABLE_FULL    = (ErrCode)0x0314;   // MAX_COMPONENT_TYPES / MAX_EVENT_TYPES / no fields
+constexpr ErrCode ERR_ECS_TABLE_FULL    = (ErrCode)0x0314;   // MAX_COMPONENT_TYPES / MAX_EVENT_TYPES / no fields / too many fields
 constexpr ErrCode ERR_ECS_SEALED        = (ErrCode)0x0315;   // declaration after world_build_schedule
+constexpr ErrCode ERR_ECS_BAD_NAME      = (ErrCode)0x0316;   // a field name spelling _pad* (the synthesized-pad namespace - review 1 D1)
+constexpr ErrCode ERR_ECS_BAD_DEFAULT   = (ErrCode)0x0317;   // default wider than the field's scalar, or on a handle/StrId kind (docs/LUAU-LAYER.md §10.6)
+
+// The declaration-door field bound: worst-case pad synthesis doubles the rows + a tail pad,
+// and the save decoder walks at most ENC_MAX_FIELDS (encoder.h) stored rows - a component
+// past this could never be decoded again (review 1 D6).
+enum : u32 { LUACOMP_MAX_FIELDS = 127 };
 
 // Builds the runtime FieldInfo table with the deterministic packer (declaration order, natural
 // alignment, every interior gap and the tail an explicit _padN field - docs/LUAU-LAYER.md

@@ -171,3 +171,54 @@ TL_TEST(luacomp_every_reject_code_and_no_meta_residue, "core,ecs,luacomp,edge,fa
     ev = world_register_event_luau(&f.w, sv("LuaEv2"), LA_DECL, 4u, 8u);
     TL_EXPECT_EQ(ev.err, ERR_ECS_SEALED);
 }
+
+TL_TEST(luacomp_pad_names_defaults_and_field_bound_are_rejected, "core,ecs,luacomp,edge,fast") {
+    // Review 1 D1/D6: the _pad namespace belongs to the synthesized pads (a user field there
+    // desynced the default builder into a wild write); defaults are validated, never
+    // truncated; handle/StrId kinds have no default; and a component past the decoder's field
+    // bound could never be loaded again.
+    WorldFixture& f = *wt_fixture(0u);
+    TL_ASSERT_TRUE(world_fixture_init(&f, 1u));
+
+    LuauFieldDecl two[2] = {
+        { sv("_pada"), K_u8, 0, 1, 0, 1u },
+        { sv("y"), K_u32, 0, 1, 0, 2u },
+    };
+    Result<ComponentId> r = world_register_component_luau(&f.w, sv("P1"), two, 2u, 0u);
+    TL_EXPECT_EQ(r.err, ERR_ECS_BAD_NAME);   // the exact D1 segfault shape, now a named reject
+
+    LuauFieldDecl bad = { sv("x"), K_u8, 0, 1, 0, 0x1FFu };
+    r = world_register_component_luau(&f.w, sv("P2"), &bad, 1u, 0u);
+    TL_EXPECT_EQ(r.err, ERR_ECS_BAD_DEFAULT);   // wider than the scalar, never truncated
+
+    bad = LuauFieldDecl{ sv("x"), K_Entity, 0, 1, 0, 5u };
+    r = world_register_component_luau(&f.w, sv("P3"), &bad, 1u, 0u);
+    TL_EXPECT_EQ(r.err, ERR_ECS_BAD_DEFAULT);   // a fabricated handle is not a default
+
+    bad = LuauFieldDecl{ sv("x"), K_StrId, 0, 1, 0, 1u };
+    r = world_register_component_luau(&f.w, sv("P4"), &bad, 1u, 0u);
+    TL_EXPECT_EQ(r.err, ERR_ECS_BAD_DEFAULT);
+
+    // 128 fields: one past LUACOMP_MAX_FIELDS (sized so worst-case pad synthesis still fits
+    // the decoder's ENC_MAX_FIELDS).
+    static LuauFieldDecl many[128];
+    static char names[128][8];
+    for (u32 i = 0; i < 128u; ++i) {
+        names[i][0] = 'f';
+        names[i][1] = (char)('a' + (i / 26u));
+        names[i][2] = (char)('a' + (i % 26u));
+        names[i][3] = '\0';
+        many[i] = LuauFieldDecl{ StrView{ names[i], 3u }, K_u8, 0, 1, 0, 0u };
+    }
+    r = world_register_component_luau(&f.w, sv("P5"), many, 128u, 0u);
+    TL_EXPECT_EQ(r.err, ERR_ECS_TABLE_FULL);
+    r = world_register_component_luau(&f.w, sv("P6"), many, 127u, 0u);   // the bound itself is legal
+    TL_EXPECT_EQ(r.err, ERR_OK);
+
+    // A full-width default stays legal (the existing default test pins 0xAB on u8; this pins
+    // the exact boundary).
+    LuauFieldDecl edge = { sv("x"), K_u8, 0, 1, 0, 0xFFu };
+    r = world_register_component_luau(&f.w, sv("P7"), &edge, 1u, 0u);
+    TL_EXPECT_EQ(r.err, ERR_OK);
+    TL_EXPECT_EQ(((const u8*)f.w.comps[r.value].info->default_row)[0], 0xFFu);
+}

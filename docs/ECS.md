@@ -292,7 +292,10 @@ parallel `TL_OFFSETS_Name` list, and generates `wire_write_Name(ByteWriter*, con
 
 The **reflection table hash** (part of `session_fingerprint`): for each registered component in
 registration order, `tl_hash64` over `(name_hash, size, align, for each field: name_hash, kind,
-count, offset, size)`.
+count, offset, size)` — then the same tuple for each registered **event type** in registration
+order (reconciled 2026-08-25, W2 ecs review 1 D5: event types are the same POD field tables and
+Luau-declared ones must match across peers per `LUAU-LAYER.md` §10.6; leaving them out of the
+fold would let two peers with different event schemas handshake).
 
 ### 10.3 Columns and entities
 
@@ -359,11 +362,14 @@ inside it — the dedicated arena has exactly the required lifetime (reset after
 no scope interleaving; the jobs lane's per-worker chunks restore the spec's scratch placement
 when worker scratch gets structured barriers. Per-chunk caps are `WorldDesc` init knobs
 (defaults: 8192 records, 256 KB payload; overflow is `TL_FATAL` — a blown budget is a bug).
-`apply_commands(World*)` at each barrier: chunks in ascending `chunk_id`, records in order;
+`apply_commands(World*)` at each barrier: the window's deferred free-list pops land first
+(reservation order — review 1 D3), then chunks in ascending `chunk_id`, records in order;
 `CMD_ADD` copies payload into the column; `CMD_DESTROY` removes the entity from every column it is
-in (walk all tables — 1024 probes max; entities are few) then frees the slot; `CMD_SET_FIELD`
-writes `payload_len` bytes at `field.offset` (editor/Luau cold path). After applying, every
-chunk's scratch is released. The apply window sets `guard_barrier_begin/end`.
+in (walk all tables — 1024 probes max; entities are few) then frees the slot; `CMD_SET_FIELD`'s
+payload is a little-endian `u32` field index followed by the field's bytes, written at
+`field.offset` (editor/Luau cold path; reconciled 2026-08-25, review 1 D7). After applying, the
+chunks' backing (the dedicated command arena, §10.5 above) is reset. The apply window sets
+`guard_barrier_begin/end`.
 
 ### 10.6 Schedule
 

@@ -56,22 +56,44 @@ Result<const ComponentInfo*> lc_build(World* w, StrView name, const LuauFieldDec
     Result<const ComponentInfo*> r;
     r.value = nullptr;
     r.err = ERR_OK;
-    if (field_count == 0u || fields == nullptr || name.len == 0u) {
+    if (field_count == 0u || fields == nullptr || name.len == 0u
+        || field_count > LUACOMP_MAX_FIELDS) {
         r.err = ERR_ECS_TABLE_FULL;
         return r;
     }
     for (u32 i = 0; i < field_count; ++i) {
-        if (fields[i].kind >= K_COUNT) { r.err = ERR_ECS_BAD_KIND; return r; }
-        if (fields[i].count == 0u || fields[i].count > 255u) { r.err = ERR_ECS_BAD_COUNT; return r; }
-        if (fields[i].name.len == 0u) { r.err = ERR_ECS_BAD_COUNT; return r; }
+        const LuauFieldDecl* fd = &fields[i];
+        if (fd->kind >= K_COUNT) { r.err = ERR_ECS_BAD_KIND; return r; }
+        if (fd->count == 0u || fd->count > 255u) { r.err = ERR_ECS_BAD_COUNT; return r; }
+        if (fd->name.len == 0u) { r.err = ERR_ECS_BAD_NAME; return r; }
+        // The _pad* namespace belongs to the synthesized pads: a user field there would
+        // collide with a pad's name hash and be wire-zero-enforced (review 1 D1).
+        if (fd->name.len >= 4u && fd->name.ptr[0] == '_' && fd->name.ptr[1] == 'p'
+            && fd->name.ptr[2] == 'a' && fd->name.ptr[3] == 'd') {
+            r.err = ERR_ECS_BAD_NAME;
+            return r;
+        }
+        // Defaults are validated at the door, never truncated (review 1 D6): the bits must fit
+        // the field's scalar width, and handle/StrId kinds have no default but null/0
+        // (docs/LUAU-LAYER.md §10.6 - a fabricated handle is never a "default").
+        if (fd->default_bits != 0u) {
+            const u32 scalar = kind_scalar_size(fd->kind);
+            if (scalar < 8u && (fd->default_bits >> (8u * scalar)) != 0u) {
+                r.err = ERR_ECS_BAD_DEFAULT;
+                return r;
+            }
+            if (fd->kind >= K_Entity && fd->kind <= K_Basin) { r.err = ERR_ECS_BAD_DEFAULT; return r; }
+            if (fd->kind == K_StrId) { r.err = ERR_ECS_BAD_DEFAULT; return r; }
+        }
         for (u32 j = 0; j < i; ++j) {   // the encoder keys fields by name hash - names are unique
-            if (sv_eq(fields[i].name, fields[j].name)) { r.err = ERR_ECS_DUPLICATE_NAME; return r; }
+            if (sv_eq(fd->name, fields[j].name)) { r.err = ERR_ECS_DUPLICATE_NAME; return r; }
         }
     }
 
     // Worst case: one interior pad per field + the tail pad.
     FieldInfo* rows = (FieldInfo*)arena_push(&w->meta, ((u64)field_count * 2u + 1u) * sizeof(FieldInfo),
                                              alignof(FieldInfo));
+    u32 decl_row[LUACOMP_MAX_FIELDS];   // decl i -> its emitted row (structural, never name-sniffed - review 1 D1)
     u32 row_count = 0;
     u32 pad_counter = 0;
     u32 offset = 0;
@@ -84,6 +106,7 @@ Result<const ComponentInfo*> lc_build(World* w, StrView name, const LuauFieldDec
         if (aligned != offset) { lc_emit_pad(&w->meta, rows, &row_count, &pad_counter, offset, aligned - offset); }
         offset = aligned;
         const char* fname = lc_copy_name(&w->meta, fields[i].name);
+        decl_row[i] = row_count;
         rows[row_count] = FieldInfo{ fname, fnv1a64(fields[i].name.ptr, fields[i].name.len),
                                      fields[i].kind, 0, fields[i].count, offset,
                                      align * fields[i].count };
@@ -101,12 +124,11 @@ Result<const ComponentInfo*> lc_build(World* w, StrView name, const LuauFieldDec
     if (any_default) {
         u8* def = (u8*)arena_push(&w->meta, size, max_align);
         memset(def, 0, size);
-        u32 ri = 0;
         for (u32 i = 0; i < field_count; ++i) {
-            while (tl_field_is_pad(&rows[ri])) { ri += 1u; }
+            const FieldInfo* row = &rows[decl_row[i]];
             const u32 scalar = kind_scalar_size(fields[i].kind);
             for (u32 e = 0; e < fields[i].count; ++e) {
-                u8* p = def + rows[ri].offset + (u64)e * scalar;
+                u8* p = def + row->offset + (u64)e * scalar;
                 const u64 bits = fields[i].default_bits;
                 switch (scalar) {
                     case 1: { u8 v = (u8)bits;   memcpy(p, &v, 1); break; }
@@ -115,7 +137,6 @@ Result<const ComponentInfo*> lc_build(World* w, StrView name, const LuauFieldDec
                     default: { memcpy(p, &bits, 8); break; }
                 }
             }
-            ri += 1u;
         }
         default_row = def;
     }

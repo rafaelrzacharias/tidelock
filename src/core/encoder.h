@@ -42,7 +42,11 @@ constexpr const char* err_enc_name(ErrCode e) {
 }
 
 // A rename entry (docs/ASSETS-AND-DATA.md §8.4): a stored field named old_hash decodes into the
-// live field named new_hash. save.h owns registration; the decoder takes the span.
+// live field named new_hash. save.h owns registration; the decoder takes the span. Resolution
+// is per stored field, first matching alias wins, no chaining; when two stored fields resolve
+// to one live field (a duplicate stored name, or an alias landing on an also-stored name) the
+// decode is deterministic last-write-wins in stored order - stored streams are the encoder's
+// own output, where neither shape exists (review 1 note, pinned here rather than rejected).
 struct FieldAlias {
     NameHash old_hash;
     NameHash new_hash;
