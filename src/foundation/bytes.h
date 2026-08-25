@@ -148,6 +148,14 @@ inline u64 br_get_u64(ByteReader* r) {
     return v;
 }
 
+// Advances past n bytes without reading them (a decoder skipping a stored field it no longer
+// has). Underflow or a prior failure sets the sticky code and moves nothing.
+inline void br_skip(ByteReader* r, u64 n) {
+    if (n == 0u) { return; }
+    if (r->err != ERR_OK || n > r->len - r->pos) { r->err = ERR_BYTES_TRUNCATED; return; }
+    r->pos += n;
+}
+
 // Copies n raw bytes into out; zero-fills out with the sticky code on underflow or after a prior
 // failure (a partially-read struct never carries stale caller memory). out non-null unless n == 0.
 inline void br_get_bytes(ByteReader* r, void* out, u64 n) {
