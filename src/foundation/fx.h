@@ -271,7 +271,12 @@ constexpr bool is_zero(fx<Rep, F> a) { return a.v == 0; }
 // to<q_t>(fx_raw<pos_t>(1 << 19)) is the smallest case: the intermediate is 2^31 and comes back
 // as INT32_MIN, a positive value arriving as the most negative one. That is a returned value,
 // not a contract: callers on a slim tier must range-check, and the value is pinned by
-// fx_review_release_error_values so a change to it cannot pass unnoticed. The other assert on
+// fx_review_release_error_values so a change to it cannot pass unnoticed. The negative side
+// mirrors it - to<q_t>(fx_raw<pos_t>(-(1 << 19) - 1)) wraps to INT32_MAX - 4095, a negative
+// value arriving as a large positive one - and is pinned too. Wrap-not-saturate RATIFIED as the
+// contract by RR-16 (2026-08-25): an out-of-range conversion is a bug, and wrap's violently
+// wrong value surfaces in the hash trace on the tick it happens, where a saturated value would
+// drift plausibly and silently. The other assert on
 // the widening path (|x.v| < 2^(63 - D)) has no defined release value at all - past it the
 // multiply is signed overflow, which is UB, so a call site that can reach it is a bug on every
 // tier, not a wrap.

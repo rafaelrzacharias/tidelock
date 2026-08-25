@@ -619,14 +619,14 @@ the drop heights), all declared in the README; no threshold, world constant or r
       expectation outside dev. The fatal check itself is still the loose one - see "Tighten
       `TL_TEST_EXPECT_FATAL` to the real contract" below for the exact string, exit code and
       prerequisites.
-- [ ] **RR-16 (sweep D5) — ratify or reverse `de527e3`'s wrap choice.** Alone among the five
-      `w1-closeout` commits it implements a decision that was never RULED: the filed gap at the
-      old fx item ("Either … or …") was resolved by the commit itself to branch 1 — document the
-      C++20 modular wrap of an out-of-range `to<q_t>` conversion on slim tiers (`pos_t` extreme →
-      `INT32_MIN`) rather than saturate. The arithmetic is verified correct as documented; what
-      is missing is Rafael's signature on wrap-vs-saturate as the *contract*, plus the negative-
-      side edge (`-(1<<19)-1` wrapping positive) being documented and tested. One line to ratify;
-      if reversed, it is an fx-lane change with a trace-pin consequence.
+- [x] **RR-16 (sweep D5) — RULED 2026-08-25: wrap stands.** `de527e3`'s choice (C++20 modular
+      wrap of an out-of-range `to<R>` on slim tiers, never saturate) is ratified as the contract.
+      Rationale: an out-of-range conversion is a bug — wrap's violently wrong value surfaces in
+      the hash trace on the tick it happens, saturation would hide it behind a plausible value
+      and drift silently; wrap is also free where saturate adds a clamp to a hot conversion path;
+      both are equally deterministic. The negative-side edge the sweep flagged is now documented
+      in `fx.h` and pinned in `fx_review_release_error_values`
+      (`to<q_t>(fx_raw<pos_t>(-(1<<19)-1))` → `INT32_MAX - 4095`).
 - [ ] **Sweep D4 residue: re-derive the mem_pool misaligned-base fixture for large-page hosts.**
       The fixture offset (+4096) and both pins assume 4 KB pages; it now TL_SKIPs loudly on
       anything else. When a >4K-page host enters the matrix, derive the offset from
