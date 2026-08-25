@@ -1861,14 +1861,21 @@ right; it is the template the others now follow.
 - [ ] Symbol audit + include firewall wired into CI against the det libs.
 
 ## ECS + reflection (`docs/ECS.md`, `FRAME-LOOP.md`)
-- [ ] X-macro `TL_COMPONENT` + `FieldInfo`/kinds + static_asserts; `World`, columns (paged sparse
-      set on VMem), entities, `world_get/column/entities`.
-- [ ] Systems + `SystemDesc` + schedule build (topo-sort, tie-break, cycle fatal) + phases.
-- [ ] Command buffer (record/apply at barrier; `GROWS_AT_BARRIER` window) + `EventQueue<T>`
-      double-buffer + the end-of-tick barrier.
-- [ ] Reflection encoder/decoder (name-keyed, alias, defaults) — round-trip tests; desync field-diff.
+- [x] X-macro `TL_COMPONENT` + `FieldInfo`/kinds + static_asserts; `World`, columns (paged sparse
+      set on VMem), entities, `world_get/column/entities`. (W2 ecs, 2026-08-25: kinds are
+      token-keyed under RR-5 — E-1; spawn reserves without growth — E-3; `phase.h` and
+      `foundation/bytes.h` landed header-first for the loop and net lanes.)
+- [x] Systems + `SystemDesc` + schedule build (topo-sort, tie-break, cycle fatal) + phases.
+      (W2 ecs, 2026-08-25; `run_phase` publishes `sched.running`, applies the command barrier.)
+- [x] Command buffer (record/apply at barrier; `GROWS_AT_BARRIER` window) + `EventQueue<T>`
+      double-buffer + the end-of-tick barrier. (W2 ecs, 2026-08-25; plus `world_post_restore` —
+      the ECS half of MEMORY.md §5's post_restore barrier, and the E-5 rollback-events finding.)
+- [x] Reflection encoder/decoder (name-keyed, alias, defaults) — round-trip tests; desync
+      field-diff. (W2 ecs, 2026-08-25; `luacomp` packer with fingerprint parity to C++ twins;
+      `save.h`'s file format/migrations stay W3 assets+data.)
 - [ ] Frame loop + time + `InputProducer` seam + Script producer + `RecordedInput` record/replay;
-      the headless driver (`tests/driver`) with `--dual --replay --workers-sweep`.
+      the headless driver (`tests/driver`) with `--dual --replay --workers-sweep`. (W3 loop+input;
+      `core/phase.h` already landed from W2 ecs.)
 
 ## v0 — "the engine is alive" (`docs/RENDER2D.md`, `INPUT.md`, `ASSETS-AND-DATA.md`, `LUAU-LAYER.md`, `TOOLING.md`)
 - [ ] Vendor SDL3, SDL_ttf, stb_image, stb_sprintf, Luau (`LUA_USE_LONGJMP`), Dear ImGui (docking).
