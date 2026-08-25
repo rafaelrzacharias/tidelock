@@ -81,6 +81,11 @@ struct FieldInfo {
 };
 
 // One reflected struct (docs/ECS.md §10.2). flags: COMP_SINGLETON / COMP_HIDDEN.
+// `default_row` (added over the rev-1 struct, W2 ecs): a full default INSTANCE, or null for
+// all-zeros. Luau-declared components build it from their per-field `default` ints
+// (docs/LUAU-LAYER.md §10.6); the save decoder applies it before overlaying stored fields
+// (docs/ASSETS-AND-DATA.md §5 "declared defaults for added fields"). The macros leave it null
+// (C++ components default to zero); it is NOT part of the reflection hash (layout only).
 struct ComponentInfo {
     const char*      name;
     NameHash         name_hash;
@@ -89,6 +94,7 @@ struct ComponentInfo {
     const FieldInfo* fields;
     u32              field_count;
     u32              flags;
+    const void*      default_row;
 };
 
 // ComponentInfo.flags (docs/ECS.md §2 singletons, §10.2).
@@ -190,7 +196,7 @@ inline constexpr FieldInfo TL_WIRE_FV_ROW =
     static_assert(tl_fields_sum_size(Name##_tbl::rows) == sizeof(Name), "explicit padding required: name every gap _padN (docs/ECS.md section 10.2)"); \
     inline constexpr const FieldInfo* Name##_fields = Name##_tbl::rows;                          \
     inline constexpr ComponentInfo Name##_info = { #Name, fnv1a64(#Name, sizeof(#Name) - 1),    \
-        (u32)sizeof(Name), (u32)alignof(Name), Name##_tbl::rows, tl_count(Name##_tbl::rows), (FLAGS) }; \
+        (u32)sizeof(Name), (u32)alignof(Name), Name##_tbl::rows, tl_count(Name##_tbl::rows), (FLAGS), nullptr }; \
     /* typed-API hook: resolves Name's ComponentInfo for the world_* function templates */      \
     constexpr const ComponentInfo* tl_info_of(const Name*) { return &Name##_info; }
 
@@ -206,7 +212,7 @@ inline constexpr FieldInfo TL_WIRE_FV_ROW =
     static_assert(tl_fields_sum_size(Name##_tbl::rows) == sizeof(Name), "explicit padding required: name every gap _padN (docs/ECS.md section 10.2)"); \
     inline constexpr const FieldInfo* Name##_fields = Name##_tbl::rows;                          \
     inline constexpr ComponentInfo Name##_info = { #Name, fnv1a64(#Name, sizeof(#Name) - 1),    \
-        (u32)sizeof(Name), (u32)alignof(Name), Name##_tbl::rows, tl_count(Name##_tbl::rows), 0u };
+        (u32)sizeof(Name), (u32)alignof(Name), Name##_tbl::rows, tl_count(Name##_tbl::rows), 0u, nullptr };
 
 // TL_WIRE_STRUCT(Name): the wire door (docs/CPP-SUBSET.md §9 R-2). Adds the leading
 // `u32 format_version` as field 0 (struct member and table row), pins every offset from the
@@ -226,7 +232,7 @@ inline constexpr FieldInfo TL_WIRE_FV_ROW =
     static_assert(tl_fields_sum_size(Name##_tbl::rows) == sizeof(Name), "explicit padding required: name every gap _padN (docs/ECS.md section 10.2)"); \
     inline constexpr const FieldInfo* Name##_fields = Name##_tbl::rows;                          \
     inline constexpr ComponentInfo Name##_info = { #Name, fnv1a64(#Name, sizeof(#Name) - 1),    \
-        (u32)sizeof(Name), (u32)alignof(Name), Name##_tbl::rows, tl_count(Name##_tbl::rows), 0u }; \
+        (u32)sizeof(Name), (u32)alignof(Name), Name##_tbl::rows, tl_count(Name##_tbl::rows), 0u, nullptr }; \
     /* wire write: every field low-byte-first through the field table, format_version first */  \
     inline void wire_write_##Name(ByteWriter* w, const Name* s) {                               \
         tl_wire_put_row(w, Name##_tbl::rows, tl_count(Name##_tbl::rows), s);                    \

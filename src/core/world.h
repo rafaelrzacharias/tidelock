@@ -36,6 +36,7 @@
 #include "foundation/map.h"
 #include "foundation/arena_registry.h"
 #include "foundation/scratch.h"
+#include "foundation/strview.h"
 
 struct InputFrame;    // docs/INPUT.md §1 (W3 loop+input)
 struct DataTables;    // docs/ASSETS-AND-DATA.md §8.3 (W3 assets+data)
@@ -246,6 +247,43 @@ Span<const T> eq_read(World* w) {
 
 // The LAST -> FIRST barrier's event step (docs/CANON.md step 2); the loop calls it after LAST.
 void world_events_swap(World* w);
+
+// --- Luau-declared components and events (docs/ECS.md §6.1/§10.7; luacomp.cpp) ---------------
+
+// One declared field: name (any bytes; copied), a kind from the closed enum, count 1..255,
+// and the default as raw bits (fx rows cross as raw i32 bits - docs/FX-PALETTE.md §6; 0 for
+// "no default"). The core ErrCode range 0x031x names the reject reasons.
+struct LuauFieldDecl {
+    StrView   name;
+    FieldKind kind;
+    u8        _pad0;
+    u16       count;
+    u32       _pad1;
+    u64       default_bits;
+};
+
+constexpr ErrCode ERR_ECS_DUPLICATE_NAME = (ErrCode)0x0311;  // component/event name already registered
+constexpr ErrCode ERR_ECS_BAD_KIND      = (ErrCode)0x0312;   // kind outside the closed enum
+constexpr ErrCode ERR_ECS_BAD_COUNT     = (ErrCode)0x0313;   // field count 0 or > 255 (docs/LUAU-LAYER.md §10.6)
+constexpr ErrCode ERR_ECS_TABLE_FULL    = (ErrCode)0x0314;   // MAX_COMPONENT_TYPES / MAX_EVENT_TYPES / no fields
+constexpr ErrCode ERR_ECS_SEALED        = (ErrCode)0x0315;   // declaration after world_build_schedule
+
+// Builds the runtime FieldInfo table with the deterministic packer (declaration order, natural
+// alignment, every interior gap and the tail an explicit _padN field - docs/LUAU-LAYER.md
+// §10.6; docs/ECS.md §10.7) on the world's permanent meta arena, then registers the column
+// exactly like a C++ component (same kinds, inspector, encoder, fingerprint contribution).
+// Names are interned when the world carries an interner, and always copied onto `meta`.
+// flags: COMP_SINGLETON for `opts = { singleton = true }`. Recoverable errors, never fatal -
+// the binding surfaces them as script errors (docs/ASSETS-AND-DATA.md §3 fail-loud compile).
+Result<ComponentId> world_register_component_luau(World* w, StrView name,
+                                                  const LuauFieldDecl* fields, u32 field_count,
+                                                  u32 flags);
+
+// The event-door twin (`ecs.event` - docs/LUAU-LAYER.md §10.6): same packer, same rejects;
+// cap 0 = EVENT_DEFAULT_CAP.
+Result<EventTypeId> world_register_event_luau(World* w, StrView name,
+                                              const LuauFieldDecl* fields, u32 field_count,
+                                              u32 cap);
 
 // --- fingerprint input -----------------------------------------------------------------------
 
