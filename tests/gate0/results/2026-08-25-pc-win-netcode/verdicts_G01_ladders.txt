@@ -1,0 +1,2 @@
+VERDICT G-01 substeps=8 PASS jitter_p95_texel=0.0009 top_drift_texel=-0.0002 pop=0 intra_tick_max_texel=0.0010 perturb_quanta=0 ticks=10000 run_twice=identical max_colors=8 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=8
+VERDICT G-01 substeps=8 PASS jitter_p95_texel=0.0000 top_drift_texel=-0.0001 pop=0 intra_tick_max_texel=0.0000 perturb_quanta=0 ticks=10000 run_twice=identical max_colors=8 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=8

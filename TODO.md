@@ -35,6 +35,8 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       **PC half DONE 2026-08-25** (`tests/gate0/results/2026-08-25-pc-win-netcode/README.md`:
       G-01 PASS, G-02a PASS, G-02b FAIL, G-03 FAIL, G-04 INVESTIGATE, G-05 FAIL, G-06 PASS on the
       PC leg); the ladder was climbed to rung 3 with no change; the Pi half waits on RR-1.
+      **Reviewed 2026-08-25** ("W2 gate0 — adversarial review" below): bench SHIP as evidence after
+      two review commits; every CSV re-run and reproduced; RR-13's numbers replaced (D2).
 - [ ] **Decision commit:** `FX-PALETTE.md` rev 2 (rows DECIDED, or the fallback recorded) +
       `PIVOT-DESIGN.md` §3.1b/§12 updated + `LESSONS.md` entries per rung climbed.
 
@@ -131,6 +133,183 @@ rev-2 decision commit is Rafael's.** Ranked by what it means for `FX-PALETTE.md`
       `tl_gate0 --scenario G06 --ticks 200` to that CI job); the weekly-lane hook (`TESTING.md`
       §6) once the runners exist; G-04 at 1e6 ticks (the results carry 20,000: 16 h per run at
       54 ms/tick on this PC, twice for the bit-compare).
+
+## W2 gate0 — adversarial review of the bench (2026-08-25, fresh context, Fable 5 high)
+
+**Verdict on the BENCH: FIX FIRST — done, now SHIP as evidence, with one standing caveat.** Scope
+`origin/w2-gate0` at `eab75e7` (5 commits), reviewed in its own worktree; fixes landed as `W2
+gate0 review 1..N` and every scenario was re-run on `netcode-win` (-O2) after the last bench
+edit, so no verdict below rests on a bench that changed after it was written. The caveat that
+does not go away: G-03/G-04/G-05 grade a solver whose density constraint is NOT `ALLOY.md`
+§14.4.3's (two Jacobi passes, λᵢ+λⱼ, before the colour sweep, at compliance α̃ = 0.3 — RR-10);
+that is admitted in the code and the README and is reproduced by the double binding, but it
+means those three verdicts are about the bench's liquid, not the spec's, until RR-10 is ruled.
+The lane's thesis — every FAIL is solver design or spec, not a palette row, except RR-8/RR-9 —
+**survives**, with two corrections: RR-13's cost attribution was wrong by a factor (D2), and
+RR-15 is a spec-letter FAIL that the scene reproduces faithfully, not a scene built wrong (see
+the RR-15 paragraph).
+
+Reproduction (step 8): G-01, G-02, G-03 (5k) re-run from the tip produced hash traces identical to
+the committed CSVs on every tick (`hash_lo64` column, `cmp` after dropping the two timing
+columns); the shadow traces for G-01/G-02a/G-02b reproduce bit-for-bit. The G-03 shadow trace
+did not (D3). After the review commits every CSV under `results/` is from the reviewed binary.
+
+### Defects found (ranked; fixed unless marked)
+
+- **D1 — `main.cpp` (fixed, review 1): the G-05 cost numbers were not the bench's.** On a run
+  stopped by an escape (every G-05 count stops at tick 83–139) the verdict line dropped the cost
+  detail, `ticks_run` was set to 0, and the p50/p95/p99 were taken over ticks 200..500 of a
+  `cost[]` whose tail past the stop was zero — so the bench printed no `VERDICT G-05` line at
+  all and the README's "341/409 ms, 155 pair evaluations, 141–194 ns" were hand-derived from a
+  CSV column and an uncommitted shorter run. Fix: percentiles over the ticks that ran, cost
+  detail printed on escape too, and a per-phase accounting
+  (`phase_us_per_tick[broadphase,predict,density,colors,writeback,velocity]`). Re-run
+  (`verdicts_G05_s8.txt`): **20k p50 605 ms = density 388 + XSPH velocity pass 168 + broadphase
+  46 + colours 4 + rest 1**; 3.29 M pair evaluations per tick (164 per particle: ~10 neighbours
+  × 2 walks × 8 substeps), **184 ns per pair evaluation**; 10k 347 ms, 50k 1,425 ms. The contact
+  solve is 0.7 % of the tick; the liquid's two pair walks are 92 %.
+- **D2 — RR-13's attribution (reframed, evidence below; the RR text stands corrected here):
+  "the fixed-point premium is a factor ~5–10 of the ~100×" is wrong — measured 32×, and it is
+  two functions, not the palette.** Micro-benchmark of the pair kernel exactly as `solver.cpp`
+  spells it, same flags (`clang-cl /O2`, this PC): **`isqrt64` 62.5 ns** (the FixPointCS 32-
+  iteration restoring loop in `det_math.cpp`), `rne_div` (i64) 16.8 ns, `normalize` 101 ns
+  (= a second `isqrt64` + two `div<q_t>`), the three `mul<q_t>` of W 4 ns; the bench's pass-1
+  pair body **176 ns** (= 2 sqrt + 3 div + 4 ns of everything else), the same body in scalar
+  `double` **5.5 ns**. The bench computes `length(d)` and then `unit(d)` (which recomputes the
+  length) and `div<q_t>(r, h)` separately: two square roots and three divisions per pair where
+  `FX-PALETTE.md` §3's kernel strategy ("normalize once per pair") needs one root and one
+  reciprocal — that rewrite measures 91 ns with the same `isqrt64`; an exact Newton `isqrt64`
+  (2 steps from a `clz` seed, bit-identical result, deterministic) would take it to an estimated
+  ~35–40 ns (Medium confidence — not built). So: ~30 % of the cost is the kernel's op count, ~60 %
+  is `isqrt64`'s algorithm, and neither is a row. **Which budget assumption fails:** `ALLOY.md`
+  §11.2 derives the 4 ms solve budget for "60 Hz, **~8 cores**", while `GATE0-BENCH.md` §2 measures
+  G-05 "single thread" — the threshold and the protocol disagree by the core count. On 8 cores
+  the scalar-double kernel would meet it (20k × 164 pairs × 5.5 ns = 18 ms / 8 = 2.3 ms) and
+  the current fixed kernel would not (605 ms / 8 = 76 ms), nor would the 40 ns one (33 ms / 8 =
+  4.2 ms, borderline) — the budget needs the SIMD lanes of `FX-PALETTE.md` §9 R-4 and/or one pair
+  walk per substep (XSPH re-evaluates W with a second sqrt+div per pair; caching W from the density
+  pass halves the walks) before fixed point can be judged against it. RR-13's ruling request is
+  upheld; its numbers are replaced by these.
+- **D3 — stale evidence in `results/` (fixed, review 2 — re-run and recommitted):**
+  (a) `verdicts_G03_s8.txt` carried a `VERDICT G-03 … PASS density_err_p95=0.000000` line from a
+  binary older than `25958c3` ("escape = FAIL in every judge"), contradicting the stop lines
+  above it and the README's FAIL; (b) `shadow_G03_s8_l1.csv` (committed at `a22d1b9`) diverges
+  from the current bench at tick 16 and tops out at 60 k raw, where the current shadow shows the
+  double world ejecting particle 740 at tick 32 (fx: tick 34) and then running off to 5,500 m
+  because the shadow has no escape stop — the CSV the README cites for "the double fails too"
+  was not from this solver; (c) `G01_s8_l1.csv` held 1,200 ticks for a 10,000-tick verdict.
+  The claim itself is confirmed by the re-run (`--shadow --watch 740`: dbl x = −1.58 m at t=32,
+  fx x = −1.39 m at t=34, both inside the left wall).
+- **D4 — `shadow.cpp` (fixed, review 1): the double world's constants were hard-coded
+  (`consts_make(…, 50, 1302, …)`)**, so every `--alpha`/`--mu` shadow comparison the lane cites
+  ("α̃ ≤ 0.1 tunnels … 1.0 gives 4.2 %") compared an fx world at the CLI's compliance with a
+  double world at the default. The default-compliance conclusions are unaffected; the sweep's
+  shadow numbers were not evidence. Fix: the CLI values are passed through.
+- **D5 — the jitter metric's floor (fixed by naming it, review 1): `jitter_p95_texel=0.0000` means
+  "< 1.6 quanta per tick", not zero.** Samples are `texel × 1e4` in a u32, so a displacement of
+  one `pos_t` quantum (1/16,384 texel) rounds to 0 before the percentile. Perturbation runs
+  (`--perturb q`, odd stack boxes start q quanta off-axis, `verdicts_G01_perturb.txt`): q = 1
+  → 0.0000 (under the floor, as expected); q = 16,384 (1 texel) → 0.0004; q = 262,144 (a 1 m stagger)
+  → 0.0005; `--ladder 0` → 0.0009 with `intra_tick_max_texel=0.0010`. The metric moves. A
+  per-substep probe was added (`intra_tick_max_texel`: the largest body displacement between two
+  consecutive substep writebacks after settle): **0.0000–0.0001 texel** at rest for s4/s8/s16 —
+  no oscillation hiding inside a tick.
+- **D6 — G-06 "PASS" is weaker than its line reads (not fixed; recorded).** Its G-02b leg
+  compares 2 ticks and its G-03 leg 34 ticks before the escape stop; the run-twice compare then
+  matches the zeroed tails. The second in-process run reuses the same scratch addresses with the
+  first run's bytes still there (the arenas are `ARENA_ZERO_ON_PUSH`; scratch is not), which is a
+  genuine uninitialised-read probe, but as `LESSONS.md` already says, "two instances, same op
+  sequence" is the weakest determinism test; the Pi leg and the sanitizer leg are the ones that
+  carry information, and both are BLOCKED. `G06_G05` also runs at 10k only.
+- **D7 — G-02b's boulder leaves tick 0 moving UP at 216 m/s with restitution 0 (not fixed; a
+  solver-design symptom the lane did not report).** `--dump` at tick 0: boulder vy = +226709760
+  raw (+216 m/s), fx and double alike (y 699560 vs 699553). A position-level contact with a
+  1.07 m/substep penetration, lever terms and a 4096:1 pair over ONE Gauss-Seidel pass creates
+  energy on the way out. Belongs to RR-15/RR-10's design pass.
+- **D8 — `ALLOY.md` §14.4.3's density text is unbuildable as written (doc bug, not fixed here —
+  it is RR-10's home): `C = max(ρ − 1, 0)` with `dl = max(dl, −λ)` yields dl ≤ 0 clamped to 0 on
+  every step** (the bench's `C = 1 − ρ ≤ 0` note is correct). And `GATE0-BENCH.md` §8.3 step 4
+  puts friction in the velocity pass while `ALLOY.md` S3 (the home) has position-level friction
+  and S5 restitution + XSPH only; the bench follows ALLOY. Both are one-line doc fixes for the
+  RR-10 ruling commit.
+- **D9 — the README's numbers (fixed, review 2):** the table was checked line by line against the
+  verdict files; besides D1/D3 it matched. It is regenerated from the re-run files.
+
+Cleared on inspection: the XPBD step is `ALLOY.md` §14.4.3's line for line (`den` i64 frac 30,
+`num` with the α̃λ term, ONE `rne_div` on the raw bits per R-6 — `dlam_of`; no truncating `/`
+anywhere on a sim path); the pair clamp is `max(w, other >> 12)` with statics exactly 0; colouring
+is greedy in stable-id order, persistent once + contacts per tick, level lists in the same order;
+contacts are corner-vs-analytic-SDF (R-1), sorted by (kind, i, j); sleeping OFF; single-threaded;
+`len2_wide`'s |d|² < 2^27 m² precondition holds at every call site by construction (neighbours
+within 5 fine cells; contact candidates within one coarse cell; the penetration probe's worst
+pair is a wall centre vs a body 300 m away in G-05: 9 × 10⁴ m²); no `src/` file is touched by the
+branch; `tl_audit` and `docaudit` green; the hashed state is exactly the four registered arenas
+and every transient is scratch rebuilt per tick. Rung 1 (i64 λ, round once per substep) is the
+default `--ladder 1` and is what every PASS ran on. The only §5 liberties taken are scene
+geometry the spec leaves open (G-03's height follows from the count — RR-14; G-05's 600 m box;
+the drop heights), all declared in the README; no threshold, world constant or row moved.
+
+### RR-8..RR-15 — assessment
+
+- **RR-8 — UPHELD, and it is a doc contradiction, not a row failure.** `FX-PALETTE.md` §3 already
+  states λ "is an i64 accumulator within a substep (rung 1) and narrows once at writeback", §3.2
+  makes rung 1 "the LEAD, day one", and `ALLOY.md` §8.1 says "λ accumulators widen likewise";
+  only `ALLOY.md` §14.4.3's pseudocode (`dλ: lambda_t = lambda_t(i32(rne_div(num · 2^16, den)))`,
+  `lambda += dl (i32 add)`) narrows per constraint. **`ALLOY.md` §14.4.3 is the wrong doc**; the
+  fix is its `dλ`/`λ +=`/`Δ` lines becoming the i64 frac-30 local with one `lam_narrow` at
+  writeback (the bench's spelling). The bench's default IS the §3 form (`--ladder 1`), and the
+  creep vanishes with it: `G01_s8_l0.csv` (per-constraint narrowing) jitter p95 0.0009 texel =
+  ~15 quanta/tick and intra-tick 0.0010; `G01_s8_l1.csv` 0.0000/0.0001 over 10,000 ticks, at 4,
+  8 and 16 substeps. `lambda_t` as the STORAGE row is untouched by this.
+- **RR-9 — UPHELD, with one bench artefact separated out.** The ω cap is a design fact: encoding
+  ω implicitly as `θ − pθ` with `angle_t` wrapping to (−½, ½] turn makes |ω| ≤ inv_h/2 = 240
+  turn/s at 480 Hz the unambiguous maximum whatever `omega_t`'s ±2,048 range says; the bench
+  additionally clamps at inv_h/4 (a quarter turn per substep, `omega_from_delta`) and COUNTS that
+  — so `omega_clamps` on the verdict lines measures the bench's stricter clamp, not the encoding's
+  bound. It binds G-02b (5 clamps at s8, 8,549 at s16) and the collapsing G-05 (2,625 at 10k),
+  nothing else. The inertia range re-derives with CANON sizes: inv_I = 12/(m(w² + h²)); a
+  4096:1 body (m = 2⁻¹² kg) that is a 1 m box gives 24,576, a 0.25 m feather 393,216, the bench's
+  2.5 × 0.25 m plank 7,788 — only the plank fits `invmass_t`'s ±8,192, and its angular denominator
+  share inv_I·(r×n)² at r = 1.25 m is 12.2 k, outside the row if narrowed as §14.4.3's "w +=" line
+  does. The row's derivation (`FX-PALETTE.md` §3: "inv_mass ∈ [0, 4096] under the clamp") never
+  covered inertia; the ruling is a real gap.
+- **RR-10 — UPHELD on the mechanism, unverified on the fix (as filed: Medium).** Read against the
+  doc, the owner-only one-constraint form does drop the λⱼ cross terms; the two-pass form the
+  bench runs is standard PBF, still owner-only and deterministic. The double binding reproduces
+  every liquid failure the lane reports (5k column: ejection at tick 32 dbl / 34 fx; shadow error
+  before the ejection ≤ 175,580 raw = 10.7 texels over 5,000 particles of a collapsing column).
+  What the review adds: the 2.1 % rest-density error of the 1k column is the equilibrium of a
+  compliant constraint (α̃ = 0.3 against Σw|∇C|² of a few units), which the shadow tracks — it
+  is not a `q_t`/kernel-precision number and must not be read as one when rev 2 is written.
+- **RR-11 — UPHELD (no new evidence; consistent with the code).** `q_sat` clamps only the stored
+  metric copy; the solver's ρ is the i64 local. Whether the row widens or the compliance keeps
+  ρ < 2 is RR-10's design pass.
+- **RR-12 — UPHELD.** The bench's "static bodies are not carriers" reading is the only one under
+  which a wall does not serialise every contact on it; the 64-colour fatal is a content rule
+  without a number until RR-10 decides how particle–body contacts are accumulated.
+- **RR-13 — REFRAMED (D2).** Upheld that the budget is unreachable by this kernel single-threaded
+  in any arithmetic, and that the "PC fail → float fallback" clause cannot apply to a budget the
+  float kernel misses too; overturned on the premium (32×, not 5–10×) and on where it lives
+  (`isqrt64`'s bit-serial loop + a two-sqrt/three-div kernel spelling, both fixable without a row
+  move), and the failing assumption is named: §11.2's ~8 cores vs §2's single thread.
+- **RR-14 — UPHELD.** 5k particles at CANON's 2-texel spacing in a 2 m width is 313 rows =
+  39 m; the spec's three numbers cannot coexist. The bench chose count over height and says so.
+  The 1k (7.8 m) column is the one that holds; which is THE G-03 is Rafael's.
+- **RR-15 — REFRAMED.** The scene is built as the spec's letter says (plank resting on the floor,
+  1 m boulder at −V_MAX from 3 m), and "tunneling" per §8.4 ("any body centre crossing a static
+  box's interior") is what the plank does: it is spun 27° and pushed 0.8 m into the 1 m floor
+  within two ticks, in fx and double to within 55 raw units. So it is not a scene bug and not a
+  row; it is the linearised corner contact + one GS pass over a 4096:1 chain at 1.07 m/substep,
+  and the boulder side creates energy on the way out (D7). The ruling still needed is what the
+  criterion's object is — "the boulder does not tunnel" (passes at s4/8/16) or "nothing tunnels"
+  (fails at s4/8/16, at s16 only at tick 320) — and whether a 4096:1 body launched to V_MAX is in
+  the design envelope at all (the validator's V_MAX is a per-component clamp the bench applies
+  and counts: 7 clamps at s8).
+
+### Not done here (recorded)
+- The Pi leg (RR-1), the sanitizer G-06 run, G-04 at 1e6 ticks, and any change to the solver's
+  density design, kernel spelling or `isqrt64` — the last two are the cheapest cost wins named in
+  D2 and belong to whoever owns RR-13's ruling, not to a review.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [ ] **RR-6 A tighter sine?** Measured (`FX-PALETTE.md` §4.4): the ported `SinPoly4` gives

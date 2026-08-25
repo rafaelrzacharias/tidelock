@@ -1,3 +1,3 @@
 gate0: particle 609 escaped at x=-1868272 y=-189037 vx=42378240 vy=-210458880 rho=336860522
 gate0: G04: a carrier left the sealed box at tick 876 - tunneling, run stopped
-VERDICT G-04 substeps=16 FAIL tunneling=1 (a carrier left the sealed box; the trace is truncated) ticks=3000 run_twice=skipped max_colors=60 max_nbr=74 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=9 corr_clamps=0 vmax_clamps=0 max_degree=60
+VERDICT G-04 substeps=16 FAIL tunneling=1 (a carrier left the sealed box at tick 876; the trace is truncated) ticks=3000 run_twice=skipped max_colors=60 max_nbr=74 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=9 corr_clamps=0 vmax_clamps=0 max_degree=60
