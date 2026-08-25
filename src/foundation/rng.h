@@ -75,8 +75,8 @@ constexpr q_t rng_q(u64 r) {
 // (W1 rng/hash review 2). A span that does not fit R needs a wider row, not a wrap.
 //
 // Compiles only for an R the table lists a q_t product for (docs/FX-PALETTE.md §3.1:
-// pos_t/invmass_t, vel_t/omega_t, q_t/stiff_t/angle_t/dt_t, scalar_t/lambda_t). Never through
-// doubles.
+// pos_t/invmass_t, vel_t, omega_t (its own format from rev 2, §9 R-8), q_t/stiff_t/angle_t/dt_t,
+// scalar_t/lambda_t). Never through doubles.
 template <typename R>
 constexpr R rng_range(u64 r, R lo, R hi) {
     TL_ASSERT(lo.v <= hi.v);

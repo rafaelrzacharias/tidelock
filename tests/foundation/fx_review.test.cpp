@@ -81,10 +81,10 @@ TL_TEST(fx_review_edge_matrix_in_contract, "foundation,fx,det,fast") {
     TL_EXPECT_EQ(rne_shr(-((i64)1 << 61) - 1, 62), (i64)-1);
     TL_EXPECT_EQ(rne_shr(INT64_MIN + 1, 62), (i64)-2);
     // mul_int at |k| = INT32_MAX, a small enough that the result fits
-    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(1), INT32_MAX).v, 2097152);    // (2^31 - 1) / 2^10 = 2097151.999 -> 2097152
-    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(-1), INT32_MAX).v, -2097152);
-    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(1), INT32_MIN).v, -2097152);
-    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(1023), INT32_MIN).v, (i32)ref_rne_shr((i64)1023 * INT32_MIN, 10));
+    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(1), INT32_MAX).v, 8388608);    // (2^31 - 1) / 2^8 = 8388607.996 -> 8388608 (rev 2: narrow 8)
+    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(-1), INT32_MAX).v, -8388608);
+    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(1), INT32_MIN).v, -8388608);
+    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(255), INT32_MIN).v, (i32)ref_rne_shr((i64)255 * INT32_MIN, 8));   // 255/256 * -2^31 is the largest in-contract magnitude at narrow 8 (1023 fitted only at the old narrow 10)
     TL_EXPECT_EQ(mul_int<vel_t>(fx_raw<pos_t>(1 << 20), 511).v, (1 << 20) * 511 * 4);   // 2^29 * 4 = 2^31 - 4 * 2^20: fits
     TL_EXPECT_EQ(mul_int<vel_t>(fx_raw<pos_t>(INT32_MIN), 0).v, 0);
     // mul with INT32_MIN on both sides: 2^62 >> S
