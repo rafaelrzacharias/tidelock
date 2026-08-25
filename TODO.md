@@ -83,10 +83,20 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
         the sub-quantum difference. `--ladder 3` diverges at tick 20: the residual carry
         preserves exactly the bits the writeback round discards. Body scenarios diverge from
         tick 0 (the ω raw encoding changed width — a hash compares encodings, not physics).
-- [ ] Closeout remainder: spot-verify bit-identity of the rev-2 matrix on the dev PC (the
-      cross-machine leg of the two-PC protocol); the aarch64 evidence rides the CI arm64 legs
-      (the Pi left the program 2026-08-25 — this line said "Pi legs BLOCKED on RR-1" when the
-      branch forked before that ruling landed on main).
+- [x] Closeout remainder: spot-verify bit-identity of the rev-2 matrix on the dev PC (the
+      cross-machine leg of the two-PC protocol). **DONE 2026-08-25, upgraded to the FULL matrix
+      re-run against the MERGED tree** (main `63083c4` + the W1 sweep + RR-16 — so the evidence
+      is of the code that will ship): every CSV leg bit-identical to the PC2 run (timing columns
+      excluded), all four shadow CSVs byte-identical, every verdict line reproduced — incl. the
+      G-04 regression escape at exactly tick 10417 and G-03's 2.1184 % letter-FAIL, so both
+      findings are properties of the code, not a machine. tl_tests green on all four tiers on
+      the merged tree (262 selected, 0 failed; both trace pins reproduce — the second machine of
+      the pin protocol). Dev-PC (perf reference) G-05: 20k p50 501 / p95 615 ms, 152 ns/pair
+      (normalize-once bought ~17 % here vs PC2's ~25–30 % — microarchitecture split), verdict
+      FAIL vs 32 ms unchanged. `tests/gate0/results/2026-08-25-pc-win-netcode-rev2/README.md`.
+      Remaining leg: the {Linux, arm64} conformance halves = the four-leg CI run on this branch
+      (the steward session dispatches it after the push; the aarch64 evidence rides the CI arm64
+      legs — the Pi left the program 2026-08-25).
 
 ## W2 gate0 — the bench is built; what it measured (2026-08-25, `w2-gate0`, PC x86-64 netcode tier)
 

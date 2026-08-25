@@ -121,5 +121,7 @@ what the fx world does, including every liquid failure.
   (R-3; still FAIL, honestly).
 - Two regressions vs rev 1, both filed in `TODO.md`, neither tuned: G-04's escape at tick
   10417 (was INVESTIGATE) and G-04 l3-3k PASS → FAIL. Both are the liquid's (RR-10).
-- The Pi legs (G-05 Pi half, G-06 cross-ISA) stay BLOCKED on RR-1; the dev-PC spot-verify of
-  this matrix is the remaining cross-machine leg (`TODO.md` closeout remainder).
+- The aarch64 evidence rides the hosted CI arm64 legs of the `CANON.md` target matrix (the
+  Pi 4 left the program 2026-08-25; this line was written before that ruling reached this
+  branch); the dev-PC spot-verify of this matrix is the remaining cross-machine leg — done,
+  see `../2026-08-25-pc-win-netcode-rev2/README.md` (`TODO.md` closeout remainder).
