@@ -40,6 +40,12 @@ struct EntityTag;
 using Entity = Handle<EntityTag, 22, 10>;
 static_assert(sizeof(Entity) == 4, "docs/CANON.md: Entity is u32");
 
+// The dense per-world component id (docs/CANON.md "Types": u16, < MAX_COMPONENT_TYPES) and the
+// event type id (a NameHash - docs/ECS.md §5). Homed here with the rest of the reflection types.
+using ComponentId = u16;
+using EventTypeId = NameHash;
+enum : u32 { MAX_COMPONENT_TYPES = 1024 };   // docs/CANON.md "Sizes and caps"; docs/ECS.md §9 R-1
+
 // The core module's ErrCode range is 0x03xx (mem 0x01xx, jobs 0x02xx, net 0x04xx, alloy 0x0Axx).
 // Truncation surfaces as the byte pair's own ERR_BYTES_TRUNCATED; these are the format's codes.
 constexpr ErrCode ERR_WIRE_PAD_NONZERO = (ErrCode)0x0301;  // a _padN field read back nonzero
