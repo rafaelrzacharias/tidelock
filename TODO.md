@@ -733,6 +733,35 @@ the drop heights), all declared in the README; no threshold, world constant or r
       grouped by CPU model, and file the election of the perf reference leg as a ruling here.
       Absolute grading is suspended at the committed PC rev-2 record regardless, until the Deck
       re-anchors (`WORKFLOW.md` §4).
+      **Prepared 2026-08-25 (steward; perf.yml run 1 = 32899367355, main 07e9768, G-05 ×3 per
+      leg; the artifact blob host is unreachable from the cloud session, so numbers are from
+      the four jobs' logs — the artifacts hold the same verdict lines plus cpu.txt).**
+      The fleet measured as TWO silicon groups, not four: both x64 legs report
+      `AMD EPYC 7763` (cpu.txt), both arm64 legs are the same Azure silicon under two names —
+      windows-11-arm reports the SoC (`Cobalt 100`), ubuntu-24.04-arm its core IP
+      (`Neoverse-N2`). The radar must canonicalize the label before grouping, or the two arm
+      records never compare.
+      20k medians-of-3 (p50 / p95 ms, ns per pair eval): ubuntu-latest 435.6 / 573.7 / 132 ·
+      windows-latest 436.7 / 577.8 / 132 · ubuntu-24.04-arm 325.5 / 418.2 / 98 ·
+      windows-11-arm 323.6 / 411.4 / 98 (the arm group is ~25 % faster on this kernel).
+      Run-to-run spread ((max−min)/median), worst across 10k/20k/50k: ubuntu-latest p50
+      0.72 % / p95 1.92 % · ubuntu-24.04-arm 0.24 % / 1.60 % · windows-11-arm 1.64 % / 4.30 % ·
+      windows-latest 1.91 % / 13.91 % (10k p95; 8.25 % at 50k). Cross-leg identity held in the
+      perf data too: every leg stops all three counts on the known RR-10 tunneling escape at
+      the identical tick (141 / 83 / 84) with identical pair_evals and escape coordinates, and
+      `run_twice=identical` everywhere; verdict stays FAIL vs 32 ms on every leg (data, not a
+      red job, per `WORKFLOW.md` §4).
+      **The election — multiple-choice for Rafael (the ruling is his; nothing below moves
+      until it lands):**
+      (A, recommended) **ubuntu-latest** — steadiest at the graded sizes (20k/50k p95 spread
+      ≤ 0.5 %), x86-64 like the Deck min-spec and the PC record, cheapest runner minutes.
+      Radar metric: 20k p50 median vs committed baseline, EPYC-7763-grouped.
+      (B) **ubuntu-24.04-arm** — lowest overall spread and fastest wall-clock, but arm64 while
+      every perf anchor in the program (PC rev-2 record, the future Deck) is x86-64.
+      (C) **windows-latest** — matches the dev PCs' OS/toolchain, but the worst variance
+      measured (13.9 % p95 spread); not defensible as a radar.
+      (D) **dual radar** — both Linux legs, one baseline per silicon group; more coverage,
+      two baselines to maintain.
 - [ ] **After the election: build the radar** (`WORKFLOW.md` §4 promises it; nothing implements
       it yet — sweep D7). Commit the elected leg's baseline medians, add the compare step
       (median vs baseline, same CPU model only, `CANON.md`'s `PERF_WARN_X`/`PERF_FAIL_X` bands)
