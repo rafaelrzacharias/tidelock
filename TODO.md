@@ -37,8 +37,26 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       PC leg); the ladder was climbed to rung 3 with no change; the Pi half waits on RR-1.
       **Reviewed 2026-08-25** ("W2 gate0 — adversarial review" below): bench SHIP as evidence after
       two review commits; every CSV re-run and reproduced; RR-13's numbers replaced (D2).
-- [ ] **Decision commit:** `FX-PALETTE.md` rev 2 (rows DECIDED, or the fallback recorded) +
+- [x] **Decision commit:** `FX-PALETTE.md` rev 2 (rows DECIDED, or the fallback recorded) +
       `PIVOT-DESIGN.md` §3.1b/§12 updated + `LESSONS.md` entries per rung climbed.
+      **DONE 2026-08-25 (this commit).** Rafael ruled on RR-5 + RR-8..RR-15 (each RULED line
+      below); the fallback did not fire; no row moved by a failure. The two rev-2 edits:
+      `omega_t` → `fx<i32,22>` (retune to the structural cap, `FX-PALETTE.md` §9 R-8c) and
+      rung 1 hardened to REQUIRED (§9 R-7). `ALLOY.md` §14.4.3 rewritten to the bench's proven
+      arithmetic (i64 λ + `lam_narrow`, `w_ang30`, two-pass Jacobi density with C = 1 − ρ,
+      per-body Jacobi accumulation); `GATE0-BENCH.md` §2 amended by §7 R-3/R-4/R-5;
+      `CANON.md`/`PIVOT-DESIGN.md` §3.1b/§12 synced. `FX_PALETTE_REV = 2`.
+- [ ] **Post-rulings closeout slice (NEXT — the re-measurement Rafael asked for):**
+      (1) `fx_palette.h`: `omega_t = fx<i32,22>`, the vel/omega op-table split (`FX_OP` triples
+      for the new format), derivation asserts (`INT_BITS ≥ 512`, angle→omega narrows 8), the
+      `FX_PALETTE_REV` bump — fx trace pins WILL move: re-pin both traces, all four tiers;
+      (2) `tests/gate0`: judges to the amended §2 criteria (G-02b boulder-only, G-03 = 1k with
+      G-03b recorded-not-graded, G-05 vs 32 ms), the normalize-once pair kernel (91 ns measured
+      form, `FX-PALETTE.md` §3 q_t row's own strategy); (3) re-run the full matrix on one PC,
+      spot-verify bit-identity on the second; new results dir + README, expected movement:
+      G-02b PASS under R-5, G-03 PASS as redefined, G-05 re-graded honestly (~half the pair
+      cost from normalize-once; still above 32 ms until the Newton `isqrt64` lands — W3).
+      One session, Fable 5 high (row + sim arithmetic).
 
 ## W2 gate0 — the bench is built; what it measured (2026-08-25, `w2-gate0`, PC x86-64 netcode tier)
 
@@ -48,7 +66,7 @@ The Pi leg of G-06 is BLOCKED on RR-1 exactly as RR-1's entry says; the §8.5 re
 at the end of this section. **Nothing below moves a threshold, a world constant or a row: the
 rev-2 decision commit is Rafael's.** Ranked by what it means for `FX-PALETTE.md` rev 2:
 
-- [ ] **RR-8 (row, measured) `lambda_t` must be an i64 across the sweep — rung 1 as
+- [x] **RR-8 (row, measured) `lambda_t` must be an i64 across the sweep — rung 1 as
       `FX-PALETTE.md` §3.2 states it, not as `ALLOY.md` §14.4.3's pseudocode narrows it.** The
       pseudocode's `lambda_t(i32(rne_div(num * 2^16, den)))` per constraint quantises a unit-mass
       correction to 4 `pos_t` quanta (`lambda_t`'s 1.5e-5 kg·m quantum × w = 1): a single resting
@@ -57,7 +75,10 @@ rev-2 decision commit is Rafael's.** Ranked by what it means for `FX-PALETTE.md`
       quantum in 10,000 ticks. Fix the home: `ALLOY.md` §14.4.3's `dλ`/`λ +=` lines become the
       i64 local narrowed once at writeback (the bench's `lam_narrow`); `lambda_t` stays the
       STORAGE row. Confidence High (bit-level, both bindings).
-- [ ] **RR-9 (row, measured) `invmass_t` cannot hold the inverse inertia of a 4096:1 body
+      **RULED 2026-08-25 (Rafael, as recommended): accepted as filed.** `FX-PALETTE.md` §9 R-7
+      (rung 1 REQUIRED, per-constraint narrowing banned); `ALLOY.md` §14.4.3 carries the
+      spelling. Done in the decision commit.
+- [x] **RR-9 (row, measured) `invmass_t` cannot hold the inverse inertia of a 4096:1 body
       smaller than 2.5 m, and the angular denominator share `inv_I (r×n)²` overflows it for any
       light plank.** `inv_I = 12/(m(w²+h²))`: a 0.25 m feather at 1/4096 kg is 393k, a 2.5 m ×
       0.25 m plank 7,790 (the largest that fits; that is the G-02 feather the bench uses). The
@@ -66,7 +87,14 @@ rev-2 decision commit is Rafael's.** Ranked by what it means for `FX-PALETTE.md`
       §14.4.3 line rewritten as the i64 term. Also measured: the implicit angle encoding
       `pθ = θ − ω·h` caps |ω| at inv_h/2 turn/s (240 at 480 Hz) whatever `omega_t`'s ±2,048
       range — the row's headroom above 240 turn/s is unreachable by construction.
-- [ ] **RR-10 (solver design, measured in BOTH bindings) PBF density as one owner-only pass per
+      **RULED 2026-08-25 (Rafael): the i64 rewrite AND the row retune.** (a) `w_ang30` stays the
+      i64 frac-30 den term, never narrowed (`ALLOY.md` §14.4.3 rewritten); (b) `invinertia`
+      storage in `invmass_t` becomes a validator CONTENT bound (`ALLOY.md` §1.4 Body pool note);
+      (c) `omega_t` retuned `fx<i32,20>` → **`fx<i32,22>`** (±512 turn/s = 2× the structural
+      cap, 4× resolution) — Rafael chose the retune over document-only. All in `FX-PALETTE.md`
+      §9 R-8. Consequence: `vel_t`/`omega_t` are distinct types now; the `fx_palette.h` edit +
+      op-table split + trace re-pin is the post-rulings closeout slice (Gate 0 section above).
+- [x] **RR-10 (solver design, measured in BOTH bindings) PBF density as one owner-only pass per
       substep is unstable at any useful stiffness.** `ALLOY.md` §14.4.3's "owner-only write; the
       symmetric Δx_j is applied when j is the owner" drops the λ_j cross terms of the standard
       λ_i + λ_j form (it is not that form realised twice). Measured on a 48-particle block: a
@@ -80,18 +108,32 @@ rev-2 decision commit is Rafael's.** Ranked by what it means for `FX-PALETTE.md`
       design pass (iterations per substep, a converged solve, boundary particles) before the
       liquid rows can be graded at 2 %. Confidence High on the mechanism (the double shadow
       reproduces it), Medium on which redesign.
-- [ ] **RR-11 (row, measured) ρ/ρ₀ in `q_t` saturates at 2 under impact and the constraint
+      **RULED 2026-08-25 (Rafael, as recommended): two-pass Jacobi λᵢ+λⱼ is the spec now**
+      (`ALLOY.md` §14.4.3 rewritten, incl. the C = 1 − ρ sign fix and α̃ = 0.3 as the measured
+      start); the full liquid design pass (iterations/convergence, boundary particles, impact
+      response, whether compliance keeps ρ < 2) is **filed as the OPENING task of the W3
+      alloy-liquids-gases lane** — see the W3 queue item below. Rev 2 is not blocked on it: the
+      shadow reproduces every liquid failure, so the rows are cleared regardless.
+- [x] **RR-11 (row, measured) ρ/ρ₀ in `q_t` saturates at 2 under impact and the constraint
       loses its restoring force.** With the compliant liquid a box impact compresses the fluid
       past 2× rest density; `q_sat` clamps ρ, C clamps at −1, λ stops growing, the clump persists.
       The bench keeps ρ as the i64 frac-30 local and clamps only the stored metric copy. Either
       the density ratio needs a wider row or the compliance must keep ρ < 2 (RR-10).
-- [ ] **RR-12 (solver design) `ALLOY.md` §14.4.3's 64-colour `TL_FATAL` fires on any body in
+      **RULED 2026-08-25 (Rafael, as recommended): the bench's split is the spec** — ρ is the
+      i64 frac-30 local through the constraint, `q_t` clamps only the stored metric
+      (`FX-PALETTE.md` §9 R-9, `ALLOY.md` §14.4.3). Wider-row-vs-compliance is deferred INTO the
+      RR-10 design pass (it is a property of the winning solver design).
+- [x] **RR-12 (solver design) `ALLOY.md` §14.4.3's 64-colour `TL_FATAL` fires on any body in
       liquid.** A static body (inv_mass 0) is never written and is not a carrier for colouring
       (the bench's reading); a DYNAMIC 0.5 m box resting in the G-04 liquid shares 40–70
       contacts, a box landing in it 1,000+. The bench's cap is 4,096; the production sim needs
       either a per-body Jacobi accumulation for particle–body contacts or a cap that is a
       content rule with a real number.
-- [ ] **RR-13 (spec) G-05's threshold is unreachable by the kernel as spelled, in any
+      **RULED 2026-08-25 (Rafael, as recommended): per-body Jacobi accumulation** for the body
+      side of particle–body contacts (bodies leave the colouring; the 64-colour fatal stays as
+      the rigid–rigid content rule; static bodies are never carriers) — `ALLOY.md` §14.4.3
+      colouring block. Iteration/ordering detail rides the RR-10 design pass (same W3 lane).
+- [x] **RR-13 (spec) G-05's threshold is unreachable by the kernel as spelled, in any
       arithmetic.** Measured at netcode −O2: 141 ns per pair evaluation (density + XSPH:
       one `isqrt64`, one `rne_div` for q, `normalize` = one more `isqrt64` + two `rne_div`, ~10
       `mul<R>`), ~155 pair evaluations per particle per tick at 8 substeps. 20k particles ≤ 4 ms
@@ -105,17 +147,32 @@ rev-2 decision commit is Rafael's.** Ranked by what it means for `FX-PALETTE.md`
       10k 341/409 ms, 20k 657/757 ms, 50k 1,486/1,712 ms — the 20k number is 160× the 4 ms
       threshold. G-05 itself is a tunneling FAIL at every count (RR-10: the 9.8/19.5/49 m liquid
       columns crush their base), so the cost is of a run in progress, not of a steady state.
-- [ ] **RR-14 (spec) G-03 as written cannot be built at CANON spacing.** "5k-particle column, 2 m
+      **RULED 2026-08-25 (Rafael, as recommended; numbers per review D2): the threshold is
+      restated, the fallback clause did not fire.** `GATE0-BENCH.md` §7 R-3: 20k ≤ 32 ms PC
+      single-thread (4 ms × 8 cores — `ALLOY.md` §11.2's own derivation stated in the protocol's
+      units; the literal 4 ms was unreachable by ANY scalar arithmetic, double included). Kernel
+      fixes ruled in: normalize-once-per-pair (91 ns measured, this closeout slice) and the
+      Newton-from-clz `isqrt64` + cached W (W3 — the isqrt must pass the fxcheck exhaustive
+      oracle bit-exact before it replaces the FixPointCS loop). SIMD (`FX-PALETTE.md` §9 R-4)
+      stays the named escalation if the honest budget is still missed after those.
+- [x] **RR-14 (spec) G-03 as written cannot be built at CANON spacing.** "5k-particle column, 2 m
       wide, ~1.2 m tall" at 2-texel spacing is 16 columns × 313 rows = 39 m tall (the bench's
       G-03); a 2 m × 1.2 m column is 160 particles. The 39 m column crushes its own base (RR-10)
       and fails at tick 34 in both runs; the 7.8 m (1,000-particle) column holds at 2.0 %. Which
       geometry is THE G-03 is a ruling; the results carry both.
-- [ ] **RR-15 (spec) G-02b as posed tests the feather, not the boulder.** The boulder at V_MAX
+      **RULED 2026-08-25 (Rafael, as recommended): THE G-03 = 1,000 particles**, geometry
+      DERIVED from CANON spacing (never both stated again); the 5k/39 m column becomes G-03b,
+      recorded-not-graded until the RR-10 design pass. `GATE0-BENCH.md` §2 + §7 R-4.
+- [x] **RR-15 (spec) G-02b as posed tests the feather, not the boulder.** The boulder at V_MAX
       never tunnels; the 4096:1 plank it lands on is ejected at V_MAX_WORLD (vmax clamps
       counted), spun past the ω cap (RR-9) and passes a 1 m wall within 2 ticks — a tunneling
       FAIL by the doc's letter. If the intent is "the boulder must not tunnel through the
       feather or the floor", the criterion should say so; if it is "nothing tunnels", the
       linearised corner contact cannot hold a body spinning a quarter turn per substep.
+      **RULED 2026-08-25 (Rafael, as recommended): the criterion grades the boulder** (tunnels
+      through neither feather nor floor); the feather's ejection is recorded, not graded —
+      graded on it: clamps engage (counted), state bounded. `GATE0-BENCH.md` §2 + §7 R-5.
+      Expected on re-run with the R-8 angular term: G-02b PASS — the re-run is the test.
 - [ ] Bench facts recorded so nobody rediscovers them: the analytic box SDF needs a corner
       tie-break (aligned stacks are all corners); walls must overlap at the box corners; the
       neighbour list carries `ALLOY.md` §1.2's support margin (5×5 cells, reach h + travel) and
@@ -319,7 +376,7 @@ the drop heights), all declared in the README; no threshold, world constant or r
       Options if a consumer ever needs more: a degree-5/6 minimax fit (bespoke - would need its
       own oracle run, which `tools/fxcheck` now provides), or a 2^k-entry table + linear
       interpolation. Not before a consumer names the need.
-- [ ] **RR-5 Tagged palette rows?** `fx<Rep,FRAC>` keys a row by format, so `pos_t`/`invmass_t`,
+- [x] **RR-5 Tagged palette rows?** `fx<Rep,FRAC>` keys a row by format, so `pos_t`/`invmass_t`,
       `q_t`/`stiff_t`/`angle_t`/`dt_t`, `vel_t`/`omega_t` and `scalar_t`/`lambda_t` are one C++
       type each: `pos_t + invmass_t` compiles, and the §3.1 op table collapses to format triples
       (`FX-PALETTE.md` §1, the W1 fx lane's finding). The compiler checks scale, not units. A
@@ -327,6 +384,11 @@ the drop heights), all declared in the README; no threshold, world constant or r
       explicit `to<R>` at every unit change (`invmass_t → scalar_t` is already one) and a larger
       op table. Rev-1 ships format-keyed, as the doc now states; decide before Gate 0's solver is
       promoted (W3 alloy-solver), because that is the last point where the retag is a header edit.
+      **RULED 2026-08-25 (Rafael, at rev 2 — the deadline): stays format-keyed.** No desync
+      class found by Gate 0 or the W1 reviews would have been caught by tags; the retag's cost
+      (a `to<R>` at every unit change + a larger op table) buys nothing measured. Recorded in
+      `FX-PALETTE.md` §1. (Note: `vel_t`/`omega_t` did split at rev 2 — via the R-8 retune, a
+      format change, not a tag.)
 - [x] **`foundation/tl_assert.h` landed from the fx lane, not tooling-rt.** `fx.h` needs
       `TL_ASSERT` on its first line of arithmetic and the tooling-rt lane had not published its
       header; the header's content is pinned by `TOOLING.md` §9 + `CPP-SUBSET.md` §9 R-3 +
@@ -1459,7 +1521,7 @@ right; it is the template the others now follow.
       `platform/*` entirely); and every applicable §9.6 row having a test - all eleven rows are
       covered, `headless_draw_validates` split across four.
       **Not fixed, deliberately:** RR-9 below, plus the four recorded-gap entries after it.
-- [ ] **RR-9 (ruling request, W1 platform review): the headless impl leaks its own arena, and
+- [x] **RR-9 (ruling request, W1 platform review): the headless impl leaks its own arena, and
       the spec is the reason.** `VMemArena` has no `free` by design (`MEMORY.md` §0 rule 1), but
       `PLATFORM.md` §9.4 tells the headless `draw` to give every streaming texture a `w*h*4` CPU
       buffer "from the platform arena" and names no reclamation policy, so `texture_destroy`
@@ -1631,6 +1693,19 @@ right; it is the template the others now follow.
       to the game design docs when a game repo exists (NAT is ruled: LAN/direct-IP v1, `NETCODE.md` §5.5).
 
 ## Alloy (`docs/ALLOY.md` — headless-first; its own build queue in "Gates & rulings ledger")
+- [ ] **W3 alloy-liquids-gases OPENING task — the liquid design pass (the RR-10 ruling,
+      2026-08-25).** The two-pass Jacobi λᵢ+λⱼ form is the spec (`ALLOY.md` §14.4.3); this pass
+      decides what rev 1 left open and Gate 0 measured as missing: iterations per substep /
+      convergence criterion, boundary particles, impact response (a 0.5 m box from 12 m: 2,100
+      contacts, ρ saturates — RR-11's wider-row-vs-compliance question is decided HERE), and the
+      per-body Jacobi accumulation detail (RR-12). Exit criterion: G-03b (39 m column) and a
+      re-posed splash scenario hold; G-05 re-graded against `GATE0-BENCH.md` §2 as amended.
+      Model: Fable 5 high (solver design on sim paths).
+- [ ] **W3 alloy-solver / fx follow-up — the Newton `isqrt64` (the RR-13 ruling).** 2-step
+      Newton from a `clz` seed, replacing the FixPointCS 32-iteration loop (62.5 ns → est.
+      35–40 ns, Medium confidence): MUST prove bit-exactness through the fxcheck exhaustive +
+      differential oracle before it replaces anything; cached W from the density pass (halves
+      the pair walks) lands with it.
 - [ ] **T-A-01 closure-scoped arena restore prototype — THE GATE for speculation.** Before any
       netcode Phase 3 work.
 - [ ] Alloy test infra: conservation oracles, per-arena hash, run-twice, worker sweep, perf harness.

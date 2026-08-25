@@ -113,8 +113,11 @@ loop). **B chosen**:
   `flags` (u16), `mass_quanta` (i32 — exact Σ-mass), `temp` (i16 quanta; hot-row vs warm
   column is a bench, §1.4).
 - **`Body` pool** — small-N rich records: rigid + soft bodies. Adds rotation (`theta: angle_t`
-  turns, `omega: omega_t`), inertia (`invinertia`: `invmass_t` row — same range argument),
-  shape/SDF handle, material, island id, sleep state. Terrain = big static bodies here.
+  turns, `omega: omega_t`), inertia (`invinertia`: `invmass_t` row — a CONTENT bound, ruled
+  2026-08-25, `FX-PALETTE.md` §9 R-8: the validator rejects a body whose `inv_I = 12/(m(w²+h²))`
+  exceeds the row — the smallest legal 4096:1 body is 2.5 m × 0.25 m; a lighter/smaller body is
+  a new ruling, not a quiet clamp), shape/SDF handle, material, island id, sleep state.
+  Terrain = big static bodies here.
 - **Identity**: bodies, constraints, plants, agents, cavities/basins are `Handle<Tag,IDX,GEN>`
   citizens in `SlotMap`s (`MEMORY.md`, `CONTAINERS.md`). **Particles are plain `u32` indices
   with tick-scoped validity** (`PIVOT-DESIGN.md` §4): the particle pool is compacted only at the
@@ -758,7 +761,7 @@ answer (PIVOT §0, §3.1a/b)**: the dynamic range is *bounded by design*, then *
   the denominator; `invmass_t` fx<i32,18> holds it with 2× headroom.
 - Per-domain Q-formats: `pos_t` fx<i32,18> (±8,192 m, 3.8 µm), `vel_t` fx<i32,20>,
   `invmass_t` fx<i32,18>, `stiff_t`/`q_t` fx<i32,30>, `angle_t` fx<i32,30> turns, `omega_t`
-  fx<i32,20>. The sub-texel-correction vs world-extent spread is the `pos_t` vs correction
+  fx<i32,22> (rev 2 — `FX-PALETTE.md` §3). The sub-texel-correction vs world-extent spread is the `pos_t` vs correction
   split; the correction quantum (3.8 µm = 1/16384 texel) is what G-01 measures.
 - Kernel normalization `q = r/h_kernel` makes PBF/SDF kernel precision world-scale-independent.
 - Widened i64 intermediates, round once per substep (ladder rung 1) and RNE in `mul<R>`
@@ -1408,7 +1411,8 @@ Contact generation (once per tick, reused by all 8 substeps — §1.2):
   C4 body–body        [candidate pair ↑]: a's surface points against b's SDF and b's against a's; deepest 4 each way
   All contacts written to per-chunk scratch lists keyed by the parallel_for chunk; folded [chunk ↑] into one array; then stable-sorted by (a, b) via sort_u64_kv
 Colouring: persistent constraints: cached Constraint.color (recoloured only when CF_DIRTY_COLOR is set by pass 5); contacts: every tick.
-  greedy [constraint slot ↑ then contact ↑]: colour = lowest colour not used by any constraint sharing a carrier (carrier→colour bitmask u64 in scratch; > 64 colours ⇒ TL_FATAL — a content bug)
+  greedy [constraint slot ↑ then contact ↑]: colour = lowest colour not used by any constraint sharing a carrier (carrier→colour bitmask u64 in scratch; > 64 colours ⇒ TL_FATAL — a content bug among RIGID carriers)
+  RULED 2026-08-25 (Gate 0 RR-12): particle–body contacts do NOT colour on the body carrier — a dynamic body resting in liquid shares 40–70 contacts, a landing one 1,000+ (measured), so any fixed cap there is content-dependent. The body side of particle–body contacts accumulates Jacobi into per-body i64 scratch, applied once per level; a static body (inv_mass 0) is never written and is never a colouring carrier. The 64-colour fatal stays as the rigid–rigid content rule. Iteration/ordering detail lands with the W3 liquid design pass (`TODO.md`, the RR-10 ruling).
   level lists: Level[c] = array of (kind, index) in the same order; parallel_levels(jobs, n_colors, levels, project_chunk, ctx) with grain GRAIN_CONSTRAINT
 Substep loop, s = 0..7:
   S1 predict [particle index ↑ ∥ body slot ↑] (parallel_for):
@@ -1422,13 +1426,15 @@ Substep loop, s = 0..7:
        C      : violation (pos_t, frac 18) from the kernel (distance: sqrt<pos_t>(dot<fx<i64,36>>(d,d)) − rest, d from xl rounded to pos_t for the kernel input only)
        grad   : ∇C per carrier as vec2<q_t> (unit) and, for bodies, the angular term r×n via cross<pos_t>(r_world, n) → pos_t
        w_eff  : pair clamp — wa' = max(wa, wb >> 12), wb' = max(wb, wa >> 12) unless the raw w is 0 (static stays 0)   // MASS_RATIO_CLAMP = 2¹²
-                 body: w += rne_shr(mul_widen(i32(rne_shr(i64(rn.v) * rn.v, 18)), inv_inertia.v), 18)  // (r×n)² at frac 18, × invmass frac 18 → frac 18
-       den    : i64 = i64(wa'.v) * 4096 + i64(wb'.v) * 4096 + i64(alpha_tilde.v)                  // frac 30; < 2^45; never 0 unless both static (skipped). Multiplies, never << of a signed value (CPP-SUBSET.md §5)
-       num    : i64 = −i64(C.v) * 4096 − rne_shr(i64(alpha_tilde.v) * i64(lambda.v), 16)             // frac 30: |C|·2^12 < 2^43, stiff(30)×lambda(16) >> 16 < 2^46 ⇒ |num| < 1.125·2^46
-       dλ     : lambda_t = lambda_t(i32(rne_div(num * (i64(1) << 16), den)))                        // ONE rne_div on the raw i64 bits, RNE (FX-PALETTE.md §9 R-6); num·2^16 < 2^63 by the bound above; |dl| ≤ 2^31 asserted
-       unilateral kinds (contact, max-only, min-only, density): dl = max(dl, −lambda) ⇒ λ ≥ 0
-       lambda += dl (i32 add; range ±32768 asserted in debug)
-       Δ      : per carrier: mag = rne_shr(mul_widen(w'.v, dl), 4)  // invmass(18)×lambda(16) = 34 → frac 30
+                 body: the angular share is an i64 frac-30 local, NEVER narrowed into invmass_t (FX-PALETTE.md §9 R-8; a 4096:1 plank with a 1.25 m lever has inv_I·(r×n)² ≈ 12,000, outside ±8,192 — measured, G-02):
+                 w_ang30 = rne_shr(rne_shr(i64(rn.v) * i64(rn.v), 18) * i64(inv_inertia.v), 6)    // (r×n)² frac 18, × inv_I frac 18 = 36 → frac 30; joins den directly
+       den    : i64 = i64(wa'.v) * 4096 + i64(wb'.v) * 4096 + i64(alpha_tilde.v) (+ w_ang30 per body side)   // frac 30; never 0 unless both static (skipped). Multiplies, never << of a signed value (CPP-SUBSET.md §5)
+       λ local: the constraint's λ is an i64 frac-30 LOCAL across the substep's sweep (lam30; FX-PALETTE.md §9 R-7 — rung 1 REQUIRED, per-constraint narrowing BANNED: measured to creep a resting box 12 quanta/tick, G-01 --ladder 0)
+       num    : i64 frac 30 = −c30 − rne_shr(sat_mul(i64(alpha_tilde.v), lam30), 30)              // c30 = i64(C.v)·2^12 for a pos_t C
+       dλ     : i64 frac 30 = rne_div(num * (i64(1) << 30), den)                                  // ONE rne_div on the raw i64 bits, RNE (FX-PALETTE.md §9 R-6). num·2^30 must fit i64 (|num| < 2^33 = 8 m at frac 30); a V_MAX contact can exceed it: num AND den are RNE-halved together until it fits — den ≥ 2^18 keeps the quotient's precision far above the λ quantum, and the scaling is a pure function of the operands (deterministic)
+       unilateral kinds (contact, max-only, min-only, density): dl = max(dl, −lam30) ⇒ λ ≥ 0
+       lam30 += dl (i64 add); Constraint.lambda ← lam_narrow(lam30) ONCE per substep at writeback (RNE by 14; a value outside the lambda_t row is COUNTED and clamped — the G-02 saturation metric)
+       Δ      : per carrier: mag = rne_shr(mul_widen(w'.v, dl), 18)  // invmass(18) × λ-local(30) = 48 → frac 30; |mag| < 2^33 raw (8 m) asserted — larger means the scene is broken
                  xl += (rne_shr(mag * n.x.v, 30), rne_shr(mag * n.y.v, 30));  bodies also θl += rne_shr(mag_ang * ..., 30) with the angular share
        damping: the §8.1 mandatory term: dl_damp = −rne_shr(mul_widen(damping.v, i32(rne_shr((xl − xs·2^12)·n, 12))), 30) folded into num before the divide (XPBD β form)
      kernels (solver_kernels.h, one inline fn each, signature `void project_<kind>(const KindPayload*, CarrierRefs, SolverLocal*, Scratch*)`):
@@ -1441,12 +1447,14 @@ Substep loop, s = 0..7:
        ④ contact (from Contact rows): C = −depth_now where depth_now = −sdf re-evaluated from xl? NO — depth_now = depth − dot<pos_t>(Δx_rel, n) (linearised; the SDF is not re-sampled inside substeps); unilateral
            friction (position level, after the normal step): Δp_t = tangential part of ((xl_a − xs_a) − (xl_b − xs_b)) − mul<pos_t>(surface_v, H)·t
                  lim = mul<pos_t>(friction, |Δx_n this step|); if |Δp_t| ≤ lim: correct −Δp_t fully (static); else correct −Δp_t · div<q_t>(lim, |Δp_t|) (dynamic); split by w'
-       density (PBF, one "constraint" per liquid particle i, coloured as a contact; its carriers = i ∪ nbr[i] — conflicts resolved by colouring on the owner i only; neighbours are READ at their xs (start-of-substep) positions, so levels are Jacobi w.r.t. neighbours — deterministic):
-           q_ij = div<q_t>(r_ij, H_KERNEL) with r_ij = sqrt<pos_t>(dot<fx<i64,36>>(d, d)); W = (1−q²)³ in q_t (three mul<q_t>); ∇W = (1−q)² (spiky) × n_ij
-           rho = Σ_j mul_widen(kw[si][sj].v, W.v) (i64, frac 60 → rne_shr 30 → frac 30) + self term kw[si][si]  [nbr ↑]
-           C = max(q_t(rho − ONE), 0)   (unilateral, ρ/ρ₀ − 1 with kw normalised so rho == ONE at rest)
-           ∇C_i = Σ_j kw·∇W·n_ij (i64 frac 30, rne_shr once); ∇C_j = −kw·∇W·n_ij;  den = Σ_j w_j|∇C_j|² + w_i|∇C_i|² + α̃ (i64 frac 30: |∇C|² frac 60 → >>30, × w frac 18 → >>18)
-           dλ as generic; Δx_i = mul<pos_t>(∇C_i, mul<pos_t>(w_i, dλ)) applied to xl_i only (owner-only write; the symmetric Δx_j is applied when j is the owner — the standard PBF λ_i + λ_j form, realised over two constraints)
+       density (PBF) — REWRITTEN 2026-08-25 (Gate 0 RR-10, measured in BOTH bindings): the rev-1 owner-only single pass ("the symmetric Δx_j is applied when j is the owner") drops the λ_j cross terms and is NOT the standard λ_i+λ_j form realised twice — a 1 m/s landing launched the top row of a 48-particle block at 2.6 m/s, fx and double alike. The decided form is TWO Jacobi passes per substep over the neighbour lists, owner-only writes, deterministic:
+           pass 1 (read-only) [index ↑, nbr ↑]: q_ij = div<q_t>(r_ij, H_KERNEL) with r_ij = sqrt<pos_t>(dot<fx<i64,36>>(d, d)); W = (1−q²)³ in q_t (three mul<q_t>); ∇W = (1−q)² (spiky) × n_ij
+                rho_i = Σ_j mul_widen(kw[si][sj].v, W.v) (i64, frac 60 → rne_shr 30 → frac 30) + self term kw[si][si] — rho stays this i64 frac-30 LOCAL through the whole constraint (FX-PALETTE.md §9 R-9: ρ/ρ₀ exceeds q_t's ±2 under impact, measured G-03/G-04; the q_t METRIC copy is clamped at storage, `q_sat`)
+                C_i = ONE − rho_i, unilateral C ≤ 0 when compressed ⇒ λ ≥ 0. (The rev-1 spelling `C = max(ρ − 1, 0)` with `dl = max(dl, −λ)` zeroes every correction step — a sign bug, found by the bench)
+                ∇C_i = Σ_j kw·∇W·n_ij (i64 frac 30, rne_shr once); ∇C_j = −kw·∇W·n_ij; den_i = Σ_j w_j|∇C_j|² + w_i|∇C_i|² + α̃ (i64 frac 30); λ_i = max(dλ(−C_i, den_i), 0) via the generic step
+           pass 2 (apply) [index ↑, nbr ↑]: Δx_i = w_i · Σ_j (λ_i + λ_j) ∇W_ij n_ij, written to xl_i only — every j's symmetric share arrives through j's own pass-2 line; order-free, deterministic
+           compliance is MANDATORY at 480 Hz (a rigid one-pass correction over-shoots a landing ~3× and v = Δx/h turns 6 mm into 2.9 m/s — LESSONS.md): α̃ = 0.3 is the measured start (holds a 7.8 m column at 2.0 % p95 density error; ≤ 0.1 tunnels the floor, 1.0 gives 4.2 %)
+           left to the W3 alloy-liquids-gases design pass (`TODO.md`, filed with the RR-10 ruling): iterations per substep / convergence, boundary particles, impact response (a 0.5 m box from 12 m collects 2,100 particle contacts as ρ saturates — RR-11), and whether compliance alone keeps ρ < 2
   S4 writeback, single round [index ↑ ∥ slot ↑] (parallel_for):
        x = pos_t(i32(rne_shr(xl, 12)))   // THE one round per substep
        v = mul_int<vel_t>(x − px, INV_H)  // px == xs

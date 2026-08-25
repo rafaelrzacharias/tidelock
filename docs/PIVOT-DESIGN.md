@@ -175,7 +175,7 @@ The subset — C-with-namespaces ("orthodox C++"):
 | Substeps/tick | **8** (60 Hz → h = 1/480 s) | XPBD default; h, h² are precomputed rounded fx constants (1/480 isn't dyadic; one shared constant is deterministic by construction) |
 | `MASS_RATIO_CLAMP` | **4096 : 1 (2¹²), applied as an effective clamp** | The ALLOY §10 feather→boulder counter-measure: per-solve, each pair's inv-mass spread saturates at the clamp rather than the validator rejecting table data — content is never refused, extreme pairs just behave as if 4096:1 (a documented approximation, invisible in practice: past ~1000:1 the light body reads as massless anyway). Statics are inv_mass = 0 exactly and cost no range |
 
-### 3.1b The palette rows (DECIDED 2026-08-22 as written here plus `scalar_t = fx<i32,16>` — `FX-PALETTE.md` §3/§9 is the authority; Gate 0 verifies, the ladder is the pre-committed response)
+### 3.1b The palette rows (DECIDED 2026-08-22; **rev 2 VERIFIED by Gate 0, 2026-08-25** — `FX-PALETTE.md` §3/§9 is the authority. Gate 0's verdict: no row moved by a failure; the float fallback did not fire; `omega_t` retuned to its structural cap and the wide-local/narrow-storage principle ruled — `FX-PALETTE.md` §9 R-7..R-9. Every Gate 0 FAIL was solver design or scenario spec: `ALLOY.md` §14.4.3 and `GATE0-BENCH.md` §2 amended in the same commit, `TODO.md` RR-10..RR-15)
 
 Derivation rule: integer bits ≥ ⌈log₂(range × margin)⌉, rest is FRAC; 32-bit wherever the
 solver should vectorize.
@@ -187,7 +187,7 @@ solver should vectorize.
 | `invmass_t` | **fx<i32,18>** | ±8,192 | 3.8e-6 | Unit mass = reference particle; inv_mass ∈ [0,4096] under the clamp, 2× headroom — the `w₁+w₂+α̃` denominator cannot overflow by construction |
 | `stiff_t` (α̃=α/h²) | **fx<i32,30>** | ±2 | 9.3e-10 | Near-zero for stiff constraints; precision matters, range doesn't. Tables store α; α̃ precomputed at init |
 | `q_t` (normalized dist) | **fx<i32,30>** | ±2 | 9.3e-10 | **Kernel strategy**: PBF/SDF kernels evaluate on q = r/h_kernel ∈ [0,1] — normalize once per pair, polynomial in `q_t`, scale back once. Kernel precision becomes world-scale-independent |
-| `angle_t` / `omega_t` | **fx<i32,30>** / **fx<i32,20>** | ±2 turns / ±2,048 turn/s | ~1e-9 turn | **Turns, not radians** — wraps free at ±1; sin/cos tables index naturally |
+| `angle_t` / `omega_t` | **fx<i32,30>** / **fx<i32,22>** (rev 2) | ±2 turns / ±512 turn/s | ~1e-9 turn | **Turns, not radians** — wraps free at ±1; sin/cos tables index naturally. `omega_t` retuned at rev 2 to its structural cap (`FX-PALETTE.md` §9 R-8) |
 | Conserved quanta | **plain i32/i64** | — | — | Unchanged from ALLOY; saturating ops only |
 
 - **Solver internals — the precision ladder** *(ratified 2026-08-21; ordered by
@@ -602,6 +602,14 @@ Remaining, in intended order of resolution:
    fallback). **Gate 0 is now fully specified and unblocked** — next stop is the dev machine:
    fx/det-math headers + the bench. On results, §3.1b rev 2 gets the DECIDED stamp (or the
    pre-committed fallback fires).
+   **DONE (Gate 0 ran 2026-08-25):** §3.1b rev 2 DECIDED — bit-exact across two PCs, netcode +
+   dev-shadow tiers (`tests/gate0/results/2026-08-25-pc-win-netcode/` + the pc2 reproduction);
+   the fallback did NOT fire. G-01/G-02a/G-06(PC) PASS; every FAIL was solver design or scenario
+   spec, never a row (`TODO.md` RR-8..RR-15, all ruled 2026-08-25): `ALLOY.md` §14.4.3 rewritten
+   (i64 λ, i64 angular share, two-pass Jacobi density, per-body Jacobi accumulation) and
+   `GATE0-BENCH.md` §2 amended (G-02b criterion, G-03 geometry, G-05 budget made consistent with
+   `ALLOY.md` §11.2's core count) in the decision commit. The Pi leg (G-06 cross-ISA, G-05 Pi
+   half) stays open on RR-1.
 2. ~~Luau step-debugger scope~~ **RULED 2026-08-21 — ceiling = Tier 1** (§7): Tier 0
    (console + replay scrub) at v0; Tier 1 (break-and-inspect) when gameplay scripting
    starts; Tier 2 rejected. Details in §7's debugger bullet.

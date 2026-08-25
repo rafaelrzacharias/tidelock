@@ -50,12 +50,12 @@
 | `stiff_t` | `fx<i32,30>` | ±2 | α̃ = α/h², precomputed at init |
 | `q_t` | `fx<i32,30>` | ±2 | unitless, kernels on q = r/h |
 | `angle_t` | `fx<i32,30>` | ±2 turns | turns; wraps by masking |
-| `omega_t` | `fx<i32,20>` | ±2,048 turn/s | |
+| `omega_t` | `fx<i32,22>` | ±512 turn/s | retuned rev 2: |ω| ≤ 240 turn/s structurally (`FX-PALETTE.md` §3) |
 | `dt_t` | `fx<i32,30>` | ±2 s | only `H` |
 | `scalar_t` | `fx<i32,16>` | ±32,768 | unitless scalars; `lambda_t` is an alias |
 | conserved quanta | `i32`/`i64` | — | saturating ops only |
 | SDF texel distance | `i16`, 4 frac bits | ±2,048 texels | storage, not a row |
-| `FX_PALETTE_REV` | 1 | in `build_id` |
+| `FX_PALETTE_REV` | 2 | in `build_id` |
 
 ## Sizes and caps
 

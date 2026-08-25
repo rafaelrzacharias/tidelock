@@ -1,9 +1,14 @@
-# Gate 0 — the fixed-point XPBD + PBF convergence and cost bench (tidelock, rev 1)
+# Gate 0 — the fixed-point XPBD + PBF convergence and cost bench (tidelock, rev 2)
 
-> **Status:** spec rev 1, 2026-08-22. **Thresholds are FROZEN** (confirmed at the 2026-08-21 veto
-> pass; `PIVOT-DESIGN.md` §10). The answer is not negotiated after results exist. This doc is the
-> executable form of that spec: what to build, what to run, what to record, what each result means.
-> **This is THE pivot gate.** It is the next milestone and it hangs the cross-ISA claim.
+> **Status:** rev 2, 2026-08-25 — **the gate has RUN** (results:
+> `tests/gate0/results/2026-08-25-pc-win-netcode/README.md` + the pc2 reproduction beside it;
+> bit-exact across two machines). Verdict: the palette holds — no row moved by a failure, the
+> float fallback did not fire; `FX-PALETTE.md` rev 2 is stamped. Three criteria were amended by
+> ruling AFTER the run (§7 R-3..R-5) because each contradicted its own derivation or scenario —
+> the doc-bug class, not renegotiation; the amended rows are re-graded by the re-run filed in
+> `TODO.md`. Still open here: the Pi leg (G-06 cross-ISA, G-05 Pi half — RR-1), the sanitizer
+> G-06 evidence run, and G-03b/G-05 re-grading behind the `ALLOY.md` §14.4.3 liquid design pass.
+> Thresholds remain frozen as amended.
 
 ---
 
@@ -17,7 +22,7 @@ stable and within budget. Three outcomes, pre-committed:
 | G-01..G-06 pass | `FX-PALETTE.md` rev 2 stamped DECIDED with measured values; `fx_palette.h` written; foundation week starts |
 | convergence failure (G-01..G-04) | climb the precision ladder (`FX-PALETTE.md` §3.2) rung by rung, re-run; palette rows may move *within the derivation rule*; thresholds do not move |
 | ladder exhausted | **fallback fires:** pinned-toolchain float, x86-64 only, cross-ISA (the Pi) consciously written off, PIVOT rev-bumped. Decided then, not drifted into |
-| G-05 PC half fails (> 8 ms at 20k) | pivot-level — same fallback ladder |
+| G-05 PC half fails (beyond §2's PC fail bound at 20k) | pivot-level — same fallback ladder (per §7 R-3: judged against a threshold whose core count and arithmetic match the protocol, after the named kernel fixes) |
 | G-05 Pi-only miss | **not pivot-level** — redraws minimum spec (Pi becomes stretch peer); never triggers the float fallback, since abandoning fixed point to rescue the Pi would surrender the property that exists *for* the Pi |
 | G-06 fails (any divergence) | the highest-information result the bench can produce: it is UB. Hunt with UBSan/ASan before anything else |
 
@@ -54,10 +59,11 @@ using widened i64 sums of fx products, reported as raw i64 so the envelope compa
 | ID | Scenario | Pass | Investigate | Fail |
 |---|---|---|---|---|
 | **G-01** | 10-box stack at rest (1 m boxes, unit mass), 10k ticks | p95 per-tick position jitter < 0.1 texel, zero sink, zero pop | < 0.5 texel | creep / pop / oscillation |
-| **G-02** | feather on boulder at full 4096:1 (after the clamp), dropped from 2 m then resting; boulder dropped on feather at `V_MAX` | sustained penetration < 1 texel, no tunneling at `V_MAX` | < 2 texels | tunneling, or any saturation hit in `invmass_t`/`lambda_t` |
-| **G-03** | 5k-particle PBF column (2 m wide, ~1.2 m tall) settling in a sealed box | p95 rest-density error < 2% after settle, stays settled over 5k further ticks | < 5% | undamped "boiling" (kinetic energy not monotone-decreasing after settle) |
+| **G-02** | feather on boulder at full 4096:1 (after the clamp), dropped from 2 m then resting; boulder dropped on feather at `V_MAX` | sustained penetration < 1 texel; **the boulder tunnels through neither the feather nor the floor** (amended by §7 R-5: the criterion grades the heavy body — the feather's ejection under a `V_MAX` impact is recorded, not graded; graded on the feather: the vmax/ω clamps engage (counted) and its state stays bounded) | < 2 texels | boulder or floor tunneling, or any UNCOUNTED saturation in `invmass_t`/`lambda_t` |
+| **G-03** | 1,000-particle PBF column settling in a sealed box (≈ 7.8 m at CANON 2-texel lattice spacing — the count is the spec, the geometry is DERIVED; amended by §7 R-4) | p95 rest-density error < 2% after settle, stays settled over 5k further ticks | < 5% | undamped "boiling" (kinetic energy not monotone-decreasing after settle) |
+| **G-03b** | stress variant: 5k particles (≈ 39 m column). Verdict gated on the `ALLOY.md` §14.4.3 liquid design pass (`TODO.md` RR-10) — the column crushes its own base in both bindings today | — | recorded, not graded, until RR-10's design pass lands | — |
 | **G-04** | sealed mixed scene (the G-01 stack + 2k particles + 20 free boxes + 10 ropes of 8 distance constraints), 1e6 ticks | monotone non-increasing energy envelope (windowed max over 1k ticks) | slow bounded drift (envelope bounded within 1% of initial over the run) | energy growth |
-| **G-05** | cost sweep: 10k / 20k / 50k particles + 2k bodies, 8 substeps, single thread | 20k ≤ 4 ms PC **and** ≤ 12 ms Pi 4 | ≤ 8 ms PC / > 12 ms Pi | > 8 ms PC at 20k |
+| **G-05** | cost sweep: 10k / 20k / 50k particles + 2k bodies, 8 substeps, single thread | 20k ≤ **32 ms** PC **and** ≤ **96 ms** Pi 4, single-thread (amended by §7 R-3: the old "4 ms" was `ALLOY.md` §11.2's ~8-core budget applied to a single-thread protocol — unreachable by ANY scalar arithmetic incl. double; 32 ms = 4 ms × 8 cores, same budget stated in the protocol's own units) | ≤ 64 ms PC / > 96 ms Pi | > 64 ms PC at 20k |
 | **G-06** | all of the above run twice in one process + PC-vs-Pi cross-compiled | 100% identical per-tick hash traces | — | any divergence (= UB) |
 
 **Substep sweep (ratified):** G-01..G-05 run at substeps **4 / 8 / 16**, not only 8. Substep count
@@ -109,7 +115,10 @@ palette change).
 May: a row's FRAC within the derivation rule (range × margin must still fit); the substep count;
 rung selection. May not: the thresholds; the world constants (§2 of `FX-PALETTE.md` — a world
 constant change is a separate ruling); the 32-bit-vectorizable rule (rung 4 is the only sanctioned
-64-bit storage path, and it keeps 32-bit math).
+64-bit storage path, and it keeps 32-bit math). (The 2026-08-25 §7 R-3/R-4/R-5 amendments are not
+exceptions to "may not touch the thresholds": each fixed a criterion that contradicted its own
+derivation or its own scenario — the doc-bug class of `CLAUDE.md` rule 8, ruled by Rafael, not
+adjusted to fit a result.)
 
 ---
 
@@ -124,7 +133,7 @@ constant change is a separate ruling); the 32-bit-vectorizable rule (rung 4 is t
 
 ---
 
-## 7. Rulings (closed 2026-08-22 — nothing open)
+## 7. Rulings (R-1/R-2 closed 2026-08-22; R-3..R-5 the post-run amendments, ruled 2026-08-25 — nothing open)
 
 - **R-1 Box–box contacts are corner-vs-SDF deepest-point** (Alloy's real method, `ALLOY.md` §2.1),
   not SAT. The bench must exercise the precision of the contact path the sim will ship, or G-01's
@@ -132,6 +141,28 @@ constant change is a separate ruling); the 32-bit-vectorizable rule (rung 4 is t
 - **R-2 G-05 includes the broadphase rebuild** (tiered hash + radix sort) in the budget, reported as
   separate `solve_us` and `broadphase_us` columns so a miss is attributable. The threshold applies
   to the sum.
+- **R-3 The G-05 threshold names its core count and its arithmetic (Gate 0 RR-13).** `ALLOY.md`
+  §11.2 derives the 4 ms solve budget for ~8 cores; §4 here measures single-thread — the two
+  disagreed by the core count, and the literal 4 ms was unreachable by ANY scalar arithmetic
+  (scalar double: ~18 ms at 20k). Threshold restated single-thread at 32 ms PC / 96 ms Pi (§2).
+  Consequences: the pre-committed "PC fail → float fallback" clause was VOID against the old
+  threshold and did not fire; the measured 605 ms is a kernel-shape cost, not a palette cost —
+  ~60 % `isqrt64`'s bit-serial loop, ~30 % a kernel spelled with two roots + three divisions per
+  pair where §3 of `FX-PALETTE.md` needs one root + one reciprocal (91 ns measured vs 176 ns).
+  The W3 solver lane re-grades G-05 after the kernel fixes (normalize-once, Newton `isqrt64`
+  proven through the fxcheck oracle, W cached from the density pass); SIMD (`FX-PALETTE.md` §9
+  R-4) stays the named escalation if the honest budget is still missed.
+- **R-4 G-03 is specified by particle COUNT; geometry derives from CANON spacing (Gate 0
+  RR-14).** The rev-1 row named both ("5k particles, 2 m × 1.2 m") and they contradict at CANON's
+  2-texel lattice: 5k particles is a 39 m column, and 2 m × 1.2 m is 160 particles — too few to
+  grade a density field. THE G-03 is 1,000 particles (≈ 7.8 m — measured: it holds at 2.0–2.1 %
+  p95); the 5k/39 m column is the G-03b stress variant, gated on the RR-10 design pass.
+- **R-5 G-02b grades the boulder, not the feather (Gate 0 RR-15).** The scenario exists to test
+  the 4096:1 mass ratio: the criterion is "the boulder tunnels through neither the feather nor
+  the floor". A 4096:1 plank under a `V_MAX` impact WILL be ejected — that is physics, not a
+  defect; requiring the linearised corner contact to hold a quarter-turn-per-substep spin is
+  requiring what the solver does not claim. Graded on the feather: clamps engage (counted) and
+  state stays bounded. Its ejection kinematics are recorded in the CSV, not graded.
 
 ## 8. Implementation specification
 

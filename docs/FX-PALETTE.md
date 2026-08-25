@@ -1,10 +1,13 @@
-# The fx palette and det math (tidelock, rev 1)
+# The fx palette and det math (tidelock, rev 2)
 
-> **Status:** design rev 1.1, 2026-08-22; reconciled with the W1 fx lane's headers 2026-08-23.
-> Mechanism, policy and rows **DECIDED**; Gate 0
-> (`GATE0-BENCH.md`) *verifies* the rows and may force a recorded rev-2 revision through the
-> pre-committed ladder (§3.2, §9 R-1). `fx_palette.h` is written from this doc; rev 2 carries the
-> measured values.
+> **Status:** rev 2, 2026-08-25 — the Gate 0 decision commit. Rows **DECIDED against measurement**
+> (`tests/gate0/results/2026-08-25-pc-win-netcode/README.md` + the pc2 reproduction beside it;
+> bit-exact across two machines, netcode and dev-shadow tiers). **No row was moved by a failure**;
+> every Gate 0 FAIL was solver design or scenario spec (`TODO.md` RR-10..RR-15). Two rev-2 edits,
+> both within the derivation rule: `omega_t` retuned to its structural cap (§3, §9 R-8) and
+> `lambda_t`'s i64-accumulator status hardened from "likely" to REQUIRED (§3.2 rung 1, §9 R-7).
+> The float fallback did **not** fire. `fx_palette.h` is written from this doc; the rev-2 header
+> edit (the `omega_t` alias + op-table split + trace-pin refresh) is the commit after this one.
 > **Lineage:** expands `PIVOT-DESIGN.md` §3.1–§3.2. PIVOT is the ruling.
 > **Owns:** `src/foundation/fx.h`, `fx_palette.h`, `det_math.h`, `fx_float.h`.
 
@@ -44,12 +47,14 @@ template <typename Rep, int FRAC> struct fx { Rep v; };   // one header, no syst
   costs ~1 extra add per op. Conversions `to<R>(x)` also RNE when narrowing.
 - **No implicit conversions, ever.** Every constructor is `explicit`; `to<R>(x)` is the only
   conversion and it is greppable. `fx` ↔ integer: `fx_int<R>(i)` / `fx_to_int_floor(x)`.
-- **Rows are keyed by format, not by name.** `using pos_t = fx<i32,18>` and `using invmass_t =
-  fx<i32,18>` are one C++ type, as are `q_t`/`stiff_t`/`angle_t`/`dt_t` and `vel_t`/`omega_t`
-  and `scalar_t`/`lambda_t`. The compiler checks *scale*, never units: the mixed-op table
-  (§3.1) therefore has one line per distinct format triple and admits every row of those
-  formats. Distinct-type rows would need a tag parameter (`fx<Rep,FRAC,Tag>`) and a `to<R>` at
-  every unit change - a rev-2 question, filed in `TODO.md` as a ruling request, not decided here.
+- **Rows are keyed by format, not by name (RULED at rev 2 — stays; `TODO.md` RR-5 closed
+  2026-08-25).** `using pos_t = fx<i32,18>` and `using invmass_t = fx<i32,18>` are one C++ type,
+  as are `q_t`/`stiff_t`/`angle_t`/`dt_t` and `scalar_t`/`lambda_t`. The compiler checks *scale*,
+  never units: the mixed-op table (§3.1) has one line per distinct format triple and admits every
+  row of those formats. A tag parameter (`fx<Rep,FRAC,Tag>`) would buy unit checking at the cost
+  of an explicit `to<R>` at every unit change and a larger op table; no desync class found by
+  Gate 0 or the W1 reviews would have been caught by tags, so the retag is not paid. (`vel_t`/
+  `omega_t` ceased to share a format at rev 2 — the §9 R-8 retune, not a tagging decision.)
 - **Comparisons** between identical formats only. `abs`, `min`, `max`, `clamp`, `sign` per format.
 - **Width is a performance decision.** No usable 64-bit SIMD multiply exists on SSE2/AVX2/NEON, so
   every column the solver should vectorize is a 32-bit format. `fx<i64,·>` rows exist only where
@@ -77,7 +82,7 @@ change, not a redesign.
 
 ---
 
-## 3. The palette rows (DECIDED — verified by Gate 0)
+## 3. The palette rows (DECIDED — verified by Gate 0, 2026-08-25)
 
 **Derivation rule:** integer bits ≥ ⌈log₂(range × margin)⌉, the rest is FRAC; 32-bit wherever the
 solver should vectorize. Each row carries a range/resolution line; the `init()` table validator
@@ -91,10 +96,10 @@ checks game data against these ranges (same slot as `v_max`).
 | `stiff_t` (α̃ = α/h²) | **fx<i32,30>** | ±2 | 9.3e-10 | near zero for stiff constraints; precision matters, range doesn't. Tables store α (as `q_t`-scaled data), α̃ precomputed at init with an i64 divide |
 | `q_t` (normalized/unitless) | **fx<i32,30>** | ±2 | 9.3e-10 | **kernel strategy:** PBF/SDF kernels evaluate on q = r/h_kernel ∈ [0,1] — normalize once per pair, polynomial in `q_t`, scale back once; kernel precision becomes world-scale-independent. Also density ratio C = ρ/ρ₀−1, friction coefficients, restitution, blend weights |
 | `angle_t` | **fx<i32,30>** | ±2 turns | ~1e-9 turn | **turns, not radians** — wraps free at ±1 by masking; sin/cos index naturally |
-| `omega_t` | **fx<i32,20>** | ±2,048 turn/s | ~1e-6 turn/s | angular velocity |
+| `omega_t` | **fx<i32,22>** | ±512 turn/s | ~2.4e-7 turn/s | angular velocity. **Retuned at rev 2** (§9 R-8): the implicit encoding `pθ = θ − ω·h` caps \|ω\| at `inv_h/2` = 240 turn/s at 480 Hz whatever the row holds (measured, G-02b), so the old ±2,048 was ~90 % unreachable headroom; ±512 is 2× margin over the structural cap, buying 4× resolution. No longer the same format as `vel_t` — angular and linear velocity are distinct C++ types from rev 2 on |
 | `dt_t` | **fx<i32,30>** | ±2 s | 9.3e-10 s | h, and only h. h² is never a runtime operand (α̃ is precomputed); `inv_h` is the plain integer 480 |
 | `scalar_t` | **fx<i32,16>** | ±32,768 | 1.5e-5 | unitless scalars outside the solver: quanta-path coefficients, animation speed, modifiers, utility scores (§9 R-5) |
-| `lambda_t` | **= `scalar_t`** (accumulated in i64) | ±32,768 m·mass | 1.5e-5 | XPBD Lagrange multiplier (length × mass units); an alias of `scalar_t`. The row most likely to move at rev 2; it is an i64 accumulator within a substep (rung 1) and narrows once at writeback |
+| `lambda_t` | **= `scalar_t`** (accumulated in i64) | ±32,768 m·mass | 1.5e-5 | XPBD Lagrange multiplier (length × mass units); an alias of `scalar_t`. **Rev 2: the row did not move — the accumulator ruling hardened instead** (§9 R-7): λ is an i64 frac-30 local across the substep's sweep, narrowed once per substep (`lam_narrow`, RNE by 14, saturation counted); per-constraint narrowing is BANNED — measured to creep a resting box 12 quanta/tick (`--ladder 0`, G-01). `lambda_t` is storage only |
 | conserved quanta | **plain i32 / i64** | — | — | mass-quanta, moles, charge, load: integers, saturating ops only (`ALLOY.md` §10). Never an fx row |
 
 Stress-case mapping: the feather→boulder denominator is `invmass_t`'s clamp; the sub-texel
@@ -115,7 +120,7 @@ combination compiles because no other helper is instantiated.
 | `pos_t × pos_t` | `fx<i64,36>` (local, never stored) | squared distance before `sqrt<pos_t>` |
 | `omega_t × dt_t` | `angle_t` (delta) | rotate |
 | `angle_t` → `(sin, cos)` | `q_t`, `q_t` | det math |
-| `stiff_t + invmass_t (+ invmass_t)` | `invmass_t`-ranged `fx<i64,30>` local | the XPBD denominator, widened; **one `rne_div` on the raw i64 bits** (§9 R-6: `div<R>` is 32-bit; the caller spells the shift — `ALLOY.md` §14.4.3) |
+| `stiff_t + invmass_t (+ invmass_t)` | `invmass_t`-ranged `fx<i64,30>` local | the XPBD denominator, widened; **one `rne_div` on the raw i64 bits** (§9 R-6: `div<R>` is 32-bit; the caller spells the shift — `ALLOY.md` §14.4.3). A body's angular share `inv_I·(r×n)²` joins the den as the same i64 frac-30 local and is **never narrowed into `invmass_t`** (§9 R-8: it overflows the row for any light plank — measured, G-02) |
 | `invmass_t = div(unit, quanta·unit_mass)` | at creation only | i64 divide, not a per-tick op |
 
 Precomputed constants (rounded once, shared): `H = dt_t(1/480)`, `G_SUBSTEP = vel_t(9.81·h)`,
@@ -125,9 +130,11 @@ Precomputed constants (rounded once, shared): `H = dt_t(1/480)`, `G_SUBSTEP = ve
 
 Climb rung by rung; the float fallback fires only when the ladder is exhausted.
 
-1. **Widened accumulate + round-once-per-substep — the LEAD, day one.** Solver-local positions,
-   velocities and λ stay i64 across a substep's constraint sweep; rounded to storage format once.
-   Most of 64-bit's precision at zero storage/bandwidth cost.
+1. **Widened accumulate + round-once-per-substep — REQUIRED, not a rung to climb (hardened at
+   rev 2, §9 R-7).** Solver-local positions, velocities and λ stay i64 across a substep's
+   constraint sweep; rounded to storage format once. Most of 64-bit's precision at zero
+   storage/bandwidth cost. Gate 0 measured the alternative: per-constraint λ narrowing creeps a
+   resting box 12 quanta/tick while the double shadow sits still (`--ladder 0`, G-01).
 2. **RNE in `mul<R>`, day one** (§1).
 3. **Residual carry** — per-quantity rounding residual fed back next substep (error diffusion,
    deterministic): a standing Gate 0 bench variant, adopted only if rungs 1–2 leave a stall.
@@ -273,7 +280,7 @@ too: `pos2_wide_t = fx<i64,36>`, `den_wide_t = fx<i64,30>`.
 
 ---
 
-## 9. Rulings (closed 2026-08-22 — nothing open)
+## 9. Rulings (R-1..R-6 closed 2026-08-22/23; R-7..R-9 the Gate 0 rev-2 rulings, 2026-08-25 — nothing open)
 
 - **R-1 The rows are DECIDED at the §3 values.** Gate 0 *verifies* them; it does not choose them.
   A convergence failure triggers the pre-committed ladder (§3.2) and, if a row must move, a
@@ -306,6 +313,31 @@ too: `pos2_wide_t = fx<i64,36>`, `den_wide_t = fx<i64,30>`.
   and the circuit solve's `floor_div` were the same downward bias §1 bans. The `<< S` is a
   multiply, never a shift of a signed value (`CPP-SUBSET.md` §5). A `div<R>` over an i64 operand
   becomes an op-table row only if a third site appears.
+- **R-7 In-kernel λ is an i64 frac-30 local; `lambda_t` is storage (ruled 2026-08-25, Gate 0
+  RR-8 — rung 1 REQUIRED).** `dλ = rne_div(num · 2³⁰, den)` (with the deterministic operand
+  halving when `|num| ≥ 2³³` — a pure function of the operands), accumulated in i64 across the
+  substep's sweep, narrowed once per substep (`lam_narrow`: RNE by 14, out-of-row values counted
+  and clamped). The per-constraint form `lambda_t(i32(rne_div(num·2¹⁶, den)))` is banned in sim
+  code: it quantises a unit-mass correction to 4 `pos_t` quanta and creeps a resting box 12
+  quanta/tick (measured, both bindings; `tests/gate0/results/…/G01_s8_l0.csv`). `ALLOY.md`
+  §14.4.3 carries the spelling.
+- **R-8 The angular constraint terms stay wide; `omega_t` is retuned to its structural cap
+  (ruled 2026-08-25, Gate 0 RR-9).** (a) A body's denominator share `inv_I·(r×n)²` is computed
+  and kept as the i64 frac-30 local (`w_ang30`), never narrowed into `invmass_t` — a 4096:1 plank
+  with a 1.25 m lever has `inv_I·(r×n)² ≈ 12,000`, outside ±8,192. (b) `inv_I` itself is stored
+  in `invmass_t`, which bounds CONTENT: the validator rejects a body whose `inv_I` exceeds the
+  row (the smallest legal 4096:1 body is 2.5 m × 0.25 m); a lighter/smaller body is a new ruling,
+  not a quiet clamp. (c) `omega_t` becomes `fx<i32,22>` (±512 turn/s): the implicit encoding
+  `pθ = θ − ω·h` caps |ω| at `inv_h/2` = 240 turn/s by construction, so range above the cap was
+  unreachable; ±512 keeps 2× margin and the 4 reclaimed bits go to resolution. Consequence:
+  `vel_t` and `omega_t` are
+  distinct C++ types from rev 2 — the op table instantiates the omega triples explicitly.
+- **R-9 Wide-local, narrow-storage is the palette-wide principle (ruled 2026-08-25, Gate 0
+  RR-8/RR-9/RR-11).** Kernels compute in i64 frac-30 locals; palette rows are what SoA columns
+  store, written once per substep at the single rounding point. Third instance: the PBF density
+  ratio ρ/ρ₀ stays an i64 frac-30 local through the constraint (it exceeds `q_t`'s ±2 under
+  impact — measured, G-03/G-04); `q_t` clamps only the stored metric copy. A future kernel that
+  narrows mid-sweep is a bug by this ruling, not a style choice.
 
 ## 10. Implementation specification
 
@@ -366,7 +398,7 @@ template <typename R, typename A, typename B> R div(A a, B b) {
     TL_ASSERT(q >= INT32_MIN && q <= INT32_MAX);
     return fx_raw<R>(i32(q));
 }
-template <typename R, typename A> R mul_int(A a, i32 k);            // exact a.v * k, then rescaled from A's point to R's (pos_t x 480 -> vel_t widens 2 bits exactly; angle_t x 480 -> omega_t narrows 10 with RNE); listed in the op table as fx_op_allowed<R, A, i32>
+template <typename R, typename A> R mul_int(A a, i32 k);            // exact a.v * k, then rescaled from A's point to R's (pos_t x 480 -> vel_t widens 2 bits exactly; angle_t x 480 -> omega_t narrows 8 with RNE); listed in the op table as fx_op_allowed<R, A, i32>
 template <typename A> i64 mul_wide(A a, A b);                        // raw i64 product, no rounding — for squared lengths (fx<i64,36> local)
 ```
 
@@ -384,7 +416,7 @@ Wrapping/saturating integer helpers for quanta paths live in the same header: `w
 ```cpp
 using pos_t = fx<i32,18>;  using vel_t = fx<i32,20>;  using invmass_t = fx<i32,18>;
 using stiff_t = fx<i32,30>; using q_t = fx<i32,30>;  using angle_t = fx<i32,30>;
-using omega_t = fx<i32,20>; using dt_t = fx<i32,30>; using scalar_t = fx<i32,16>; using lambda_t = scalar_t;
+using omega_t = fx<i32,22>; using dt_t = fx<i32,30>; using scalar_t = fx<i32,16>; using lambda_t = scalar_t;
 constexpr u32 FX_PALETTE_REV = 1;
 
 constexpr pos_t   TEXEL          = fx_raw<pos_t>(1 << 14);                 // 1/16 m
