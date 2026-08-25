@@ -59,7 +59,10 @@ struct Scene {
     // Scenario-specific metric parameters (docs/GATE0-BENCH.md §8.4)
     u32 settle_tick;        // metrics start after this tick (G-01: 600; G-03: GATE0_G03_SETTLE)
     u32 stack_top_body;     // G-01: the body whose y is the sink/pop probe; 0xFFFFFFFF = none
-    u32 _pad0;
+    u32 graded_body;        // G-02: the body the criterion GRADES (the boulder - docs/GATE0-BENCH.md
+                            // §7 R-5: tunneling and sustained penetration are judged on this body
+                            // only; every other carrier's ejection is recorded). 0xFFFFFFFF = the
+                            // scenario grades every carrier (G-01/G-03/G-04/G-05).
 };
 
 // Allocates the scene's arrays from `arena` at the given capacities; counts start at 0.

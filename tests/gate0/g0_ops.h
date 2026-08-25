@@ -382,6 +382,38 @@ inline pos_t pos_mul_int(pos_t a, i32 k) { return fx::fx_raw<pos_t>(fx::sat_mul(
 // (a * b) >> 30 on two frac-30 locals, saturating product asserted not to saturate.
 inline local_t local_mul30(local_t a, local_t b) { const i64 p = fx::sat_mul(a, b); TL_ASSERT(p != INT64_MAX && p != INT64_MIN); return fx::rne_shr(p, LOCAL_FRAC); }
 
+// --- the normalize-once pair kernel (docs/FX-PALETTE.md §3 q_t row: "normalize once per pair";
+// the 91 ns form docs/GATE0-BENCH.md §7 R-3 names). ONE root (the fx::len isqrt64) and ONE
+// reciprocal (rne_div) per pair, against the rev-1 spelling's two roots + three divisions:
+//   q = r / h_kernel is an EXACT shift (h_kernel raw is a power of two; q.v = r.v << q_shift
+//   equals div<q_t>(r, h) bit for bit - consts_make asserts the precondition);
+//   n = d * (2^48 / r.v) >> 18: the reciprocal 1/r at frac 30 (1/m) via one rne_div, then a
+//   multiply per component. Its ROUNDING DIFFERS from normalize()'s div<q_t>(d.x, r) per
+//   component, so the physics is a different evaluation order from the rev-1 bench: the re-run
+//   is judged, not reproduced (TODO.md, the post-rulings closeout slice).
+// Returns false when r == 0: n is undefined (left zero); q = 0 and W(0) stay valid.
+struct PairGeom { pos_t r; q_t q; vec2<q_t> n; };
+inline bool pair_geom(vec2<pos_t> d, pos_t hk, u32 q_shift, PairGeom* g) {
+    (void)hk;                                                     // the fx side derives q from q_shift (hk is the double binding's operand)
+    const pos_t r = fx::len(d);                                   // the one isqrt64
+    g->r = r;
+    const i64 qv = i64(r.v) * (i64(1) << q_shift);
+    TL_ASSERT(fx::fx_fits<q_t>(qv));                              // callers test within_radius(d, h) first
+    g->q = fx::fx_raw<q_t>(i32(qv));
+    if (r.v == 0) { g->n = { fx::fx_raw<q_t>(0), fx::fx_raw<q_t>(0) }; return false; }
+    const i64 inv_r = fx::rne_div(i64(1) << 48, i64(r.v));        // the one reciprocal: 1/r at frac 30 (1/m)
+    g->n = { fx::fx_raw<q_t>(i32(fx::rne_shr(i64(d.x.v) * inv_r, pos_t::FRAC_BITS))),
+             fx::fx_raw<q_t>(i32(fx::rne_shr(i64(d.y.v) * inv_r, pos_t::FRAC_BITS))) };   // |d.c| <= r keeps the product < 2^49 and |n| <= ONE + rounding
+    return true;
+}
+// q = r / h_kernel by the same exact shift, for the pair walks that need no direction (XSPH).
+inline q_t q_of_r(pos_t r, pos_t hk, u32 q_shift) {
+    (void)hk;
+    const i64 qv = i64(r.v) * (i64(1) << q_shift);
+    TL_ASSERT(fx::fx_fits<q_t>(qv));
+    return fx::fx_raw<q_t>(i32(qv));
+}
+
 #else
 // ---- the double mirror: same names, same argument orders, libm arithmetic ------------------
 using pos_t     = double;
@@ -407,7 +439,7 @@ inline invmass_t cvt_w(::invmass_t x)   { return fxd(x.v, 18); }
 inline stiff_t   cvt_stiff(::stiff_t x) { return fxd(x.v, 30); }
 inline q_t       cvt_q(::q_t x)         { return fxd(x.v, 30); }
 inline angle_t   cvt_ang(::angle_t x)   { return fxd(x.v, 30); }
-inline omega_t   cvt_omega(::omega_t x) { return fxd(x.v, 20); }
+inline omega_t   cvt_omega(::omega_t x) { return fxd(x.v, ::omega_t::FRAC_BITS); }   // 22 at rev 2 - derived, not restated (this literal sat at 20 when the row moved)
 inline dt_t      cvt_dt(::dt_t x)       { return fxd(x.v, 30); }
 inline scalar_t  cvt_scalar(::scalar_t x) { return fxd(x.v, 16); }
 inline lambda_t  lam_zero()             { return 0.0; }
@@ -547,6 +579,20 @@ inline pos_t pos_from_raw(i64 raw) { return fxd(raw, 18); }
 inline bool  within_radius(vec2<pos_t> d, pos_t h) { return d.x * d.x + d.y * d.y < h * h; }
 inline pos_t pos_mul_int(pos_t a, i32 k) { return a * double(k); }
 inline local_t local_mul30(local_t a, local_t b) { return a * b; }
+
+// The double mirror of the normalize-once pair kernel: same structure (one sqrt, one reciprocal,
+// multiplies), so the two bindings change evaluation order together.
+struct PairGeom { pos_t r; q_t q; vec2<q_t> n; };
+inline bool pair_geom(vec2<pos_t> d, pos_t hk, u32, PairGeom* g) {
+    const double r = sqrt(d.x * d.x + d.y * d.y);
+    g->r = r;
+    g->q = r / hk;
+    if (r == 0.0) { g->n = { 0.0, 0.0 }; return false; }
+    const double ir = 1.0 / r;
+    g->n = { d.x * ir, d.y * ir };
+    return true;
+}
+inline q_t q_of_r(pos_t r, pos_t hk, u32) { return r / hk; }
 #endif
 
 }  // namespace G0_NS
