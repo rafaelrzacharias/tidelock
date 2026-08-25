@@ -46,8 +46,9 @@ tidelock readers never saw rev 2. The table exists so the reasoning is not re-li
   (§1.1). Every budget in §7, §10.4, §16 is a **model** pending Gate 0 (G-05) and Hovel.
 - Cross-ISA bit-exactness is delivered by fixed-point-by-construction (`DETERMINISM.md`), not by a
   compiler. The residual silent-desync class is UB, not FP — hence sanitizers stay in the gate.
-- The physical perf/soak bench is the two PCs (x86-64 Windows) now, the Steam Deck (x86-64
-  Linux) when it joins; the Pi 4 left the program (ruled 2026-08-25). The *target* set is
+- The physical *network-soak* bench is the two PCs (x86-64 Windows) now, the Steam Deck (x86-64
+  Linux) when it joins; the Pi 4 left the program (ruled 2026-08-25), and where perf is *graded*
+  is `WORKFLOW.md` §4's policy. The *target* set is
   `CANON.md`'s {Windows, Linux} × {x86-64, arm64} matrix — cross-ISA conformance runs on the
   hosted CI arm64 legs, not on owned hardware.
 
@@ -1666,11 +1667,17 @@ What 8 adds that 3 cannot: the `1−(1−p)^7` curve is only meaningful at 7 rem
 transitions; the simultaneous-loss deadlock (R10) in its real shape.
 
 **The nightly four-leg battletest (added 2026-08-25; lands in W5 with net-p3..p8):** the *same*
-8-process loopback match — seeded scripted inputs via the Script producer, the S-13 impairment
-shim injecting deterministic loss/jitter/latency, real ENet over loopback so WinSock and the
-POSIX socket paths are both exercised — run **independently on each of the four `CANON.md`
-target legs**, then a cross-leg diff of the per-tick hash traces. Determinism makes the four
-runs the same match, so this is an 8-player game proven bit-identical across
+8-process loopback match — seeded scripted inputs via the Script producer, the §19.7
+`ImpairmentShim` injecting deterministic loss/jitter/latency (the shim exists only under
+`TL_DEV=1`, so this job runs the **dev tier**; timing is not graded here, so the tier costs
+nothing) — real ENet over loopback, exercising WinSock and the POSIX socket paths — run
+**independently on each of the four `CANON.md` target legs**, then a cross-leg diff of the
+per-tick hash traces. The cross-leg identity holds only when the *sequenced input log* is
+pinned, which the harness enforces rather than hopes: **fixed input delay for the run (no
+adaptive-delay movement) and zero deadline-miss substitutions**, both asserted per run — a run
+that trips either assert is *invalid and re-run*, not a red diff, because adaptive delay (§7.4)
+and per-action-class substitution (§8.4) are legitimate log differences, not bugs. With the log
+pinned, the four runs are the same match: an 8-player game proven bit-identical across
 {Windows, Linux} × {x86-64, arm64} every night, with zero inter-machine packets required.
 Boundary, stated: no live packets ever flow *between* ISAs here (wire-format asymmetry is the
 job of the `TL_WIRE_STRUCT` static asserts and the encoder goldens/byte-stability tests), and

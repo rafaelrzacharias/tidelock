@@ -718,14 +718,21 @@ the drop heights), all declared in the README; no threshold, world constant or r
       `nightly.yml` can therefore land now on hosted runners: full `tl_tests --isolate` with no
       `--timeout-ms` and no `!slow` filter on all four legs; `fxcheck` full + `oracle.py
       check-coeffs` + `oracle.py verify` (the item below); `tl_gate0 --scenario G06` per leg with
-      a cross-leg `hash_lo64` diff (the first cross-ISA solver evidence). The *perf/soak* half
-      (replay-diff against PR artifacts, G-05 on real hardware) runs on the reference PC now and
-      gains a self-hosted `deck` runner when the Deck is benched (the Pi left the program,
-      2026-08-25). `weekly.yml` unchanged.
+      a cross-leg `hash_lo64` diff (the first cross-ISA solver evidence). Perf grading is
+      `WORKFLOW.md` §4's policy (elected-leg radar; absolutes suspended at the PC rev-2 record);
+      the *network-soak* half (replay-diff against PR artifacts over a real LAN) gains a
+      self-hosted `deck` runner when the Deck is benched (the Pi left the program, 2026-08-25).
+      `weekly.yml` unchanged.
 - [ ] **Perf-leg election (`WORKFLOW.md` §4, ruling request).** Run `perf.yml` (dispatch, or its
       first nightly), pull the four `perf-g05-*` artifacts, compute per-leg medians and variance
       grouped by CPU model, and file the election of the perf reference leg as a ruling here.
-      Until it is made, G-05 absolute grading stays against the committed PC rev-2 record.
+      Absolute grading is suspended at the committed PC rev-2 record regardless, until the Deck
+      re-anchors (`WORKFLOW.md` §4).
+- [ ] **After the election: build the radar** (`WORKFLOW.md` §4 promises it; nothing implements
+      it yet — sweep D7). Commit the elected leg's baseline medians, add the compare step
+      (median vs baseline, same CPU model only, `CANON.md`'s `PERF_WARN_X`/`PERF_FAIL_X` bands)
+      to `perf.yml` or `nightly.yml`, and make a band breach visible — warn = annotation,
+      fail = red job.
 - [ ] **`ship` playtest artifact** (`WORKFLOW.md` §4): when v0's first playable exists, CI
       uploads the `ship-win` game binary as a downloadable artifact — personal machines are
       playtest instances, and the download is how a build reaches one.

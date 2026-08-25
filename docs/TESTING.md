@@ -69,8 +69,9 @@ the hosted arm64 legs (re-ruled 2026-08-25), sanitizers in the PR lane on the si
 Every leg of the `CANON.md` target matrix builds natively on a hosted CI runner and runs the same
 scenes with the same seeds; hash traces and `build_id` are diffed across legs. Any difference is a
 bug (UB by default hypothesis); the OS and ISA axes of the matrix separate OS effects from ISA
-effects. Physical perf/soak jobs run the same diff on reference hardware over SSH via
-`tools/deploy.sh` (`BUILD.md` §7) — the PC now, the Steam Deck when it enters the bench.
+effects. Physical *network-soak* jobs run the same diff over a real LAN via `tools/deploy.sh`
+(`BUILD.md` §7) once Hovel exists — the PCs now, the Steam Deck when it enters the bench; where
+perf is *graded* is `WORKFLOW.md` §4's policy, not a machine named here.
 Gate 0's G-06 is the first use; Hovel Milestone A the second; the 10 h soak (Milestone E) the
 successor of Ore's 43 M-tick run.
 
@@ -135,7 +136,8 @@ net packet decode, Luau bytecode loader — under ASan in nightly.
   stb_sprintf; every CI system reads it). CI is **GitHub Actions**: hosted native runners cover
   the whole `CANON.md` target matrix in the PR lane (re-ruled 2026-08-25 — conformance no longer
   waits on owned hardware); the Steam Deck joins as a self-hosted runner for the nightly
-  perf/soak job when it enters the bench (the Pi 4 left the program, same ruling).
+  *network-soak* job when it enters the bench (the Pi 4 left the program, same ruling; perf
+  grading is `WORKFLOW.md` §4's policy).
 - **R-2 `tests/` obeys the subset**, with two exemptions: the generated test list and
   `printf`-class io + clock + filesystem access (tests are not sim code). `tools/` is fully exempt.
 

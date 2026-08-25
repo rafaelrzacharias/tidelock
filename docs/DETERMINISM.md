@@ -216,9 +216,9 @@ reflection field tables give a field-by-field diff of the diverging component (`
 
 - **R-3 The determinism target is the platform matrix, not a machine list (ruled 2026-08-25).**
   The target set — home: `CANON.md`, Build tiers and targets — is **{Windows, Linux} ×
-  {x86-64, arm64}**. Reference *hardware instances* for perf and soak are the PC now and the
-  Steam Deck later (the Pi 4 left the program, ruled 2026-08-25), no longer the definition;
-  conformance (bit-exact traces, one `build_id`) is proven on any
+  {x86-64, arm64}**. Machines are instances, never the definition (the Pi 4 left the program,
+  ruled 2026-08-25; perf grading is `WORKFLOW.md` §4's policy; the physical PCs serve Hovel's
+  network soaks, `NETCODE.md` §19.4); conformance (bit-exact traces, one `build_id`) is proven on any
   conforming instance, which in practice is CI's hosted native runners on every PR-lane run
   (`BUILD.md` §10.4). Supersedes the three-machine phrasing in item 5's original text; a new OS
   or ISA enters by ruling in `CANON.md`, never by drift.

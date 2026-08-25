@@ -465,7 +465,7 @@ Pixel goldens (FLIP-compared, `--render=software`) are nightly, never PR-blockin
 4. `extract.cpp`, `sprite.cpp` + `extract_snap_and_arc`; a textured sprite moving under interpolation at 144 Hz render / 60 Hz sim shows no stutter (manual).
    **v0 done:** steps 1–4 green; `tidelock` draws sprites through the queue; `stats_draw_calls == batches`; zero heap allocation per frame (the allocator shim counter is 0 in steady state).
 5. Milestone 2: `simview.cpp` chunks (+ `simview_half_texel`), then bodies, particles, basins, burn; `parallel_for` adoption when `JOBS.md` lands (the writer is already chunk-keyed).
-   **Milestone 2 done:** a carved chunk re-uploads only on `dirty_serial` change (counter test), ~60 visible chunks ≤ 1 ms CPU write + upload on the reference PC.
+   **Milestone 2 done:** a carved chunk re-uploads only on `dirty_serial` change (counter test), ~60 visible chunks ≤ 1 ms CPU write + upload, graded per `WORKFLOW.md` §4 (the committed PC rev-2 record until the Deck re-anchors).
 
 ---
 

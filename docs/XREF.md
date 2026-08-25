@@ -201,7 +201,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `BUILD.md` -> §15.1, §19.5
 - `CANON.md` -> §15.1, §19.4
 - `CONTAINERS.md` -> §14.1
-- `DETERMINISM.md` -> §14
+- `DETERMINISM.md` -> §14, §19.4
 - `FRAME-LOOP.md` -> §7.4, §20
 - `INPUT.md` -> §8.4, §12.2
 - `JOBS.md` -> §2
@@ -274,7 +274,11 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ROADMAP.md` -> §9
 
 ## WORKFLOW.md
+- `ALLOY.md` -> §4
+- `BUILD.md` -> §4
 - `CANON.md` -> §4
 - `DETERMINISM.md` -> §4
 - `GATE0-BENCH.md` -> §4
+- `NETCODE.md` -> §4
+- `RENDER2D.md` -> §4
 - `TESTING.md` -> §4

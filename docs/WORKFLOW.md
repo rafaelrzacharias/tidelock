@@ -14,7 +14,10 @@
   start** — before substantive commits pile up. The PR is not a request for outside review
   (external PRs are disabled; every PR is Rafael's own work, `CLAUDE.md` public-repo protocol);
   it is machinery: CI runs on every push, review findings have an anchor, and the branch
-  auto-deletes on merge.
+  auto-deletes on merge. When a session's tooling cannot open the PR (integration permissions),
+  Rafael opens it from the branch's compare URL — one tap; everything else stays automated.
+  The repo's squash/rebase merge toggles remain enabled in settings; the merge-commit rule below
+  is convention until Rafael flips them off (a one-tap hardening).
 - Inside the lane, `CLAUDE.md`'s operating contract applies unchanged: model gate, slice brief,
   one feature per commit, commit **and** push every turn, docaudit before docs commits.
 - **Merge method: merge commit — never squash, never rebase.** One-feature-per-commit history
@@ -48,12 +51,15 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
 - **Perf grading moves to an elected CI leg.** `.github/workflows/perf.yml` measures the G-05
   sweep N times per matrix leg, recording CPU model, medians and variance as artifacts; the
   election of the reference leg is a **ruling made from that data** (request filed in
-  `TODO.md`), never before it. Shared-runner numbers are a regression radar: medians against a
-  committed baseline on the elected leg, warn ≈1.3×, fail ≈2×, and **never a comparison across
-  CPU models** — the fleet is heterogeneous, so every measurement records its silicon.
-- Absolute thresholds (`GATE0-BENCH.md` §2) grade against the elected leg on an interim basis
-  and **re-anchor on the Steam Deck when it is benched** — the only fixed silicon in the
-  program's future is the shipping min-spec machine.
+  `TODO.md`), never before it. The elected leg carries the **regression radar only**: medians
+  against a committed baseline, grouped by CPU model — **never a comparison across models**
+  (the fleet is heterogeneous, so every measurement records its silicon). The radar bands live
+  in `CANON.md` (Perf grading).
+- **Absolute grading is suspended at the committed PC rev-2 record**
+  (`tests/gate0/results/`, the last fixed-silicon measurement) until the Steam Deck —
+  the shipping min-spec machine and the only fixed silicon in the program's future — is
+  benched and **re-anchors the `GATE0-BENCH.md` §2 thresholds by ruling**. A shared runner
+  never grades an absolute number: an elected *label* is not fixed silicon.
 - **Personal machines are playtest instances, nothing more**: CI's `ship` artifact is the
   download for human look-and-feel sessions (`TODO.md` carries the upload step, landing with
   v0's first playable). The physical PCs remain Hovel's *network-soak* hardware
@@ -65,4 +71,7 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
 - **R-2 The perf reference retires from owned hardware to the elected CI leg** (§4); the
   election itself waits on `perf.yml`'s first data set and is filed in `TODO.md`.
 
-*Rev 1 — 2026-08-25. This doc shipped through its own §1 process as the first governed PR.*
+*Rev 1 — 2026-08-25; §1/§4 amended same day by the slice's own adversarial review (D4/D6: the
+PR-fallback actor named, absolute grading pinned to the PC rev-2 record until the Deck). This
+doc shipped as the first §1-governed PR — opened via the App grant, review verdict recorded on
+it.*

@@ -4,7 +4,9 @@
 # (TODO.md carries the request), never asserted; shared-runner numbers are regression radar and
 # never compare across CPU models, which is why cpu.txt rides with every run. A G-05 verdict
 # FAIL (exit 3) is data here, not a job failure - the honest 32 ms miss is already on record
-# (GATE0-BENCH.md §2); any other nonzero exit is a real error and fails loudly.
+# (GATE0-BENCH.md §2); any other nonzero exit is a real error and fails loudly. The 300-minute
+# timeout is sized for today's escape-truncated G-05 runs; when the W3 solver work makes full
+# 500-tick sweeps run to completion, re-measure the slowest leg and resize.
 name: perf
 
 on:
@@ -71,9 +73,14 @@ jobs:
           cat perf/cpu.txt
       - name: G-05 x3 (medians and variance are computed offline from the artifacts)
         shell: bash
+        # Both traps below were found by this slice's adversarial review (D1/D2) and are load-
+        # bearing: a bare var="$(cond && echo x)" under set -e aborts the step when cond is
+        # false, and without pipefail the pipe into tee returns TEE's status - every tl_gate0
+        # exit code would read as 0, corrupting the very data the election reads.
         run: |
-          set -eu
-          bin="out/${{ env.PRESET }}/bin/tl_gate0$([ '${{ runner.os }}' = 'Windows' ] && echo .exe)"
+          set -euo pipefail
+          ext=""; [ "${{ runner.os }}" = "Windows" ] && ext=".exe" || :
+          bin="out/${{ env.PRESET }}/bin/tl_gate0$ext"
           python tools/audit/binarch.py --file "$bin" --expect "$([ '${{ runner.arch }}' = 'ARM64' ] && echo aarch64 || echo x86_64)"
           for i in 1 2 3; do
             mkdir -p "perf/run$i"
@@ -84,6 +91,9 @@ jobs:
             [ "$rc" -eq 0 ] || [ "$rc" -eq 3 ] || exit "$rc"
           done
       - uses: actions/upload-artifact@v4
+        # always(): partial CSVs and cpu.txt are the election's raw data - a failed later run
+        # must not discard the earlier ones.
+        if: always()
         with:
           name: perf-g05-${{ matrix.os }}
           path: perf/

@@ -144,13 +144,12 @@ slots, allocated once. Registration order = lockstep contract.
 **{Windows, Linux} × {x86-64, arm64}** — triples `x86_64-pc-windows-msvc`,
 `aarch64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`. Targets are
 OS × ISA pairs, not machines: any conforming hardware is a peer. CI's hosted native runners are
-the conformance instances (bit-exact traces, one `build_id` — `BUILD.md` §10.4). **Perf grading
-is the elected CI leg** (`WORKFLOW.md` §4, re-ruled 2026-08-25; the election is made from
-`perf.yml`'s per-leg measurements and filed in `TODO.md`): regression-relative on one leg, never
-across CPU models, with absolute thresholds re-anchoring on the Steam Deck when it is benched.
-Personal machines are playtest instances; the physical PCs stay as Hovel's network-soak hardware
-(`NETCODE.md` §19.4). The Pi 4 left the program (ruled 2026-08-25). A new OS or ISA enters this
-list by ruling, not by drift.
+the conformance instances (bit-exact traces, one `build_id` — `BUILD.md` §10.4). **Perf
+grading:** the policy home is `WORKFLOW.md` §4 (re-ruled 2026-08-25); the radar bands are
+constants and live here: **`PERF_WARN_X` = 1.3 · `PERF_FAIL_X` = 2** (median vs the committed
+baseline, same CPU model only). Personal machines are playtest instances; the physical PCs stay
+as Hovel's network-soak hardware (`NETCODE.md` §19.4). The Pi 4 left the program (ruled
+2026-08-25). A new OS or ISA enters this list by ruling, not by drift.
 
 Tiers `debug` (`-O0 -g`), `dev` (`-O1 -g`, `TL_DEV=1`), `netcode` (`-O2 -g1`), `ship`. Libs
 `tl_foundation`, `tl_foundation_det` (audited), `tl_core`, `tl_sim` (audited), `tl_net`,
