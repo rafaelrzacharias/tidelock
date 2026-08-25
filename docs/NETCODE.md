@@ -46,10 +46,10 @@ tidelock readers never saw rev 2. The table exists so the reasoning is not re-li
   (§1.1). Every budget in §7, §10.4, §16 is a **model** pending Gate 0 (G-05) and Hovel.
 - Cross-ISA bit-exactness is delivered by fixed-point-by-construction (`DETERMINISM.md`), not by a
   compiler. The residual silent-desync class is UB, not FP — hence sanitizers stay in the gate.
-- The three machines — PC x86-64 Windows, Steam Deck x86-64 Linux, Pi 4 aarch64 Linux — remain
-  the physical perf/soak reference set; the *target* set is `CANON.md`'s {Windows, Linux} ×
-  {x86-64, arm64} matrix (ruled 2026-08-25). G-05's severity split (PIVOT §10) decides whether
-  the Pi stays a reference peer or becomes best-effort.
+- The physical perf/soak bench is the two PCs (x86-64 Windows) now, the Steam Deck (x86-64
+  Linux) when it joins; the Pi 4 left the program (ruled 2026-08-25). The *target* set is
+  `CANON.md`'s {Windows, Linux} × {x86-64, arm64} matrix — cross-ISA conformance runs on the
+  hosted CI arm64 legs, not on owned hardware.
 
 ---
 
@@ -92,7 +92,7 @@ doc or a vendored library:
 | Snapshot ring | `MEMORY.md` — the registered arena set, N copies allocated once (PIVOT §4) |
 | Sim-script bytecode in the lockstep contract | `LUAU-LAYER.md` |
 | Test runner, record→replay, per-arena hash trace | `TESTING.md` |
-| Cross-ISA proof | Gate 0 G-06 (PC-vs-Pi cross-compiled bit-compare) + Hovel Milestone E |
+| Cross-ISA proof | Gate 0 G-06 (cross-leg bit-compare on the CI target matrix) + Hovel Milestone E |
 | N-way lockstep harness | `tests/hovel/` (§19) |
 
 ---
@@ -134,7 +134,7 @@ is a redesign, not a tuning change.
 > identically (§4.2).
 
 > **INV-7 — Worker-count invariance is a peer-facing requirement.**
-> A Pi 4 and a 16-core desktop share a match. The sim must produce identical hashes at 1/2/8/16
+> A 4-core handheld and a 16-core desktop share a match. The sim must produce identical hashes at 1/2/8/16
 > workers or lockstep fails regardless of netcode quality. Delivered by `JOBS.md`'s chunk-keyed
 > rule (outputs keyed by chunk id, merges in chunk order, stealing permitted). The netcode's role
 > is to make it a **gate** (§7.7).
@@ -475,8 +475,8 @@ sim ever read it.
 ```
 
 **These are estimates carried from `ALLOY.md`'s float-era budget.** Gate 0 G-05 re-derives them
-for fixed point: pass at 20k particles ≤ 4 ms PC *and* ≤ 12 ms Pi; > 8 ms PC at 20k is
-pivot-level. If 20k does not fit, the budget moves (counts, substeps), not the verdict. The budget
+for fixed point: pass at 20k particles per `GATE0-BENCH.md` §2's PC threshold (the Pi half left
+with the Pi, 2026-08-25); > 8 ms PC at 20k is pivot-level. If 20k does not fit, the budget moves (counts, substeps), not the verdict. The budget
 is per peer and independent of peer count.
 
 ### 7.2 Therefore: rollback is not cheap (model)
@@ -1184,7 +1184,7 @@ The player never drops. Recovery is secondary; if it fires often, §14.4 is what
 `BUILD.md` §5, and used under those names everywhere. `build_id` covers the source tree, the
 semantic compile defines, the tier, the palette rev and the sim-script bytecode - and is
 deliberately **target-independent** (`BUILD.md` §9 R-8), which is what lets one `build_id` cover the
-PC, the Deck and the Pi in §19.5's runbook; the compiler, triple and flag spellings live in
+every bench machine in §19.5's runbook; the compiler, triple and flag spellings live in
 `build_env`, reported in CSVs and crash reports and never compared. `session_fingerprint` covers
 `build_id` plus the
 reflection field tables (the cross-peer layout check for hashed state that is not a hand-written
@@ -1290,7 +1290,7 @@ over a long session is accepted as degradation; remedy is end-and-reseat, free u
 | Full-world rollback, depth 6 | **~48 ms — not affordable** |
 
 Headroom on a rollback tick is ~4.6 ms: affordable, not comfortable, and a second reason the
-horizon stays short. Per-peer, unaffected by peer count. The Pi question is §19.4.
+horizon stays short. Per-peer, unaffected by peer count. The weakest-peer question is §19.4.
 
 ### 16.3 Memory and storage
 
@@ -1407,7 +1407,7 @@ measured on a cheap region analogue **before Alloy exists**.
 
 ```
   GATE 0  (foundation)  fixed-point XPBD + PBF convergence & cost bench (PIVOT §10)
-                        G-06: run twice + PC-vs-Pi cross-compiled, identical hash traces
+                        G-06: run twice + cross-leg on the CI target matrix, identical hash traces
   GATE 1  (core)        v0 "window + moving sprite + 60 Hz", test-infra-first
   GATE 2  (core)        per-arena hash + record->replay->compare (TESTING.md)
   ---- netcode may start here, against Hovel rather than Alloy ----
@@ -1444,7 +1444,9 @@ The moat claim: **a deterministic colony sim, in lockstep, with 8 players and pe
 Hovel establishes whether it is buildable at 1/100th scale — and finds the result that would say
 it is not.
 
-**Hardware:** PC (x86-64 Windows), Steam Deck (x86-64 Linux), Pi 4 (aarch64 Linux).
+**Hardware:** PC and PC 2 (both x86-64 Windows), plus the Steam Deck (x86-64 Linux) when it
+joins the bench; until then the third peer is a headless process (§19.10). The Pi 4 left the
+program (ruled 2026-08-25) — cross-ISA on silicon is the CI arm64 legs' job now.
 
 | Proves | Does not prove |
 |---|---|
@@ -1453,7 +1455,7 @@ it is not.
 | `Persistent` end-to-end: leave, solo, resume, custody, fork detection | Absolute performance of the real sim |
 | Closure-explosion dynamics (R3b) with a region analogue | Closure *restore cost* in Alloy's SoA pools (R3a) — Gate 4 |
 | INV-7 across 1/2/4/8 workers on genuinely different core counts | 8-peer behaviour until more machines exist (§19.10) |
-| Whether Pi 4-class hardware holds a lockstep budget | Console/handheld certification |
+| Whether min-spec hardware holds a lockstep budget (the Deck, once benched) | Console/handheld certification |
 
 > **The harness sim is disposable.** A `tests/hovel/` throwaway exe in the engine's C++ subset,
 > exercising `src/net/`, deleted afterwards. It must never accrete gameplay; no code in it is
@@ -1523,22 +1525,22 @@ Set to 1 / 4 / 16 MB to measure session-start and rejoin against §11.3's table.
 
 | Machine | ISA / OS | Role | Why |
 |---|---|---|---|
-| PC | x86-64 / Windows | Peer + usual coordinator + build host | Fastest; only Windows peer (WinSock + Windows timer path under ENet) |
-| Steam Deck | x86-64 / Linux | Peer | Same ISA, different OS/libc — isolates OS effects from ISA effects |
-| Pi 4 | aarch64 / Linux | Peer, **binding constraint** | Different ISA, different core count, slow enough to be the realistic worst peer |
+| PC | x86-64 / Windows | Peer + usual coordinator + build host | Fastest; WinSock + Windows timer path under ENet |
+| PC 2 | x86-64 / Windows | Peer | Second physical box on a real LAN; already proved cross-machine bit-identity (Gate 0, 2026-08-25) |
+| Steam Deck | x86-64 / Linux | Peer, **binding constraint** once it joins | Different OS/libc — isolates OS effects; the slowest bench machine anchors min-spec |
 
-**Sizing rule: dial the load so the Pi 4 hits ~4 ms/tick, not the PC.** Hovel is a **dial**:
-`SIM_LOAD` scales grid, pawns, buildings, and field iterations together.
+**Sizing rule: dial the load so the slowest peer on the bench hits ~4 ms/tick, not the fastest.**
+Hovel is a **dial**: `SIM_LOAD` scales grid, pawns, buildings, and field iterations together.
 
 ```
   For each machine: sweep SIM_LOAD, record p50/p95/p99 tick time.
   Report: load at which each machine hits 4 ms, 8 ms, 16.7 ms.
-  Derive: heterogeneity ratio PC : Deck : Pi 4.
+  Derive: heterogeneity ratio across the bench (PC : PC 2 : Deck).
 ```
 
-That ratio tells the real engine what fraction of the desktop budget a Pi-class peer carries.
+That ratio tells the real engine what fraction of the desktop budget the weakest peer carries.
 There is no measured anchor from the Ore soak — its workload ran a different stack; start the
-sweep from G-05's Pi figure instead.
+sweep from G-05's PC figure instead.
 
 **Build and deploy — cross-compile once from the PC.** Clang cross-targets aarch64 natively
 (`BUILD.md`); one tree, one flag set, three binaries. A divergence is then a *sim* claim, not a
@@ -1572,14 +1574,14 @@ Every scenario is scripted, seeded, replayable from its archive — a failure sh
 | **S-02** | Each machine runs 1, 2, 4, 8 workers in turn (once `JOBS.md` is parallel) | INV-7; the chunk-keyed rule under stealing on three core counts | Identical hash trace at every worker count on every machine; plus one mixed-pair run |
 | **S-03** | PC runs `-O0`, `-O2`, `-O2 -march=native` builds as peers | **Free regression check**, downgraded from R8: fixed point makes this pass by construction | Identical hashes; **a failure is UB** — hunt with UBSan, never gate the handshake on flags |
 | **S-04** | Deck sends graceful leave, rejoins 5 min later | §10.3, §10.4 snapshot + tail | No phantom; `QUORUM` recomputes at the sequenced tick; rejoin takes the snapshot path |
-| **S-05** | Pi 4 cable pulled 10 s, restored before evict | SUSPECT, phantom via Markov predictor | Phantom inputs identical on PC and Deck; no divergence on resume |
-| **S-06** | Pi 4 pulled 40 s (> `SUSPECT_TO_EVICT_TICKS`) | Sequenced eviction; R6 idempotency | All peers drop the avatar on the same tick; rejoin appends to succession |
+| **S-05** | Peer C's cable pulled 10 s, restored before evict | SUSPECT, phantom via Markov predictor | Phantom inputs identical on the remaining peers; no divergence on resume |
+| **S-06** | Peer C pulled 40 s (> `SUSPECT_TO_EVICT_TICKS`) | Sequenced eviction; R6 idempotency | All peers drop the avatar on the same tick; rejoin appends to succession |
 | **S-07** | PC (coordinator) killed mid-session | §9.5 failover, gap re-sequencing | Deck takes over within 1 tick + horizon rollback; no peer accepts a tick it had not confirmed |
 | **S-08** | Stall one peer's confirmation, then kill the coordinator | **Behind-successor** — the R5 hole | The stalled peer's epoch claim is *refused*; a caught-up peer succeeds |
 | **S-09** | Kill 2 of 3 simultaneously | §8.3 quorum-loss termination; R10 | Survivor writes a checkpoint and stops; checkpoint bit-identical to the last confirmed |
-| **S-10** | Deck and Pi leave; PC solo 30 min; both rejoin | `live = 1`; §10.4 crossover | `QUORUM(1) = 1` with no special-casing; rejoin **must** use snapshot; replay-only measured as wrong |
+| **S-10** | Peers B and C leave; PC solo 30 min; both rejoin | `live = 1`; §10.4 crossover | `QUORUM(1) = 1` with no special-casing; rejoin **must** use snapshot; replay-only measured as wrong |
 | **S-11** | Full session end; all machines rebooted; resumed next day | `Persistent` + `Restored`, §11.3 | `tick0_state_hash` matches on all three; chain head agrees; play continues |
-| **S-12** | Custody PC → Deck; then force-takeover from Pi against a held baton | §11.6, R11 | Handoff acked, signed, chained; forced takeover yields a **detected fork** with the correct point |
+| **S-12** | Custody PC → peer B; then force-takeover from peer C against a held baton | §11.6, R11 | Handoff acked, signed, chained; forced takeover yields a **detected fork** with the correct point |
 | **S-13** | Impairment sweep: latency 20/60/150 ms, jitter 0/10/40 ms, loss 0/1/5% | §7.4, `REDUNDANCY_TICKS`, degradation shape | Adaptive delay isolates the impaired peer; others' rollback depth unchanged |
 | **S-14** | Scripted mass-merge: one bridging tile merges 6 regions, under rollback | **R3(b) closure explosion** | Closure size logged per rollback; the distribution is the deliverable |
 | **S-15** | 10 h continuous, three machines, mixed activity (= Milestone E) | Soak; the named successor to the 43 M-tick run | Zero divergence; no leak; checkpoint cadence stable |
@@ -1600,7 +1602,7 @@ struct ImpairmentShim {
 ```
 
 1. **Reproducible.** Same seed, same drops, same run.
-2. **Cross-platform.** Identical on Windows, Deck, Pi.
+2. **Cross-platform.** Identical on every bench machine and CI target leg.
 3. **Legally nondeterministic.** Transport side of INV-2; own PRNG stream; **compiled out of
    release builds** and `static_assert`ed absent there.
 
@@ -1633,7 +1635,7 @@ refused), checkpoint writes (duration, size), custody transfers, chain entries, 
 
 **The five numbers that matter most:**
 1. **Closure size distribution under load** (S-14) — the R3(b) answer.
-2. **Heterogeneity ratio** PC : Deck : Pi 4 at equal `SIM_LOAD`.
+2. **Heterogeneity ratio** across the bench at equal `SIM_LOAD`.
 3. **Rollback frequency and depth** vs measured `p`, against §7.5's model.
 4. **Coordinator upstream, measured**, against 1.40 Mbit/s.
 5. **Rejoin and session-start wall time** at 1 / 4 / 16 MB ballast, against §11.3.
@@ -1645,14 +1647,15 @@ refused), checkpoint writes (duration, size), custody transfers, chain entries, 
 | Hash divergence | 0 | — | ≥ 1 unexplained |
 | Closure size, p95 (S-14) | < 5% of world | 5–20% | > 20% sustained |
 | Rollback tick cost, p95 | < 6 ms | 6–10 ms | > 10 ms |
-| Pi 4 tick time at target load, p99 | < 8 ms | 8–14 ms | > 16.7 ms |
+| Slowest-peer tick time at target load, p99 | < 8 ms | 8–14 ms | > 16.7 ms |
 | Coordinator upstream | within 20% of 1.40 Mbit/s | 20–50% over | > 2× |
 | Rejoin, 4 MB ballast | < 10 s | 10–30 s | > 60 s |
 | Archive size, 30 min, 3 peers | < 80 KB | 80–150 KB | > 300 KB |
 
 ### 19.10 Scaling to 8
 
-More Pi 4s are the cheapest path (five units ≈ £300–400). Two free steps first:
+Extra physical peers are whatever x86-64 boxes are available (old laptops, mini-PCs — the Pi
+fleet option left with the Pi, 2026-08-25). Two free steps first:
 
 - **Headless peers on one machine** — multiple Hovel processes over loopback. Exercises
   `QUORUM(live)` arithmetic, succession, shadow selection, eviction at N = 8 *logically*.
@@ -1673,8 +1676,8 @@ Stated in advance, so the answer is not negotiated after the fact:
    By construction this can only be UB or a logic bug; it is the highest-information result the
    harness can produce and is hunted with sanitizers, not negotiated. A failure that survives the
    hunt would mean fixed-point-by-construction is not the guarantee this program rests on.
-3. **Pi 4-class hardware cannot hold budget.** Not fatal; redraws minimum spec per G-05's severity
-   split.
+3. **Min-spec hardware (the Deck, once benched) cannot hold budget.** Not fatal; redraws
+   minimum spec.
 4. **Rejoin or session-start is unacceptable at realistic arena sizes** (S-10, S-11 at 16 MB).
    `Persistent` would need incremental snapshots — a significant addition to §11.3.
 5. **R10 reproduces as a real deadlock** (S-09 at N = 8). Correctness rework of §8.3 before
@@ -2458,20 +2461,22 @@ tl_hovel --name <node> --slot <0..7> --role {peer|coordinator|headless}
 by §9.2). Exit code 0 = ended cleanly with zero divergence; 2 = divergence (the event log names the
 tick and arena); 3 = quorum loss; 4 = CLI/handshake error.
 
-**Runbook — Milestone A, three machines:** (1) `cmake --preset netcode-win`, `netcode-linux`,
-`netcode-pi4`; build once; `tools/fingerprint` prints one `build_id` for all three — record it.
-(2) `tools/deploy.sh deck <host>`, `tools/deploy.sh pi4 <host>`. (3) Smoke on the PC alone:
+**Runbook — Milestone A, three machines (PC, PC 2, and the Deck once benched — a headless
+loopback peer stands in until then, §19.10):** (1) `cmake --preset netcode-win` on both PCs
+(`netcode-deck` for the Deck); build once; `tools/fingerprint` prints one `build_id` for all
+peers — record it. (2) `tools/deploy.sh deck <host>` when the Deck is on the bench. (3) Smoke on
+the PC alone:
 `tl_hovel --name pc --slot 0 --role coordinator --listen 7000 --peers "" --model match --origin
 seeded --world out/w --seed 1 --sim-load 1 --ballast-mb 0 --csv out/pc.csv --events out/pc.ev
 --ticks 3600 --scenario none`; exit 0 required. (4) Start in slot order within 30 s: PC (slot 0,
-coordinator, `--peers deck:7000,pi:7000`), Deck (slot 1, `--peers pc:7000,pi:7000`), Pi (slot 2,
-`--peers pc:7000,deck:7000`); common `--seed 20260822 --sim-load <L> --ticks 216000 --scenario S-01`.
+coordinator, `--peers pc2:7000,c:7000`), PC 2 (slot 1, `--peers pc:7000,c:7000`), peer C (slot 2,
+`--peers pc:7000,pc2:7000`); common `--seed 20260822 --sim-load <L> --ticks 216000 --scenario S-01`.
 (5) Watch each node's stderr for `handshake ok`, `session running`, then `digest ok tick=…` every
 30 ticks; adjudicate progress against the CSV's `wall_us`. (6) At exit, pull the three CSVs and
 event logs; `tools/hovel_compare <csv...>` asserts identical `state_hash_lo64` per tick and reports
 p50/p95/p99 `sim_us` per machine, the heterogeneity ratio, and coordinator `bytes_out`. (7) Sweep
-`--sim-load` until the Pi's p99 `sim_us` ≈ 4,000; record the load at 4/8/16.7 ms per machine
-(§19.4). Gate: 1 h, zero divergence, exit 0 on all three.
+`--sim-load` until the slowest peer's p99 `sim_us` ≈ 4,000; record the load at 4/8/16.7 ms per
+machine (§19.4). Gate: 1 h, zero divergence, exit 0 on all three.
 
 ### 20.8 Build order and "done" criteria
 
@@ -2572,4 +2577,7 @@ against running code, not documents.
 rapidhash/BLAKE2b/Ed25519 via Monocypher, entropy behind the platform seam, INV-8 rewritten for
 fixed point, R1 closed, R12 resolved, R8/R14/R15/T-O-03/04 void, Hovel Milestone B re-specified as
 an fx field, Milestone E named as the soak's successor. Consensus, succession, disconnection,
-session model, archive, and budgets carried whole. All budgets are models until Gate 0 reports.*
+session model, archive, and budgets carried whole. All budgets are models until Gate 0 reports.
+§0.3/§2/§8/§16/§19 swept 2026-08-25 for the Pi 4's removal (target set → `CANON.md` matrix;
+bench = the two PCs now, the Deck when it joins; cross-ISA conformance on the hosted CI arm64
+legs).*

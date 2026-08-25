@@ -44,7 +44,7 @@ TRIPLES = [
     ("win", "x86_64-pc-windows-msvc"),
     ("winarm", "aarch64-pc-windows-msvc"),
     ("linux", "x86_64-unknown-linux-gnu"),
-    ("pi", "aarch64-unknown-linux-gnu"),
+    ("arm", "aarch64-unknown-linux-gnu"),
 ]
 
 # The tier define sets that reach a sim TU (docs/BUILD.md §3). The preprocess leg runs once per
@@ -65,7 +65,7 @@ extern "C" int memcmp(const void*, const void*, size_t);
 # Clang predefines _MSC_VER for the windows-msvc triple whatever the driver, and a vendor header
 # may legally branch on it (rapidhash.h includes <intrin.h> under `#if defined(_MSC_VER)`,
 # unconditionally on __SIZEOF_INT128__). Clang's own resource-dir intrin.h then declares ~90
-# SIMD-intrinsic records the linux/pi triples never see, so the layout leg counts a different
+# SIMD-intrinsic records the linux/arm triples never see, so the layout leg counts a different
 # number of records and reports a divergence that is real text but inert code.
 #
 # The first fix for that was `-U_MSC_VER` in BASE_FLAGS. That is the failure mode this file's

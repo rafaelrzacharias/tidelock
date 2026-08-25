@@ -127,7 +127,10 @@ Developed on two PCs synced via git; per-machine auto-memory does not sync.
 - Durable context → committed files only (`docs/`, `TODO.md`, `LESSONS.md`). Never substance in
   auto-memory.
 - **Commit AND push in the same turn.** (Exception: told not to, or a push would force-overwrite.)
-- **No `Co-Authored-By` trailer** — Rafael is sole author, every commit.
+- **No `Co-Authored-By` trailer** — Rafael is sole author, every commit. This holds for
+  cloud/agent sessions too (ruled 2026-08-25): commits pushed from them carry Rafael's
+  author+committer identity and GitHub's "Unverified" badge is accepted — never a bot identity
+  for a green badge.
 - Line endings: `.gitattributes` is the authority (`*.bat`/`*.cmd` CRLF, else LF);
   `git config --local core.autocrlf false` per clone.
 

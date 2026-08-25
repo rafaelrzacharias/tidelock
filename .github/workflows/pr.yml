@@ -1,10 +1,10 @@
 # PR lane - blocking. Spec: docs/BUILD.md §10.4, docs/TESTING.md §5, §6 (budget < 10 min).
 # Targets are the CANON.md matrix, ruled 2026-08-25: {Windows, Linux} x {x86-64, arm64}, all four
-# on hosted native runners. Jobs that need hardware or code this repo does not have yet are
-# declared and gated, never silently omitted: cross-pi4 needs the R-3 sysroot (docs/BUILD.md §9),
-# the determinism harness needs tl_driver (W1 runner+driver lane). Both are queued in TODO.md.
-# workflow_dispatch exists so a session branch can be proven green before it merges (external PRs
-# are disabled on this repo, so pull_request alone cannot cover agent branches).
+# on hosted native runners. Jobs that need code this repo does not have yet are declared and
+# gated, never silently omitted: the determinism harness needs tl_driver (W1 runner+driver lane),
+# queued in TODO.md. workflow_dispatch exists so a session branch can be proven green before it
+# merges (external PRs are disabled on this repo, so pull_request alone cannot cover agent
+# branches).
 name: pr
 
 on:
@@ -74,17 +74,26 @@ jobs:
       - name: install ninja (windows)
         if: runner.os == 'Windows'
         run: choco install ninja -y
-      - name: install LLVM if the runner image lacks it (windows-arm64)
-        # The windows-11-arm image tool set is thinner than windows-latest's. If clang-cl is
-        # absent, install LLVM; choco ships the native woa64 build on arm64 hosts. An x64 LLVM
-        # under emulation would default to the x86_64 triple - the binarch step below turns that
-        # silent wrong-ISA build into a loud failure.
+      - name: native LLVM present (windows-arm64)
+        # Presence is not nativeness: an x64 clang-cl under emulation would default to the
+        # x86_64 triple and build the wrong ISA. Measured with binarch on the compiler binary
+        # itself (the same gate that later checks the build's output); install LLVM only when
+        # clang-cl is absent or non-native, then re-measure - a still-non-native result is a
+        # loud red, never a silent x64 leg.
         if: matrix.os == 'windows-11-arm'
         shell: pwsh
         run: |
-          if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
+          $ErrorActionPreference = 'Stop'
+          function NativeClangCl {
+            $c = Get-Command clang-cl -ErrorAction SilentlyContinue
+            if (-not $c) { return $false }
+            (python tools/audit/binarch.py --file $c.Path --expect aarch64 | Out-Host); return ($LASTEXITCODE -eq 0)
+          }
+          if (-not (NativeClangCl)) {
             choco install llvm -y --no-progress
             Add-Content $env:GITHUB_PATH "C:\Program Files\LLVM\bin"
+            $env:PATH = "C:\Program Files\LLVM\bin;$env:PATH"
+            if (-not (NativeClangCl)) { throw "no native arm64 clang-cl on this runner" }
           }
       - name: preset name
         shell: bash
@@ -147,8 +156,11 @@ jobs:
   build-id-cross-target:
     # R-8 says build_id is identical on every target. The selftest can only compare two command
     # lines someone typed; this job compares four real netcode builds of one checkout - one per
-    # leg of the CANON.md target matrix, staged by build-test (tier == netcode).
+    # leg of the CANON.md target matrix, staged by build-test (tier == netcode). !cancelled():
+    # a failed build-test leg must turn this gate RED via the count check below, not skip it -
+    # a needs-skipped job reads as satisfied in branch protection.
     needs: [build-test]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -216,25 +228,3 @@ jobs:
         # the W1 wave merge: the tree grew from 13 placeholder TUs to the full W1 foundation
         # and measured 12.46 s full on this runner; 25/5 keeps a 2x regression visible.
 
-  cross-pi4:
-    # Build-only aarch64 leg against the Pi's own sysroot - since the target-matrix ruling
-    # (2026-08-25) this proves the DEPLOYABLE Pi artifact, not aarch64 conformance (the hosted
-    # ubuntu-24.04-arm leg carries that natively). Runs once the sysroot tarball of
-    # docs/BUILD.md §9 R-3 exists and its URL is set as the repository variable TL_SYSROOT_URL;
-    # until then it is skipped, not red. TODO.md carries the ruling request.
-    if: vars.TL_SYSROOT_URL != ''
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.13' }
-      - run: sudo apt-get update && sudo apt-get install -y clang lld llvm ninja-build
-      - name: fetch the pinned sysroot and verify its hash
-        run: |
-          set -eu
-          curl -fsSL "${{ vars.TL_SYSROOT_URL }}" -o sysroot.tar.gz
-          python tools/audit/sysroot_hash.py --tarball sysroot.tar.gz --versions toolchain/VERSIONS --key sysroot_pi4
-          mkdir -p out/sysroot/pi4 && tar -xzf sysroot.tar.gz -C out/sysroot/pi4
-      - run: cmake --preset netcode-pi4 -DTL_SYSROOT=$PWD/out/sysroot/pi4
-      - run: cmake --build --preset netcode-pi4
-      - run: file out/netcode-pi4/bin/tl_tests | grep -q aarch64

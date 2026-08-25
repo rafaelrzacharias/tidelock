@@ -30,11 +30,13 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 - [x] `tests/gate0/` — disposable solver (gravity, rigid boxes, distance + contact + friction, PBF
       density), scenarios G-01..G-06, substep sweep 4/8/16, CSV + verdict lines, FLOAT-SHADOW config.
       (W2 gate0, 2026-08-25 — findings and ruling requests RR-8..RR-15 in the "W2 gate0" section below.)
-- [ ] Run on PC; cross-compile + run on Pi 4 (`docs/BUILD.md` §7); commit CSVs under
-      `tests/gate0/results/`. Climb the ladder on any convergence failure (`FX-PALETTE.md` §3.2).
+- [ ] Run on PC; commit CSVs under `tests/gate0/results/`. Climb the ladder on any convergence
+      failure (`FX-PALETTE.md` §3.2).
       **PC half DONE 2026-08-25** (`tests/gate0/results/2026-08-25-pc-win-netcode/README.md`:
       G-01 PASS, G-02a PASS, G-02b FAIL, G-03 FAIL, G-04 INVESTIGATE, G-05 FAIL, G-06 PASS on the
-      PC leg); the ladder was climbed to rung 3 with no change; the Pi half waits on RR-1.
+      PC leg); the ladder was climbed to rung 3 with no change. (The Pi half waited on RR-1 until
+      2026-08-25, when the Pi left the program: the aarch64 evidence is now the nightly G-06
+      cross-leg diff on the hosted CI arm64 runners — RR-2.)
       **Reviewed 2026-08-25** ("W2 gate0 — adversarial review" below): bench SHIP as evidence after
       two review commits; every CSV re-run and reproduced; RR-13's numbers replaced (D2).
 - [x] **Decision commit:** `FX-PALETTE.md` rev 2 (rows DECIDED, or the fallback recorded) +
@@ -185,7 +187,8 @@ rev-2 decision commit is Rafael's.** Ranked by what it means for `FX-PALETTE.md`
       C = 1 − ρ ≤ 0 (the doc's `C = max(ρ − 1, 0)` with `dl = max(dl, −λ)` zeroes every step);
       the free boxes of G-04/G-05 start a quarter metre over the liquid or on the floor (the spec
       names no drop height; a 12 m plunge is a splash test the compliant liquid cannot survive).
-- [ ] **§8.5 remainder:** the Pi leg of G-06 and the Pi half of G-05 (RR-1); the UBSan/ASan
+- [ ] **§8.5 remainder (Pi items re-scoped 2026-08-25):** G-06's cross-leg diff on the hosted CI
+      arm64 legs (was "the Pi leg"; the G-05 Pi half is void); the UBSan/ASan
       G-06 evidence run (`sanitize-linux` is the only sanitizer lane; no Linux host here — add
       `tl_gate0 --scenario G06 --ticks 200` to that CI job); the weekly-lane hook (`TESTING.md`
       §6) once the runners exist; G-04 at 1e6 ticks (the results carry 20,000: 16 h per run at
@@ -612,9 +615,14 @@ the drop heights), all declared in the README; no threshold, world constant or r
       expectation outside dev. The fatal check itself is still the loose one - see "Tighten
       `TL_TEST_EXPECT_FATAL` to the real contract" below for the exact string, exit code and
       prerequisites.
-- [ ] **RR-1 Pi 4 sysroot + the aarch64 leg of `BUILD.md` §10.5.** Rafael has a Pi 4 on the LAN,
-      so this is now an execution task, not a decision. Lane: W0 skeleton (**Opus 5 high**). It
-      touches only `toolchain/`, `cmake/toolchain-pi4.cmake`, `tools/sysroot.sh|deploy.sh` and this
+- [x] **RR-1 — CLOSED AS OBSOLETE, ruled 2026-08-25: the Pi 4 left the program.** The aarch64
+      leg of `BUILD.md` §10.5 is carried by the hosted CI arm64 runners (ci-matrix lane); the
+      pi4 toolchain file, presets, sysroot row and `cross-pi4` job were removed the same day.
+      The R-3 sysroot mechanism survives for the **Steam Deck**, which inherits this item's
+      prerequisite checklist (64-bit check aside) when it enters the bench as the perf/min-spec
+      machine. Original entry kept below for that reuse:
+      ~~RR-1 Pi 4 sysroot + the aarch64 leg of `BUILD.md` §10.5.~~ It
+      touches only `toolchain/`, `tools/sysroot.sh|deploy.sh` and this
       file, so it does not collide with the audit/fingerprint code under adversarial review.
 
       *Prerequisites, from Rafael, before anything runs:*
@@ -643,22 +651,27 @@ the drop heights), all declared in the README; no threshold, world constant or r
       un-gate the `cross-pi4` PR job, which needs the tarball at a URL CI can `GET` (R-3's "release
       bucket"); no bucket exists. So RR-1 then shrinks to "publish the sysroot tarball somewhere
       CI can fetch it, set `TL_SYSROOT_URL`", and RR-2 stays as written. The commit says exactly
-      that rather than marking §10.5 fully met.
+      that rather than marking §10.5 fully met. *(2026-08-25: the `cross-pi4` job and
+      `TL_SYSROOT_URL` gate were removed with the Pi; a `cross-deck` equivalent arrives with the
+      Deck.)*
 
-      *Still blocked on the above:* the cross-ISA nightly (`docs/TESTING.md` §4) and Gate 0's G-06
-      run on the Pi (`docs/GATE0-BENCH.md`) — G-06 is a Gate 0 scenario, not a nice-to-have.
+      *(2026-08-25: the two "still blocked" items — cross-ISA nightly and G-06 on a second ISA —
+      moved to the hosted CI arm64 legs with the target-matrix ruling; neither waits on hardware
+      any more. G-06 is a Gate 0 scenario, not a nice-to-have.)*
 - [ ] **RR-2 `nightly.yml` / `weekly.yml` (`docs/BUILD.md` §10.4). Re-scoped 2026-08-25 by the
       target-matrix ruling (`CANON.md`):** cross-ISA *conformance* no longer waits on self-hosted
       runners — the PR lane's hosted `ubuntu-24.04-arm` / `windows-11-arm` legs carry it natively.
       `nightly.yml` can therefore land now on hosted runners: full `tl_tests --isolate` with no
       `--timeout-ms` and no `!slow` filter on all four legs; `fxcheck` full + `oracle.py
       check-coeffs` + `oracle.py verify` (the item below); `tl_gate0 --scenario G06` per leg with
-      a cross-leg `hash_lo64` diff (the first cross-ISA solver evidence). The self-hosted `pi4`
-      and `deck` runners remain the *perf/soak* half (replay-diff against PR artifacts, G-05 on
-      real hardware) and still land with RR-1. `weekly.yml` unchanged.
+      a cross-leg `hash_lo64` diff (the first cross-ISA solver evidence). The *perf/soak* half
+      (replay-diff against PR artifacts, G-05 on real hardware) runs on the reference PC now and
+      gains a self-hosted `deck` runner when the Deck is benched (the Pi left the program,
+      2026-08-25). `weekly.yml` unchanged.
 - [ ] **RR-4 (b) is BUILT** (`tools/audit/targets.py`, `tl_audit_targets`, PR lane). Every sim TU
-      is preprocessed and its record layouts dumped for `x86_64-pc-windows-msvc`,
-      `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`, then diffed. Measured: 0
+      is preprocessed and its record layouts dumped for the four `CANON.md` target triples
+      (`aarch64-pc-windows-msvc` added 2026-08-25 with the target-matrix ruling), then diffed.
+      Measured on the original three: 0
       divergences on the real tree, ~75 ms per triple per TU, no sysroot (freestanding headers come
       from clang's resource dir; `<string.h>` is stubbed with the four declarations `CPP-SUBSET.md`
       §1 allows). Selftest fixtures prove it catches `[[no_unique_address]]`, `#pragma pack` +
@@ -667,11 +680,13 @@ the drop heights), all declared in the README; no threshold, world constant or r
       scanner, still open below; and the value-divergence classes stay with the token bans by
       design (`char` signedness, `long`/`size_t` in an expression, wide literals, high escape
       bytes), which is the split the review's own attack recommended.
-- [ ] **Coverage boundary of the cross-target gate, tied to RR-1.** `tools/audit/targets.py`
-      measures the TUs under `src/sim` and the det half of `src/foundation`. A record instantiated
-      only from `net`/`script`/`save` - a `TL_WIRE_STRUCT` template with a bit-field, say - is
-      measured nowhere until those modules compile for aarch64, i.e. until RR-1. Stated in
-      `CPP-SUBSET.md` §5; close it by extending the gate's TU set once a Pi build exists.
+- [ ] **Coverage boundary of the cross-target gate — re-scoped 2026-08-25.** `tools/audit/
+      targets.py` measures the TUs under `src/sim` and the det half of `src/foundation`. A record
+      instantiated only from `net`/`script`/`save` - a `TL_WIRE_STRUCT` template with a bit-field,
+      say - was measured nowhere until an aarch64 build existed; the whole tree now compiles and
+      runs on the hosted CI arm64 legs every PR, which covers *execution* but not the gate's
+      layout diff. Stated in `CPP-SUBSET.md` §5; close it by extending the gate's TU set to those
+      modules.
 - [ ] **The contract-comment rule is at the limit of a regex.** Three reviews have now found
       false positives and false negatives in `tools/audit/includes.py`'s declaration scanner
       (operators, attributes, template heads, a `(` inside a literal). The token bans are fine as
@@ -750,7 +765,7 @@ the drop heights), all declared in the README; no threshold, world constant or r
       `ubuntu-24.04-arm` and `windows-11-arm` jobs run both pins natively (ci-matrix lane).
       Check this off when the first four-leg run is green — CI evidence, not a local claim
       (`LESSONS.md`: check CI before writing "verified"). A mismatch is UB until proven otherwise
-      (`TESTING.md` §4); the Pi repeats the same test as a hardware instance when RR-1 lands.
+      (`TESTING.md` §4).
 - [ ] `tools/fxcheck` is not in CI yet: it is a separate CMake project (`cmake -S tools -B
       out/tools`), ~4 min in full. Add a nightly step (`fxcheck` + `oracle.py check-coeffs` +
       `oracle.py verify worst.tsv`) with RR-2's `nightly.yml`; `--quick` (~3 s) could sit in the
@@ -1257,8 +1272,9 @@ right; it is the template the others now follow.
       identical too) and is included only from `hash.cpp`; `rng_for`/`mix64`/`K0`/the
       `(system_id << 32 | draw)` packing match `DETERMINISM.md` §3 token for token, and all seven
       `rng_for` goldens plus all five rapidhash goldens re-derive exactly in an independent Python
-      implementation; `__SIZEOF_INT128__` is defined for all three triples (measured), so
-      rapidhash's MSVC `_umul128` path really is dead code everywhere; `rng_q` is the top 30 bits
+      implementation; `__SIZEOF_INT128__` is defined for all three triples (measured; 2026-08-25:
+      re-measured true for the fourth, `aarch64-pc-windows-msvc`, added by the target-matrix
+      ruling), so rapidhash's MSVC `_umul128` path really is dead code everywhere; `rng_q` is the top 30 bits
       in `[0, 1)`; `rng_below` is Lemire with the documented `~n/2^64` bias and is correct at
       `n = 1` and `n = 2^32-1`; the four `R`s `rng_range` admits are exactly `FX-PALETTE.md`
       §3.1's `q_t x row` lines; the `fx_test_util.h` splitmix replacement is the same mix and both

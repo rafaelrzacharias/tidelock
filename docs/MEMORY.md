@@ -42,8 +42,8 @@ void    arena_decommit_above(VMemArena*, u64 mark);     // returns pages to the 
 - **Commit granularity is explicit** (page multiples, `page` recorded) so Alloy's per-chunk
   commit/decommit terrain arena is an extension, not a rewrite.
 - **Reserve sizes are generous and fixed at init** from a table in `app/` (per arena, per platform
-  tier); exceeding `reserved` is `TL_FATAL` — a blown budget is a bug, not silent growth. The Pi's
-  table is smaller. T-A-03 replaces guesses with measurements.
+  tier); exceeding `reserved` is `TL_FATAL` — a blown budget is a bug, not silent growth. A
+  low-RAM peer's table is smaller. T-A-03 replaces guesses with measurements.
 
 ### 1.2 Permanent arenas + the registered arena set
 

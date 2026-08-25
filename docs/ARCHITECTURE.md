@@ -203,7 +203,7 @@ side is ever read back into the sim (D10, INV-6). The full loop and phase semant
 
 | Milestone | Builds | Done when |
 |---|---|---|
-| **Skeleton** | CMake tree, presets, audits, `tl_types.h`, runner stub | empty tree passes every audit on Windows + Linux + pi4 cross; `build_id.txt` stable (`BUILD.md` §10.5) |
+| **Skeleton** | CMake tree, presets, audits, `tl_types.h`, runner stub | empty tree passes every audit on the `CANON.md` target matrix; `build_id.txt` stable (`BUILD.md` §10.5) |
 | **Gate 0** | `fx.h`, `fx_palette.h`, `det_math.h`, `fxcheck`, `tl_gate0` | `GATE0-BENCH.md` §8.5; `FX-PALETTE.md` rev 2 committed |
 | **Foundation** | vmem/registry/scratch/handles/pools, containers, rng/hash, runner, headless platform, harness | `MEMORY.md` §8.8, `CONTAINERS.md` §8.7, `DETERMINISM.md` §9.5 green; dual-sim of an empty world passes |
 | **ECS** | reflection, columns, schedule, commands, events, encoder, loop, input producers, recorder, driver | `ECS.md` §10.8, `FRAME-LOOP.md` §8.4, `INPUT.md` §9.6 green; `tl_driver --record/--replay --verify` round-trips a scripted scene |

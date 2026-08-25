@@ -93,7 +93,7 @@ systems parallelize by `reads/writes` groups for free once the pool exists.
   and folded by `chunk_count(n, grain)`. Any grain derived from worker count makes chunk
   *boundaries* worker-dependent and is forbidden — the debug shuffle mode (§3) would catch it.
 - **R-2 One pool policy on every platform:** `core_count − 1` workers, main thread participates.
-  No per-platform branch; the Pi simply runs 3 workers. Worker count never enters results.
+  No per-platform branch; a 4-core peer simply runs 3 workers. Worker count never enters results.
 
 Added 2026-08-24 (W1 jobs lane), each a defect in rev 1's own §6.2/§6.3 found before code:
 
@@ -159,8 +159,8 @@ naturally aligned (a misaligned atomic is UB, and a fault on aarch64); `Jobs` `s
 own offsets. No `<atomic>`, no `volatile`. Both `atomic.h` and `jobs.h` `#error` under `TL_SIM_TU`:
 `tools/audit/allow.txt` names `__aarch64_*` outline atomics as the tripwire for atomics in det
 code, but on x86-64 a 32-bit fetch-add inlines to `lock xadd` and emits no symbol at all, so that
-tripwire exists only on the Pi leg — where the symbol audit does not run. A compile error runs
-everywhere.
+tripwire exists only on the aarch64 legs — where the symbol audit does not run. A compile error
+runs everywhere.
 
 ### 6.2 Structures
 

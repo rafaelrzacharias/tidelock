@@ -51,7 +51,7 @@ FAST_MATH = ("-ffast-math", "-Ofast", "/fp:fast", "-funsafe-math-optimizations",
              "-ffp-model=fast", "-ffp-contract=fast", "/fp:except-", "-menable-unsafe-fp-math")
 
 # Defines the platform or the CMake generator injects; dropping them is part of what lets
-# win/linux/pi4 agree.
+# every target leg agrees.
 PLATFORM_DEFINES = {
     "WIN32", "_WINDOWS", "UNICODE", "_UNICODE", "_MT", "_DLL",
     "_HAS_EXCEPTIONS", "_CRT_SECURE_NO_WARNINGS", "_GNU_SOURCE",

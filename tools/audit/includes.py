@@ -169,7 +169,7 @@ CHAR_LITERAL_USE = re.compile(r'\b(?:const\s+char|char\s+const)\s*(\*|\[|\(\s*&)
 
 # Layout and target-selection hazards that are not types. Each was measured to differ between
 # windows-msvc and linux/aarch64 by the third W0 review, with no UB involved:
-#   bit-fields          `struct { u8 a:4; u16 c:8; }` is 4 B on windows-msvc, 2 B on linux/pi
+#   bit-fields          `struct { u8 a:4; u16 c:8; }` is 4 B on windows-msvc, 2 B on linux/arm
 #   platform macros     a sim TU that branches on _WIN32 or __aarch64__ is two different programs
 #   custom sections     section(".x") hides a mutable global from the .data/.bss gate
 #   unfixed enum base   the underlying type is the compiler's choice; hashed state cannot have one

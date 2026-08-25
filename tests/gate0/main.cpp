@@ -484,7 +484,6 @@ int main(int argc, char** argv) {
     (void)s;   // used by the shadow block only (dev tiers)
     Ctx cx; cx.bt = &bt; cx.a = &a;
     int rc = 0;
-    const char* pi_note = "pi=BLOCKED(RR-1)";
 
     if (want(&a, "G01")) {
         FILE* f = open_csv(a.out, "G01", a.substeps, a.ladder, CSV_HEADER); if (!f) return 1;
@@ -526,7 +525,7 @@ int main(int argc, char** argv) {
         fclose(f);
         if (p95_20k) {
             const u32 v = p95_20k <= 4000 ? V_PASS : (p95_20k <= 8000 ? V_INVESTIGATE : V_FAIL);
-            printf("VERDICT G-05 substeps=%u %s pc_20k_p95_us=%llu %s\n", a.substeps, VNAME[v], (unsigned long long)p95_20k, pi_note);
+            printf("VERDICT G-05 substeps=%u %s pc_20k_p95_us=%llu\n", a.substeps, VNAME[v], (unsigned long long)p95_20k);
             if (v == V_FAIL) rc = 3;
         }
     }
@@ -549,7 +548,7 @@ int main(int argc, char** argv) {
             if (strstr(o.detail, "run_twice_divergence")) diverged = 1;
         }
         fclose(f);
-        printf("VERDICT G-06 substeps=%u %s pc_two_runs=%s %s\n", a.substeps, diverged ? "FAIL" : "PASS", diverged ? "DIVERGED" : "identical", pi_note);
+        printf("VERDICT G-06 substeps=%u %s pc_two_runs=%s\n", a.substeps, diverged ? "FAIL" : "PASS", diverged ? "DIVERGED" : "identical");
         if (diverged) rc = 3;
     }
     if (a.shadow) {

@@ -15,7 +15,7 @@ The target set's home is `CANON.md` (Build tiers and targets, ruled 2026-08-25):
 | Windows x86-64 | **clang-cl** (LLVM release, pinned) | links the MSVC CRT; VS Build Tools / Windows SDK present; the dev PCs |
 | Windows arm64 | **clang-cl** (native woa64 LLVM) | same driver and CRT; conformance instance is CI's hosted runner |
 | Linux x86-64 | **clang** (same major version) | Steam Deck is the physical reference; natively in distrobox or CI |
-| Linux aarch64 | **clang** — native, or `--target=aarch64-linux-gnu` + sysroot | CI builds natively on a hosted arm64 runner; the Pi 4 deploy artifact cross-compiles from the PC (§7) |
+| Linux aarch64 | **clang** (native) | CI's hosted arm64 runner is the conformance instance; no owned aarch64 hardware (the Pi 4 left the program, ruled 2026-08-25) |
 
 One compiler family deletes MSVC-vs-clang codegen/UB behaviour as a determinism variable. MSVC
 stays available as an occasional second-opinion build, never a peer. Pinned versions live in
@@ -33,7 +33,7 @@ unable to change results — except through UB, which is why sanitizers stay in 
 | `.bat`/`.sh` scripts invoking clang | none | small until cross-compile, then not | painful | none | rejected |
 
 Layout: one `CMakeLists.txt` per module folder (a static lib each); `cmake/presets.json` with
-`dev-win`, `netcode-win`, `ship-win`, `*-linux`, `*-pi4`; `cmake/toolchain-pi4.cmake`. Vendored
+`dev-win`, `netcode-win`, `ship-win`, `*-linux`, `netcode-deck`; `cmake/toolchain-deck.cmake`. Vendored
 libs are separate targets compiled once (their own flags, `UNITY_BUILD` too) and cached.
 `tools/` is its own CMake project (may use anything, including C++ and the STL).
 
@@ -123,11 +123,11 @@ with pinned options for `netcode`/`ship`; `dev` compiles on load with the same v
 
 ## 7. Cross-compile and deploy
 
-`cmake --preset netcode-pi4 && cmake --build --preset netcode-pi4` → `out/pi4/bin/`;
-`tools/deploy.sh pi4 <host>` scp's the binaries + `script/` + `assets/`; `tl_driver` and
-`tl_hovel` run over SSH with their CSVs pulled back. The Deck is the same flow with the x86-64
-Linux preset. The artifact is pinned per run (fingerprint in every CSV header); never repin while
-a soak is in flight.
+For the Steam Deck (the one cross target since the Pi left the program, ruled 2026-08-25):
+`cmake --preset netcode-deck && cmake --build --preset netcode-deck` → `out/netcode-deck/bin/`;
+`tools/deploy.sh deck <host>` scp's the binaries + `script/` + `assets/`; `tl_driver` and
+`tl_hovel` run over SSH with their CSVs pulled back. The artifact is pinned per run (fingerprint
+in every CSV header); never repin while a soak is in flight.
 
 ---
 
@@ -148,9 +148,10 @@ Durable context lives in committed files only (`docs/`, `TODO.md`, `LESSONS.md`)
 - **R-2 No LTO in any tier.** It costs link time against the budget and has no measured win; it
   would also be a fingerprint input for nothing. Revisit only with a profile showing a cross-TU
   inlining loss in a hot sim loop — and then the fix is unity-build placement, not LTO.
-- **R-3 Pi sysroot = a tarball of the Pi's `/usr/include`, `/usr/lib`, `/lib` captured by
+- **R-3 Cross sysroot = a tarball of the target's `/usr/include`, `/usr/lib`, `/lib` captured by
   `tools/sysroot.sh`**, stored in a release bucket (not git), its hash pinned in
-  `toolchain/VERSIONS`. The Deck uses the same mechanism with an x86-64 Linux sysroot.
+  `toolchain/VERSIONS`. The Steam Deck (x86-64 Linux sysroot) is the one consumer since the Pi
+  left the program (ruled 2026-08-25).
 
 - **R-4 The offline tools are Python, not C++, until one of them needs to link a vendored
   library.** `fingerprint`, `audit/*` and `rebuild_budget` are `tools/*.py`; `luauc` (links the
@@ -186,7 +187,7 @@ Durable context lives in committed files only (`docs/`, `TODO.md`, `LESSONS.md`)
 
 - **R-8 `build_id` is target-independent; `build_env` carries the rest.** The W0 review found that
   putting the compiler string and the resolved compile commands into `build_id` made a mixed-target
-  session impossible to hand-shake: `netcode-win`, `netcode-linux` and `netcode-pi4` differ by
+  session impossible to hand-shake: `netcode-win`, `netcode-linux` and `netcode-deck` differ by
   target triple and driver spelling alone, so `NETCODE.md` §19.5's Milestone A ("build once;
   one `build_id` for all three") and §15's "two peers on one release agree by construction" were
   both unreachable. Ruled: `build_id` covers only what can change a tick's bytes - source tree
@@ -196,11 +197,11 @@ Durable context lives in committed files only (`docs/`, `TODO.md`, `LESSONS.md`)
   never compared. This is the same premise Gate 0 exists to prove: under fixed point, codegen
   cannot change results except through UB **and except through target-variable language types** -
   `char` is signed on x86-64 and unsigned on aarch64, `long` is 32-bit on Windows and 64-bit on
-  Linux, and either one diverges a PC peer from a Pi peer with no UB in sight. The second W0
+  Linux, and either one diverges an x86-64 peer from an arm64 peer with no UB in sight. The second W0
   review found the premise stated without that clause and unenforced; `tools/audit/includes.py`
   now bans `char`, `long` and `wchar_t` in sim TUs (message literals keep `const char*`), and the
   ban is a selftest fixture. R-8 is only sound with that gate in place. Alternatives rejected: keeping `build_id`
-  target-specific (coherent, but it deletes PC + Deck + Pi peers from the product, which is a scope
+  target-specific (coherent, but it deletes cross-platform peers from the product, which is a scope
   decision, not a build one); a thin `build_id` of source tree + palette + bytecode only (a `dev`
   peer could then join a `netcode` session and be caught only by the tick-30 checksum, which
   abandons refuse-early for detect-late).
@@ -212,11 +213,10 @@ Durable context lives in committed files only (`docs/`, `TODO.md`, `LESSONS.md`)
 ```
 CMakeLists.txt                 project, options (TL_TIER, TL_SANITIZE), includes cmake/*.cmake, add_subdirectory per module
 CMakePresets.json              the file CMake reads; two lines, `include`s cmake/presets.json (CMake only looks for presets at the repo root)
-cmake/presets.json             dev-win · debug-win · netcode-win · ship-win · dev-linux · netcode-linux · sanitize-linux · netcode-deck · netcode-pi4 · ship-pi4; binaryDir = out/<preset>, binaries in out/<preset>/bin
+cmake/presets.json             dev-win · debug-win · netcode-win · ship-win · dev-linux · netcode-linux · sanitize-linux · netcode-deck; binaryDir = out/<preset>, binaries in out/<preset>/bin
 .vscode/                       committed workspace config: CMake Tools on presets, clangd over .cache/compile_commands.json, LLDB launch configs, tasks (configure/build/test/audits); no solution files — VS Code + CMake presets is the IDE (ruled 2026-08-22)
 cmake/tier.cmake               flag sets per tier (CPP-SUBSET.md §7, BUILD.md §3) as interface targets tl_flags_common / tl_flags_sim
-cmake/toolchain-pi4.cmake      CMAKE_SYSTEM_NAME Linux, processor aarch64, clang --target=aarch64-linux-gnu, --sysroot=${TL_SYSROOT}
-cmake/toolchain-deck.cmake     x86-64 Linux sysroot variant
+cmake/toolchain-deck.cmake     CMAKE_SYSTEM_NAME Linux, processor x86_64, clang --target=x86_64-linux-gnu, --sysroot=${TL_SYSROOT}
 cmake/audit.cmake              custom targets: tl_audit_symbols (llvm-nm), tl_audit_includes (grep), tl_audit_docs (tools/docaudit), tl_rebuild_budget
 cmake/fingerprint.cmake        generates out/<preset>/generated/build_id.cpp from tools/fingerprint.py at configure+build
 cmake/testlist.cmake           scans tests/**/*.test.cpp for TL_TEST( and generates test_list.inc (docs/TESTING.md §9.1)
@@ -279,7 +279,7 @@ render/net when their tests are compiled in). `tl_sim` and `tl_foundation_det` c
   own symbols and those of layers named before it) and `--data-only NAME=PATH` for the rest of
   `src/`; besides undefined symbols it fails on any object file with a non-empty `.data`/`.bss`,
   which is the only reliable catch for anonymous-namespace and `inline static` mutable globals.
-- `tools/sysroot.sh <host>`: rsyncs `/usr/include /usr/lib /lib /usr/lib/gcc` from the Pi (or
+- `tools/sysroot.sh <host>`: rsyncs `/usr/include /usr/lib /lib /usr/lib/gcc` from the Deck (or
   Deck) into a tarball; prints its BLAKE2b for `toolchain/VERSIONS`.
 - `tools/deploy.sh <preset> <host>`: scp `out/<preset>/bin/*`, `script/`, `assets/`; prints the
   remote run line.
@@ -292,21 +292,24 @@ trace pins inside it are the cross-ISA determinism gate, `DETERMINISM.md` §8 R-
 assertion per leg (`tools/audit/binarch.py`: no silent host-arch fallback) → the four-way R-8
 `build_id` diff → driver harness jobs → sanitizer job (both Linux ISAs, `-DTL_SANITIZE=ON`, sim
 tests) → rebuild budget. `nightly.yml`: slow tests, fuzz, fxcheck + oracle, G-06 cross-leg hash
-diff on the hosted runners; the self-hosted `pi4` and `deck` runners join it for the physical
-perf/soak half (replay-diff against PR artifacts, save cross-build, pixel goldens) once RR-1
-lands. `weekly.yml`: Hovel scenarios (when present), Gate 0 re-run on palette/solver changes.
+diff on the hosted runners; a self-hosted `deck` runner joins it for the physical perf/soak half
+(replay-diff against PR artifacts, save cross-build, pixel goldens) when the Deck enters the
+bench — perf hardware is the PC alone until then (Pi removed, ruled 2026-08-25).
+`weekly.yml`: Hovel scenarios (when present), Gate 0 re-run on palette/solver changes.
 
 Built so far: `pr.yml` with audits (doc, include firewall, header contracts, doc-touch, symbols),
 the four-leg × four-tier build+test matrix with per-leg binary-ISA assertion, the four-way R-8
 `build_id` gate, fingerprint stability, the two-ISA sanitizer job, the rebuild budget, and
-`workflow_dispatch` so a session branch is proven green before merging. Its `cross-pi4` job
-(the deployable Pi artifact) is gated on the repository variable `TL_SYSROOT_URL` (R-3) and the
-harness jobs wait on `tl_driver`; `nightly.yml`/`weekly.yml` are queued in `TODO.md`.
+`workflow_dispatch` so a session branch is proven green before merging. The harness jobs wait on
+`tl_driver`; `nightly.yml`/`weekly.yml` are queued in `TODO.md`. (The former `cross-pi4` job left
+with the Pi, ruled 2026-08-25 — a `cross-deck` equivalent lands with the Deck sysroot, R-3.)
 
 ### 10.5 Done criteria
 
-An empty-tree configure+build passes every audit; `build_id.txt` is stable across two clean builds;
-the pi4 preset produces an aarch64 ELF that runs `tl_tests --tag smoke` on the Pi via `deploy.sh`.
+An empty-tree configure+build passes every audit; `build_id.txt` is stable across two clean
+builds; every leg of the `CANON.md` target matrix builds and runs `tl_tests` in CI. (The
+original third criterion — an aarch64 ELF smoke-run on the Pi — left with the Pi, ruled
+2026-08-25; the hosted arm64 legs replace it.)
 
 Met on Windows (2026-08-22, W0 skeleton, re-verified after the W0 adversarial review):
 `debug/dev/netcode/ship-win` configure and build clean under `-Werror`; `tl_tests --tag smoke`
@@ -321,8 +324,9 @@ a sim TU including `net/wire.h` and `foundation/jobs.h`; `tl_foundation_det` ref
 symbol; a `/O1`-vs-`/O2` delta between netcode and ship; a `.gitignore`d `.cpp` under `src/`; a
 `CXXFLAGS` injection. All eight are caught.
 
-The pi4 leg is **unmet and blocked on hardware**: clang emits aarch64 ELF and the preset fails
-loudly without `TL_SYSROOT`, but the R-3 sysroot tarball needs a live Pi. `TODO.md` carries it as a
-ruling request.
+The aarch64 criterion was blocked on Pi hardware from 2026-08-22 until the target-matrix ruling;
+it is now carried by the hosted `ubuntu-24.04-arm` / `windows-11-arm` CI legs (§10.4). The Deck
+cross leg (R-3 sysroot) waits on the Deck entering the bench.
 
-*Rev 1 — 2026-08-22; §9 R-4..R-8 and §3/§5/§10.1/§10.3/§10.4/§10.5 reconciled with the W0 skeleton, its adversarial review and the R-8 ruling, 2026-08-22. §1/§10.3/§10.4 re-ruled to the `CANON.md` target matrix ({Windows, Linux} × {x86-64, arm64}, hosted native CI runners), 2026-08-25.*
+*Rev 1 — 2026-08-22; §9 R-4..R-8 and §3/§5/§10.1/§10.3/§10.4/§10.5 reconciled with the W0 skeleton, its adversarial review and the R-8 ruling, 2026-08-22. §1/§10.3/§10.4 re-ruled to the `CANON.md` target matrix ({Windows, Linux} × {x86-64, arm64}, hosted native CI runners), 2026-08-25; §1/§2/§7/§9 R-3/§10.1/§10.4/§10.5 swept for the Pi 4's
+removal from the program (perf reference = the PC now, the Steam Deck later), same date.*

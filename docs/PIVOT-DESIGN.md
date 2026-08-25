@@ -55,6 +55,9 @@ all void: no floats in authoritative state.
 3-peer reference set), delivered by fixed point. **The XPBD/PBF fixed-point bench (Gate 0, §10)
 is what this now hangs on** — its fallback is pinned-toolchain float, x86-64 only, decided then,
 not drifted into.
+*(Amended 2026-08-25: the requirement stands, its instances changed. The target set is now
+`CANON.md`'s {Windows, Linux} × {x86-64, arm64} matrix, proven on hosted native CI runners; the
+Pi 4 left the program, and the physical bench is the two PCs now, the Steam Deck when it joins.)*
 
 **Prior-rule amendments this ruling makes:**
 - `CLAUDE.md` principle 1 ("never C++") is rewritten as the §2 subset — the *reasons* (hidden
@@ -245,7 +248,8 @@ philosophy, radians, no palette policy — oracle only; CNL/SG14 — template-he
   (1) **exhaustive** over all 2³² inputs for 32-bit unary functions — feasible offline in
   minutes per function, so no sampling; (2) **differential** vs vendored FixPointCS on its
   native Q32.32/Q16.16; (3) error-vs-double/MPFR bounds using fpm's published accuracy-test
-  methodology as the template. Plus the PC-vs-Pi cross-compiled bit-compare test.
+  methodology as the template. Plus the cross-ISA bit-compare test (since 2026-08-25: cross-leg
+  on the CI target matrix).
 - No libm anywhere in sim code (§2 include firewall).
 
 ### 3.3 RNG
@@ -506,6 +510,10 @@ GATE 0   Fixed-point XPBD + PBF convergence & cost bench (headless).      ← TH
          rescue the Pi would surrender the cross-ISA property that exists FOR the Pi.
          G-05 otherwise re-derives the ALLOY §11.2 budget for fixed point — if 20k
          doesn't fit, the budget moves (counts, substeps), not the verdict.
+         (Amended 2026-08-25: the Pi left the program before its half ever ran; the
+         Pi-only branch of this split is void, min-spec anchors to the PC until the
+         Deck is benched, and the PC-half rule stands unchanged. The cross-ISA
+         property the split protected is now proven on the hosted CI arm64 legs.)
          G-06 should pass trivially; "expected" is not "tested", and a failure there
          is the highest-information result the bench can produce.
          Diagnostic instrument (ratified 2026-08-21): the FLOAT-SHADOW build — the
@@ -528,7 +536,8 @@ FOUND    Foundation week(s): VMemArena + scratch + registry + offset-guard · co
 ECS      Minimal ECS + X-macro reflection + generic inspector + M2 encoder (~3 weeks total
          with FOUND).
 V0       Window + moving sprite + fixed 60 Hz + clean exit (unchanged milestone), ImGui shell.
-HOVEL    3 machines (PC/Deck/Pi), ENet, integer lockstep — NETCODE §19 transfers almost
+HOVEL    3 machines (NETCODE §19.4's bench roster; since 2026-08-25 the two PCs + the Deck
+         when benched), ENet, integer lockstep — NETCODE §19 transfers almost
          verbatim and gets cheaper (fixed point = Milestone A is the whole story).
          Proves the cross-ISA claim on the new stack early. Hovel Milestone E (the
          10 h three-machine soak) is NAMED (ratified 2026-08-21) as the successor to
@@ -551,7 +560,8 @@ exactly as the original plan had it.
   determinism variable; MSVC stays available as an occasional second-opinion build, never a peer.
 - Pinned compiler versions recorded in-repo; pinned flag sets; `-fno-exceptions -fno-rtti`;
   warnings-as-errors; UBSan/ASan jobs in the determinism CI.
-- Pi 4 builds cross-compiled from the PC (aarch64 clang/gcc target) — build once, deploy three.
+- Cross builds from the PC where a bench machine needs one (the Deck; the Pi 4 entry here ended
+  2026-08-25) — build once, deploy everywhere; aarch64 builds run natively in CI.
 - Unity builds; vendored deps compiled once; **rebuild time is a CI-tracked budget** (§2).
 - Build fingerprint as §8. Fixed point makes codegen differences unable to change results —
   except through UB, which is why sanitizers stay in the gate.
@@ -608,8 +618,9 @@ Remaining, in intended order of resolution:
    spec, never a row (`TODO.md` RR-8..RR-15, all ruled 2026-08-25): `ALLOY.md` §14.4.3 rewritten
    (i64 λ, i64 angular share, two-pass Jacobi density, per-body Jacobi accumulation) and
    `GATE0-BENCH.md` §2 amended (G-02b criterion, G-03 geometry, G-05 budget made consistent with
-   `ALLOY.md` §11.2's core count) in the decision commit. The Pi leg (G-06 cross-ISA, G-05 Pi
-   half) stays open on RR-1.
+   `ALLOY.md` §11.2's core count) in the decision commit. (The Pi leg stayed open on RR-1 until
+   2026-08-25, when the Pi left the program: G-06 cross-ISA moved to the hosted CI arm64 legs
+   and the G-05 Pi half is void.)
 2. ~~Luau step-debugger scope~~ **RULED 2026-08-21 — ceiling = Tier 1** (§7): Tier 0
    (console + replay scrub) at v0; Tier 1 (break-and-inspect) when gameplay scripting
    starts; Tier 2 rejected. Details in §7's debugger bullet.

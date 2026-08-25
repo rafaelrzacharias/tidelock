@@ -59,16 +59,18 @@ queries ("spawn X, command Y, assert state at tick N").
 ## 3. The determinism harness (DECIDED — `DETERMINISM.md` §6)
 
 Dual-sim · record→replay · worker sweep · long-run fuzz · cross-ISA · sanitizer runs. All are
-driver invocations; the first three are in the PR lane, fuzz nightly, cross-ISA nightly when the
-Pi is reachable, sanitizers in the PR lane on the sim test set.
+driver invocations; the first three are in the PR lane, fuzz nightly, cross-ISA in the PR lane on
+the hosted arm64 legs (re-ruled 2026-08-25), sanitizers in the PR lane on the sim test set.
 
 ---
 
-## 4. Cross-ISA (DECIDED — required, infra-gated)
+## 4. Cross-ISA (DECIDED — required; re-ruled 2026-08-25, no longer infra-gated)
 
-The PC cross-compiles the driver + tests for aarch64 (`BUILD.md` §2), deploys to the Pi 4 over
-SSH, runs the same scenes with the same seeds, pulls the hash CSVs, diffs. Any difference is a bug
-(UB by default hypothesis). The Deck (x86-64 Linux) runs the same job to separate OS from ISA.
+Every leg of the `CANON.md` target matrix builds natively on a hosted CI runner and runs the same
+scenes with the same seeds; hash traces and `build_id` are diffed across legs. Any difference is a
+bug (UB by default hypothesis); the OS and ISA axes of the matrix separate OS effects from ISA
+effects. Physical perf/soak jobs run the same diff on reference hardware over SSH via
+`tools/deploy.sh` (`BUILD.md` §7) — the PC now, the Steam Deck when it enters the bench.
 Gate 0's G-06 is the first use; Hovel Milestone A the second; the 10 h soak (Milestone E) the
 successor of Ore's 43 M-tick run.
 
@@ -96,7 +98,7 @@ successor of Ore's 43 M-tick run.
 | Lane | Contents | Budget |
 |---|---|---|
 | **PR** (blocking) | build all tiers on the `CANON.md` target matrix ({Windows, Linux} × {x86-64, arm64}, hosted native runners, per-leg binary-ISA assertion); unit/property (`--isolate`) on every leg — the fx trace pins inside are the cross-ISA gate; four-way `build_id` diff; dual-sim + replay + worker sweep on the scene set; sim tests under UBSan+ASan on both Linux ISAs; static gates; descriptor-level render tests | < 10 min |
-| **nightly** | long-run fuzz; physical perf/soak on the Pi + Deck (replay-diff against PR artifacts); save cross-build load (yesterday's fixture); pixel goldens (software renderer, FLIP-compared, never blocking); fx exhaustive oracle runs; G-06 cross-leg hash diff on the hosted runners | hours |
+| **nightly** | long-run fuzz; physical perf/soak on reference hardware (the PC now, the Deck later; replay-diff against PR artifacts); save cross-build load (yesterday's fixture); pixel goldens (software renderer, FLIP-compared, never blocking); fx exhaustive oracle runs; G-06 cross-leg hash diff on the hosted runners | hours |
 | **weekly** | Hovel soak scenarios once Hovel exists; Gate 0 re-run if the palette or the solver changed | 10 h |
 
 Flakiness rules: **no PR-lane retries**; a flaky test is quarantined to nightly with an owner; a
@@ -132,8 +134,8 @@ net packet decode, Luau bytecode loader — under ASan in nightly.
 - **R-1 The runner emits TSV and `--junit` from day one** (the JUnit XML writer is ~40 lines over
   stb_sprintf; every CI system reads it). CI is **GitHub Actions**: hosted native runners cover
   the whole `CANON.md` target matrix in the PR lane (re-ruled 2026-08-25 — conformance no longer
-  waits on owned hardware); the Pi and Deck join as self-hosted runners for the nightly
-  perf/soak job only.
+  waits on owned hardware); the Steam Deck joins as a self-hosted runner for the nightly
+  perf/soak job when it enters the bench (the Pi 4 left the program, same ruling).
 - **R-2 `tests/` obeys the subset**, with two exemptions: the generated test list and
   `printf`-class io + clock + filesystem access (tests are not sim code). `tools/` is fully exempt.
 
@@ -192,7 +194,8 @@ scenes and Hovel.
 | dual-sim / replay / sweep | `tl_driver --scene scenes/harness_*.luau --dual`, `--record` then `--replay --verify`, `--workers-sweep` |
 | sanitizers | same unit + harness jobs on the `-DTL_SANITIZE=ON` build (UBSan+ASan), timing ignored |
 | audits | `tl_audit_symbols`, `tl_audit_includes`, `tl_rebuild_budget`, fingerprint-stability (two clean builds, diff `build_id.txt`) |
-| cross-ISA (nightly) | PC: `--record`; Pi/Deck: `--replay --verify` on the same tree's artifacts |
+| cross-ISA (PR lane, hosted legs) | each leg: `--record`, then cross-leg `--replay --verify` on the same tree's artifacts; the Deck repeats it nightly as physical hardware when it joins |
 
 *Rev 1 — 2026-08-22; §5/§6/§8 R-1 re-ruled to the `CANON.md` target matrix (hosted native CI
-runners; Pi + Deck = nightly perf/soak only), 2026-08-25.*
+runners), 2026-08-25; §3/§4/§6/§8 R-1/§9.3 swept for the Pi 4's removal (perf reference = the PC
+now, the Steam Deck later), same date.*

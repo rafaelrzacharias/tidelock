@@ -205,8 +205,8 @@ side (2D rigid transforms are `(pos, sin, cos)`); `mat3` lives render-side in fl
    `det_math.h` (`FX_*_MAX_ERR_ULP`) and asserted by the tests.
 
 Layers 1–2 are C++ (`tools/fxcheck/fxcheck.cpp`, vendored FixPointCS under
-`tools/fxcheck/vendor/`), exempt from the subset. Plus the PC-vs-Pi cross-compiled bit-compare
-(`TESTING.md` §4).
+`tools/fxcheck/vendor/`), exempt from the subset. Plus the cross-ISA bit-compare across the
+`CANON.md` target legs (`TESTING.md` §4).
 
 **Measured at rev 1 (2026-08-23, exhaustive):** `sin`/`cos` max |err| **9.06 ulp** of `q_t`
 (the reference `SinPoly4` is "27.13 bits" — 7.3 ulp of Q30 — before our RNE steps); `sin²+cos²`
@@ -513,6 +513,7 @@ worst cases `fxcheck` writes to `worst.tsv`.
 
 `fx.h`, `fx_palette.h`, `det_math.h`, `fx_float.h` compile under every tier with the sim flag set
 (`-nostdinc++`, `-fno-builtin`); the `tl_foundation_det` symbol audit is empty; every test above is
-green on PC, `slow` ones nightly; the cross-ISA trace matches on the Pi. Then Gate 0.
+green on PC, `slow` ones nightly; the cross-ISA trace matches on the hosted arm64 legs
+(re-ruled 2026-08-25; was "on the Pi"). Then Gate 0.
 
 *Rev 1.1 — 2026-08-22. Rev 2 is written from Gate 0's CSVs.*

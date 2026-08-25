@@ -752,7 +752,7 @@ TARGET_CASES = [
 ]
 # The false positive the -U_MSC_VER flag was reaching for, and the evidence that stubbing
 # <intrin.h> keeps it fixed: a vendor-shaped header that includes <intrin.h> under _MSC_VER pulls
-# ~90 SIMD-intrinsic records into the win layout dump and none into linux/pi. The gate must see
+# ~90 SIMD-intrinsic records into the win layout dump and none into linux/arm. The gate must see
 # zero divergences here AND still fail the mscver case above - one flag could not do both.
 TARGET_INTRIN = ("#ifdef _MSC_VER\n#include <intrin.h>\n#endif\n"
                  "struct Plain { u32 a; u64 b; };\n"

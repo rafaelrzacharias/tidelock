@@ -49,12 +49,11 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `DETERMINISM.md` -> §10.4
 - `ECS.md` -> §5
 - `FX-PALETTE.md` -> §5, §9
-- `GATE0-BENCH.md` -> §2
 - `LUAU-LAYER.md` -> §5
 - `MEMORY.md` -> §5
 - `NETCODE.md` -> §5, §9
 - `ROADMAP.md` -> §10.4, §10.5
-- `TESTING.md` -> §2
+- `TESTING.md` -> §7
 - `TOOLING.md` -> §3
 
 ## CANON.md
@@ -144,6 +143,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ARCHITECTURE.md` -> §8.5
 - `CANON.md` -> §4
 - `FX-PALETTE.md` -> §8
+- `NETCODE.md` -> §2
 - `ROADMAP.md` -> §8.5
 
 ## INPUT.md
