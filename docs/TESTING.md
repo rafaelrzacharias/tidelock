@@ -69,8 +69,9 @@ the hosted arm64 legs (re-ruled 2026-08-25), sanitizers in the PR lane on the si
 Every leg of the `CANON.md` target matrix builds natively on a hosted CI runner and runs the same
 scenes with the same seeds; hash traces and `build_id` are diffed across legs. Any difference is a
 bug (UB by default hypothesis); the OS and ISA axes of the matrix separate OS effects from ISA
-effects. Physical perf/soak jobs run the same diff on reference hardware over SSH via
-`tools/deploy.sh` (`BUILD.md` §7) — the PC now, the Steam Deck when it enters the bench.
+effects. Physical *network-soak* jobs run the same diff over a real LAN via `tools/deploy.sh`
+(`BUILD.md` §7) once Hovel exists — the PCs now, the Steam Deck when it enters the bench; where
+perf is *graded* is `WORKFLOW.md` §4's policy, not a machine named here.
 Gate 0's G-06 is the first use; Hovel Milestone A the second; the 10 h soak (Milestone E) the
 successor of Ore's 43 M-tick run.
 
@@ -83,7 +84,7 @@ successor of Ore's 43 M-tick run.
 | symbol audit | `llvm-nm --undefined-only` over every sim static lib vs the allowlist (`CPP-SUBSET.md` §4) | PR, blocking |
 | include firewall | no banned system include in `src/`; no backend header outside its wrap module; no `float`/`double` tokens in sim TUs; no `static` mutable; no `thread_local`; no `std::` | PR, blocking |
 | WIRE_STRUCT | every struct in `net/wire.h`, `save.h`, `InputFrame` has sizeof + offsetof static_asserts (a script checks the macro was used) | PR, blocking |
-| rebuild-time budget | full rebuild < 10 s, incremental (touch one sim TU) < 2 s on the reference PC; a regression is a failure, like perf | PR, blocking (measured on the CI box with its own budget) |
+| rebuild-time budget | full rebuild < 10 s, incremental (touch one sim TU) < 2 s on the dev PC (an iteration-speed budget, not the retired perf reference — `WORKFLOW.md` §4); a regression is a failure, like perf | PR, blocking (measured on the CI box with its own budget) |
 | fingerprint stability | two clean builds of the same tree produce the same fingerprint | PR |
 | header contracts | every `module.h` has a contract block naming its spec section; every public function in a module header has a contract comment (`CPP-SUBSET.md` §6) — `tools/audit/includes.py` | PR, blocking |
 | `NOMINMAX` | every file including `<windows.h>` defines `NOMINMAX` on an earlier line (`PLATFORM.md` §9.1) — `tools/audit/includes.py` gate 7, the one gate that walks `tests/` as well as `src/` | PR, blocking |
@@ -98,7 +99,7 @@ successor of Ore's 43 M-tick run.
 | Lane | Contents | Budget |
 |---|---|---|
 | **PR** (blocking) | build all tiers on the `CANON.md` target matrix ({Windows, Linux} × {x86-64, arm64}, hosted native runners, per-leg binary-ISA assertion); unit/property (`--isolate`) on every leg — the fx trace pins inside are the cross-ISA gate; four-way `build_id` diff; dual-sim + replay + worker sweep on the scene set; sim tests under UBSan+ASan on both Linux ISAs; static gates; descriptor-level render tests | < 10 min |
-| **nightly** | long-run fuzz; physical perf/soak on reference hardware (the PC now, the Deck later; replay-diff against PR artifacts); save cross-build load (yesterday's fixture); pixel goldens (software renderer, FLIP-compared, never blocking); fx exhaustive oracle runs; G-06 cross-leg hash diff on the hosted runners | hours |
+| **nightly** | long-run fuzz; perf regression on the elected CI leg (`WORKFLOW.md` §4); physical network soaks once Hovel exists (replay-diff against PR artifacts); save cross-build load (yesterday's fixture); pixel goldens (software renderer, FLIP-compared, never blocking); fx exhaustive oracle runs; G-06 cross-leg hash diff on the hosted runners; the four-leg 8-peer battletest once net-p3..p8 exist (`NETCODE.md` §19.10) | hours |
 | **weekly** | Hovel soak scenarios once Hovel exists; Gate 0 re-run if the palette or the solver changed | 10 h |
 
 Flakiness rules: **no PR-lane retries**; a flaky test is quarantined to nightly with an owner; a
@@ -135,7 +136,8 @@ net packet decode, Luau bytecode loader — under ASan in nightly.
   stb_sprintf; every CI system reads it). CI is **GitHub Actions**: hosted native runners cover
   the whole `CANON.md` target matrix in the PR lane (re-ruled 2026-08-25 — conformance no longer
   waits on owned hardware); the Steam Deck joins as a self-hosted runner for the nightly
-  perf/soak job when it enters the bench (the Pi 4 left the program, same ruling).
+  *network-soak* job when it enters the bench (the Pi 4 left the program, same ruling; perf
+  grading is `WORKFLOW.md` §4's policy).
 - **R-2 `tests/` obeys the subset**, with two exemptions: the generated test list and
   `printf`-class io + clock + filesystem access (tests are not sim code). `tools/` is fully exempt.
 
@@ -197,5 +199,5 @@ scenes and Hovel.
 | cross-ISA (PR lane, hosted legs) | each leg: `--record`, then cross-leg `--replay --verify` on the same tree's artifacts; the Deck repeats it nightly as physical hardware when it joins |
 
 *Rev 1 — 2026-08-22; §5/§6/§8 R-1 re-ruled to the `CANON.md` target matrix (hosted native CI
-runners), 2026-08-25; §3/§4/§6/§8 R-1/§9.3 swept for the Pi 4's removal (perf reference = the PC
-now, the Steam Deck later), same date.*
+runners), 2026-08-25; §3/§4/§6/§8 R-1/§9.3 swept for the Pi 4's removal and re-pointed at
+`WORKFLOW.md` §4 for perf grading, same date.*

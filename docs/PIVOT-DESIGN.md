@@ -511,9 +511,12 @@ GATE 0   Fixed-point XPBD + PBF convergence & cost bench (headless).      ← TH
          G-05 otherwise re-derives the ALLOY §11.2 budget for fixed point — if 20k
          doesn't fit, the budget moves (counts, substeps), not the verdict.
          (Amended 2026-08-25: the Pi left the program before its half ever ran; the
-         Pi-only branch of this split is void, min-spec anchors to the PC until the
-         Deck is benched, and the PC-half rule stands unchanged. The cross-ISA
-         property the split protected is now proven on the hosted CI arm64 legs.)
+         Pi-only branch of this split is void and the PC-half rule stands unchanged.
+         The cross-ISA property the split protected is now proven on the hosted CI
+         arm64 legs. Amended again the same day, WORKFLOW.md §4: absolute perf grading
+         is suspended at the committed PC rev-2 record until the Steam Deck — the
+         shipping min-spec — is benched and re-anchors the thresholds by ruling;
+         CI legs carry the regression radar only.)
          G-06 should pass trivially; "expected" is not "tested", and a failure there
          is the highest-information result the bench can produce.
          Diagnostic instrument (ratified 2026-08-21): the FLOAT-SHADOW build — the

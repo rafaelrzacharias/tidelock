@@ -97,6 +97,7 @@ model here — the launch prompt names it.
 | W2 | **vendor** | Sonnet 5 | SDL_ttf, imgui, enet, monocypher builds; pool hooks; adaptors | mem, platform | links clean on the `CANON.md` matrix (4 legs) |
 | W3 | ★ **alloy-solver** | Fable 5 high | pass 3 (from gate0), contacts, colouring, velocity pass | gate0 verdict, alloy-substrate | `ALLOY.md` §14.7 step 5 (solver) |
 | W3 | **ci-matrix** | Fable 5 high | `pr.yml` on the `CANON.md` target matrix (4 hosted native legs), 4-way `build_id` gate, `binarch.py`, `targets.py` 4th triple, the target-set ruling across the docs | skeleton | all four legs green on one commit (`BUILD.md` §10.4) |
+| W3 | **governance** | Fable 5 high | `WORKFLOW.md` + the PR-per-lane rule, `perf.yml` election measurement, the perf-reference re-ruling (owned hardware retired), `NETCODE.md` §19.10 four-leg battletest plan | ci-matrix | shipped through its own draft PR with a ship review verdict |
 | W3 | **loop+input** | Sonnet 5 | loop, time, phases, interp, action map, Live/Script/Replay producers, recorder | ecs, platform | `FRAME-LOOP.md` §8.4, `INPUT.md` §9.6 |
 | W3 | **assets+data** | Sonnet 5 | asset registry, loaders, data-table compiler, save v1 | ecs, luau-vm, platform | `ASSETS-AND-DATA.md` §8.5 |
 | W3 | **luau-bindings** | Opus 5 high | `ecs.*`, `alloy.*`, `input/events/data/log`, trampolines, proxies, reload, `luauc`, binding docs | ecs, alloy-substrate, luau-vm | `LUAU-LAYER.md` §10.12 |

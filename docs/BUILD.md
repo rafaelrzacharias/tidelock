@@ -292,9 +292,10 @@ trace pins inside it are the cross-ISA determinism gate, `DETERMINISM.md` §8 R-
 assertion per leg (`tools/audit/binarch.py`: no silent host-arch fallback) → the four-way R-8
 `build_id` diff → driver harness jobs → sanitizer job (both Linux ISAs, `-DTL_SANITIZE=ON`, sim
 tests) → rebuild budget. `nightly.yml`: slow tests, fuzz, fxcheck + oracle, G-06 cross-leg hash
-diff on the hosted runners; a self-hosted `deck` runner joins it for the physical perf/soak half
-(replay-diff against PR artifacts, save cross-build, pixel goldens) when the Deck enters the
-bench — perf hardware is the PC alone until then (Pi removed, ruled 2026-08-25).
+diff on the hosted runners, the `perf.yml` election measurements (`WORKFLOW.md` §4); a
+self-hosted `deck` runner joins for the physical *network-soak* half (replay-diff against PR
+artifacts over a real LAN, save cross-build, pixel goldens) when the Deck enters the bench
+(Pi removed, ruled 2026-08-25).
 `weekly.yml`: Hovel scenarios (when present), Gate 0 re-run on palette/solver changes.
 
 Built so far: `pr.yml` with audits (doc, include firewall, header contracts, doc-touch, symbols),
@@ -329,4 +330,6 @@ it is now carried by the hosted `ubuntu-24.04-arm` / `windows-11-arm` CI legs (�
 cross leg (R-3 sysroot) waits on the Deck entering the bench.
 
 *Rev 1 — 2026-08-22; §9 R-4..R-8 and §3/§5/§10.1/§10.3/§10.4/§10.5 reconciled with the W0 skeleton, its adversarial review and the R-8 ruling, 2026-08-22. §1/§10.3/§10.4 re-ruled to the `CANON.md` target matrix ({Windows, Linux} × {x86-64, arm64}, hosted native CI runners), 2026-08-25; §1/§2/§7/§9 R-3/§10.1/§10.4/§10.5 swept for the Pi 4's
-removal from the program (perf reference = the PC now, the Steam Deck later), same date.*
+removal from the program, same date; §10.4 re-pointed at `WORKFLOW.md` §4 for perf grading
+(elected CI leg radar, absolutes at the committed PC rev-2 record until the Deck re-anchors),
+same date.*

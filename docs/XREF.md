@@ -29,6 +29,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `README.md` -> §9
 - `RENDER2D.md` -> §5, §8
 - `ROADMAP.md` -> §9
+- `WORKFLOW.md` -> §9
 
 ## ASSETS-AND-DATA.md
 - `ALLOY.md` -> §3
@@ -141,10 +142,10 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 
 ## GATE0-BENCH.md
 - `ARCHITECTURE.md` -> §8.5
-- `CANON.md` -> §4
 - `FX-PALETTE.md` -> §8
 - `NETCODE.md` -> §2
 - `ROADMAP.md` -> §8.5
+- `WORKFLOW.md` -> §2
 
 ## INPUT.md
 - `ARCHITECTURE.md` -> §4, §9.6
@@ -200,12 +201,13 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `BUILD.md` -> §15.1, §19.5
 - `CANON.md` -> §15.1, §19.4
 - `CONTAINERS.md` -> §14.1
-- `DETERMINISM.md` -> §14
+- `DETERMINISM.md` -> §14, §19.4
 - `FRAME-LOOP.md` -> §7.4, §20
 - `INPUT.md` -> §8.4, §12.2
 - `JOBS.md` -> §2
-- `ROADMAP.md` -> §19.5, §20.8
-- `TESTING.md` -> §19
+- `ROADMAP.md` -> §19.5, §19.10, §20.8
+- `TESTING.md` -> §19, §19.10
+- `WORKFLOW.md` -> §19, §19.4
 
 ## PIVOT-DESIGN.md
 - `ALLOY.md` -> §2, §4, §9
@@ -250,6 +252,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 ## ROADMAP.md
 - `BUILD.md` -> §0
 - `CONTAINERS.md` -> §0
+- `WORKFLOW.md` -> §2
 
 ## TESTING.md
 - `BUILD.md` -> §5, §8, §9.1
@@ -269,3 +272,13 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `PLATFORM.md` -> §9.3.9
 - `RENDER2D.md` -> §2
 - `ROADMAP.md` -> §9
+
+## WORKFLOW.md
+- `ALLOY.md` -> §4
+- `BUILD.md` -> §4
+- `CANON.md` -> §4
+- `DETERMINISM.md` -> §4
+- `GATE0-BENCH.md` -> §4
+- `NETCODE.md` -> §4
+- `RENDER2D.md` -> §4
+- `TESTING.md` -> §4

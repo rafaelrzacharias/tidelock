@@ -105,9 +105,9 @@ palette change).
   solver's used columns `[base, used)` each tick (`DETERMINISM.md` §4).
 - **Shadow CSV** (dev config only): `tick, substep, pass, constraint_kind, max_abs_err_fx_vs_double`.
 - **Timing:** p50/p95/p99 of `solve_us` over the last 80% of ticks (warm-up excluded), reported per
-  machine per particle count. The PC number is the **binding** one — min-spec is PC-class until
-  the Deck joins (2026-08-25 ruling) — and also the pivot-level one; shared CI runners never
-  grade timing.
+  machine per particle count. Where timing is *graded* is `WORKFLOW.md` §4's policy
+  (re-ruled 2026-08-25): the two PCs' committed rev-2 numbers are the absolute record until the
+  Deck re-anchors §2 by ruling; CI legs carry the regression radar only.
 - **Pass/fail is computed by the bench itself** and printed as a verdict line per scenario; the
   CSVs are committed under `tests/gate0/results/<date>-<machine>/` so the rev-2 palette cites
   real files.
@@ -246,5 +246,6 @@ target matrix (the Pi half of the criterion left with the Pi, 2026-08-25); CSVs 
 `FX-PALETTE.md` rev 2 written.
 
 *Rev 1 — 2026-08-22; §0/§2 G-05/G-06/§4/§8.4/§8.5 swept for the Pi 4's removal (2026-08-25
-target-matrix ruling): cross-ISA evidence moved to the hosted CI arm64 legs, min-spec anchored to
-the PC until the Deck joins.*
+target-matrix ruling): cross-ISA evidence moved to the hosted CI arm64 legs. §4 timing re-pointed
+at `WORKFLOW.md` §4 the same day (absolute record = the committed PC rev-2 numbers until the Deck
+re-anchors §2 by ruling).*

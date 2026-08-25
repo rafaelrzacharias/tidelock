@@ -189,8 +189,8 @@ non-commutative combine safe (`JOBS.md` reduction rule, PIVOT §12a).
 
 - **Substeps = 8** (PIVOT §3.1a). Gate 0's 4/8/16 sweep verifies; a move is a recorded constant
   change.
-- **Particle budget = 20k active at nominal load** (§11.2); G-05 verifies on the reference PC
-  (the Deck joins later — 2026-08-25 ruling).
+- **Particle budget = 20k active at nominal load** (§11.2); G-05 verifies it, graded per
+  `WORKFLOW.md` §4 (the committed PC rev-2 record until the Deck re-anchors — 2026-08-25).
 - **Hot row = 32 B, `temp` in the hot row:** `pos` 8 · `prev_pos` 8 · `inv_mass` 4 ·
   `mass_quanta` 4 · `species_id` 2 · `flags` 2 · `temp` 2 · `_pad0` 2. Two rows per 64-byte line.
   `temp` stays hot because pass 1 and pass 4 both read it per particle every tick; a warm column
@@ -1620,7 +1620,7 @@ change after Gate 0 re-runs the bench, not the whole queue.
 | 5f. AgentBody | `agent.cpp`, `MoveIntent` intake, commit window | `t_agent`, `t_edit_cmds` (intent) | — |
 | 5g. Queries + wake | `query.cpp`, T11 wake queue, `hash.cpp` views | `t_queries`, `t_wake_queue`, `t_snapshot` | — |
 | 6. T-A-01 / T-A-03 | snapshot-ring prototype in `tests/sim/t_rollback.cpp` | restore round-trip hash identity at depth 6; closure-restore vs whole-arena cost | restore ms vs island count; Σ `used` per arena on the G-05 scene → reserve table commit |
-| 7. Engine wiring | `gen/*.cpp`, Luau bindings (outside `tl_sim`), render over `views.h`, desync harness integration, the toybox scene | `t_gen`, `t_harness` over the toybox incl. cross-ISA, the two-consumer scene scripts | G-05 final: ≤ 4 ms on the reference PC at nominal load |
+| 7. Engine wiring | `gen/*.cpp`, Luau bindings (outside `tl_sim`), render over `views.h`, desync harness integration, the toybox scene | `t_gen`, `t_harness` over the toybox incl. cross-ISA, the two-consumer scene scripts | G-05 final: ≤ 4 ms at nominal load, graded per `WORKFLOW.md` §4 |
 
 Each step's "done" = its tests green under debug + UBSan/ASan, the worker sweep identical, the
 measurement committed to `GATE0-BENCH.md`/`docs/measurements/`, and no new undefined symbol.
