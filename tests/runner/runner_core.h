@@ -30,6 +30,25 @@ constexpr int TL_EXIT_FAIL = 1;
 constexpr int TL_EXIT_SKIP = 4;   // the child ran and declared itself skipped (TL_SKIP)
 constexpr int TL_EXIT_FATAL = 2;  // the real tl_fatal's controlled exit (src/foundation/crash.cpp)
 
+// Strict non-negative decimal parse into `out`; true on success. atoll answers 0 for "abc", ""
+// and "12x000", so a typo'd --timeout-ms silently DISARMED the hang safety net and a typo'd
+// --seed silently became seed 0 (W1 wave-boundary sweep D1, 2026-08-25). The driver hit the
+// identical class and fixed it in driver_args.h (drv_parse_u63); the runner never inherited the
+// fix. Overflow is a refusal, not a wrap: every numeric flag here is a count.
+inline bool rc_parse_u63(const char* s, i64* out) {
+    if (s == nullptr || *s == 0) { return false; }
+    constexpr i64 I63_MAX = (i64)0x7fffffffffffffff;
+    i64 v = 0;
+    for (const char* p = s; *p; ++p) {
+        if (*p < '0' || *p > '9') { return false; }
+        const i64 digit = (i64)(*p - '0');
+        if (v > (I63_MAX - digit) / 10) { return false; }
+        v = v * 10 + digit;
+    }
+    *out = v;
+    return true;
+}
+
 // How a child process terminated. `spawned` is the one that must be checked first: a spawn that
 // never happened is not evidence of anything, least of all of an expected fatal. `timed_out` is
 // checked immediately after it and beats everything else including `expect_fatal`: the runner

@@ -252,6 +252,25 @@ TL_TEST(runner_skip_reports_skip_not_pass, "runner,fast") {
     TL_SKIP("a live SKIP row, so the status is exercised end to end in every run");
 }
 
+TL_TEST(runner_parse_u63_rejects_garbage_never_answers_zero, "runner,fast") {
+    // sweep D1 (2026-08-25): atoll answered 0 for every string below, and 0 means "timeout off".
+    // The negative tests are the point (docs/TESTING.md §1).
+    i64 v = -7;
+    TL_EXPECT_TRUE(!rc_parse_u63(nullptr, &v));
+    TL_EXPECT_TRUE(!rc_parse_u63("", &v));
+    TL_EXPECT_TRUE(!rc_parse_u63("abc", &v));
+    TL_EXPECT_TRUE(!rc_parse_u63("12x000", &v));
+    TL_EXPECT_TRUE(!rc_parse_u63("-1", &v));
+    TL_EXPECT_TRUE(!rc_parse_u63("+1", &v));
+    TL_EXPECT_TRUE(!rc_parse_u63(" 1", &v));
+    TL_EXPECT_TRUE(!rc_parse_u63("9223372036854775808", &v));   // I64_MAX + 1: overflow refused
+    TL_EXPECT_EQ(v, (i64)-7);                                   // a refusal never writes out
+    TL_EXPECT_TRUE(rc_parse_u63("0", &v));      TL_EXPECT_EQ(v, (i64)0);
+    TL_EXPECT_TRUE(rc_parse_u63("120000", &v)); TL_EXPECT_EQ(v, (i64)120000);
+    TL_EXPECT_TRUE(rc_parse_u63("9223372036854775807", &v));    // exactly I64_MAX parses
+    TL_EXPECT_EQ(v, (i64)0x7fffffffffffffff);
+}
+
 TL_TEST(runner_child_verdict_timeout_is_its_own_status, "runner,fast") {
     // docs/TESTING.md §9.1 (--timeout-ms, ruled 2026-08-24): a timed-out child is TIMEOUT, never
     // PASS, FAIL or SKIP - and the timeout beats every other signal, because the exit code of a
