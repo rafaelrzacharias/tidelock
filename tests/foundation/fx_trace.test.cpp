@@ -1,7 +1,7 @@
 // fx_trace.test.cpp - the cross-ISA trace (docs/FX-PALETTE.md §10.5 "fx_crossisa"): a 1M-op
 // trace of mul/div/mul_int/to/sqrt/sincos/atan2/normalize/rotate over seeded inputs, folded
 // into one 64-bit hash that is PINNED here. The same binary logic must produce the same hash on
-// clang-cl/x86-64, clang/linux x86-64 (CI) and clang/aarch64 (the Pi, nightly) - a differing
+// clang-cl/x86-64, clang/linux x86-64 (CI) and clang/aarch64 (the CI arm64 legs) - a differing
 // value is a determinism bug, UB by default hypothesis (docs/TESTING.md §4). The driver job of
 // the spec is the same trace hashed through the driver once the runner+driver lane lands; until
 // then this test IS the trace, and the pinned constant is the PC's answer.

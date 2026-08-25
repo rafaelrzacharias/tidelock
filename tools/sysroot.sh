@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Capture a cross-compile sysroot from a live target. Spec: docs/BUILD.md §7, ruling R-3.
-# Usage: tools/sysroot.sh <host> [out-dir]     e.g. tools/sysroot.sh pi@tidelock-pi4
+# Usage: tools/sysroot.sh <host> [out-dir]     e.g. tools/sysroot.sh deck@tidelock-deck
 # The tarball is stored outside git; its BLAKE2b goes into toolchain/VERSIONS.
 set -euo pipefail
 

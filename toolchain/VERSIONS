@@ -7,5 +7,4 @@ cmake                     4.3.2
 ninja                     1.13.2
 python                    3.13
 cxx_standard              c++20                                     # docs/CPP-SUBSET.md §7
-sysroot_pi4               unset                                     # tools/sysroot.sh <pi-host>; pin the blake2b it prints (docs/BUILD.md §9 R-3)
-sysroot_deck              unset                                     # same, for the Steam Deck x86-64 sysroot
+sysroot_deck              unset                                     # tools/sysroot.sh <deck-host>; pin the blake2b it prints (docs/BUILD.md §9 R-3)

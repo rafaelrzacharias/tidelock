@@ -324,6 +324,15 @@ INCLUDE_CASES = [
      "tests/foundation/nom_test_api.h",
      "#include <windows.h>\nstatic inline void nom_probe(void) {}\n",
      "no `#define NOMINMAX`"),
+    # Gate 7 reads the comments-blanked text like every other token check (the 2026-08-25 review
+    # sweep found it alone reading raw lines): a #define NOMINMAX inside a comment is not a
+    # define, so this file is still a violation. The define sits at column 0 on its own line
+    # inside the block comment ON PURPOSE - a raw-line scan matches it and would pass this file,
+    # so this fixture is the one that distinguishes blanked from raw.
+    ("a commented-out NOMINMAX does not satisfy gate 7",
+     "src/platform/os_nom_commented.cpp",
+     "/*\n#define NOMINMAX\n*/\n#include <windows.h>\nvoid os_nom_commented(void) {}\n",
+     "no `#define NOMINMAX`"),
 ]
 
 # Things that must NOT fire: the gates have to be usable, not just loud.
@@ -406,6 +415,12 @@ INCLUDE_CLEAN = [
     ("a tests/ file with NOMINMAX before its <windows.h> is clean",
      "tests/foundation/nom_ok_api.h",
      "#define NOMINMAX\n#include <windows.h>\nstatic inline void nom_ok(void) {}\n"),
+    # Gate 7 on the blanked text, the clean side (2026-08-25 review sweep): a block-commented
+    # include at column 0 is prose, not an include - it must not trigger the gate. Planted in
+    # src/platform/ so nothing else about the file is questionable.
+    ("a block-commented <windows.h> include does not trigger gate 7",
+     "src/platform/os_nom_prose.cpp",
+     "/*\n#include <windows.h>\n*/\nvoid os_nom_prose(void) {}\n"),
 ]
 
 
@@ -711,7 +726,7 @@ def test_fingerprint(tmp):
 
 
 # --- targets.py -------------------------------------------------------------------------------
-# The constructs four reviews found and no regex caught. Each is measured on all three triples,
+# The constructs four reviews found and no regex caught. Each is measured on all four triples,
 # so these fixtures are the evidence that measurement beats enumeration - and the clean ones are
 # the evidence it does not cry wolf on ordinary sim code.
 TARGET_CASES = [
@@ -737,7 +752,7 @@ TARGET_CASES = [
 ]
 # The false positive the -U_MSC_VER flag was reaching for, and the evidence that stubbing
 # <intrin.h> keeps it fixed: a vendor-shaped header that includes <intrin.h> under _MSC_VER pulls
-# ~90 SIMD-intrinsic records into the win layout dump and none into linux/pi. The gate must see
+# ~90 SIMD-intrinsic records into the win layout dump and none into linux/arm. The gate must see
 # zero divergences here AND still fail the mscver case above - one flag could not do both.
 TARGET_INTRIN = ("#ifdef _MSC_VER\n#include <intrin.h>\n#endif\n"
                  "struct Plain { u32 a; u64 b; };\n"

@@ -103,14 +103,34 @@ language is retired. **Design complete, pre-code.** Next milestone: **Gate 0** (
 - **Games are Luau** (`script/`, later their own repos): data + meaning. Authoritative state never
   lives in the Luau heap (`docs/LUAU-LAYER.md` §0).
 - **Determinism is fixed-point by construction** (`docs/FX-PALETTE.md`, `docs/DETERMINISM.md`): no
-  floats on any sim path; cross-ISA (PC x86-64 + Steam Deck x86-64 + Pi 4 aarch64) for free.
+  floats on any sim path; cross-platform for free — targets are `CANON.md`'s {Windows, Linux} ×
+  {x86-64, arm64} matrix (ruled 2026-08-25), machines are instances.
+
+## PUBLIC REPOSITORY — world-readable, at all times (ruling 2026-08-25)
+This repo is **public**. Every commit, branch, doc, commit message, and CI log is visible to
+anyone, forever — clones and forks persist even if visibility is later reverted. Enforced every
+session, every commit:
+- **No secrets, ever, anywhere**: no keys, tokens, credentials, or connection strings — not in
+  code, docs, tests, commit messages, or branch names. CI secrets live in GitHub Actions
+  secrets, referenced by name only. A pasted log or tool output is scrubbed before commit.
+- **No personal info in code or docs**: no emails, phone numbers, addresses, machine hostnames,
+  local user paths (`C:\Users\<name>`, `/home/<name>`), IPs, or agent-session URLs. The one
+  deliberate exception: Rafael's commit-author identity (name + GitHub email), ruled 2026-08-25.
+  Upstream authors' own headers under `vendor/` are theirs and stay.
+- **Read-only to the world**: external issues/PRs/contributions are not accepted — disabled
+  where GitHub allows, closed unread where it doesn't. Nothing merges except Rafael's own work.
+- **License is proprietary** (`LICENSE`, cited in `README.md`): all rights reserved; `vendor/`
+  keeps upstream licenses. Never add a file that grants rights (no OSS license templates).
 
 ## Two-PC git sync — context lives in COMMITTED files
 Developed on two PCs synced via git; per-machine auto-memory does not sync.
 - Durable context → committed files only (`docs/`, `TODO.md`, `LESSONS.md`). Never substance in
   auto-memory.
 - **Commit AND push in the same turn.** (Exception: told not to, or a push would force-overwrite.)
-- **No `Co-Authored-By` trailer** — Rafael is sole author, every commit.
+- **No `Co-Authored-By` trailer** — Rafael is sole author, every commit. This holds for
+  cloud/agent sessions too (ruled 2026-08-25): commits pushed from them carry Rafael's
+  author+committer identity and GitHub's "Unverified" badge is accepted — never a bot identity
+  for a green badge.
 - Line endings: `.gitattributes` is the authority (`*.bat`/`*.cmd` CRLF, else LF);
   `git config --local core.autocrlf false` per clone.
 

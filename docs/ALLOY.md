@@ -189,7 +189,8 @@ non-commutative combine safe (`JOBS.md` reduction rule, PIVOT §12a).
 
 - **Substeps = 8** (PIVOT §3.1a). Gate 0's 4/8/16 sweep verifies; a move is a recorded constant
   change.
-- **Particle budget = 20k active at nominal load** (§11.2); G-05 verifies on PC and Pi.
+- **Particle budget = 20k active at nominal load** (§11.2); G-05 verifies on the reference PC
+  (the Deck joins later — 2026-08-25 ruling).
 - **Hot row = 32 B, `temp` in the hot row:** `pos` 8 · `prev_pos` 8 · `inv_mass` 4 ·
   `mass_quanta` 4 · `species_id` 2 · `flags` 2 · `temp` 2 · `_pad0` 2. Two rows per 64-byte line.
   `temp` stays hot because pass 1 and pass 4 both read it per particle every tick; a warm column
@@ -791,7 +792,7 @@ answer (PIVOT §0, §3.1a/b)**: the dynamic range is *bounded by design*, then *
 **The headless harness ships FIRST** (`TESTING.md`), before the substrate:
 - run-twice (two worlds, one process, identical hash trace);
 - worker-count invariance 1 / 2 / 8 / 16 (a blocking release gate) + one mixed-pair run;
-- cross-ISA: PC x86-64 ↔ Pi 4 aarch64, Pi binary cross-compiled from the PC, identical traces;
+- cross-ISA: x86-64 ↔ arm64 across the CI target legs, identical traces;
 - record→replay over the command log;
 - property/fuzz per pass; round-trip tests for **every §6.2 transition** (disturb-settle-
   disturb, melt-freeze, boil-condense, dissolve-precipitate) with Σ-mass exact;
@@ -898,11 +899,11 @@ displacement vs `v_max`; every persistent field has a declared default (the §9.
 pass 1 fields ~0.5 · pass 2 forces ~0.5 · pass 3 solve ~4.0 (dominant by design) · pass 4
 chemistry ~1.0 · pass 5 topology ~1.0 amortized · hashing/bookkeeping ~0.5 → ~8 ms sim budget.
 This budget is per peer and independent of peer count. **G-05 is the measurement**: 20k
-particles + 2k bodies **≤ 4 ms PC and ≤ 12 ms Pi 4** passes; > 8 ms PC at 20k is
-**pivot-level** (fixed point cannot hold the primary platform — the fallback ladder fires); a
-Pi-only miss **redraws min-spec** (Pi becomes a stretch peer) and never triggers the float
-fallback. If 20k doesn't fit, the budget moves (counts, substeps), not the verdict. Any pass
-2× over target triggers a design review, not a micro-opt hunt.
+particles + 2k bodies **≤ 4 ms PC** passes; > 8 ms PC at 20k is **pivot-level** (fixed point
+cannot hold the primary platform — the fallback ladder fires). (The Pi's ≤ 12 ms half and its
+min-spec-redraw clause left with the Pi, ruled 2026-08-25; the Deck's budget is set from
+measurement when it enters the bench.) If 20k doesn't fit, the budget moves (counts, substeps),
+not the verdict. Any pass 2× over target triggers a design review, not a micro-opt hunt.
 
 ### §11.3 Resolved-by-design sweep
 
@@ -943,7 +944,8 @@ Ore `noise` / `hash.coord2` no longer exist. The primitives must be re-homed.
   separate from per-tick `rng_for`; generating a chunk at tick 0 or tick 10⁶ yields identical
   content. Generation is a pure function; it runs in scratch and writes the chunk only at the
   pass-5 boundary.
-- Gate: a chunk-hash replay test (generate every chunk of a test seed on PC and Pi; compare).
+- Gate: a chunk-hash replay test (generate every chunk of a test seed on every CI target leg;
+  compare).
 
 ---
 
@@ -1591,7 +1593,7 @@ other than `<stdint.h> <stddef.h> <string.h> <limits.h>`.
 | `t_queries.cpp` | raycast/shapecast vs reference marching; connectivity; `medium_at` across all four kinds; `cavity_path` hop/min-opening; light budget occlusion |
 | `t_agent.cpp` | medium transitions from immersion/contact; commit window: identical state under any intent stream inside the window |
 | `t_plants.cpp` | growth thresholds; chop (sever joint) → segment falls; wither reversal; light budget feed |
-| `t_gen.cpp` | chunk-hash replay for a test seed at tick 0 and 10⁶; PC↔Pi trace compare (infra-gated) |
+| `t_gen.cpp` | chunk-hash replay for a test seed at tick 0 and 10⁶; cross-leg trace compare on the CI arm64 legs |
 | `t_snapshot.cpp` | save/restore round-trip → identical next-tick hash; `alloy_post_restore` rebuilds `chunk_slot_of`; fingerprint mismatch → `ALLOY_ERR_SNAPSHOT_FINGERPRINT` |
 | `t_harness.cpp` | run-twice (two `AlloyWorld`s in one process), record→replay over the command log, worker sweep 1/2/8/16 + shuffle, UBSan/ASan variants — over the toybox scene |
 | `t_budget.cpp` | G-05 scene (20k particles, 2k bodies, 500 dirty regions): per-pass ms and Σ `used` per arena written to CSV (T-A-03) |
@@ -1618,7 +1620,7 @@ change after Gate 0 re-runs the bench, not the whole queue.
 | 5f. AgentBody | `agent.cpp`, `MoveIntent` intake, commit window | `t_agent`, `t_edit_cmds` (intent) | — |
 | 5g. Queries + wake | `query.cpp`, T11 wake queue, `hash.cpp` views | `t_queries`, `t_wake_queue`, `t_snapshot` | — |
 | 6. T-A-01 / T-A-03 | snapshot-ring prototype in `tests/sim/t_rollback.cpp` | restore round-trip hash identity at depth 6; closure-restore vs whole-arena cost | restore ms vs island count; Σ `used` per arena on the G-05 scene → reserve table commit |
-| 7. Engine wiring | `gen/*.cpp`, Luau bindings (outside `tl_sim`), render over `views.h`, desync harness integration, the toybox scene | `t_gen`, `t_harness` over the toybox incl. cross-ISA, the two-consumer scene scripts | G-05 final: ≤ 4 ms PC / ≤ 12 ms Pi at nominal load |
+| 7. Engine wiring | `gen/*.cpp`, Luau bindings (outside `tl_sim`), render over `views.h`, desync harness integration, the toybox scene | `t_gen`, `t_harness` over the toybox incl. cross-ISA, the two-consumer scene scripts | G-05 final: ≤ 4 ms on the reference PC at nominal load |
 
 Each step's "done" = its tests green under debug + UBSan/ASan, the worker sweep identical, the
 measurement committed to `GATE0-BENCH.md`/`docs/measurements/`, and no new undefined symbol.

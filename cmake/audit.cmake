@@ -89,7 +89,7 @@ add_custom_target(tl_audit_includes
 add_custom_target(tl_audit_targets
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/audit/targets.py"
           --root "${CMAKE_SOURCE_DIR}" --clang "${TL_CLANGXX}"
-  COMMENT "audit: preprocess + record layouts on all three triples"
+  COMMENT "audit: preprocess + record layouts on all four triples"
   VERBATIM)
 
 add_custom_target(tl_audit_docs

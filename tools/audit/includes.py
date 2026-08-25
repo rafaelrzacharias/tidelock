@@ -169,7 +169,7 @@ CHAR_LITERAL_USE = re.compile(r'\b(?:const\s+char|char\s+const)\s*(\*|\[|\(\s*&)
 
 # Layout and target-selection hazards that are not types. Each was measured to differ between
 # windows-msvc and linux/aarch64 by the third W0 review, with no UB involved:
-#   bit-fields          `struct { u8 a:4; u16 c:8; }` is 4 B on windows-msvc, 2 B on linux/pi
+#   bit-fields          `struct { u8 a:4; u16 c:8; }` is 4 B on windows-msvc, 2 B on linux/arm
 #   platform macros     a sim TU that branches on _WIN32 or __aarch64__ is two different programs
 #   custom sections     section(".x") hides a mutable global from the .data/.bss gate
 #   unfixed enum base   the underlying type is the compiler's choice; hashed state cannot have one
@@ -699,10 +699,16 @@ DEFINE_NOMINMAX = re.compile(r'^\s*#\s*define\s+NOMINMAX\b')
 
 
 def check_nominmax(root, path, errors):
-    """Fails if the file includes <windows.h> with no `#define NOMINMAX` on an earlier line."""
+    """Fails if the file includes <windows.h> with no `#define NOMINMAX` on an earlier line.
+
+    Reads the comments-and-strings-blanked text, like every other token check (the module rule at
+    the top of this file): a block-commented `#include <windows.h>` at column 0 must not trigger,
+    and a `#define NOMINMAX` inside a comment must not satisfy the rule - the 2026-08-25 review
+    sweep found gate 7 alone reading raw lines. strip_comments preserves line structure, so the
+    reported line numbers still point at the real file."""
     rel = os.path.relpath(path, root).replace(os.sep, "/")
     try:
-        lines = open(path, encoding="utf-8", errors="replace").read().splitlines()
+        lines = strip_comments(open(path, encoding="utf-8", errors="replace").read()).splitlines()
     except OSError:
         return
     defined_at = -1

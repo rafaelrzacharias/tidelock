@@ -118,17 +118,22 @@ inline TestVerdict tl_ctx_verdict(u32 failures, u32 checks, bool skipped) {
     return VERDICT_PASS;
 }
 
-// The verdict for a test that ran in a CHILD process. `dev_tier` is TL_DEV at the call site.
+// The verdict for a test that ran in a CHILD process.
 //
-// A fatal-expected test (docs/TESTING.md §9.1) is judged as a fatal expectation only on a tier
-// where TL_ASSERT is compiled in; on netcode/ship the call under test cannot fatal, so the body
-// is written to TL_SKIP and is judged as an ordinary child.
+// A fatal-expected test (docs/TESTING.md §9.1) is judged the same way in EVERY tier: the real
+// tl_fatal exits(2) after printing the marker, and TL_FATAL/TL_CHECK never compile out, so the
+// expectation is tier-agnostic (the W1 ruling-closeout's finding B, resolved at the wave merge -
+// the old `dev_tier` parameter is gone). A row whose TRIGGER is dev-only (TL_ASSERT) declares
+// that itself with a body TL_SKIP outside dev, and that skip is honored here.
 //
-// KNOWN GAP (TODO.md): the contract is exit code 2 + the TL_FATAL_MARKER stderr line, but the
-// runner does not capture the child's stderr yet and this tree's tl_fatal is still the trap stub.
-// Until both land, "terminated abnormally" stands in for it. What is NOT deferred: a child that
-// never spawned is a FAIL on every path - the earlier code returned "expected fatal, PASS" for a
-// failed CreateProcess, so a broken exe path turned every fatal-expected test green (review 1).
+// KNOWN GAP (TODO.md, "the TL_TEST_EXPECT_FATAL tightening"): the contract is exit code 2 + the
+// TL_FATAL_MARKER stderr line naming the expected fatal, but the runner does not capture the
+// child's stderr, so exit code 2 stands in for it and cannot say WHICH fatal fired - the
+// 2026-08-25 sweep measured that (map_grow's guard deleted still passed its row in dev, via
+// arena_push's null-arena assert; map_fixed_overflow_names_its_fatal is the site-level pin until
+// the capture lands). What is NOT deferred: a child that never spawned is a FAIL on every path -
+// the earlier code returned "expected fatal, PASS" for a failed CreateProcess, so a broken exe
+// path turned every fatal-expected test green (review 1).
 inline TestVerdict tl_child_verdict(bool expect_fatal, const ChildResult& cr) {
     if (!cr.spawned) { return VERDICT_FAIL; }
     // Before the fatal-expected inversion, deliberately: a killed child's exit code is the

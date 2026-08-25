@@ -252,13 +252,15 @@ TL_TEST(vmem_reserve_rounds_up_to_commit_granule, "foundation,mem,smoke,fast") {
 }
 
 TL_TEST_EXPECT_FATAL(vmem_push_one_byte_past_reserve_is_fatal, "foundation,mem,fatal") {
-#if TL_DEV
     (void)t;
     // The other half of "the fatal coincides with the real edge": with the whole reserve spent,
     // ONE more byte is over budget and TL_FATALs (docs/MEMORY.md section 1.1). Paired with
     // vmem_reserve_rounds_up_to_commit_granule, which proves every byte up to `reserved` is
     // pushable, this pins the edge from both sides. A sub-granule request on purpose: this arena
-    // could not push at all before the ruling.
+    // could not push at all before the ruling. The over-reserve check is a TL_FATAL, live in
+    // EVERY tier, and tl_child_verdict has been tier-agnostic since the wave merge
+    // (runner_core.h) - so this row runs on all four tiers. The 2026-08-25 review sweep replaced
+    // the netcode/ship TL_SKIP here, which cited a runner limitation that no longer exists.
     VMemApi api = test_vmem_api();
     VMemArena a = {};
     if (vmem_arena_init(&a, 0x9003u, 100u, 0u, &api) != ERR_OK) {
@@ -266,12 +268,4 @@ TL_TEST_EXPECT_FATAL(vmem_push_one_byte_past_reserve_is_fatal, "foundation,mem,f
     }
     (void)arena_push(&a, a.reserved, 1u);   // the whole budget: legal, the edge is inclusive
     (void)arena_push(&a, 1u, 1u);           // one past it: TL_FATAL, exit 2
-#else
-    // Same runner limitation as registry_add_hashed_without_snapshot_is_fatal: the over-reserve
-    // check is a TL_FATAL, so it is live on this tier, but tl_child_verdict
-    // (tests/runner/runner_core.h) inverts the pass condition only under TL_DEV. TODO.md carries
-    // it, owner the runner lane. A visible SKIP, never a vacuous pass.
-    TL_SKIP("tl_child_verdict judges fatal-expected rows only under TL_DEV (runner_core.h); this "
-            "fatal is a TL_FATAL and is live on this tier - TODO.md");
-#endif
 }

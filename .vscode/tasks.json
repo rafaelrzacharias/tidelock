@@ -1,7 +1,7 @@
 {
   "version": "2.0.0",
   "inputs": [{ "id": "preset", "type": "pickString", "description": "CMake preset", "default": "dev-win",
-               "options": ["dev-win", "debug-win", "netcode-win", "ship-win", "netcode-pi4"] }],
+               "options": ["dev-win", "debug-win", "netcode-win", "ship-win", "netcode-deck"] }],
   "tasks": [
     { "label": "configure", "type": "shell", "command": "cmake --preset ${input:preset}", "problemMatcher": [] },
     { "label": "build", "type": "shell", "command": "cmake --build --preset ${input:preset}", "group": { "kind": "build", "isDefault": true }, "problemMatcher": ["$gcc"] },

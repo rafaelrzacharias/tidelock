@@ -1,0 +1,34 @@
+tidelock — proprietary license
+
+Copyright (c) 2026 Rafael R. Zacharias. All rights reserved.
+
+This repository contains the source code, design documents, and assets of a
+commercial game engine and game. The source is made publicly VISIBLE for
+reference and continuous-integration purposes only. Public visibility is not
+a grant of rights.
+
+NO LICENSE IS GRANTED. Without the prior explicit written permission of the
+copyright holder, you may NOT, under any circumstances:
+
+  - use this software or any part of it, for any purpose, commercial or not;
+  - copy, reproduce, or redistribute it, in source or binary form;
+  - modify it or create derivative works from it;
+  - incorporate any part of it (code, algorithms as expressed here, designs,
+    documents, or assets) into any other software or publication;
+  - train, fine-tune, or ground any machine-learning system on it.
+
+Viewing the code on GitHub, and the automatic forking GitHub performs as part
+of its platform features, are permitted only to the extent GitHub's Terms of
+Service require; they convey no further rights.
+
+The exception is the third-party code vendored under vendor/: each library
+there remains under its own upstream license, stated in its own files, and
+nothing in this notice restricts rights those licenses grant to their own
+upstream works.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
+DAMAGES, OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+For permission requests, contact the copyright holder via GitHub:
+https://github.com/rafaelrzacharias

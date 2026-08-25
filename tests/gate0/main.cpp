@@ -513,7 +513,6 @@ int main(int argc, char** argv) {
     (void)s;   // used by the shadow block only (dev tiers)
     Ctx cx; cx.bt = &bt; cx.a = &a;
     int rc = 0;
-    const char* pi_note = "pi=BLOCKED(RR-1)";
 
     if (want(&a, "G01")) {
         FILE* f = open_csv(a.out, "G01", a.substeps, a.ladder, CSV_HEADER); if (!f) return 1;
@@ -565,9 +564,10 @@ int main(int argc, char** argv) {
         if (p95_20k) {
             // docs/GATE0-BENCH.md §2 as amended by §7 R-3: 20k <= 32 ms PC single-thread
             // (= ALLOY.md §11.2's 4 ms x 8 cores stated in the protocol's units); INVESTIGATE
-            // to 64 ms; FAIL beyond.
+            // to 64 ms; FAIL beyond. (The Pi half of the old threshold left with the Pi,
+            // 2026-08-25 - the arm64 evidence is the CI cross-leg diff, never a Pi timing.)
             const u32 v = p95_20k <= 32000 ? V_PASS : (p95_20k <= 64000 ? V_INVESTIGATE : V_FAIL);
-            printf("VERDICT G-05 substeps=%u %s pc_20k_p95_us=%llu %s\n", a.substeps, VNAME[v], (unsigned long long)p95_20k, pi_note);
+            printf("VERDICT G-05 substeps=%u %s pc_20k_p95_us=%llu\n", a.substeps, VNAME[v], (unsigned long long)p95_20k);
             if (v == V_FAIL) rc = 3;
         }
     }
@@ -593,7 +593,7 @@ int main(int argc, char** argv) {
             if (strstr(o.detail, "run_twice_divergence")) diverged = 1;
         }
         fclose(f);
-        printf("VERDICT G-06 substeps=%u %s pc_two_runs=%s %s\n", a.substeps, diverged ? "FAIL" : "PASS", diverged ? "DIVERGED" : "identical", pi_note);
+        printf("VERDICT G-06 substeps=%u %s pc_two_runs=%s\n", a.substeps, diverged ? "FAIL" : "PASS", diverged ? "DIVERGED" : "identical");
         if (diverged) rc = 3;
     }
     if (a.shadow) {

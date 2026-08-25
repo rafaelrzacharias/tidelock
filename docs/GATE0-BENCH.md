@@ -6,9 +6,10 @@
 > float fallback did not fire; `FX-PALETTE.md` rev 2 is stamped. Three criteria were amended by
 > ruling AFTER the run (§7 R-3..R-5) because each contradicted its own derivation or scenario —
 > the doc-bug class, not renegotiation; the amended rows are re-graded by the re-run filed in
-> `TODO.md`. Still open here: the Pi leg (G-06 cross-ISA, G-05 Pi half — RR-1), the sanitizer
-> G-06 evidence run, and G-03b/G-05 re-grading behind the `ALLOY.md` §14.4.3 liquid design pass.
-> Thresholds remain frozen as amended.
+> `TODO.md`. Still open here: the sanitizer G-06 evidence run, the G-06 cross-leg hash diff on
+> the hosted CI arm64 legs (the Pi leg left the program with the 2026-08-25 target-matrix
+> ruling; its G-05 half is void), and G-03b/G-05 re-grading behind the `ALLOY.md` §14.4.3
+> liquid design pass. Thresholds remain frozen as amended.
 
 ---
 
@@ -63,8 +64,8 @@ using widened i64 sums of fx products, reported as raw i64 so the envelope compa
 | **G-03** | 1,000-particle PBF column settling in a sealed box (≈ 7.8 m at CANON 2-texel lattice spacing — the count is the spec, the geometry is DERIVED; amended by §7 R-4) | p95 rest-density error < 2% after settle, stays settled over 5k further ticks | < 5% | undamped "boiling" (kinetic energy not monotone-decreasing after settle) |
 | **G-03b** | stress variant: 5k particles (≈ 39 m column). Verdict gated on the `ALLOY.md` §14.4.3 liquid design pass (`TODO.md` RR-10) — the column crushes its own base in both bindings today | — | recorded, not graded, until RR-10's design pass lands | — |
 | **G-04** | sealed mixed scene (the G-01 stack + 2k particles + 20 free boxes + 10 ropes of 8 distance constraints), 1e6 ticks | monotone non-increasing energy envelope (windowed max over 1k ticks) | slow bounded drift (envelope bounded within 1% of initial over the run) | energy growth |
-| **G-05** | cost sweep: 10k / 20k / 50k particles + 2k bodies, 8 substeps, single thread | 20k ≤ **32 ms** PC **and** ≤ **96 ms** Pi 4, single-thread (amended by §7 R-3: the old "4 ms" was `ALLOY.md` §11.2's ~8-core budget applied to a single-thread protocol — unreachable by ANY scalar arithmetic incl. double; 32 ms = 4 ms × 8 cores, same budget stated in the protocol's own units) | ≤ 64 ms PC / > 96 ms Pi | > 64 ms PC at 20k |
-| **G-06** | all of the above run twice in one process + PC-vs-Pi cross-compiled | 100% identical per-tick hash traces | — | any divergence (= UB) |
+| **G-05** | cost sweep: 10k / 20k / 50k particles + 2k bodies, 8 substeps, single thread | 20k ≤ **32 ms** PC, single-thread (amended by §7 R-3: the old "4 ms" was `ALLOY.md` §11.2's ~8-core budget applied to a single-thread protocol — unreachable by ANY scalar arithmetic incl. double; 32 ms = 4 ms × 8 cores, same budget stated in the protocol's own units; the Pi half — was ≤ 96 ms — left with the Pi, 2026-08-25) | ≤ 64 ms PC | > 64 ms PC at 20k |
+| **G-06** | all of the above run twice in one process + cross-leg on the `CANON.md` target matrix (CI) | 100% identical per-tick hash traces | — | any divergence (= UB) |
 
 **Substep sweep (ratified):** G-01..G-05 run at substeps **4 / 8 / 16**, not only 8. Substep count
 interacts with quantization non-obviously (smaller h → smaller corrections, closer to the `pos_t`
@@ -93,8 +94,10 @@ palette change).
 
 ## 4. Measurement protocol (DECIDED)
 
-- **Machines:** the dev PC (x86-64 Windows, clang-cl) and the Pi 4 (aarch64, cross-compiled from
-  the PC with the same clang — `BUILD.md` §2). Steam Deck optional for G-06 (third data point).
+- **Machines:** the dev PC (x86-64 Windows, clang-cl), with the second PC for cross-machine
+  bit-identity; the aarch64 data points run natively on the hosted CI arm64 legs (re-ruled
+  2026-08-25 — formerly the cross-compiled Pi 4). The Steam Deck joins for perf when it enters
+  the bench.
 - **Build tiers:** `netcode`-equivalent flags (`-O2`, no sanitizers) for timing; a second run of
   G-01..G-04 under UBSan+ASan for G-06 evidence (timing ignored).
 - **Per-tick CSV** (buffered, written after the run): `tick, substeps, scenario, jitter_p95_texel,
@@ -102,8 +105,9 @@ palette change).
   solver's used columns `[base, used)` each tick (`DETERMINISM.md` §4).
 - **Shadow CSV** (dev config only): `tick, substep, pass, constraint_kind, max_abs_err_fx_vs_double`.
 - **Timing:** p50/p95/p99 of `solve_us` over the last 80% of ticks (warm-up excluded), reported per
-  machine per particle count. The Pi number is the **binding** one for min-spec; the PC number is
-  the pivot-level one.
+  machine per particle count. The PC number is the **binding** one — min-spec is PC-class until
+  the Deck joins (2026-08-25 ruling) — and also the pivot-level one; shared CI runners never
+  grade timing.
 - **Pass/fail is computed by the bench itself** and printed as a verdict line per scenario; the
   CSVs are committed under `tests/gate0/results/<date>-<machine>/` so the rev-2 palette cites
   real files.
@@ -233,11 +237,14 @@ below-rung-1 reference the CSVs compare against.
 - **Cost** (G-05): `solve_us`, `broadphase_us` via the platform clock around the phases (the bench
   is not sim code), p50/p95/p99 over ticks 200..end.
 - **Hash** (G-06): `tl_hash64` over every SoA column's used extent each tick, written to the CSV;
-  the two-run and PC/Pi comparisons are `diff` of the hash columns.
+  the two-run and cross-leg comparisons are `diff` of the hash columns.
 
 ### 8.5 Done criteria
 
-All six verdict lines `PASS` at substeps 8 on PC and Pi (G-05's Pi half may be `INVESTIGATE`
-without blocking by the severity split); CSVs committed; `FX-PALETTE.md` rev 2 written.
+All six verdict lines `PASS` at substeps 8 on the PC, with G-06's cross-leg diff green on the CI
+target matrix (the Pi half of the criterion left with the Pi, 2026-08-25); CSVs committed;
+`FX-PALETTE.md` rev 2 written.
 
-*Rev 1 — 2026-08-22.*
+*Rev 1 — 2026-08-22; §0/§2 G-05/G-06/§4/§8.4/§8.5 swept for the Pi 4's removal (2026-08-25
+target-matrix ruling): cross-ISA evidence moved to the hosted CI arm64 legs, min-spec anchored to
+the PC until the Deck joins.*

@@ -60,7 +60,7 @@ Render-side = floats legal, never authoritative, never written back.
 - Music / footstep-material / bark / dynamic-loop logic is **Luau** (game content on the wrap);
   the engine exposes `audio.play(clip, pos)`, `audio.bus_gain`, `audio.listener` bindings in
   the UI VM, and `emit_sound_event` from the sim VM (which only *posts*; it cannot read audio).
-- Every peer renders, so every peer mixes — but a peer with no device (Pi headless soak) runs
+- Every peer renders, so every peer mixes — but a peer with no device (a headless soak) runs
   the same build with the audio slot unregistered.
 - No destructors: voice lifetime is slot-generation in a `SlotMap`; device teardown is an
   explicit `audio_shutdown()` in the platform seam's ordered shutdown list.
@@ -515,8 +515,9 @@ copy-engine upload, o3de prefab DOM, `mesh/` primitives, Blender level-export si
   sees `fx`.
 - Shader sources are a new artifact class for the cook key; bytecode per platform is CAS
   content. Shaders are **not** in the build fingerprint (they cannot affect sim state).
-- Steam Deck / Pi targets: Vulkan via SDL_GPU on both; the Pi path is the reason SDL_Render
-  stays the fallback (a Vulkan driver regression on the Pi must not block a peer).
+- Steam Deck target: Vulkan via SDL_GPU; SDL_Render stays the fallback so a Vulkan driver
+  regression on a low-end peer never blocks it (the Pi, which motivated this, left the program
+  2026-08-25 — the reasoning stands for any weak GPU).
 - ImGui moves from the SDLRenderer3 backend to the SDL_GPU backend in the same change.
 - The two backends are a **conformance pair** in the harness: the same command buffer rendered
   by both must produce the same draw-call count and sort order (structural check, no GPU);

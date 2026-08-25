@@ -506,11 +506,14 @@ TL_TEST(registry_restore_reproduces_hash_trace, "foundation,mem,determinism,smok
 // --- the 2026-08-24 ruling: HASHED implies SNAPSHOT --------------------------------------------
 
 TL_TEST_EXPECT_FATAL(registry_add_hashed_without_snapshot_is_fatal, "foundation,mem,fatal") {
-#if TL_DEV
     (void)t;
     // docs/MEMORY.md section 1.2: a hashed arena that is not snapshotted cannot be rolled back,
     // so a mid-run restore cannot reproduce the hash trace (section 8.8) - a desync trap wired at
-    // registration. registry_add refuses the combination outright.
+    // registration. registry_add refuses the combination outright. The trigger is a TL_FATAL,
+    // live in EVERY tier, and tl_child_verdict has been tier-agnostic since the wave merge
+    // (runner_core.h) - so this row runs on all four tiers. The 2026-08-25 review sweep replaced
+    // the netcode/ship TL_SKIP here, which cited a runner limitation that no longer exists; the
+    // ruling is now proved everywhere its fatal fires.
     VMemApi api = test_vmem_api();
     VMemArena a;
     if (vmem_arena_init(&a, 0xF1u, 1u << 16, ARENA_ZERO_ON_PUSH, &api) != ERR_OK) {
@@ -518,31 +521,49 @@ TL_TEST_EXPECT_FATAL(registry_add_hashed_without_snapshot_is_fatal, "foundation,
     }
     ArenaRegistry r = {};
     registry_add(&r, 0xF1u, &a, ARENA_HASHED);   // no ARENA_SNAPSHOT - TL_FATAL, exit 2
-#else
-    // The fatal is a TL_FATAL, so it fires on netcode/ship too - but tl_child_verdict
-    // (tests/runner/runner_core.h) judges a fatal-expected row as a fatal expectation only under
-    // TL_DEV, because every such test until now asserted through TL_ASSERT, which compiles out
-    // there. On this tier the child would exit 2 and be scored an ordinary FAIL. Filed in TODO.md
-    // ("TL_TEST_EXPECT_FATAL cannot express a TL_FATAL/TL_CHECK-expected row outside dev"); a
-    // visible SKIP until then, never a vacuous pass.
-    TL_SKIP("tl_child_verdict judges fatal-expected rows only under TL_DEV (runner_core.h); this "
-            "fatal is a TL_FATAL and is live on this tier - TODO.md");
-#endif
+}
+
+// The other illegal shape of the same ruling: GROWS_AT_BARRIER added to the mix must not slip
+// past the refusal - the check is "HASHED without SNAPSHOT", not a comparison against one exact
+// flag word. Until the 2026-08-25 sweep the fatal's edge had one tested point, not the set (D4).
+TL_TEST_EXPECT_FATAL(registry_add_hashed_grows_without_snapshot_is_fatal, "foundation,mem,fatal") {
+    (void)t;
+    VMemApi api = test_vmem_api();
+    VMemArena a;
+    if (vmem_arena_init(&a, 0xF2u, 1u << 16, ARENA_ZERO_ON_PUSH, &api) != ERR_OK) {
+        return;   // setup failed: exits 0, which the runner scores FAIL for a fatal-expected row
+    }
+    ArenaRegistry r = {};
+    registry_add(&r, 0xF2u, &a, ARENA_HASHED | ARENA_GROWS_AT_BARRIER);   // still no SNAPSHOT - TL_FATAL
 }
 
 // The other side of the same ruling, in-process and on every tier: the combinations registry_add
-// still accepts. Without this the fatal above could be over-broad (refusing SNAPSHOT-only or
-// GROWS_AT_BARRIER-only registrations) and no test would notice - world_init exercises all three
-// legal shapes, and reaching the seal is the assertion.
+// still accepts. Without this the fatals above could be over-broad and no test would notice.
+// The three flag bits give eight combinations; two are illegal (HASHED alone, HASHED|GROWS -
+// the fatal rows above), and ALL SIX legal ones are registered here - the fixture covers three
+// and the second registry covers the other three (the 2026-08-25 sweep's D4: the name promised
+// "every" while three shapes went untested).
 TL_TEST(registry_add_accepts_every_legal_flag_combination, "foundation,mem,fast") {
     TestWorld w;
     TL_ASSERT_TRUE(world_init(&w));
     TL_EXPECT_EQ(w.reg.count, 4u);
-    TL_EXPECT_EQ(w.reg.e[1].flags & ARENA_HASHED, 0u);     // SNAPSHOT without HASHED: legal
-    TL_EXPECT_EQ(w.reg.e[3].flags, (u32)ARENA_GROWS_AT_BARRIER);   // neither: legal
+    TL_EXPECT_EQ(w.reg.e[1].flags & ARENA_HASHED, 0u);     // SNAPSHOT | GROWS: legal
+    TL_EXPECT_EQ(w.reg.e[3].flags, (u32)ARENA_GROWS_AT_BARRIER);   // GROWS alone: legal
+    // The remaining three legal shapes, on a second registry over the same arenas (registration
+    // records a pointer, it takes no ownership): bare membership, SNAPSHOT alone, all three bits.
+    ArenaRegistry r2 = {};
+    registry_add(&r2, 0x01u, &w.a, 0u);
+    registry_add(&r2, 0x02u, &w.b, ARENA_SNAPSHOT);
+    registry_add(&r2, 0x03u, &w.c, ARENA_HASHED | ARENA_SNAPSHOT | ARENA_GROWS_AT_BARRIER);
+    registry_seal(&r2);
+    TL_EXPECT_EQ(r2.count, 3u);
+    // The invariant the fatal enforces, asserted over both sealed registries.
     for (u32 i = 0; i < w.reg.count; ++i) {
-        // The invariant the fatal enforces, asserted over the whole sealed registry.
         const u32 f = w.reg.e[i].flags;
+        TL_EXPECT_TRUE((f & ARENA_HASHED) == 0u || (f & ARENA_SNAPSHOT) != 0u);
+    }
+    for (u32 i = 0; i < r2.count; ++i) {
+        const u32 f = r2.e[i].flags;
         TL_EXPECT_TRUE((f & ARENA_HASHED) == 0u || (f & ARENA_SNAPSHOT) != 0u);
     }
     world_release(&w);

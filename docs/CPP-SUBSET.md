@@ -144,7 +144,7 @@ anywhere. Rules:
   nondeterminism source — `DETERMINISM.md` §2).
 - **Target-variable language constructs are banned in sim TUs.** Two gates, split by what each
   can actually see. **`tools/audit/targets.py` measures** the layout and preprocessor classes -
-  it preprocesses every sim TU and dumps its record layouts for all three triples and diffs, so
+  it preprocesses every sim TU and dumps its record layouts for the four `CANON.md` target triples and diffs, so
   a `#pragma pack`, an `alignas`, a `[[no_unique_address]]`, a bit-field or any per-target `#if`
   is caught in *any* spelling rather than by whichever spelling someone listed. **`tools/audit/includes.py` bans the tokens** whose divergence is in the VALUE, over identical
   text and identical layouts, which no diff can see - and nothing belongs to both lists: `char` (signed on x86-64, unsigned on aarch64), `long` (32-bit on Windows,

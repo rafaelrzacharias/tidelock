@@ -89,13 +89,14 @@ model here — the launch prompt names it.
 | W1 | **runner+driver** | Sonnet 5 | `tl_tests` full, `tl_driver` skeleton, harness API stubs | skeleton | `TESTING.md` §9 |
 | W1 | **tooling-rt** | Sonnet 5 | `tl_log/prof/probe/assert` headers + runtimes, crash writer | skeleton | `TOOLING.md` §9 (foundation half) |
 | W1 | **jobs** | Opus 5 high | atomics, pool, `parallel_for/levels`, shuffle mode | platform thread API header | `JOBS.md` §6.4 |
-| W2 | ★ **gate0** | Fable 5 high | `tests/gate0` solver + scenarios + shadow; run PC + Pi; rev-2 palette | fx, mem | `GATE0-BENCH.md` §8.5 |
+| W2 | ★ **gate0** | Fable 5 high | `tests/gate0` solver + scenarios + shadow; run PC (arm64 legs via CI since 2026-08-25); rev-2 palette | fx, mem | `GATE0-BENCH.md` §8.5 |
 | W2 | **ecs** | Fable 5 high | reflect, columns, schedule, commands, events, encoder, diff | mem, containers, rng/hash | `ECS.md` §10.8 |
 | W2 | **luau-vm** | Opus 5 high | Luau vendored, three VMs, sandbox, `fx.*`, data VM | fx, mem | `LUAU-LAYER.md` §10.12 (VM half) |
 | W2 | **net-p1** | Opus 5 high | `wire.h`, encoder, archive, checkpoint writer, chain | containers, rng/hash, `TL_WIRE_STRUCT` | `NETCODE.md` §20.8 Phase 1 |
 | W2 | **alloy-substrate** | Fable 5 high | pools, broadphase, sdf + carve + redistance, cavity flood, topology/union-find, bond-graph heat flux (the first exact-conservation slice), edit intake | fx, mem, containers, rng/hash | `ALLOY.md` §14.7 steps 1, 3, 4 |
-| W2 | **vendor** | Sonnet 5 | SDL_ttf, imgui, enet, monocypher builds; pool hooks; adaptors | mem, platform | links clean on the 3 targets |
+| W2 | **vendor** | Sonnet 5 | SDL_ttf, imgui, enet, monocypher builds; pool hooks; adaptors | mem, platform | links clean on the `CANON.md` matrix (4 legs) |
 | W3 | ★ **alloy-solver** | Fable 5 high | pass 3 (from gate0), contacts, colouring, velocity pass | gate0 verdict, alloy-substrate | `ALLOY.md` §14.7 step 5 (solver) |
+| W3 | **ci-matrix** | Fable 5 high | `pr.yml` on the `CANON.md` target matrix (4 hosted native legs), 4-way `build_id` gate, `binarch.py`, `targets.py` 4th triple, the target-set ruling across the docs | skeleton | all four legs green on one commit (`BUILD.md` §10.4) |
 | W3 | **loop+input** | Sonnet 5 | loop, time, phases, interp, action map, Live/Script/Replay producers, recorder | ecs, platform | `FRAME-LOOP.md` §8.4, `INPUT.md` §9.6 |
 | W3 | **assets+data** | Sonnet 5 | asset registry, loaders, data-table compiler, save v1 | ecs, luau-vm, platform | `ASSETS-AND-DATA.md` §8.5 |
 | W3 | **luau-bindings** | Opus 5 high | `ecs.*`, `alloy.*`, `input/events/data/log`, trampolines, proxies, reload, `luauc`, binding docs | ecs, alloy-substrate, luau-vm | `LUAU-LAYER.md` §10.12 |
