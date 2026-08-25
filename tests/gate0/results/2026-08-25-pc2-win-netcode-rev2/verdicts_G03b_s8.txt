@@ -1,0 +1,5 @@
+gate0: particle 740 escaped at x=-365678 y=1454618 vx=-107566080 vy=69874560 rho=336860522
+gate0: G03b: a carrier left the sealed box at tick 34 - tunneling, run stopped
+gate0: particle 740 escaped at x=-365678 y=1454618 vx=-107566080 vy=69874560 rho=336860522
+gate0: G03b: a carrier left the sealed box at tick 34 - tunneling, run stopped
+VERDICT G-03b substeps=8 RECORDED tunneling=1 (a carrier left the sealed box at tick 34; the trace is truncated) ticks=7000 run_twice=identical max_colors=2 max_nbr=97 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=2

@@ -195,6 +195,15 @@ Consts consts_make(u32 substeps, u32 ladder, u32 mu_percent, u32 alpha_nano, u32
     k.rest_vel_min = cvt_vel(fx::fx_raw<::vel_t>(g.v * 2));
     k.contact_margin = cvt_pos(fx::fx_raw<::pos_t>(2 * fx::TEXEL.v));
     k.h_kernel = cvt_pos(fx::fx_raw<::pos_t>(4 * fx::TEXEL.v));
+    {   // q = r / h_kernel as an exact shift (docs/GATE0-BENCH.md §7 R-3 normalize-once): the
+        // raw kernel radius is a power of two by construction, asserted, so div<q_t>(r, h) and
+        // (r.v << q_shift) are the same bits.
+        const i32 hk_raw = 4 * fx::TEXEL.v;
+        TL_CHECK((hk_raw & (hk_raw - 1)) == 0);
+        u32 hs = 0;
+        while ((i32(1) << hs) != hk_raw) { hs += 1; }
+        k.q_shift = 30u - hs;
+    }
     k.c_visc = cvt_q(fx::fx_lit<::q_t>(1, 20));
     // alpha~ = alpha / h^2 = alpha_nano * 1e-9 * inv_h^2 (docs/ALLOY.md §8.1: alpha~ precomputed at init from the data alpha);
     // alpha_nano 1302 = alpha~ 0.3 at 480 Hz - the smallest compliance that holds a 7.8 m column
@@ -731,16 +740,18 @@ void substep_density(World* w) {
             w->pair_gx[t] = local_zero(); w->pair_gy[t] = local_zero();
             if (!within_radius(d, k->h_kernel)) continue;
             w->pair_evals += 1;
-            const pos_t r = length(d);
-            const q_t q = q_div(r, k->h_kernel);
-            const q_t a = q_sub(q_one(), q_mul(q, q));
+            // normalize-once (docs/GATE0-BENCH.md §7 R-3): one root + one reciprocal per pair.
+            // The rev-1 body called length(d), then unit(d) (a SECOND isqrt64 + two divisions)
+            // and div<q_t>(r, h) separately - measured 176 ns vs 91 ns for this form (TODO.md D2).
+            PairGeom pg;
+            const bool has_dir = pair_geom(d, k->h_kernel, k->q_shift, &pg);
+            const q_t a = q_sub(q_one(), q_mul(pg.q, pg.q));
             const q_t W = q_mul(q_mul(a, a), a);
             acc = local_add(acc, rho_term(k->kw, W));
-            if (is_zero_pos(r)) continue;
-            const q_t b = q_sub(q_one(), q);
+            if (!has_dir) continue;
+            const q_t b = q_sub(q_one(), pg.q);
             const q_t dW = q_mul(b, b);
-            const vec2<q_t> n = unit(d);
-            const local_t tx = grad_term(k->kw, dW, n.x), ty = grad_term(k->kw, dW, n.y);
+            const local_t tx = grad_term(k->kw, dW, pg.n.x), ty = grad_term(k->kw, dW, pg.n.y);
             w->pair_gx[t] = tx; w->pair_gy[t] = ty;
             gx = local_add(gx, tx); gy = local_add(gy, ty);
             denj = local_add(denj, den_grad(w->pinv_m[j], tx, ty));   // |grad C_j|^2 w_j: grad C_j = -kw|W'|n, same magnitude
@@ -861,7 +872,7 @@ void substep_velocity(World* w) {
             const vec2<pos_t> d = vsub(xi, { w->px[j], w->py[j] });
             if (!within_radius(d, k->h_kernel)) continue;
             w->pair_evals += 1;
-            const q_t q = q_div(length(d), k->h_kernel);
+            const q_t q = q_of_r(length(d), k->h_kernel, k->q_shift);   // one root, no division (exact shift; §7 R-3)
             const q_t a = q_sub(q_one(), q_mul(q, q));
             const q_t W = q_mul(q_mul(a, a), a);
             vpx[i] = local_add(vpx[i], xsph_term(k->c_visc, W, vel_sub(w->pvx[j], w->pvx[i])));
@@ -940,6 +951,32 @@ pos_t world_max_penetration(const World* w, u8* tunnel) {
             pen = pos_max(pen, pos_neg(sd));
             if (pos_lt(sd, pos_neg(texel))) *tunnel = 1;
         }
+    }
+    return pen;
+}
+
+pos_t world_body_penetration(const World* w, u32 body, u8* tunnel) {
+    TL_ASSERT(body < w->nb && !body_static(w, body));
+    pos_t pen = pos_zero();
+    *tunnel = 0;
+    const pos_t texel = cvt_pos(fx::TEXEL);
+    q_t sb, cb; sincos_of(w->bth[body], &sb, &cb);
+    const vec2<pos_t> xb = { w->bx[body], w->by[body] };
+    const pos_t hw = w->bhw[body], hh = w->bhh[body];
+    const vec2<pos_t> corners[4] = { { hw, hh }, { pos_neg(hw), hh }, { pos_neg(hw), pos_neg(hh) }, { hw, pos_neg(hh) } };
+    for (u32 o = 0; o < w->nb; ++o) {
+        if (o == body) continue;
+        q_t so, co; sincos_of(w->bth[o], &so, &co);
+        const vec2<pos_t> xo = { w->bx[o], w->by[o] };
+        const vec2<pos_t> hint = rot(vsub(xb, xo), q_neg(so), co);
+        vec2<q_t> nl;
+        for (u32 k = 0; k < 4; ++k) {
+            const vec2<pos_t> l = rot(vsub(vadd(xb, rot(corners[k], sb, cb)), xo), q_neg(so), co);
+            const pos_t sd = box_sdf(l, w->bhw[o], w->bhh[o], hint, &nl);
+            pen = pos_max(pen, pos_neg(sd));
+        }
+        const pos_t sdc = box_sdf(hint, w->bhw[o], w->bhh[o], hint, &nl);
+        if (pos_lt(sdc, pos_neg(texel))) *tunnel = 1;
     }
     return pen;
 }

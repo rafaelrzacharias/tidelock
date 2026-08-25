@@ -15,19 +15,19 @@ TL_TEST(fx_palette_rows_match_canon, "foundation,fx,smoke,fast") {
     TL_EXPECT_EQ(stiff_t::FRAC_BITS, 30);
     TL_EXPECT_EQ(q_t::FRAC_BITS, 30);
     TL_EXPECT_EQ(angle_t::FRAC_BITS, 30);
-    TL_EXPECT_EQ(omega_t::FRAC_BITS, 20);
+    TL_EXPECT_EQ(omega_t::FRAC_BITS, 22);   // rev 2 retune (docs/FX-PALETTE.md section 9 R-8)
     TL_EXPECT_EQ(dt_t::FRAC_BITS, 30);
     TL_EXPECT_EQ(scalar_t::FRAC_BITS, 16);
     TL_EXPECT_EQ(lambda_t::FRAC_BITS, 16);
     TL_EXPECT_EQ(sizeof(pos_t), (usize)4);
     TL_EXPECT_EQ(sizeof(pos2_wide_t), (usize)8);
-    TL_EXPECT_EQ(FX_PALETTE_REV, 1u);
+    TL_EXPECT_EQ(FX_PALETTE_REV, 2u);
     // ranges: +-2^INT_BITS in the row's unit
     TL_EXPECT_EQ(1 << pos_t::INT_BITS, 8192);        // +-8,192 m
     TL_EXPECT_EQ(1 << vel_t::INT_BITS, 2048);        // +-2,048 m/s
     TL_EXPECT_EQ(1 << q_t::INT_BITS, 2);             // +-2
     TL_EXPECT_EQ(1 << scalar_t::INT_BITS, 32768);    // +-32,768
-    TL_EXPECT_EQ(1 << omega_t::INT_BITS, 2048);      // +-2,048 turn/s
+    TL_EXPECT_EQ(1 << omega_t::INT_BITS, 512);       // +-512 turn/s (rev 2)
 }
 
 TL_TEST(fx_palette_world_constants, "foundation,fx,smoke,fast") {
@@ -65,7 +65,10 @@ TL_TEST(fx_palette_derivation_rule, "foundation,fx,fast") {
     TL_EXPECT_GE((i64)1 << vel_t::INT_BITS, (i64)4 * 512);
     TL_EXPECT_GE((i64)1 << invmass_t::INT_BITS, (i64)2 * MASS_RATIO_CLAMP);
     TL_EXPECT_GE((i64)1 << stiff_t::INT_BITS, (i64)2);
-    TL_EXPECT_GE((i64)1 << omega_t::INT_BITS, (i64)2048);
+    // omega_t: 2x margin over the structural cap inv_h/2 = 240 turn/s (docs/FX-PALETTE.md §9 R-8),
+    // and the margin is not wasted (one fewer integer bit would be under 2 x 240)
+    TL_EXPECT_GE((i64)1 << omega_t::INT_BITS, (i64)2 * 240);
+    TL_EXPECT_LT((i64)1 << (omega_t::INT_BITS - 1), (i64)2 * 240);
     TL_EXPECT_GE((i64)1 << scalar_t::INT_BITS, (i64)32768);
     // and the margin is not wasted: one fewer integer bit would break the rule
     TL_EXPECT_LT((i64)1 << (pos_t::INT_BITS - 1), (i64)2 * 4096);
@@ -83,12 +86,12 @@ TL_TEST(fx_palette_op_table_shifts, "foundation,fx,fast") {
     // every listed product's shift, as the header's comments claim
     TL_EXPECT_EQ(vel_t::FRAC_BITS + dt_t::FRAC_BITS - pos_t::FRAC_BITS, 32);
     TL_EXPECT_EQ(invmass_t::FRAC_BITS + lambda_t::FRAC_BITS - pos_t::FRAC_BITS, 16);
-    TL_EXPECT_EQ(omega_t::FRAC_BITS + dt_t::FRAC_BITS - angle_t::FRAC_BITS, 20);
+    TL_EXPECT_EQ(omega_t::FRAC_BITS + dt_t::FRAC_BITS - angle_t::FRAC_BITS, 22);
     TL_EXPECT_EQ(q_t::FRAC_BITS + pos_t::FRAC_BITS - pos_t::FRAC_BITS, 30);
     TL_EXPECT_EQ(scalar_t::FRAC_BITS + pos_t::FRAC_BITS - pos_t::FRAC_BITS, 16);
     TL_EXPECT_EQ(pos_t::FRAC_BITS + pos_t::FRAC_BITS - pos2_wide_t::FRAC_BITS, 0);
     TL_EXPECT_EQ(vel_t::FRAC_BITS - pos_t::FRAC_BITS, 2);                 // mul_int widen
-    TL_EXPECT_EQ(angle_t::FRAC_BITS - omega_t::FRAC_BITS, 10);            // mul_int narrow
+    TL_EXPECT_EQ(angle_t::FRAC_BITS - omega_t::FRAC_BITS, 8);             // mul_int narrow (rev 2: was 10)
     // the trait: listed true, unlisted false, order-sensitive
     TL_EXPECT_TRUE((fx_op_allowed<pos_t, vel_t, dt_t>::value));
     TL_EXPECT_TRUE((fx_op_allowed<pos2_wide_t, pos_t, pos_t>::value));

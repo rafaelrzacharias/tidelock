@@ -93,7 +93,7 @@ TL_TEST(fx_mul_exhaustive_small_operands, "foundation,fx,fast") {
     TL_EXPECT_EQ((exhaustive_mul<scalar_t, scalar_t, scalar_t>()), 0u);     // shift 16
     TL_EXPECT_EQ((exhaustive_mul<pos_t, invmass_t, lambda_t>()), 0u);       // shift 16
     TL_EXPECT_EQ((exhaustive_mul<vel_t, scalar_t, vel_t>()), 0u);           // shift 16
-    TL_EXPECT_EQ((exhaustive_mul<angle_t, omega_t, dt_t>()), 0u);           // shift 20
+    TL_EXPECT_EQ((exhaustive_mul<angle_t, omega_t, dt_t>()), 0u);           // shift 22 (rev 2)
     // to<R> narrowing q_t (30) -> scalar_t (16): a 14-bit RNE shift over every 16-bit input
     u32 bad = 0;
     for (i32 a = -32768; a <= 32767; ++a) {
@@ -144,6 +144,11 @@ TL_TEST(fx_mul_property_every_table_row, "foundation,fx,fast") {
     FX_PROPERTY_ROW(property_mul, q_t, scalar_t, q_t, 14, N);
     FX_PROPERTY_ROW(property_mul, q_t, q_t, scalar_t, 15, N);
     FX_PROPERTY_ROW(property_mul, scalar_t, scalar_t, scalar_t, 16, N);
+    // rev 2: omega_t is its own format (docs/FX-PALETTE.md §9 R-8) - its triples are distinct rows
+    FX_PROPERTY_ROW(property_mul, omega_t, q_t, omega_t, 17, N);
+    FX_PROPERTY_ROW(property_mul, omega_t, omega_t, q_t, 18, N);
+    FX_PROPERTY_ROW(property_mul, omega_t, scalar_t, omega_t, 19, N);
+    FX_PROPERTY_ROW(property_mul, omega_t, omega_t, scalar_t, 20, N);
 }
 
 TL_TEST(fx_div_property_every_table_row, "foundation,fx,fast") {
@@ -155,6 +160,8 @@ TL_TEST(fx_div_property_every_table_row, "foundation,fx,fast") {
     FX_PROPERTY_ROW(property_div, pos_t, pos_t, pos_t, 25, N);
     FX_PROPERTY_ROW(property_div, vel_t, vel_t, vel_t, 26, N);
     FX_PROPERTY_ROW(property_div, scalar_t, scalar_t, scalar_t, 27, N);
+    FX_PROPERTY_ROW(property_div, q_t, omega_t, omega_t, 28, N);       // rev 2 omega quotient rows
+    FX_PROPERTY_ROW(property_div, omega_t, omega_t, omega_t, 29, N);
     // div ties need a 2^31 divisor, i.e. INT32_MIN: 3*2^30/-2^31 = -1.5 -> -2 (even);
     // 5 -> -2.5 -> -2; -3 -> 1.5 -> 2; -1 -> 0.5 -> 0. Unit quotients are exact.
     TL_EXPECT_EQ(div<q_t>(fx_raw<pos_t>(3), fx_raw<pos_t>(INT32_MIN)).v, -2);
@@ -178,14 +185,14 @@ TL_TEST(fx_mul_int_and_mul_wide, "foundation,fx,fast") {
     TL_EXPECT_EQ(mul_int<vel_t>(fx_raw<pos_t>(0), INV_H).v, 0);
     // one texel per substep is 30 m/s: (1/16 m) * 480 = 30 m/s exactly
     TL_EXPECT_EQ(mul_int<vel_t>(TEXEL, INV_H).v, fx_int<vel_t>(30).v);
-    // omega = dtheta * INV_H: angle (30) -> omega (20) narrows by 10 with RNE
-    const angle_t dth = fx_raw<angle_t>(1023);                 // 1023 * 480 = 491040; /1024 = 479.53 -> 480
-    TL_EXPECT_EQ(mul_int<omega_t>(dth, INV_H).v, 480);
-    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(1), INV_H).v, 0);          // 480/1024 = 0.47 -> 0
-    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(-1), INV_H).v, 0);
-    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(2), INV_H).v, 1);          // 960/1024 = 0.94 -> 1
-    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(16), 32).v, 0);            // 512/1024 = 0.5 -> 0 (even)
-    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(48), 32).v, 2);            // 1536/1024 = 1.5 -> 2 (even)
+    // omega = dtheta * INV_H: angle (30) -> omega (22) narrows by 8 with RNE (rev 2; was 10)
+    const angle_t dth = fx_raw<angle_t>(1023);                 // 1023 * 480 = 491040; /256 = 1918.125 -> 1918
+    TL_EXPECT_EQ(mul_int<omega_t>(dth, INV_H).v, 1918);
+    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(1), INV_H).v, 2);          // 480/256 = 1.875 -> 2
+    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(-1), INV_H).v, -2);
+    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(2), INV_H).v, 4);          // 960/256 = 3.75 -> 4
+    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(4), 32).v, 0);             // 128/256 = 0.5 -> 0 (even)
+    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(12), 32).v, 2);            // 384/256 = 1.5 -> 2 (even)
     // a full turn per substep is 480 turn/s
     TL_EXPECT_EQ(mul_int<omega_t>(TURN, INV_H).v, fx_int<omega_t>(480).v);
     // mul_wide: exact product, no rounding, sign preserved

@@ -43,18 +43,16 @@ TL_TEST(runner_timeout_hang_trigger, "runner,slow") {
 // With the env var set it hangs; without it, it fatals as a fatal-expected row is supposed to, so
 // an ordinary run scores it PASS rather than dragging a permanent FAIL through the suite.
 TL_TEST_EXPECT_FATAL(runner_timeout_fatal_expected_hang_trigger, "runner,slow") {
-#if TL_DEV
+    // Tier-live since the wave merge: tl_child_verdict judges fatal-expected rows on every tier
+    // (runner_core.h), so the old TL_DEV gate here was a stale skip - the same class 088da07
+    // removed from registry/vmem_arena and missed here (sweep D3, 2026-08-25). TL_FATAL is live
+    // in every tier.
     (void)t;
     if (getenv(TL_HANG_PROBE_ENV) != nullptr) {
         volatile u64 spin = 0u;
         for (;;) { spin = spin + 1u; }   // the assert that should have fired, didn't
     }
     TL_FATAL("runner_timeout_fatal_expected_hang_trigger, inert path");
-#else
-    // tl_child_verdict judges a fatal-expected row as a fatal expectation only under TL_DEV, so
-    // here it is an ordinary child and TL_SKIP is the honest status.
-    TL_SKIP("fatal-expected rows are judged as such only under TL_DEV (runner_core.h)");
-#endif
 }
 
 namespace {
@@ -157,13 +155,21 @@ TL_TEST(runner_timeout_ms_does_not_shoot_healthy_children, "runner") {
     TL_EXPECT_EQ(bad, 1);
     TL_ASSERT_TRUE(slurp(log_path, log, sizeof(log)));
     TL_EXPECT_TRUE(strstr(log, "--timeout-ms must be 0 (off) or a positive") != nullptr);
+
+    // And non-numeric garbage is the same refusal, never atoll's silent 0=off (sweep D1,
+    // 2026-08-25): "12x000" parsed as 12 ms would shoot healthy children; "abc" as 0 would
+    // disarm the net entirely. Both classes ride on one strict parser (rc_parse_u63).
+    const int garbage = run_probe("--filter runner_glob_match --timeout-ms 12x000", log_path, false);
+    TL_EXPECT_EQ(garbage, 1);
+    TL_ASSERT_TRUE(slurp(log_path, log, sizeof(log)));
+    TL_EXPECT_TRUE(strstr(log, "--timeout-ms must be 0 (off) or a positive") != nullptr);
 }
 
 TL_TEST(runner_timeout_ms_bounds_the_serial_wait_path_too, "runner") {
-#if TL_DEV
     // The pool's WaitForMultipleObjects/waitpid(-1) is not the only unbounded wait: a
     // fatal-expected row spawns a child even without --isolate, and the runner waits on it with
-    // the single-child path. The ruling names both, so both are covered.
+    // the single-child path. The ruling names both, so both are covered. Tier-live since the
+    // wave merge (the trigger's stale TL_DEV gate fell with it - sweep D3, 2026-08-25).
     const char* log_path = "tl_timeout_serial.log.tmp";
     const int code = run_probe("--filter runner_timeout_fatal_expected_hang_trigger --timeout-ms 1000",
                                log_path, true);
@@ -177,7 +183,4 @@ TL_TEST(runner_timeout_ms_bounds_the_serial_wait_path_too, "runner") {
     // satisfied fatal expectation. TIMEOUT beats expect_fatal in tl_child_verdict for exactly
     // this reason (the kill code is the runner's own).
     TL_EXPECT_TRUE(strstr(log, "0 passed") != nullptr);
-#else
-    TL_SKIP("the trigger is a fatal-expected row, judged as such only under TL_DEV (runner_core.h)");
-#endif
 }

@@ -2,7 +2,7 @@
 // CSV, the verdict lines, the run-twice hash compare, the FLOAT-SHADOW run. Tests are not sim
 // code: printf-class io/clock/filesystem is the exemption of docs/TESTING.md §8 R-2.
 //
-//   tl_gate0 --scenario G01|G02|G03|G04|G05|G06|all --substeps 4|8|16 [--particles n] [--ticks n]
+//   tl_gate0 --scenario G01|G02|G03|G03b|G04|G05|G06|all --substeps 4|8|16 [--particles n] [--ticks n]
 //            [--ladder 0|1|2|3] --out dir [--shadow] [--once] [--csv-every n] [--seed n] [--dump] [--perturb q]
 //
 // Exit codes: 0 = every requested verdict is PASS or INVESTIGATE; 3 = a FAIL verdict or a G-06
@@ -65,7 +65,7 @@ bool parse_u64(const char* s, u64* out) {
 
 void usage() {
     fprintf(stderr,
-        "tl_gate0 --scenario G01|G02|G03|G04|G05|G06|all --substeps 4|8|16 [--particles n] [--ticks n]\n"
+        "tl_gate0 --scenario G01|G02|G03|G03b|G04|G05|G06|all --substeps 4|8|16 [--particles n] [--ticks n]\n"
         "         [--ladder 0|1|2|3] --out dir [--shadow] [--once] [--csv-every n] [--seed n] [--dump] [--perturb q]\n"
         "(docs/GATE0-BENCH.md section 8.1)\n");
 }
@@ -218,6 +218,10 @@ void run_scenario(Boot* bt, const g0scene::Scene* sc, const char* csv_name, u32 
     u32* per_tick_d = (u32*)scratch_push(s, u64(sc->np) * 4u + 16u, 16u);
     u32 pop = 0; i64 top_y_at_settle = 0, top_y_end = 0;
     i64 pen_run = 0; i64 pen_sustained_max = 0; u8 tunnel_any = 0; u8 escaped = 0;
+    // §7 R-5 graded-body metrics (judge 2 with sc->graded_body set): the boulder's own
+    // penetration/tunneling; every other carrier's escape is recorded, not graded.
+    i64 gpen_run = 0, gpen_sustained_max = 0; u8 gtunnel_any = 0;
+    u32 escape_body = 0xFFFFFFFFu;   // the first escaping BODY (a particle escape leaves it NONE; its index is on the stderr line)
     u32 dens_worst_p95 = 0;                    // max over post-settle ticks of the per-tick p95 (q_t raw)
     // energy windows (1k ticks): windowed max non-increasing (G-04), KE windows for boiling (G-03)
     i64 win_max = INT64_MIN, prev_win_max = INT64_MIN, e_initial = 0, e_max = INT64_MIN; u32 env_increases = 0;
@@ -280,11 +284,17 @@ void run_scenario(Boot* bt, const g0scene::Scene* sc, const char* csv_name, u32 
         }
         u8 tunnel = 0;
         const pos_t pen = g0::world_max_penetration(w, &tunnel);
+        if (judge == 2 && sc->graded_body != 0xFFFFFFFFu) {
+            u8 gt = 0;
+            const pos_t gpen = g0::world_body_penetration(w, sc->graded_body, &gt);
+            if (gt) gtunnel_any = 1;
+            if (gpen.v > 0) { gpen_run += 1; if (gpen_run > 3 && gpen.v > gpen_sustained_max) gpen_sustained_max = gpen.v; } else gpen_run = 0;
+        }
         {   // a carrier outside the sealed box went THROUGH a wall: tunneling, and the grid keys would wrap - stop the run
             const i64 m = fx::TEXEL.v * 4;
             for (u32 b = 0; b < sc->nb && !escaped; ++b) {
                 if (w->bflags[b] & g0::BF_STATIC) continue;
-                if (w->bx[b].v < sc->box_lo_x.v - m || w->bx[b].v > sc->box_hi_x.v + m || w->by[b].v < sc->box_lo_y.v - m || w->by[b].v > sc->box_hi_y.v + m) escaped = 1;
+                if (w->bx[b].v < sc->box_lo_x.v - m || w->bx[b].v > sc->box_hi_x.v + m || w->by[b].v < sc->box_lo_y.v - m || w->by[b].v > sc->box_hi_y.v + m) { escaped = 1; escape_body = b; }
             }
             for (u32 p = 0; p < sc->np && !escaped; ++p) {
                 if (w->px[p].v < sc->box_lo_x.v - m || w->px[p].v > sc->box_hi_x.v + m || w->py[p].v < sc->box_lo_y.v - m || w->py[p].v > sc->box_hi_y.v + m) {
@@ -379,9 +389,30 @@ void run_scenario(Boot* bt, const g0scene::Scene* sc, const char* csv_name, u32 
                  (unsigned long long)(us_broadphase / tr), (unsigned long long)(us_predict / tr), (unsigned long long)(us_density / tr),
                  (unsigned long long)(us_colors / tr), (unsigned long long)(us_writeback / tr), (unsigned long long)(us_velocity / tr));
     }
-    if (escaped) {   // a carrier through a wall is tunneling whatever the scenario measures: FAIL, and the metrics below are of a truncated run
+    // §7 R-5: for a graded-body scenario (judge 2), a NON-graded carrier leaving the box stops
+    // the run (the mechanism: grid keys would wrap) but is recorded, not graded - the verdict
+    // below is computed over the ticks that ran. Every other judge grades any escape as before.
+    const u8 graded_scene = (judge == 2 && sc->graded_body != 0xFFFFFFFFu) ? 1 : 0;
+    const u8 graded_escaped = (escaped && graded_scene && escape_body == sc->graded_body) ? 1 : 0;
+    if (escaped && (!graded_scene || graded_escaped)) {   // a carrier through a wall is tunneling whatever the scenario measures: FAIL, and the metrics below are of a truncated run
         out->verdict = V_FAIL;
         snprintf(out->detail, sizeof out->detail, "tunneling=1 (a carrier left the sealed box at tick %u; the trace is truncated)%s%s", ticks_run - 1u, judge == 5 ? " " : "", judge == 5 ? costd : "");
+    } else if (graded_scene) {
+        // docs/GATE0-BENCH.md §2 G-02 as amended by §7 R-5: graded on the boulder - it tunnels
+        // through neither the feather nor the floor, its sustained penetration inside the bands;
+        // graded on the feather: the clamps engaged and were COUNTED (the counts are on the
+        // verdict line), its state bounded (V_MAX/omega clamps bound it by construction; an
+        // ejection through a wall stops the run and is recorded below). Counted saturations are
+        // reported, never a FAIL - the §2 FAIL column reads "any UNCOUNTED saturation".
+        fmt_texel(pb, sizeof pb, gpen_sustained_max);
+        if (gtunnel_any) out->verdict = V_FAIL;
+        else if (gpen_sustained_max >= 2 * fx::TEXEL.v) out->verdict = V_FAIL;
+        else if (gpen_sustained_max >= fx::TEXEL.v) out->verdict = V_INVESTIGATE;
+        char ej[96];
+        if (escaped) snprintf(ej, sizeof ej, "feather_ejected_at_tick=%u (recorded, not graded; run stopped, trace truncated)", ticks_run - 1u);
+        else snprintf(ej, sizeof ej, "feather_ejected=0");
+        snprintf(out->detail, sizeof out->detail, "boulder_pen_sustained_texel=%s boulder_tunnel=%u any_tunnel_recorded=%u %s lambda_saturations=%u",
+                 pb, gtunnel_any, tunnel_any, ej, out->sat_hits);
     } else if (judge == 1) {
         const u32 p95 = percentile(jitter_all, n_jit, 95, s);
         const i64 sink = top_y_end - top_y_at_settle;
@@ -393,12 +424,6 @@ void run_scenario(Boot* bt, const g0scene::Scene* sc, const char* csv_name, u32 
         else if (p95 >= 1000 || sink_a >= fx::TEXEL.v / 10) out->verdict = V_INVESTIGATE;
         char ib[32]; fmt_texel(ib, sizeof ib, i64(intra_max) * fx::TEXEL.v / 10000);
         snprintf(out->detail, sizeof out->detail, "jitter_p95_texel=%s top_drift_texel=%s pop=%u intra_tick_max_texel=%s perturb_quanta=%u", jb, pb, pop, ib, g_perturb);
-    } else if (judge == 2) {
-        fmt_texel(pb, sizeof pb, pen_sustained_max);
-        if (tunnel_any || out->sat_hits > 0) out->verdict = V_FAIL;
-        else if (pen_sustained_max >= 2 * fx::TEXEL.v) out->verdict = V_FAIL;
-        else if (pen_sustained_max >= fx::TEXEL.v) out->verdict = V_INVESTIGATE;
-        snprintf(out->detail, sizeof out->detail, "sustained_penetration_texel=%s tunneling=%u lambda_saturations=%u", pb, tunnel_any, out->sat_hits);
     } else if (judge == 3) {
         fmt_q(db, sizeof db, dens_worst_p95);
         const i64 two_pct = i64(q_t::ONE) * 2 / 100, five_pct = i64(q_t::ONE) * 5 / 100;
@@ -439,7 +464,11 @@ u32 run_twice(Boot* bt, const g0scene::Scene* sc, const char* csv_name, u32 judg
 // One scene -> one verdict line (with the run-twice status folded in). No lambdas: docs/CPP-SUBSET.md §1.
 struct Ctx { Boot* bt; Args* a; };
 
-u32 judge_scene(Ctx* c, const char* gid, const char* scene_name, const char* csv_name, u32 judge, u64 default_ticks, u32 particles, FILE* csv, RunOut* out) {
+// `recorded` = docs/GATE0-BENCH.md §2 G-03b: the run and its metrics are recorded and the
+// run-twice compare still applies, but the verdict word is RECORDED and the return value is
+// V_PASS unless the two in-process runs diverged (determinism is graded even where physics
+// is not, until the RR-10 design pass lands).
+u32 judge_scene(Ctx* c, const char* gid, const char* scene_name, const char* csv_name, u32 judge, u64 default_ticks, u32 particles, FILE* csv, RunOut* out, u8 recorded = 0) {
     Scratch* s = &c->bt->scratch;
     TL_SCRATCH_SCOPE_BEGIN(s);
     g0scene::Scene sc;
@@ -454,10 +483,10 @@ u32 judge_scene(Ctx* c, const char* gid, const char* scene_name, const char* csv
     if (diverged) { o.verdict = V_FAIL; snprintf(o.detail, sizeof o.detail, "run_twice_divergence_at_tick=%llu (UB until proven otherwise)", (unsigned long long)dt); }
     *out = o;
     printf("VERDICT %s substeps=%u %s %s ticks=%llu run_twice=%s max_colors=%u max_nbr=%u nbr_overflow=%u lambda_sat=%u vel_clamps=%u omega_clamps=%u corr_clamps=%u vmax_clamps=%u max_degree=%u\n",
-           gid, c->a->substeps, VNAME[o.verdict], o.detail, (unsigned long long)ticks,
+           gid, c->a->substeps, (recorded && !diverged) ? "RECORDED" : VNAME[o.verdict], o.detail, (unsigned long long)ticks,
            c->a->once ? "skipped" : (diverged ? "DIVERGED" : "identical"), o.max_colors, o.max_nbr, o.nbr_overflow, o.sat_hits, o.sat_vel, o.sat_omega, o.corr_clamps, o.vmax_clamps, o.max_degree);
     fflush(stdout);
-    return o.verdict;
+    return (recorded && !diverged) ? V_PASS : o.verdict;
 }
 
 bool want(const Args* a, const char* id) { return !strcmp(a->scenario, "all") || !strcmp(a->scenario, id); }
@@ -501,9 +530,18 @@ int main(int argc, char** argv) {
         if (v == V_FAIL) rc = 3;
     }
     if (want(&a, "G03")) {
+        // THE G-03 is 1,000 particles (docs/GATE0-BENCH.md §2 as amended by §7 R-4: the count is
+        // the spec, the geometry derives from CANON spacing - ~7.8 m at the 2-texel lattice).
         FILE* f = open_csv(a.out, "G03", a.substeps, a.ladder, CSV_HEADER); if (!f) return 1;
-        RunOut o; const u32 v = judge_scene(&cx, "G-03", "G03", "G03", 3, 7000, a.particles ? a.particles : 5000, f, &o); fclose(f);
+        RunOut o; const u32 v = judge_scene(&cx, "G-03", "G03", "G03", 3, 7000, a.particles ? a.particles : 1000, f, &o); fclose(f);
         if (v == V_FAIL) rc = 3;
+    }
+    if (want(&a, "G03b")) {
+        // The 5k stress variant: RECORDED, not graded, until the RR-10 liquid design pass lands
+        // (docs/GATE0-BENCH.md §2 G-03b, §7 R-4). Run-twice bit-identity is still enforced.
+        FILE* f = open_csv(a.out, "G03b", a.substeps, a.ladder, CSV_HEADER); if (!f) return 1;
+        RunOut o; const u32 v = judge_scene(&cx, "G-03b", "G03", "G03b", 3, 7000, a.particles ? a.particles : 5000, f, &o, 1); fclose(f);
+        if (v == V_FAIL) rc = 3;   // only a run-twice divergence can fail a recorded scenario
     }
     if (want(&a, "G04")) {
         FILE* f = open_csv(a.out, "G04", a.substeps, a.ladder, CSV_HEADER); if (!f) return 1;
@@ -524,7 +562,11 @@ int main(int argc, char** argv) {
         }
         fclose(f);
         if (p95_20k) {
-            const u32 v = p95_20k <= 4000 ? V_PASS : (p95_20k <= 8000 ? V_INVESTIGATE : V_FAIL);
+            // docs/GATE0-BENCH.md §2 as amended by §7 R-3: 20k <= 32 ms PC single-thread
+            // (= ALLOY.md §11.2's 4 ms x 8 cores stated in the protocol's units); INVESTIGATE
+            // to 64 ms; FAIL beyond. (The Pi half of the old threshold left with the Pi,
+            // 2026-08-25 - the arm64 evidence is the CI cross-leg diff, never a Pi timing.)
+            const u32 v = p95_20k <= 32000 ? V_PASS : (p95_20k <= 64000 ? V_INVESTIGATE : V_FAIL);
             printf("VERDICT G-05 substeps=%u %s pc_20k_p95_us=%llu\n", a.substeps, VNAME[v], (unsigned long long)p95_20k);
             if (v == V_FAIL) rc = 3;
         }
@@ -534,16 +576,19 @@ int main(int argc, char** argv) {
         // the verdict is the run-twice comparison alone, on shortened default ticks
         if (a.once) { fprintf(stderr, "tl_gate0: G06 needs the second run; drop --once\n"); return 1; }
         FILE* f = open_csv(a.out, "G06", a.substeps, a.ladder, CSV_HEADER); if (!f) return 1;
-        const char* scenes[6] = { "G01", "G02a", "G02b", "G03", "G04", "G05" };
-        const u32 judges[6] = { 1, 2, 2, 3, 4, 5 };
-        const u64 ticks6[6] = { 2000, 600, 300, 1500, 3000, 300 };
+        // THE G-03 leg is the 1k column (§7 R-4); the 5k column keeps its bit-compare coverage
+        // as a G03b leg (recorded physics, graded determinism).
+        const char* scenes[7] = { "G01", "G02a", "G02b", "G03", "G03b", "G04", "G05" };
+        const u32 judges[7] = { 1, 2, 2, 3, 3, 4, 5 };
+        const u64 ticks6[7] = { 2000, 600, 300, 1500, 300, 3000, 300 };
         u32 diverged = 0;
-        for (u32 i = 0; i < 6; ++i) {
+        for (u32 i = 0; i < 7; ++i) {
             RunOut o;
             const u64 saved = a.ticks; if (!a.ticks) a.ticks = ticks6[i];
             char name[32]; snprintf(name, sizeof name, "G06_%s", scenes[i]);
-            const u32 n6 = !strcmp(scenes[i], "G05") ? 10000u : (!strcmp(scenes[i], "G03") ? 5000u : 0u);   // only G03/G05 take a count; 0 = the scene default
-            (void)judge_scene(&cx, name, scenes[i], name, judges[i], ticks6[i], n6, f, &o);
+            const char* scene_name = !strcmp(scenes[i], "G03b") ? "G03" : scenes[i];
+            const u32 n6 = !strcmp(scenes[i], "G05") ? 10000u : (!strcmp(scenes[i], "G03") ? 1000u : (!strcmp(scenes[i], "G03b") ? 5000u : 0u));   // only G03/G03b/G05 take a count; 0 = the scene default
+            (void)judge_scene(&cx, name, scene_name, name, judges[i], ticks6[i], n6, f, &o, (u8)(!strcmp(scenes[i], "G03b") ? 1 : 0));
             a.ticks = saved;
             if (strstr(o.detail, "run_twice_divergence")) diverged = 1;
         }
@@ -562,7 +607,7 @@ int main(int argc, char** argv) {
             g0scene::Scene sc;
             const u64 mark = arena_mark(&bt.scene_arena);
             const bool takes_n = !strcmp(scenes[i], "G03") || !strcmp(scenes[i], "G05");
-            build_scene(&sc, scenes[i], a.seed, takes_n ? (a.particles ? a.particles : (!strcmp(scenes[i], "G05") ? 10000 : 5000)) : a.particles, &bt.scene_arena);
+            build_scene(&sc, scenes[i], a.seed, takes_n ? (a.particles ? a.particles : (!strcmp(scenes[i], "G05") ? 10000 : 1000)) : a.particles, &bt.scene_arena);   // G03's shadow default is THE G-03 (1k, §7 R-4)
             char name[32]; snprintf(name, sizeof name, "shadow_%s", scenes[i]);
             FILE* f = open_csv(a.out, name, a.substeps, a.ladder, "");
             if (!f) return 1;

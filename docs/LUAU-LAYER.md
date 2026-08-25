@@ -301,7 +301,7 @@ their width; counts use their declared range.
 |---|---|---|
 | `fx.pos(n) fx.vel(n) fx.invmass(n) fx.stiff(n) fx.q(n) fx.angle(n) fx.omega(n) fx.scalar(n)` | `from_literal<R>` | **literal constructors** (`ASSETS-AND-DATA.md` §7 R-2): `n` is a Luau number; accepted iff `n × 2^FRAC` is an integer (exact double test: `ldexp(n, FRAC)` equals its floor and |n| < 2^(31−FRAC)) — then that integer is the raw value; else error naming the row. No rounding ever happens here. Valid in every VM; in the data VM the error is decorated with table/row/field |
 | `fx.raw(bits)` | identity | `check_int` to i32. The escape hatch for computed values |
-| `fx.H` `fx.INV_H` `fx.G_SUBSTEP` `fx.TEXEL` `fx.V_MAX_WORLD` | constants | raw bits / plain ints from `fx_palette.h`; `fx.POS=18, VEL=20, INVMASS=18, STIFF=30, Q=30, ANGLE=30, OMEGA=20, SCALAR=16` frac-bit constants for `fx.str` only |
+| `fx.H` `fx.INV_H` `fx.G_SUBSTEP` `fx.TEXEL` `fx.V_MAX_WORLD` | constants | raw bits / plain ints from `fx_palette.h`; `fx.POS=18, VEL=20, INVMASS=18, STIFF=30, Q=30, ANGLE=30, OMEGA=22, SCALAR=16` frac-bit constants for `fx.str` only (`CANON.md` "The fx palette" is the home; `OMEGA` moved to 22 at palette rev 2) |
 | `fx.mul_q(q, a) → a's row` | `mul<A>(q_t, A)` | row-independent: shift is always 30 |
 | `fx.mul_scalar(s, a) → a's row` | `mul<A>(scalar_t, A)` | shift always 16 |
 | `fx.div_q(a, b) → q` | `div<q_t>(A, A)` | same-row operands; `b == 0` → error |

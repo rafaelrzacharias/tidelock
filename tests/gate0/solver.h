@@ -59,7 +59,7 @@ struct Consts {
     stiff_t  at_density;       // PBF compliance (0)
     stiff_t  at_contact;       // contact compliance (0)
     u32      density_iters;    // Jacobi passes of the density solve per substep (1 = docs/ALLOY.md; a solver-design knob)
-    u32      _pad1;
+    u32      q_shift;          // 30 - log2(h_kernel raw): q = r / h_kernel as an EXACT shift (h_kernel is a power-of-two number of quanta; the normalize-once pair kernel, docs/GATE0-BENCH.md §7 R-3)
 };
 
 // --- the registered header (arena 0) --------------------------------------------------------
@@ -212,6 +212,11 @@ u64  world_hash(const World* w, u64 per_arena_out[MAX_ARENAS]);
 // re-evaluated from the CURRENT positions; sets *tunnel if a dynamic body's centre or a
 // particle lies strictly inside a static box.
 pos_t world_max_penetration(const World* w, u8* tunnel);
+// The §7 R-5 graded-body probe: max penetration of `body`'s corners into EVERY other body's box
+// (static or dynamic - "the boulder tunnels through neither the feather nor the floor"); sets
+// *tunnel if `body`'s centre lies more than a texel inside any other body's interior.
+// Precondition: body < nb and dynamic.
+pos_t world_body_penetration(const World* w, u32 body, u8* tunnel);
 // Energy at the documented shifts: KE = sum m*(vx^2+vy^2)*50 >> 40, PE = sum m*981*y >> 18,
 // both in centijoules (mass quanta = unit mass = 1 kg, g = 9.81), summed in i64 (saturating).
 i64  world_energy_cj(const World* w, i64* ke_out, i64* pe_out);

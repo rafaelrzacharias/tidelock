@@ -1,0 +1,2 @@
+tick,substeps,scenario,jitter_p95_texel,max_penetration_texel,density_err_p95,energy_i64,solve_us,broadphase_us,hash_lo64
+0,4,G03,0.0000,0.0000,0.000000,15695668544,4273,1592,48a8042c70b1bdcd

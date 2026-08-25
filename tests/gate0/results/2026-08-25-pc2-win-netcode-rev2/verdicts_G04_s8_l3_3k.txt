@@ -1,0 +1,4 @@
+gate0: carrier body 33 has 273 constraints at tick 135
+gate0: particle 707 escaped at x=-2035042 y=-81820 vx=-3823246 vy=-86010201 rho=336860522
+gate0: G04: a carrier left the sealed box at tick 135 - tunneling, run stopped
+VERDICT G-04 substeps=8 FAIL tunneling=1 (a carrier left the sealed box at tick 135; the trace is truncated) ticks=3000 run_twice=skipped max_colors=273 max_nbr=77 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=4 corr_clamps=0 vmax_clamps=0 max_degree=273

@@ -124,20 +124,31 @@ static void spawn_and_wait(const char* self, u32 test_index, u32 seed, const cha
         fprintf(stderr, "tl_tests: CreateProcess failed (%lu) for %s\n", GetLastError(), cmd);
         out->abnormal = false; out->exit_code = -1; return;
     }
+    // Same D2 rule as the POSIX half: a failed wait or a failed exit-code read must never leave
+    // `code` at its zero init and score an unobserved child as PASS (LESSONS.md: WAIT_FAILED
+    // means the handle is presumed dead, never "wait again").
     const DWORD wait_for = timeout_ms ? (DWORD)timeout_ms : INFINITE;
-    if (WaitForSingleObject(pi.hProcess, wait_for) == WAIT_TIMEOUT) {
+    bool wait_failed = false;
+    const DWORD w = WaitForSingleObject(pi.hProcess, wait_for);
+    if (w == WAIT_TIMEOUT) {
         // Kill it, then reap: leaving it running would leak a process per timed-out test and,
         // under --isolate, keep a lock on its private cwd.
         TerminateProcess(pi.hProcess, (UINT)TL_EXIT_FAIL);
         WaitForSingleObject(pi.hProcess, INFINITE);
         out->timed_out = true;
+    } else if (w != WAIT_OBJECT_0) {
+        fprintf(stderr, "tl_tests: WaitForSingleObject failed (%lu) - child unobserved\n", GetLastError());
+        wait_failed = true;
     }
     DWORD code = 0;
-    GetExitCodeProcess(pi.hProcess, &code);
+    if (!GetExitCodeProcess(pi.hProcess, &code)) {
+        fprintf(stderr, "tl_tests: GetExitCodeProcess failed (%lu) - child unobserved\n", GetLastError());
+        wait_failed = true;
+    }
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
-    out->exit_code = (int)code;
-    out->abnormal = (code >= 0x80000000u);   // NTSTATUS-shaped: an unhandled exception/trap
+    out->exit_code = wait_failed ? -1 : (int)code;
+    out->abnormal = wait_failed || (code >= 0x80000000u);   // NTSTATUS-shaped: an unhandled exception/trap
 }
 
 // Non-blocking spawn for the parallel pool; returns the process HANDLE (or nullptr on failure).
@@ -154,10 +165,11 @@ static HANDLE spawn_async(const char* self, u32 test_index, u32 seed, const char
 static ChildResult reap(HANDLE h, bool timed_out) {
     ChildResult r; r.spawned = true; r.timed_out = timed_out;
     DWORD code = 0;
-    GetExitCodeProcess(h, &code);
+    const bool read_failed = GetExitCodeProcess(h, &code) == 0;   // D2: never PASS on a zero init
+    if (read_failed) { fprintf(stderr, "tl_tests: GetExitCodeProcess failed (%lu) - child unobserved\n", GetLastError()); }
     CloseHandle(h);
-    r.exit_code = (int)code;
-    r.abnormal = (code >= 0x80000000u);
+    r.exit_code = read_failed ? -1 : (int)code;
+    r.abnormal = read_failed || (code >= 0x80000000u);
     return r;
 }
 
@@ -209,9 +221,22 @@ static void spawn_and_wait(const char* self, u32 test_index, u32 seed, const cha
         execv(self, argv);
         _exit(127);   // execv failed
     }
+    // A wait that FAILS is not a wait that observed a clean exit: leaving `status` at 0 on a
+    // non-EINTR waitpid error decoded as WIFEXITED/WEXITSTATUS(0) and scored an UNOBSERVED child
+    // as PASS (sweep D2, 2026-08-25 - e.g. SIGCHLD=SIG_IGN inherited across execv auto-reaps the
+    // child and waitpid answers ECHILD). The pool half already failed this loudly; this is the
+    // serial half catching up.
     int status = 0;
+    bool wait_failed = false;
     if (timeout_ms == 0u) {
-        while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
+        for (;;) {
+            const pid_t r = waitpid(pid, &status, 0);
+            if (r == pid) { break; }
+            if (r < 0 && errno == EINTR) { continue; }
+            fprintf(stderr, "tl_tests: waitpid(%d) failed (errno %d) - child unobserved\n", (int)pid, errno);
+            wait_failed = true;
+            break;
+        }
     } else {
         // waitpid has no timeout, so this is the poll loop the ruling names: WNOHANG until the
         // deadline, then SIGKILL and a blocking reap so no zombie is left behind.
@@ -219,7 +244,11 @@ static void spawn_and_wait(const char* self, u32 test_index, u32 seed, const cha
         for (;;) {
             const pid_t r = waitpid(pid, &status, WNOHANG);
             if (r == pid) { break; }
-            if (r < 0 && errno != EINTR) { break; }
+            if (r < 0 && errno != EINTR) {
+                fprintf(stderr, "tl_tests: waitpid(%d) failed (errno %d) - child unobserved\n", (int)pid, errno);
+                wait_failed = true;
+                break;
+            }
             if (now_ms() >= deadline) {
                 kill(pid, SIGKILL);
                 while (waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
@@ -230,7 +259,8 @@ static void spawn_and_wait(const char* self, u32 test_index, u32 seed, const cha
         }
     }
     out->spawned = true;
-    if (WIFEXITED(status)) { out->exit_code = WEXITSTATUS(status); out->abnormal = false; }
+    if (wait_failed) { out->exit_code = -1; out->abnormal = true; }
+    else if (WIFEXITED(status)) { out->exit_code = WEXITSTATUS(status); out->abnormal = false; }
     else { out->exit_code = -1; out->abnormal = true; }   // signalled (e.g. SIGILL from __builtin_trap)
 }
 
@@ -321,13 +351,38 @@ int main(int argc, char** argv) {
             }
         }
         else if (strcmp(a, "--isolate") == 0) { isolate = true; }
-        else if (strcmp(a, "--workers") == 0 && has_next) { workers_arg = atoll(argv[++i]); }
-        else if (strcmp(a, "--timeout-ms") == 0 && has_next) { timeout_ms_arg = atoll(argv[++i]); }
+        // Numeric flags parse strictly (rc_parse_u63): atoll's 0-for-garbage answer silently
+        // disarmed --timeout-ms and silently reseeded --seed (sweep D1, 2026-08-25). The refusal
+        // texts repeat the range checks' wording below so the probes match one message per flag.
+        else if (strcmp(a, "--workers") == 0 && has_next) {
+            if (!rc_parse_u63(argv[++i], &workers_arg)) {
+                fprintf(stderr, "tl_tests: --workers must be 0 (auto) or a positive count, got '%s'\n", argv[i]);
+                return TL_EXIT_FAIL;
+            }
+        }
+        else if (strcmp(a, "--timeout-ms") == 0 && has_next) {
+            if (!rc_parse_u63(argv[++i], &timeout_ms_arg)) {
+                fprintf(stderr, "tl_tests: --timeout-ms must be 0 (off) or a positive millisecond count, got '%s'\n", argv[i]);
+                return TL_EXIT_FAIL;
+            }
+        }
         else if (strcmp(a, "--list") == 0) { list_only = true; }
         else if (strcmp(a, "--report") == 0 && has_next) { report_path = argv[++i]; }
         else if (strcmp(a, "--junit") == 0 && has_next) { junit_path = argv[++i]; }
-        else if (strcmp(a, "--seed") == 0 && has_next) { global_seed = (u32)strtoul(argv[++i], nullptr, 10); }
-        else if (strcmp(a, "--run-one") == 0 && has_next) { run_one = atoll(argv[++i]); }
+        else if (strcmp(a, "--seed") == 0 && has_next) {
+            i64 seed_arg = 0;
+            if (!rc_parse_u63(argv[++i], &seed_arg) || seed_arg > 0xffffffff) {
+                fprintf(stderr, "tl_tests: --seed wants a decimal u32, got '%s'\n", argv[i]);
+                return TL_EXIT_FAIL;
+            }
+            global_seed = (u32)seed_arg;
+        }
+        else if (strcmp(a, "--run-one") == 0 && has_next) {
+            if (!rc_parse_u63(argv[++i], &run_one)) {
+                fprintf(stderr, "tl_tests: --run-one wants a test index, got '%s'\n", argv[i]);
+                return TL_EXIT_FAIL;
+            }
+        }
         else { fprintf(stderr, "tl_tests: unrecognised argument '%s'\n", a); usage(); return TL_EXIT_FAIL; }
     }
     // A worker count is a count: 0 means "pick core_count", anything else must be >= 1. A

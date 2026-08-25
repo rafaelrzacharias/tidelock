@@ -1,0 +1,10 @@
+VERDICT G-01 substeps=8 PASS jitter_p95_texel=0.0000 top_drift_texel=-0.0001 pop=0 intra_tick_max_texel=0.0001 perturb_quanta=0 ticks=10000 run_twice=skipped max_colors=8 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=8
+SHADOW G01 substeps=8 max_abs_err_texel=0.0412 (raw 675)
+VERDICT G-02a substeps=8 PASS boulder_pen_sustained_texel=0.0002 boulder_tunnel=0 any_tunnel_recorded=0 feather_ejected=0 lambda_saturations=0 ticks=2000 run_twice=skipped max_colors=4 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=4
+gate0: G02b: a carrier left the sealed box at tick 2 - tunneling, run stopped
+VERDICT G-02b substeps=8 PASS boulder_pen_sustained_texel=0.0000 boulder_tunnel=0 any_tunnel_recorded=1 feather_ejected_at_tick=2 (recorded, not graded; run stopped, trace truncated) lambda_saturations=0 ticks=600 run_twice=skipped max_colors=12 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=5 corr_clamps=0 vmax_clamps=7 max_degree=12
+VERDICT G-02 substeps=8 PASS boulder_pen_sustained_texel=0.0002 boulder_tunnel=0 any_tunnel_recorded=0 feather_ejected=0 lambda_saturations=0 | boulder_pen_sustained_texel=0.0000 boulder_tunnel=0 any_tunnel_recorded=1 feather_ejected_at_tick=2 (recorded, not graded; run stopped, trace truncated) lambda_saturations=0
+SHADOW G02a substeps=8 max_abs_err_texel=1.2256 (raw 20081)
+SHADOW G02b substeps=8 max_abs_err_texel=530.4301 (raw 8690567)
+VERDICT G-03 substeps=8 FAIL density_err_p95=0.021184 ke_window_increases_after_settle=4 ticks=7000 run_twice=skipped max_colors=2 max_nbr=27 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=2
+SHADOW G03 substeps=8 max_abs_err_texel=3.6701 (raw 60131)

@@ -1,0 +1,1 @@
+VERDICT G-04 substeps=16 FAIL tunneling=1 (a carrier left the sealed box at tick 2210; the trace is truncated) ticks=3000 run_twice=identical max_colors=990 max_nbr=75 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=41 corr_clamps=0 vmax_clamps=1 max_degree=990

@@ -81,10 +81,10 @@ TL_TEST(fx_review_edge_matrix_in_contract, "foundation,fx,det,fast") {
     TL_EXPECT_EQ(rne_shr(-((i64)1 << 61) - 1, 62), (i64)-1);
     TL_EXPECT_EQ(rne_shr(INT64_MIN + 1, 62), (i64)-2);
     // mul_int at |k| = INT32_MAX, a small enough that the result fits
-    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(1), INT32_MAX).v, 2097152);    // (2^31 - 1) / 2^10 = 2097151.999 -> 2097152
-    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(-1), INT32_MAX).v, -2097152);
-    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(1), INT32_MIN).v, -2097152);
-    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(1023), INT32_MIN).v, (i32)ref_rne_shr((i64)1023 * INT32_MIN, 10));
+    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(1), INT32_MAX).v, 8388608);    // (2^31 - 1) / 2^8 = 8388607.996 -> 8388608 (rev 2: narrow 8)
+    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(-1), INT32_MAX).v, -8388608);
+    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(1), INT32_MIN).v, -8388608);
+    TL_EXPECT_EQ(mul_int<omega_t>(fx_raw<angle_t>(255), INT32_MIN).v, (i32)ref_rne_shr((i64)255 * INT32_MIN, 8));   // 255/256 * -2^31 is the largest in-contract magnitude at narrow 8 (1023 fitted only at the old narrow 10)
     TL_EXPECT_EQ(mul_int<vel_t>(fx_raw<pos_t>(1 << 20), 511).v, (1 << 20) * 511 * 4);   // 2^29 * 4 = 2^31 - 4 * 2^20: fits
     TL_EXPECT_EQ(mul_int<vel_t>(fx_raw<pos_t>(INT32_MIN), 0).v, 0);
     // mul with INT32_MIN on both sides: 2^62 >> S
@@ -160,6 +160,11 @@ TL_TEST(fx_review_release_error_values, "foundation,fx,det,fast") {
     // and it comes back as INT32_MIN - a positive value arriving as the most negative one, which
     // is precisely why fx.h now tells callers on this tier to range-check.
     TL_EXPECT_EQ(to<q_t>(fx_raw<pos_t>(1 << 19)).v, INT32_MIN);
+    // The negative side of the same wrap (RR-16, wrap RATIFIED 2026-08-25): the intermediate is
+    // -(2^31) - 4096, one quantum past the most negative value to<q_t> can hold, and modular
+    // conversion brings it back as INT32_MAX - 4095 - a negative value arriving as a large
+    // positive one. Pinned so the wrap contract is covered from both directions.
+    TL_EXPECT_EQ(to<q_t>(fx_raw<pos_t>(-(1 << 19) - 1)).v, INT32_MAX - 4095);
     // clamp with lo > hi is documented as asserted only: it returns lo for x < lo, else hi for
     // x > hi, else x - stated here so a change shows up
     TL_EXPECT_EQ(clamp(fx_int<pos_t>(0), fx_int<pos_t>(5), fx_int<pos_t>(-5)).v, fx_int<pos_t>(5).v);

@@ -1,0 +1,4 @@
+SHADOW G01 substeps=8 max_abs_err_texel=0.0412 (raw 675)
+SHADOW G02a substeps=8 max_abs_err_texel=1.2256 (raw 20081)
+SHADOW G02b substeps=8 max_abs_err_texel=530.4301 (raw 8690567)
+SHADOW G03 substeps=8 max_abs_err_texel=3.6701 (raw 60131)

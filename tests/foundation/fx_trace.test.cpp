@@ -9,9 +9,11 @@
 #include "fx_test_util.h"
 #include "foundation/det_math.h"
 
+#include <stdio.h>   // the pin-mismatch diagnostic below (tests are not sim code, docs/TESTING.md §8 R-2)
+
 using namespace fx;
 
-static const u64 FX_TRACE_PINNED = 0x1a1803512f224fadull;   // clang-cl x86-64 dev, 2026-08-23
+static const u64 FX_TRACE_PINNED = 0xf29c2358a2932bbfull;   // re-pinned 2026-08-25: palette rev 2 (omega_t fx<i32,22>, docs/FX-PALETTE.md §9 R-8 - a recorded kernel change, not a lane fix); clang-cl x86-64
 
 // FNV-1a 64 over raw values (docs/CANON.md: the NameHash constants), no hash lane needed.
 static u64 fold(u64 h, u64 v) {
@@ -29,7 +31,7 @@ static u64 run_trace(u64 seed, u32 ops) {
         const i32 a = fx_rng_i32(&rng), b = fx_rng_i32(&rng), c = fx_rng_i32(&rng);
         // every op below is in-contract for any a, b, c: results fit by construction
         const pos_t p = mul<pos_t>(fx_raw<vel_t>(a), H);                          // |a| * H fits
-        const angle_t th = mul<angle_t>(fx_raw<omega_t>(b >> 2), H);                  // 512 turn/s * H = 1.07 turn < 2
+        const angle_t th = mul<angle_t>(fx_raw<omega_t>(b >> 2), H);                  // 128 turn/s * H = 0.27 turn < 2 (rev 2: frac 22)
         const q_t qq = mul<q_t>(fx_raw<q_t>(a >> 1), fx_raw<q_t>(b >> 1));          // |q| < 1 each
         const pos_t dl = mul<pos_t>(fx_raw<invmass_t>(a >> 2), fx_raw<lambda_t>(b >> 14));   // 2^29 * 2^17 >> 16 = 2^30
         const vel_t v = mul_int<vel_t>(fx_raw<pos_t>(c >> 11), INV_H);              // |c|/2^11 * 480 * 4 < 2^31
@@ -84,7 +86,7 @@ static u64 run_trace_b(u64 seed, u32 ops) {
         const pos_t s18 = sqrt<pos_t>(fx_raw<pos_t>(a & INT32_MAX));
         const q_t s30 = sqrt<q_t>(fx_raw<q_t>(b & INT32_MAX));
         const q_t rs = rsqrt<q_t>(fx_raw<q_t>((c & 0x3fffffff) | 0x10000000));
-        // mul_int narrowing: angle x INV_H -> omega (|a| < 2^21 keeps 480 * a / 2^10 in range)
+        // mul_int narrowing: angle x INV_H -> omega (|a| < 2^21 keeps 480 * a / 2^8 in range; rev 2 narrows 8)
         const omega_t om = mul_int<omega_t>(fx_raw<angle_t>(a >> 10), INV_H);
         // div with quotients up to the row's range: pos/pos -> pos (S = 18) and q/q -> q
         const i32 dd = (b >> 4) == 0 ? 1 : (b >> 4);
@@ -131,10 +133,11 @@ static u64 run_trace_b(u64 seed, u32 ops) {
     return h;
 }
 
-static const u64 FX_TRACE_B_PINNED = 0x14179b6d064d0ca6ull;   // W1 fx review 3: clang-cl x86-64 dev, 2026-08-23
+static const u64 FX_TRACE_B_PINNED = 0x22598f0e81cb2e7full;   // re-pinned 2026-08-25: palette rev 2 (omega_t fx<i32,22>, §9 R-8); was W1 fx review 3's 0x14179b6d064d0ca6
 
 TL_TEST(fx_trace_b_hash_pinned, "foundation,fx,det,crossisa,fast") {
     const u64 h = run_trace_b(0x7469646c6f636b31ull, 1u << 15);   // 2^15 x 30 values ~ 1M
+    if (h != FX_TRACE_B_PINNED) fprintf(stderr, "fx_trace_b: computed %016llx pinned %016llx\n", (unsigned long long)h, (unsigned long long)FX_TRACE_B_PINNED);
     TL_EXPECT_EQ(h, FX_TRACE_B_PINNED);
 }
 
@@ -143,6 +146,7 @@ TL_TEST(fx_trace_hash_pinned, "foundation,fx,det,crossisa,fast") {
     // reference PC (clang-cl, x86-64, dev tier) and must be reproduced by every tier, compiler
     // and ISA - re-pin ONLY with a recorded reason (a kernel change), never to make a lane green.
     const u64 h = run_trace(0x7469646c6f636b31ull /* "tidelock1", docs/CANON.md TL_HASH_SEED */, 1u << 16);
+    if (h != FX_TRACE_PINNED) fprintf(stderr, "fx_trace: computed %016llx pinned %016llx\n", (unsigned long long)h, (unsigned long long)FX_TRACE_PINNED);
     TL_EXPECT_EQ(h, FX_TRACE_PINNED);
     // and it is a function of the seed, not of anything else
     TL_EXPECT_NE(run_trace(1, 1u << 10), run_trace(2, 1u << 10));

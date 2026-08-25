@@ -1,0 +1,28 @@
+gate0: carrier body 347 has 230 constraints at tick 120
+gate0: carrier body 291 has 418 constraints at tick 123
+gate0: carrier body 37 has 266 constraints at tick 124
+gate0: carrier body 55 has 256 constraints at tick 126
+gate0: carrier body 1978 has 324 constraints at tick 127
+gate0: carrier body 1974 has 626 constraints at tick 128
+gate0: carrier body 43 has 451 constraints at tick 129
+gate0: carrier body 1984 has 2528 constraints at tick 130
+gate0: carrier body 1984 has 2897 constraints at tick 131
+gate0: carrier body 1968 has 369 constraints at tick 132
+gate0: carrier body 13 has 382 constraints at tick 133
+gate0: carrier body 13 has 1554 constraints at tick 134
+gate0: carrier body 13 has 2739 constraints at tick 135
+gate0: carrier body 55 has 2095 constraints at tick 136
+gate0: carrier body 69 has 1279 constraints at tick 137
+gate0: carrier body 29 has 1456 constraints at tick 138
+gate0: carrier body 213 has 1225 constraints at tick 139
+gate0: carrier body 221 has 1040 constraints at tick 140
+gate0: carrier body 209 has 711 constraints at tick 141
+gate0: G05_10000: a carrier left the sealed box at tick 141 - tunneling, run stopped
+VERDICT G05_10000 substeps=8 FAIL tunneling=1 (a carrier left the sealed box at tick 141; the trace is truncated) p50_us=313757 p95_us=387608 p99_us=404951 ticks_run=142 pair_evals_per_tick=1727396 contact_evals_per_tick=128164 ns_per_pair_eval=181 phase_us_per_tick[broadphase,predict,density,colors,writeback,velocity]=25350,1531,146988,7502,501,105048 ticks=500 run_twice=skipped max_colors=2897 max_nbr=96 nbr_overflow=0 lambda_sat=0 vel_clamps=14 omega_clamps=3373 corr_clamps=0 vmax_clamps=255 max_degree=2897
+gate0: particle 606 escaped at x=1898638 y=-81471 vx=-17957743 vy=-136058864 rho=336860522
+gate0: G05_20000: a carrier left the sealed box at tick 83 - tunneling, run stopped
+VERDICT G05_20000 substeps=8 FAIL tunneling=1 (a carrier left the sealed box at tick 83; the trace is truncated) p50_us=386664 p95_us=472011 p99_us=574854 ticks_run=84 pair_evals_per_tick=3289472 contact_evals_per_tick=99468 ns_per_pair_eval=117 phase_us_per_tick[broadphase,predict,density,colors,writeback,velocity]=37910,1658,205553,3362,714,134734 ticks=500 run_twice=skipped max_colors=56 max_nbr=100 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=56
+gate0: particle 278 escaped at x=-2342774 y=-76005 vx=6026880 vy=-89047680 rho=336860522
+gate0: G05_50000: a carrier left the sealed box at tick 84 - tunneling, run stopped
+VERDICT G05_50000 substeps=8 FAIL tunneling=1 (a carrier left the sealed box at tick 84; the trace is truncated) p50_us=845225 p95_us=1000883 p99_us=1101493 ticks_run=85 pair_evals_per_tick=7657061 contact_evals_per_tick=99582 ns_per_pair_eval=110 phase_us_per_tick[broadphase,predict,density,colors,writeback,velocity]=81470,2795,441362,3106,1511,299378 ticks=500 run_twice=skipped max_colors=66 max_nbr=109 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=66
+VERDICT G-05 substeps=8 FAIL pc_20k_p95_us=472011 pi=BLOCKED(RR-1)

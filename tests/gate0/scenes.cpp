@@ -36,6 +36,7 @@ void scene_init(Scene* s, VMemArena* arena, u32 cap_b, u32 cap_p, u32 cap_d) {
     s->dists = (SceneDist*)arena_push(arena, u64(cap_d) * sizeof(SceneDist) + 16u, 16u);
     s->cap_b = cap_b; s->cap_p = cap_p; s->cap_d = cap_d;
     s->stack_top_body = 0xFFFFFFFFu;
+    s->graded_body = 0xFFFFFFFFu;
 }
 
 u32 scene_add_body(Scene* s, pos_t x, pos_t y, pos_t hw, pos_t hh, angle_t th, i32 mass_quanta, u8 is_static) {
@@ -137,7 +138,8 @@ void scene_g02a(Scene* s, u64 seed) {
     (void)seed;
     scene_add_sealed_box(s, fx::fx_int<pos_t>(-10), fx::fx_int<pos_t>(0), fx::fx_int<pos_t>(10), fx::fx_int<pos_t>(20), fx::fx_int<pos_t>(1));
     const angle_t z = fx::fx_raw<angle_t>(0);
-    scene_add_body(s, fx::fx_int<pos_t>(0), m_of(1, 2), m_of(1, 2), m_of(1, 2), z, 4096, 0);           // boulder, resting
+    // the criterion grades the boulder (docs/GATE0-BENCH.md §7 R-5)
+    s->graded_body = scene_add_body(s, fx::fx_int<pos_t>(0), m_of(1, 2), m_of(1, 2), m_of(1, 2), z, 4096, 0);   // boulder, resting
     // the feather: 2.5 m x 0.25 m, 1 quantum (4096:1), 2 m above the boulder's top face
     scene_add_body(s, fx::fx_int<pos_t>(0), m_of(1, 1) + fx::fx_int<pos_t>(2) + m_of(1, 8), m_of(5, 4), m_of(1, 8), z, 1, 0);
     s->settle_tick = 600;
@@ -150,6 +152,7 @@ void scene_g02b(Scene* s, u64 seed) {
     scene_add_body(s, fx::fx_int<pos_t>(0), m_of(1, 8), m_of(5, 4), m_of(1, 8), z, 1, 0);                // feather, resting on the floor
     const u32 b = scene_add_body(s, fx::fx_int<pos_t>(0), fx::fx_int<pos_t>(3), m_of(1, 2), m_of(1, 2), z, 4096, 0);   // boulder
     s->bodies[b].vy = -fx::V_MAX_WORLD;                                                                    // at V_MAX, downward
+    s->graded_body = b;                                                                                    // docs/GATE0-BENCH.md §7 R-5: grade the boulder
     s->settle_tick = 0;
 }
 
