@@ -202,6 +202,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `CANON.md` -> §15.1, §19.4
 - `CONTAINERS.md` -> §14.1
 - `DETERMINISM.md` -> §14, §19.4
+- `ECS.md` -> §1, §20.1
 - `FRAME-LOOP.md` -> §7.4, §20
 - `INPUT.md` -> §8.4, §12.2
 - `JOBS.md` -> §2

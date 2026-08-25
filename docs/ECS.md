@@ -233,6 +233,14 @@ per-column hashes every tick.
 | `encoder.h/.cpp` | the name-keyed save encoder/decoder over field tables (`ASSETS-AND-DATA.md` §5) |
 | `diff.cpp` | field-by-field diff of two component rows (desync dumps) |
 
+Plus one file below `src/core/`: **`src/foundation/bytes.h`** — the little-endian
+`ByteWriter`/`ByteReader` pair the `TL_WIRE_STRUCT`-generated `wire_write_*`/`wire_read_*`
+functions (§10.2) write through. `NETCODE.md` §1 homes the byte pair in `src/foundation/` (it
+must sit below every consumer: `net/wire.h`, the save encoder, `InputFrame`); it landed from
+this lane as the macro's first consumer, and the net lane's `wire.h` layers varint/zigzag
+helpers on top (`NETCODE.md` §20.1). Writer overflow is a bug (`TL_CHECK`); reader underflow is
+data — a sticky `ErrCode` checked once after the last field read (W2 ecs, 2026-08-25).
+
 ### 10.2 Reflection
 
 ```cpp
