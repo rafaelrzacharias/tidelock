@@ -222,3 +222,17 @@ TL_TEST(luacomp_pad_names_defaults_and_field_bound_are_rejected, "core,ecs,luaco
     TL_EXPECT_EQ(r.err, ERR_OK);
     TL_EXPECT_EQ(((const u8*)f.w.comps[r.value].info->default_row)[0], 0xFFu);
 }
+
+TL_TEST(luacomp_bool_defaults_are_zero_or_one, "core,ecs,luacomp,edge,fast") {
+    // Review 2 R2: a bool default outside {0, 1} would build a default row byte a C++ twin
+    // loads as an invalid bool representation (UB); width alone cannot catch 2.
+    WorldFixture& f = *wt_fixture(0u);
+    TL_ASSERT_TRUE(world_fixture_init(&f, 1u));
+    LuauFieldDecl bad = { sv("flag"), K_bool, 0, 1, 0, 2u };
+    Result<ComponentId> r = world_register_component_luau(&f.w, sv("B1"), &bad, 1u, 0u);
+    TL_EXPECT_EQ(r.err, ERR_ECS_BAD_DEFAULT);
+    LuauFieldDecl good = { sv("flag"), K_bool, 0, 1, 0, 1u };
+    r = world_register_component_luau(&f.w, sv("B2"), &good, 1u, 0u);
+    TL_ASSERT_EQ(r.err, ERR_OK);
+    TL_EXPECT_EQ(((const u8*)f.w.comps[r.value].info->default_row)[0], 1u);
+}

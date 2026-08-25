@@ -77,17 +77,26 @@ void apply_spawn_realize(World* w, Entity e) {
     }
 }
 
-// True iff e is a reservation of THIS window awaiting its realize: a fresh id (gen 1) past or
-// inside the pushed range, or a dead slot whose CURRENT generation the handle carries - only
-// world_spawn mints such a handle (a stale handle's gen is always below the slot's, which the
-// remove bumped). Used to keep destroy/add appliers loud about pending targets (review 1 D4).
+// True iff e is a reservation of THIS window awaiting its realize (review 1 D4): a fresh id
+// (gen 1 - only fresh reservations carry it), or a dead gen-matching slot WHOSE ENTRY THE
+// WINDOW'S DRAIN POPPED. The membership requirement is review 2 R1: a stale handle to a
+// QUARANTINED slot is also dead with gen.data[idx] == handle_gen (the gen froze at GEN_MAX -
+// slotmap.h: "only the live bit separates it from its last handle"), and it must stay the
+// normal no-op stale flow. gen != GEN_MAX cannot separate them either - a free-list slot
+// legitimately sits at GEN_MAX (bumped from GEN_MAX-1, then pushed), so a pending last-gen
+// reservation would lose its D4 protection; membership in the popped set is exact.
 bool spawn_pending(const World* w, Entity e) {
     const SlotMap<EntityRecord, Entity>* sm = &w->entities;
     const u32 idx = handle_index(e);
     const u32 gen = handle_gen(e);
     if (gen == 1u && idx >= sm->slots.count) { return true; }
-    return idx < sm->slots.count && !bitset_test(&sm->live, idx)
-        && sm->gen.data[idx] == (u16)gen;
+    if (idx >= sm->slots.count) { return false; }
+    if (bitset_test(&sm->live, idx) || sm->gen.data[idx] != (u16)gen) { return false; }
+    if (gen == 1u) { return true; }   // a loop-pushed fresh slot awaiting its own realize
+    for (u32 i = 0; i < w->window_popped_count; ++i) {
+        if (w->window_popped[i] == idx) { return true; }
+    }
+    return false;
 }
 
 // CMD_DESTROY's applier: a dead target is the normal stale-reference flow (no-op) UNLESS it is
@@ -184,9 +193,16 @@ void apply_commands(World* w) {
     // The window's deferred free-list pops land first, in reservation order - byte-identical
     // to the recording-time pops the rev-1 design performed, but inside the barrier window
     // (review 1 D3). Destroys applying below may push freed slots back afterwards as usual.
-    while (w->reserved_free != 0u) {
-        (void)array_pop(&w->entities.free_list);
-        w->reserved_free -= 1u;
+    // The popped idxs are kept on the command arena for spawn_pending's membership check
+    // (review 2 R1); the arena reset below ends their lifetime with the window.
+    if (w->reserved_free != 0u) {
+        w->window_popped = (u32*)arena_push(&w->cmd_arena, (u64)w->reserved_free * sizeof(u32),
+                                            alignof(u32));
+        while (w->reserved_free != 0u) {
+            w->window_popped[w->window_popped_count] = array_pop(&w->entities.free_list);
+            w->window_popped_count += 1u;
+            w->reserved_free -= 1u;
+        }
     }
     for (u32 ci = 0; ci < w->cmds.chunk_count; ++ci) {
         CmdChunk* c = &w->cmds.chunks[ci];
@@ -259,6 +275,8 @@ void apply_commands(World* w) {
         c->recs = Array<CmdRecord>{ nullptr, 0, 0, nullptr };
         c->payload = Array<u8>{ nullptr, 0, 0, nullptr };
     }
+    w->window_popped = nullptr;
+    w->window_popped_count = 0;
     arena_reset_to(&w->cmd_arena, 0u);
     TL_ASSERT(w->pending_fresh == 0u);   // every fresh reservation realized this window
     if (w->guard != nullptr) { guard_barrier_end(w->guard, w->registry); }
@@ -277,4 +295,6 @@ void commands_discard(World* w) {
     arena_reset_to(&w->cmd_arena, 0u);
     w->pending_fresh = 0;
     w->reserved_free = 0;
+    w->window_popped = nullptr;
+    w->window_popped_count = 0;
 }

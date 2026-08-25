@@ -84,6 +84,9 @@ Result<const ComponentInfo*> lc_build(World* w, StrView name, const LuauFieldDec
             }
             if (fd->kind >= K_Entity && fd->kind <= K_Basin) { r.err = ERR_ECS_BAD_DEFAULT; return r; }
             if (fd->kind == K_StrId) { r.err = ERR_ECS_BAD_DEFAULT; return r; }
+            // A bool holds {0, 1}: any other byte is an invalid representation the C++ twin of
+            // a Luau-declared column would load as UB (review 2 R2).
+            if (fd->kind == K_bool && fd->default_bits > 1u) { r.err = ERR_ECS_BAD_DEFAULT; return r; }
         }
         for (u32 j = 0; j < i; ++j) {   // the encoder keys fields by name hash - names are unique
             if (sv_eq(fd->name, fields[j].name)) { r.err = ERR_ECS_DUPLICATE_NAME; return r; }

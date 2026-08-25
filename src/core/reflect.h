@@ -194,6 +194,7 @@ inline constexpr FieldInfo TL_WIRE_FV_ROW =
         static constexpr FieldInfo rows[] = { TL_FIELDS_##Name(TL_X_INFO, TL_X_INFO_A, TL_X_INFO) }; \
     };                                                                                          \
     static_assert(tl_fields_sum_size(Name##_tbl::rows) == sizeof(Name), "explicit padding required: name every gap _padN (docs/ECS.md section 10.2)"); \
+    static_assert(tl_count(Name##_tbl::rows) <= 256, "past the save decoder's field bound this component could never be loaded again (encoder.h ENC_MAX_FIELDS)"); \
     inline constexpr const FieldInfo* Name##_fields = Name##_tbl::rows;                          \
     inline constexpr ComponentInfo Name##_info = { #Name, fnv1a64(#Name, sizeof(#Name) - 1),    \
         (u32)sizeof(Name), (u32)alignof(Name), Name##_tbl::rows, tl_count(Name##_tbl::rows), (FLAGS), nullptr }; \
@@ -210,6 +211,7 @@ inline constexpr FieldInfo TL_WIRE_FV_ROW =
         static constexpr FieldInfo rows[] = { TL_FIELDS_##Name(TL_X_INFO, TL_X_INFO_A, TL_X_INFO) }; \
     };                                                                                          \
     static_assert(tl_fields_sum_size(Name##_tbl::rows) == sizeof(Name), "explicit padding required: name every gap _padN (docs/ECS.md section 10.2)"); \
+    static_assert(tl_count(Name##_tbl::rows) <= 256, "past the save decoder's field bound this component could never be loaded again (encoder.h ENC_MAX_FIELDS)"); \
     inline constexpr const FieldInfo* Name##_fields = Name##_tbl::rows;                          \
     inline constexpr ComponentInfo Name##_info = { #Name, fnv1a64(#Name, sizeof(#Name) - 1),    \
         (u32)sizeof(Name), (u32)alignof(Name), Name##_tbl::rows, tl_count(Name##_tbl::rows), 0u, nullptr };
@@ -230,6 +232,7 @@ inline constexpr FieldInfo TL_WIRE_FV_ROW =
         TL_OFFSETS_##Name(TL_X_WIRE_OFFSET)                                                     \
     };                                                                                          \
     static_assert(tl_fields_sum_size(Name##_tbl::rows) == sizeof(Name), "explicit padding required: name every gap _padN (docs/ECS.md section 10.2)"); \
+    static_assert(tl_count(Name##_tbl::rows) <= 256, "past the save decoder's field bound this component could never be loaded again (encoder.h ENC_MAX_FIELDS)"); \
     inline constexpr const FieldInfo* Name##_fields = Name##_tbl::rows;                          \
     inline constexpr ComponentInfo Name##_info = { #Name, fnv1a64(#Name, sizeof(#Name) - 1),    \
         (u32)sizeof(Name), (u32)alignof(Name), Name##_tbl::rows, tl_count(Name##_tbl::rows), 0u, nullptr }; \

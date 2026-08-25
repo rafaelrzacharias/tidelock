@@ -88,9 +88,14 @@ struct World {
     u16 _pad0;
     u32 pending_fresh;          // fresh entity ids reserved this window (TODO.md E-3)
     u32 reserved_free;          // free-list entries reserved this window - READ, not popped
-    u32 _pad2;                  // (review 1 D3: a mid-window pop moves hashed bytes, so a
+                                // (review 1 D3: a mid-window pop moves hashed bytes, so a
                                 // snapshot captured with a reservation outstanding could not be
                                 // restored consistently; the pops apply at the window's start)
+    u32 window_popped_count;    // live only inside apply_commands (review 2 R1): the idxs the
+    u32* window_popped;         // window's drain popped, on cmd_arena - spawn_pending's reused
+                                // arm requires membership here, because a stale handle to a
+                                // QUARANTINED slot is the same dead+gen-matching shape and must
+                                // stay the no-op flow (slot state alone cannot separate them)
 
     SlotMap<EntityRecord, Entity> entities;
 

@@ -322,3 +322,43 @@ TL_TEST_EXPECT_FATAL(commands_destroy_before_realize_is_fatal, "core,ecs,command
     ++t->checks;
     wt_tick(&f.w);
 }
+
+TL_TEST(commands_stale_handle_to_a_quarantined_slot_destroys_as_noop, "core,ecs,commands,edge,fast") {
+    // Review 2 R1: a quarantined slot is dead with its gen FROZEN at the last issued handle's
+    // gen - the same shape as a pending reused reservation. The pending check keys on the
+    // window's popped set, so this stale destroy must stay the documented no-op flow, and the
+    // quarantined slot must never be reissued.
+    WorldFixture& f = *wt_fixture(0u);
+    TL_ASSERT_TRUE(world_fixture_init(&f, 3u));
+    world_fixture_register_std(&f);
+    world_build_schedule(&f.w);
+
+    Entity last = Entity{ 0 };
+    for (u32 g = 1; g <= (u32)Entity::GEN_MAX; ++g) {   // 1023 tenancies of slot 0
+        last = world_spawn(&f.w);
+        world_flush(&f.w);
+        world_destroy(&f.w, last);
+        world_flush(&f.w);
+    }
+    TL_ASSERT_EQ(f.w.entities.quarantined, 1u);
+    TL_ASSERT_EQ(handle_index(last), 0u);
+    TL_ASSERT_EQ(handle_gen(last), (u32)Entity::GEN_MAX);
+    TL_EXPECT_EQ(f.w.entities.free_list.count, 0u);
+
+    world_destroy(&f.w, last);   // stale handle whose gen matches the frozen gen: no-op, no fatal
+    world_flush(&f.w);
+    TL_EXPECT_FALSE(world_entity_alive(&f.w, last));
+    TL_EXPECT_EQ(f.w.entities.quarantined, 1u);
+
+    // The next spawn takes a FRESH slot - the quarantined one retired for the world's life.
+    Entity e2 = world_spawn(&f.w);
+    world_flush(&f.w);
+    TL_EXPECT_EQ(handle_index(e2), 1u);
+    TL_EXPECT_TRUE(world_entity_alive(&f.w, e2));
+
+    // And the pending protection still holds at the LAST legal generation: destroy-before-
+    // realize of a reservation is loud, a quarantined stale is not - both shapes share
+    // dead+gen-matching, membership in the window's popped set is what separates them
+    // (covered by commands_destroy_before_realize_is_fatal for the fatal half).
+    ++t->checks;
+}

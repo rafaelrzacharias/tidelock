@@ -108,6 +108,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ALLOY.md` -> §7
 - `ARCHITECTURE.md` -> §3, §4, §5, §10.8
 - `ASSETS-AND-DATA.md` -> §6.1
+- `BUILD.md` -> §10.2
 - `CPP-SUBSET.md` -> §5, §6, §10.2, §10.3
 - `DETERMINISM.md` -> §3
 - `FRAME-LOOP.md` -> §3
