@@ -1039,6 +1039,25 @@ right; it is the template the others now follow.
   has to move with it. Recorded so it is a decision, not a discovery.
   **AFFIRMED 2026-08-24 (Rafael) as the standing rule, no code**: none of Span/StrView/Interner
   enters a hashed arena without the explicit-padding revision and the CANON row moving with it.
+- [ ] **Ruling request (filed by the 2026-08-25 wave-boundary review sweep): `SlotMap` stores
+      generations in a `u16` column but `handle.h` admits `GEN_BITS` up to 31, and nothing
+      rejects the mismatch.** `slotmap.h`'s `Array<u16> gen` is compared against
+      `(u16)handle_gen(h)` in `slotmap_get`/`slotmap_remove`/`slotmap_alive` (the alive query
+      replicates get's predicate exactly, by design), and remove's wrap test is
+      `gen.data[idx] == (u16)H::GEN_MAX` - for any domain with `GEN_BITS > 16` the truncation
+      aliases generations mod 2^16, so a stale handle can read as live and the quarantine test
+      can misfire, with no assert anywhere. No shipped domain is that wide (Entity is 10 bits,
+      `CANON.md`), so this is a landmine, not a live bug. Proposal: `static_assert(H::GEN_BITS
+      <= 16)` in `slotmap_init` beside the trivially-copyable one; alternative: widen the column
+      to u32 and re-derive the memory budget (`CONTAINERS.md` §8.2 owns the decision).
+- [ ] **Note (filed by the 2026-08-25 sweep, no action urged): `vmem_arena_init`'s granule
+      rounding wraps for a reserve request within 64 KB of 2^64.** `align_up_u64(reserve_bytes,
+      COMMIT_GRANULE)` is defined unsigned wrap to a small value (0 for exactly `2^64 - k`,
+      `k < 64K`), so `os->reserve` sees ~0 bytes and fails -> `ERR_MEM_OOM`, which is loud but
+      mislabeled. The page rounding before the 2026-08-24 ruling had the same window, one page
+      wide; the granule rounding widened it to 64 KB. Unreachable from any real budget; recorded
+      so the overflow window is a decision, not a discovery. Fix if ever touched: refuse
+      `reserve_bytes > 2^63` at the argument check, where the other bad-arg refusals live.
 
 ## W1 mem - notes and ruling requests (2026-08-24, w1-mem lane)
 - [ ] **Ruling request: `VMemApi`'s definition needs one foundation-visible home.**

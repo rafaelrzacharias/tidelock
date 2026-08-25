@@ -4,7 +4,12 @@
 #include "foundation/map.h"
 #include "foundation/vmem_test_api.h"
 #include "foundation/hash.h"
+#include <stdio.h>    // the map_fixed_overflow_names_its_fatal checker (TESTING.md §8 R-2)
+#include <stdlib.h>   // system(), for the same checker
 #include <string.h>
+#ifndef _WIN32
+#include <sys/wait.h>   // WIFEXITED/WEXITSTATUS for the checker's system() status
+#endif
 
 TL_TEST(map_put_get_overwrite, "foundation,containers,smoke,fast") {
     VMemApi api = test_vmem_api();
@@ -281,4 +286,72 @@ TL_TEST_EXPECT_FATAL(map_fixed_overflow_is_fatal, "foundation,containers,fatal")
     map_init_fixed(&m, &arena, 16u);
     for (u32 i = 0; i < 12u; ++i) { map_put(&m, i + 1u, i); }   // the full 0.75 load: legal
     map_put(&m, 13u, 13u);   // the insert that would grow: TL_FATAL, never returns
+}
+
+// The growing half of the map_put reorder (the 2026-08-25 sweep's D5; the fixed half is pinned at
+// full load in map_fixed_serves_its_full_load_factor_without_growing): an overwrite of a present
+// key at exactly full load on a GROWING map must not rehash either - before the reorder it did,
+// spuriously, moving the arena mark and doubling cap for a put that added no entry.
+TL_TEST(map_growing_overwrite_at_full_load_does_not_rehash, "foundation,containers,mem,fast") {
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, "test.map_grow_ovw"_id, 4ull * 1024 * 1024, 0, &api), ERR_OK);
+    Map<u32, u32> m;
+    map_init(&m, &arena, 16u);
+    for (u32 i = 0; i < 12u; ++i) { map_put(&m, i + 1u, i); }   // exactly 0.75 * 16
+    TL_EXPECT_EQ(m.cap, (u32)16);
+    const u64 mark = arena_mark(&arena);
+    map_put(&m, 5u, 999u);   // overwrite at full load: present key, so no growth and no push
+    TL_EXPECT_EQ(*map_get(&m, 5u), (u32)999);
+    TL_EXPECT_EQ(map_count(&m), (u32)12);
+    TL_EXPECT_EQ(m.cap, (u32)16);
+    TL_EXPECT_EQ(arena_mark(&arena), mark);
+    map_put(&m, 100u, 1u);   // and the insert that really is new DOES take the grow path
+    TL_EXPECT_EQ(m.cap, (u32)32);
+    TL_EXPECT_TRUE(arena_mark(&arena) != mark);
+    TL_EXPECT_EQ(map_count(&m), (u32)13);
+}
+
+// D2 of the 2026-08-25 sweep: exit code 2 + the marker alone cannot say WHICH fatal fired - with
+// map_grow's guard deleted, map_fixed_overflow_is_fatal still PASSED in dev, because map_grow
+// then dereferences its null grow arena and arena_push's TL_ASSERT produces the same controlled
+// exit (measured by mutation; on netcode/ship that assert is compiled out and the row fails on
+// the access violation, so the 4-tier PR matrix contains the gap). Until the filed
+// TL_TEST_EXPECT_FATAL tightening lands (TODO.md - child-stderr capture in the runner judging
+// the marker's origin), this checker pins the message at the site: it relaunches this binary
+// filtered to the row and asserts the child's fatal names the fixed-map overflow, not some
+// accidental assert on the way there. tests/ carries the io/process exemption of TESTING.md §8 R-2.
+TL_TEST(map_fixed_overflow_names_its_fatal, "foundation,containers") {
+    const char* log_path = "tl_map_fixed_fatal.log.tmp";
+    char cmd[1024];
+#ifdef _WIN32
+    // cmd.exe's `/c` strips only the first and last quote of a command line that starts with
+    // one, so the whole thing needs an extra wrapping pair (the quirk tl_assert.test.cpp and
+    // runner_timeout.test.cpp document; /bin/sh -c has no such rule).
+    snprintf(cmd, sizeof(cmd), "\"\"%s\" --filter map_fixed_overflow_is_fatal > \"%s\" 2>&1\"",
+             TL_TESTS_EXE, log_path);
+#else
+    snprintf(cmd, sizeof(cmd), "\"%s\" --filter map_fixed_overflow_is_fatal > \"%s\" 2>&1",
+             TL_TESTS_EXE, log_path);
+#endif
+    const int rc = system(cmd);
+#ifdef _WIN32
+    const int code = rc;   // no wait-status encoding on Windows - the return value IS the exit code
+#else
+    const int code = WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
+#endif
+    TL_EXPECT_EQ(code, 0);
+
+    FILE* f = fopen(log_path, "rb");
+    TL_ASSERT_TRUE(f != nullptr);
+    char log[8192];
+    const size_t n = fread(log, 1, sizeof(log) - 1, f);
+    log[n] = 0;
+    fclose(f);
+    remove(log_path);
+    // The fatal that fired is THE fatal: map_grow's own message, in the TL_FATAL marker line the
+    // grandchild printed - not merely "some fatal happened".
+    TL_EXPECT_TRUE(strstr(log, "map_grow: fixed map overflow") != nullptr);
+    TL_EXPECT_TRUE(strstr(log, "1 passed") != nullptr);
+    TL_EXPECT_TRUE(strstr(log, "0 failed") != nullptr);
 }
