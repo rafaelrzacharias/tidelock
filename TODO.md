@@ -409,6 +409,104 @@ the drop heights), all declared in the README; no threshold, world constant or r
   density design, kernel spelling or `isqrt64` — the last two are the cheapest cost wins named in
   D2 and belong to whoever owns RR-13's ruling, not to a review.
 
+## W2 ecs — lane notes and ruling requests (2026-08-25, w2-ecs)
+
+Filed at lane start from the slice brief's big-picture check (CLAUDE.md doc-integrity protocol,
+step 6). Each carries a recommendation and the multiple-choice framing for the morning pass.
+E-1 and E-3 have resolutions the surrounding rulings force; the lane builds on those
+(reversible, doc-reconciled in the same commit that lands the code) and Rafael can overrule.
+E-2 needs no W2 decision but blocks real game wiring later.
+
+- [ ] **E-1 (ruling request) `ECS.md` §10.2's `kind_of` overload set cannot exist under the
+      RR-5 format-keyed ruling.** RR-5 (ruled 2026-08-25) keeps palette rows keyed by format, so
+      `pos_t`/`invmass_t` are ONE C++ type (`fx<i32,18>`) and `stiff_t`/`q_t`/`angle_t`/`dt_t`
+      are one (`fx<i32,30>`): `constexpr FieldKind kind_of(pos_t*)` and `kind_of(invmass_t*)`
+      declare the same function twice — a redefinition error — and a single shared overload
+      cannot return two kinds, so the per-row kinds `K_pos/K_invmass/K_stiff/K_q/K_angle/K_dt`
+      that §10.2's closed enum requires are unreachable from type-based dispatch. Options:
+      (a) **token-keyed kind constants** — `TL_X_INFO` pastes the *spelled* type token
+      (`tl_field_kind_##T`), one `constexpr` constant per legal spelling; preserves the closed
+      set, the unlisted-type-fails-to-compile property, and per-row kinds; costs only that field
+      lists must spell the canonical row name (`pos_t`, never `fx<i32,18>` — which an X-macro
+      argument's comma forbids anyway). (b) format-canonical kinds via one overload per format —
+      makes `K_invmass/K_stiff/K_angle/K_dt` unreachable from C++ while Luau declarations still
+      name them, so a C++ mirror of a Luau component gets a different kind byte (fingerprint +
+      save-decode asymmetry). (c) collapse the enum to format kinds — changes the spec'd enum
+      and the Luau kind-string surface. **Recommend and built (a)**; `ECS.md` §10.2 reconciled
+      in the reflect commit. One-line revert path: the constants become one-per-format.
+- [ ] **E-2 (ruling request) `MAX_ARENAS = 64` cannot hold the component registry the ECS spec
+      requires.** Each registered component column is three registry entries (dense + entity
+      hashed/snapshotted, sparse pages snapshot-only — `ECS.md` §10.3), the entity slotmap is
+      four (`CONTAINERS.md` §8.6a), each singleton is one, plus Alloy pools and data tables —
+      at `MAX_COMPONENT_TYPES = 1024` that is ~3,000+ entries against `CANON.md`'s 64; even a
+      v0-scale game (~30 components) needs ~100. No W2 test exceeds 64, so nothing here blocks,
+      but `app/` wiring of any real game will fatal in `registry_add`. Options: (a) **raise
+      `MAX_ARENAS` to 4096** — `ArenaEntry` is 24 B so the registry grows to ~96 KB and
+      `Snapshot.used[]` to 32 KB, both trivial; the constant is a CANON edit (a ruling by
+      definition). (b) one registry entry per column covering all three ranges — breaks the
+      column-is-the-hash-unit rule and per-arena desync bisection. (c) cap real component counts
+      at ~20 — contradicts `ECS.md` §9 R-1's own rationale ("256 would cap a modded game").
+      **Recommend (a)**, deferred to Rafael (CANON constants move by ruling only).
+- [ ] **E-3 (ruling request) `ECS.md` §10.3 "world_spawn reserves an id immediately by inserting
+      a zero record" contradicts `MEMORY.md` §2 ("registered arenas grow only inside barrier
+      windows") and §1's own "realization (slot commit) happens at the barrier".** An immediate
+      `slotmap_insert` crosses an `arena_push` whenever the slots/gen columns hit a page
+      boundary — mid-tick growth of a GROWS_AT_BARRIER arena, which `guard_barrier_begin`
+      TL_FATALs on. Options: (a) **reserve without growth**: spawn pops the free list (an
+      `array_pop` moves no `used` byte; destroys are deferred, so the free list only shrinks
+      mid-tick and the pop order is a pure function of the call sequence) or takes
+      `slots.count + pending++` for fresh ids, computes the handle from the already-correct
+      `gen[idx]` (post-remove value; 1 for fresh), and records `CMD_SPAWN_REALIZE`; the realize
+      at the barrier does the actual pushes/live-bit set inside the sanctioned window. Preserves
+      "usable id immediately", LIFO determinism, and the growth window. (b) insert immediately
+      and exempt the entity columns from the guard — a hole in the zero-alloc contract.
+      **Recommend and built (a)**; `ECS.md` §10.3 reconciled in the world commit. Jobs-era note:
+      reservation order under parallel systems is a W4 jobs-integration question (chunk-keyed
+      reservation), filed with it there.
+      **Refined by review 1 (2026-08-25, D2/D3):** (i) fresh ids realize out of reservation
+      order when the external chunk is involved (it records first, applies last) - the realize
+      now loop-pushes to its own idx and decrements the pending counter once per gen-1 realize,
+      order-free; (ii) even the free-list POP moved hashed bytes mid-window, so a snapshot
+      captured with a reservation outstanding could not restore consistently - the reservation
+      is now a cursor (`World.reserved_free`) and the pops apply at the window's start, inside
+      the barrier. Both pinned by tests; `commands_discard` is now clean by construction.
+
+- [ ] **E-4 (ruling request) add-after-destroy inside one barrier window.** System A destroys
+      entity e; system B - unaware, later in schedule order - records `world_add` on e in the
+      same window. The destroy applies first (chunk order), so B's `CMD_ADD` meets a dead
+      entity. Built behaviour: **TL_CHECK fatal** (fail loud; a silent drop is banned and a
+      silent resurrect is worse), pinned by `commands_add_after_destroy_in_one_window_is_fatal`.
+      But in a real game this cross-system race is a normal composition ("enemy dies while a
+      buff system targets it"), and a fatal makes every such pairing an ordering landmine.
+      Options: (a) keep the fatal - callers must check `world_entity_alive` before adding to an
+      entity they did not spawn this window (cheap, explicit, but un-checkable at record time
+      since death happens later in the window); (b) drop the add WITH a dev-tier log line -
+      "destroy wins" as documented semantics, deterministic (apply order is fixed), matching
+      how `CMD_DESTROY` of a dead entity already no-ops; (c) drop silently - banned by
+      fail-loud policy. **Recommend (b)** once a real consumer hits it; (a) ships meanwhile
+      (the strictest default is the reversible one). One switch statement either way.
+      **Extended by review 1 (2026-08-25, D4): the OPPOSITE order is in this ruling too** -
+      destroy-of-a-reserved-but-unrealized entity (its realize applies later in the window and
+      would resurrect a silently dropped destroy). Built: loud fatal via a pending-reservation
+      check (`spawn_pending`), pinned by `commands_destroy_before_realize_is_fatal`; whatever
+      is ruled for add-after-destroy should give both orders one consistent story.
+
+- [ ] **E-5 (finding for the netcode/rollback lanes - net-p2/hovel, W3; not this lane's to
+      decide) rollback resim loses the restored tick's readable events.** The snapshot ring
+      captures registered arenas only; the event halves are deliberately outside it and a
+      restore clears them (`ECS.md` §10.4). So after `registry_restore(T)` + resim, tick T+1's
+      `eq_read` sees an EMPTY buffer where the original run saw tick T's emissions - any system
+      that feeds events back into hashed state diverges from the pre-rollback trace at exactly
+      T+1, which is a resim desync by construction, not a bug in either module. Pinned from the
+      ECS side: `world_dual_restore_reproduces_the_hash_trace` runs event-free feedback and
+      reproduces; `sys_dual_reader`'s comment marks the diverging shape. The rollback design
+      (`NETCODE.md` §20, `FRAME-LOOP.md` §8.3) must either (a) include the read half in the
+      ring slot payload (events become SNAPSHOT-flagged, still never hashed), (b) re-run tick T
+      itself from a pre-T snapshot so its emissions regenerate (changes ring indexing), or
+      (c) rule that sim systems may not carry event effects into hashed state across a
+      confirmed-tick boundary - which today's docs do not state and gameplay code WILL violate.
+      Recommend (a): one flag flip + ring sizing, no new ordering rules. For the W3 lane owner.
+
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [ ] **RR-6 A tighter sine?** Measured (`FX-PALETTE.md` §4.4): the ported `SinPoly4` gives
       max 9.06 ulp of `q_t` (its documented 27.13 bits), not the 2 ulp §10.5 had guessed; the
@@ -1804,14 +1902,21 @@ right; it is the template the others now follow.
 - [ ] Symbol audit + include firewall wired into CI against the det libs.
 
 ## ECS + reflection (`docs/ECS.md`, `FRAME-LOOP.md`)
-- [ ] X-macro `TL_COMPONENT` + `FieldInfo`/kinds + static_asserts; `World`, columns (paged sparse
-      set on VMem), entities, `world_get/column/entities`.
-- [ ] Systems + `SystemDesc` + schedule build (topo-sort, tie-break, cycle fatal) + phases.
-- [ ] Command buffer (record/apply at barrier; `GROWS_AT_BARRIER` window) + `EventQueue<T>`
-      double-buffer + the end-of-tick barrier.
-- [ ] Reflection encoder/decoder (name-keyed, alias, defaults) — round-trip tests; desync field-diff.
+- [x] X-macro `TL_COMPONENT` + `FieldInfo`/kinds + static_asserts; `World`, columns (paged sparse
+      set on VMem), entities, `world_get/column/entities`. (W2 ecs, 2026-08-25: kinds are
+      token-keyed under RR-5 — E-1; spawn reserves without growth — E-3; `phase.h` and
+      `foundation/bytes.h` landed header-first for the loop and net lanes.)
+- [x] Systems + `SystemDesc` + schedule build (topo-sort, tie-break, cycle fatal) + phases.
+      (W2 ecs, 2026-08-25; `run_phase` publishes `sched.running`, applies the command barrier.)
+- [x] Command buffer (record/apply at barrier; `GROWS_AT_BARRIER` window) + `EventQueue<T>`
+      double-buffer + the end-of-tick barrier. (W2 ecs, 2026-08-25; plus `world_post_restore` —
+      the ECS half of MEMORY.md §5's post_restore barrier, and the E-5 rollback-events finding.)
+- [x] Reflection encoder/decoder (name-keyed, alias, defaults) — round-trip tests; desync
+      field-diff. (W2 ecs, 2026-08-25; `luacomp` packer with fingerprint parity to C++ twins;
+      `save.h`'s file format/migrations stay W3 assets+data.)
 - [ ] Frame loop + time + `InputProducer` seam + Script producer + `RecordedInput` record/replay;
-      the headless driver (`tests/driver`) with `--dual --replay --workers-sweep`.
+      the headless driver (`tests/driver`) with `--dual --replay --workers-sweep`. (W3 loop+input;
+      `core/phase.h` already landed from W2 ecs.)
 
 ## v0 — "the engine is alive" (`docs/RENDER2D.md`, `INPUT.md`, `ASSETS-AND-DATA.md`, `LUAU-LAYER.md`, `TOOLING.md`)
 - [ ] Vendor SDL3, SDL_ttf, stb_image, stb_sprintf, Luau (`LUA_USE_LONGJMP`), Dear ImGui (docking).

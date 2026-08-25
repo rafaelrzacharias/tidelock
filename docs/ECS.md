@@ -233,6 +233,14 @@ per-column hashes every tick.
 | `encoder.h/.cpp` | the name-keyed save encoder/decoder over field tables (`ASSETS-AND-DATA.md` §5) |
 | `diff.cpp` | field-by-field diff of two component rows (desync dumps) |
 
+Plus one file below `src/core/`: **`src/foundation/bytes.h`** — the little-endian
+`ByteWriter`/`ByteReader` pair the `TL_WIRE_STRUCT`-generated `wire_write_*`/`wire_read_*`
+functions (§10.2) write through. `NETCODE.md` §1 homes the byte pair in `src/foundation/` (it
+must sit below every consumer: `net/wire.h`, the save encoder, `InputFrame`); it landed from
+this lane as the macro's first consumer, and the net lane's `wire.h` layers varint/zigzag
+helpers on top (`NETCODE.md` §20.1). Writer overflow is a bug (`TL_CHECK`); reader underflow is
+data — a sticky `ErrCode` checked once after the last field read (W2 ecs, 2026-08-25).
+
 ### 10.2 Reflection
 
 ```cpp
@@ -244,32 +252,50 @@ struct FieldInfo { const char* name; NameHash name_hash; FieldKind kind; u8 _pad
 struct ComponentInfo { const char* name; NameHash name_hash; u32 size; u32 align; const FieldInfo* fields; u32 field_count; u32 flags /* SINGLETON, HIDDEN */; };
 ```
 
-`kind_of<T>` is a set of `constexpr` overloaded functions (`constexpr FieldKind kind_of(i32*)`,
-`kind_of(pos_t*)`, `kind_of(Entity*)`, …) — a closed set; an unlisted type fails to compile.
+**Kinds are token-keyed, not type-keyed** (reconciled 2026-08-25, W2 ecs — `TODO.md` E-1). Rev 1
+specified `kind_of` as overloaded functions (`kind_of(pos_t*)`, `kind_of(invmass_t*)`, …), which
+cannot exist under RR-5's format-keyed rows ruling: `pos_t` and `invmass_t` are ONE C++ type, so
+those two overloads are one redefined function and a per-row answer is unreachable from a type.
+The spelled *token* in the field list is the only place the row survives to compile time, so the
+kind lookup is `tl_field_kind_##T` — one `constexpr FieldKind tl_field_kind_<spelling>` constant
+per legal spelling, still a closed set, and an unlisted type still fails to compile (undeclared
+identifier). Field lists therefore spell the canonical row name (`pos_t`, never `fx<i32,18>` —
+whose comma an X-macro argument cannot carry anyway). Owners of not-yet-built handle domains add
+their constants beside their type definitions; the enum rows already exist.
 
 ```cpp
 #define TL_X_FIELD(T, n)        T n;
 #define TL_X_ARRAY(T, n, N)     T n[N];
 #define TL_X_HANDLE(T, n)       T n;
-#define TL_X_INFO(T, n)         { #n, #n##_id, kind_of((T*)0), 0, 1, offsetof(TL_SELF, n), sizeof(T) },
-#define TL_X_INFO_A(T, n, N)    { #n, #n##_id, kind_of((T*)0), 0, N, offsetof(TL_SELF, n), sizeof(T) * N },
+#define TL_X_INFO(T, n)         { #n, fnv1a64(#n, sizeof(#n) - 1), tl_field_kind_##T, 0, 1, offsetof(TL_SELF, n), sizeof(T) },
+#define TL_X_INFO_A(T, n, N)    { #n, fnv1a64(#n, sizeof(#n) - 1), tl_field_kind_##T, 0, N, offsetof(TL_SELF, n), sizeof(T) * N },
 #define TL_COMPONENT(Name)                                                            \
     struct Name { TL_FIELDS_##Name(TL_X_FIELD, TL_X_ARRAY, TL_X_HANDLE) };            \
     static_assert(__is_trivially_copyable(Name));                                     \
-    static constexpr FieldInfo Name##_fields[] = { /* TL_SELF = Name */ TL_FIELDS_##Name(TL_X_INFO, TL_X_INFO_A, TL_X_INFO) }; \
-    static_assert(tl_fields_sum_size(Name##_fields) == sizeof(Name), "explicit padding required"); \
-    static constexpr ComponentInfo Name##_info = { #Name, #Name##_id, sizeof(Name), alignof(Name), Name##_fields, tl_count(Name##_fields), 0 };
+    struct Name##_tbl { using TL_SELF = Name;                                         \
+        static constexpr FieldInfo rows[] = { TL_FIELDS_##Name(TL_X_INFO, TL_X_INFO_A, TL_X_INFO) }; }; \
+    static_assert(tl_fields_sum_size(Name##_tbl::rows) == sizeof(Name), "explicit padding required"); \
+    inline constexpr const FieldInfo* Name##_fields = Name##_tbl::rows;               \
+    inline constexpr ComponentInfo Name##_info = { #Name, fnv1a64(#Name, sizeof(#Name) - 1), sizeof(Name), alignof(Name), Name##_tbl::rows, tl_count(Name##_tbl::rows), 0 }; \
+    constexpr const ComponentInfo* tl_info_of(const Name*) { return &Name##_info; }   // the typed-API hook
 ```
 
-(`TL_SELF` is defined/undefined around the expansion by the macro; `tl_fields_sum_size` is
-`constexpr`.) `TL_POOL_ROW` = the same without a column registration hook; `TL_WIRE_STRUCT` adds
+(`TL_SELF` is an alias in `Name##_tbl`'s scope — a macro cannot emit `#define`, so rev 1's
+"defined/undefined around the expansion" was unimplementable as written; the nested table struct
+is where `offsetof` finds its subject. Same reconciliation: `#n##_id` cannot paste a string
+literal onto an identifier, so the name hash is spelled `fnv1a64(#n, sizeof(#n) - 1)` — the same
+function `""_id` runs. `tl_fields_sum_size` is `constexpr`.) `TL_POOL_ROW` = the same without
+the typed-API hook (pool rows are indexed by their pool, never an ECS column); `TL_WIRE_STRUCT` adds
 `u32 format_version` as field 0, a `static_assert(offsetof(Name, f) == expected)` per field from a
 parallel `TL_OFFSETS_Name` list, and generates `wire_write_Name(ByteWriter*, const Name*)` /
 `wire_read_Name(ByteReader*, Name*) → ErrCode` over little-endian writers (`CPP-SUBSET.md` §9 R-2).
 
 The **reflection table hash** (part of `session_fingerprint`): for each registered component in
 registration order, `tl_hash64` over `(name_hash, size, align, for each field: name_hash, kind,
-count, offset, size)`.
+count, offset, size)` — then the same tuple for each registered **event type** in registration
+order (reconciled 2026-08-25, W2 ecs review 1 D5: event types are the same POD field tables and
+Luau-declared ones must match across peers per `LUAU-LAYER.md` §10.6; leaving them out of the
+fold would let two peers with different event schemas handshake).
 
 ### 10.3 Columns and entities
 
@@ -296,8 +322,15 @@ anyway for O(1) restore (flag `SNAPSHOT` only). The generation check in `column_
 `Entity` read as absent.
 
 `World` holds `SlotMap<EntityRecord, Entity> entities` (`EntityRecord { u16 comp_count; u16
-_pad; }`) in a registered arena; `world_spawn` reserves an id immediately by inserting a zero
-record (the slotmap's LIFO order is deterministic), and `world_destroy` is a command.
+_pad; }`) in a registered arena; `world_destroy` is a command. **`world_spawn` reserves without
+growing** (reconciled 2026-08-25, W2 ecs — `TODO.md` E-3): rev 1's "inserting a zero record"
+could cross an `arena_push` mid-tick, which `MEMORY.md` §2's barrier-window rule forbids and the
+guard fatals on. The reservation pops the free list (an `array_pop` moves no `used` byte, and
+destroys are deferred so the free list only *shrinks* mid-window — the pop order stays a pure
+function of the call sequence, which is §1's LIFO-determinism argument intact) or takes
+`slots.count + pending++` for a fresh id with generation 1; the recorded `CMD_SPAWN_REALIZE`
+performs the actual slot commit (pushes, live bit) inside the barrier window, in chunk order.
+A reserved id is commandable immediately; `world_entity_alive` turns true at the barrier.
 
 ### 10.4 Events — the two-half event arena
 
@@ -321,12 +354,22 @@ struct CmdRecord { CmdKind kind; u8 _pad0; u16 comp; Entity e; u32 payload_off; 
 struct CmdChunk  { Array<CmdRecord> recs; Array<u8> payload; u32 chunk_id; };   // on the recording worker's scratch
 ```
 
-v0 (single-threaded): one chunk per system, `chunk_id` = system index in schedule order.
-`apply_commands(World*)` at each barrier: chunks in ascending `chunk_id`, records in order;
+v0 (single-threaded): one chunk per system, `chunk_id` = system index in schedule order, plus
+one *external* chunk (id = system count) for recorders outside any system (editor, app). **The
+chunks live on a dedicated per-world transient arena, not the general scratch** (reconciled
+2026-08-25, W2 ecs): a system's own `TL_SCRATCH_SCOPE` pair would free a chunk first recorded
+inside it — the dedicated arena has exactly the required lifetime (reset after every apply) with
+no scope interleaving; the jobs lane's per-worker chunks restore the spec's scratch placement
+when worker scratch gets structured barriers. Per-chunk caps are `WorldDesc` init knobs
+(defaults: 8192 records, 256 KB payload; overflow is `TL_FATAL` — a blown budget is a bug).
+`apply_commands(World*)` at each barrier: the window's deferred free-list pops land first
+(reservation order — review 1 D3), then chunks in ascending `chunk_id`, records in order;
 `CMD_ADD` copies payload into the column; `CMD_DESTROY` removes the entity from every column it is
-in (walk all tables — 1024 probes max; entities are few) then frees the slot; `CMD_SET_FIELD`
-writes `payload_len` bytes at `field.offset` (editor/Luau cold path). After applying, every
-chunk's scratch is released. The apply window sets `guard_barrier_begin/end`.
+in (walk all tables — 1024 probes max; entities are few) then frees the slot; `CMD_SET_FIELD`'s
+payload is a little-endian `u32` field index followed by the field's bytes, written at
+`field.offset` (editor/Luau cold path; reconciled 2026-08-25, review 1 D7). After applying, the
+chunks' backing (the dedicated command arena, §10.5 above) is reset. The apply window sets
+`guard_barrier_begin/end`.
 
 ### 10.6 Schedule
 
