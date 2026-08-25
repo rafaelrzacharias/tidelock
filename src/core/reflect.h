@@ -175,9 +175,12 @@ inline constexpr FieldInfo TL_WIRE_FV_ROW =
 // constexpr field table (TL_SELF is the alias the table struct declares: a macro cannot emit
 // #define, so the alias lives in Name##_tbl's scope instead of being "defined/undefined around
 // the expansion"), the POD + explicit-padding asserts, and the typed-API hook world.h's
-// world_add<T>/world_get<T>/world_column<T> resolve T's info through. Singleton components pass
-// COMP_SINGLETON at world_register_component time (registration flags are the world's).
-#define TL_COMPONENT(Name)                                                                      \
+// world_add<T>/world_get<T>/world_column<T> resolve T's info through.
+// TL_COMPONENT_FLAGS(Name, FLAGS) is the same door with ComponentInfo.flags set: COMP_SINGLETON
+// components declare through it (docs/ECS.md section 2, section 10.2 - flags carries
+// SINGLETON/HIDDEN, and world_register_component reads info->flags).
+#define TL_COMPONENT(Name) TL_COMPONENT_FLAGS(Name, 0u)
+#define TL_COMPONENT_FLAGS(Name, FLAGS)                                                         \
     struct Name { TL_FIELDS_##Name(TL_X_FIELD, TL_X_ARRAY, TL_X_HANDLE) };                      \
     static_assert(__is_trivially_copyable(Name), "reflected structs are POD (docs/ECS.md section 2)"); \
     struct Name##_tbl {                                                                         \
@@ -187,7 +190,7 @@ inline constexpr FieldInfo TL_WIRE_FV_ROW =
     static_assert(tl_fields_sum_size(Name##_tbl::rows) == sizeof(Name), "explicit padding required: name every gap _padN (docs/ECS.md section 10.2)"); \
     inline constexpr const FieldInfo* Name##_fields = Name##_tbl::rows;                          \
     inline constexpr ComponentInfo Name##_info = { #Name, fnv1a64(#Name, sizeof(#Name) - 1),    \
-        (u32)sizeof(Name), (u32)alignof(Name), Name##_tbl::rows, tl_count(Name##_tbl::rows), 0u }; \
+        (u32)sizeof(Name), (u32)alignof(Name), Name##_tbl::rows, tl_count(Name##_tbl::rows), (FLAGS) }; \
     /* typed-API hook: resolves Name's ComponentInfo for the world_* function templates */      \
     constexpr const ComponentInfo* tl_info_of(const Name*) { return &Name##_info; }
 

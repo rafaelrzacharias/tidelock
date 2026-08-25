@@ -319,8 +319,15 @@ anyway for O(1) restore (flag `SNAPSHOT` only). The generation check in `column_
 `Entity` read as absent.
 
 `World` holds `SlotMap<EntityRecord, Entity> entities` (`EntityRecord { u16 comp_count; u16
-_pad; }`) in a registered arena; `world_spawn` reserves an id immediately by inserting a zero
-record (the slotmap's LIFO order is deterministic), and `world_destroy` is a command.
+_pad; }`) in a registered arena; `world_destroy` is a command. **`world_spawn` reserves without
+growing** (reconciled 2026-08-25, W2 ecs — `TODO.md` E-3): rev 1's "inserting a zero record"
+could cross an `arena_push` mid-tick, which `MEMORY.md` §2's barrier-window rule forbids and the
+guard fatals on. The reservation pops the free list (an `array_pop` moves no `used` byte, and
+destroys are deferred so the free list only *shrinks* mid-window — the pop order stays a pure
+function of the call sequence, which is §1's LIFO-determinism argument intact) or takes
+`slots.count + pending++` for a fresh id with generation 1; the recorded `CMD_SPAWN_REALIZE`
+performs the actual slot commit (pushes, live bit) inside the barrier window, in chunk order.
+A reserved id is commandable immediately; `world_entity_alive` turns true at the barrier.
 
 ### 10.4 Events — the two-half event arena
 
@@ -344,7 +351,14 @@ struct CmdRecord { CmdKind kind; u8 _pad0; u16 comp; Entity e; u32 payload_off; 
 struct CmdChunk  { Array<CmdRecord> recs; Array<u8> payload; u32 chunk_id; };   // on the recording worker's scratch
 ```
 
-v0 (single-threaded): one chunk per system, `chunk_id` = system index in schedule order.
+v0 (single-threaded): one chunk per system, `chunk_id` = system index in schedule order, plus
+one *external* chunk (id = system count) for recorders outside any system (editor, app). **The
+chunks live on a dedicated per-world transient arena, not the general scratch** (reconciled
+2026-08-25, W2 ecs): a system's own `TL_SCRATCH_SCOPE` pair would free a chunk first recorded
+inside it — the dedicated arena has exactly the required lifetime (reset after every apply) with
+no scope interleaving; the jobs lane's per-worker chunks restore the spec's scratch placement
+when worker scratch gets structured barriers. Per-chunk caps are `WorldDesc` init knobs
+(defaults: 8192 records, 256 KB payload; overflow is `TL_FATAL` — a blown budget is a bug).
 `apply_commands(World*)` at each barrier: chunks in ascending `chunk_id`, records in order;
 `CMD_ADD` copies payload into the column; `CMD_DESTROY` removes the entity from every column it is
 in (walk all tables — 1024 probes max; entities are few) then frees the slot; `CMD_SET_FIELD`

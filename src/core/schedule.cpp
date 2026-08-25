@@ -1,6 +1,7 @@
-// schedule.cpp - registration storage and the topo-sorted build. Spec: docs/ECS.md §10.6;
-// contract in schedule.h. run_phase's definition lands with world.h (it needs the World hub).
+// schedule.cpp - registration storage, the topo-sorted build, run_phase. Spec: docs/ECS.md
+// §10.6; contracts in schedule.h.
 #include "core/schedule.h"
+#include "core/world.h"
 #include "foundation/map.h"
 #include <string.h>
 
@@ -148,4 +149,20 @@ void schedule_build(Schedule* s, Scratch* scratch) {
     }
     TL_SCRATCH_SCOPE_END(scratch);
     s->built = 1;
+}
+
+void run_phase(World* w, Phase p) {
+    Schedule* s = &w->sched;
+    TL_CHECK(s->built == 1 && p < PHASE_COUNT);
+    for (u32 i = s->phase_begin[p]; i < s->phase_begin[p + 1u]; ++i) {
+        const u32 si = s->order.data[i];
+        // Published before every call: the Luau trampoline and the profiler auto-scope read it
+        // (docs/CANON.md "w->sched.running"; docs/ECS.md §10.6).
+        s->running.index = si;
+        s->running.label = s->systems.data[si].d.label;
+        s->systems.data[si].d.fn(w);
+        s->running.index = RUNNING_NONE;
+        s->running.label = 0;
+    }
+    apply_commands(w);   // every phase boundary is a command barrier (docs/ECS.md §4)
 }

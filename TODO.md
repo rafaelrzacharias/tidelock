@@ -464,6 +464,21 @@ E-2 needs no W2 decision but blocks real game wiring later.
       reservation order under parallel systems is a W4 jobs-integration question (chunk-keyed
       reservation), filed with it there.
 
+- [ ] **E-4 (ruling request) add-after-destroy inside one barrier window.** System A destroys
+      entity e; system B - unaware, later in schedule order - records `world_add` on e in the
+      same window. The destroy applies first (chunk order), so B's `CMD_ADD` meets a dead
+      entity. Built behaviour: **TL_CHECK fatal** (fail loud; a silent drop is banned and a
+      silent resurrect is worse), pinned by `commands_add_after_destroy_in_one_window_is_fatal`.
+      But in a real game this cross-system race is a normal composition ("enemy dies while a
+      buff system targets it"), and a fatal makes every such pairing an ordering landmine.
+      Options: (a) keep the fatal - callers must check `world_entity_alive` before adding to an
+      entity they did not spawn this window (cheap, explicit, but un-checkable at record time
+      since death happens later in the window); (b) drop the add WITH a dev-tier log line -
+      "destroy wins" as documented semantics, deterministic (apply order is fixed), matching
+      how `CMD_DESTROY` of a dead entity already no-ops; (c) drop silently - banned by
+      fail-loud policy. **Recommend (b)** once a real consumer hits it; (a) ships meanwhile
+      (the strictest default is the reversible one). One switch statement either way.
+
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [ ] **RR-6 A tighter sine?** Measured (`FX-PALETTE.md` §4.4): the ported `SinPoly4` gives
       max 9.06 ulp of `q_t` (its documented 27.13 bits), not the 2 ulp §10.5 had guessed; the
