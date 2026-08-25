@@ -310,6 +310,24 @@ inline ErrCode tl_wire_get_row(ByteReader* r, const FieldInfo* f, u32 field_coun
     return ERR_OK;
 }
 
+// One differing element between two rows of one component (the desync dump's currency -
+// docs/ECS.md §6 consumer 3, docs/DETERMINISM.md §7 step 3). Values are the element's raw bits
+// zero-extended to u64; the printer formats by field->kind.
+struct DiffLine {
+    const FieldInfo* field;
+    u32 element;    // 0 for scalars; the array index otherwise
+    u32 _pad0;
+    u64 a_bits;
+    u64 b_bits;
+};
+
+// Element-by-element diff of two rows of `info`'s component: appends one DiffLine per differing
+// element (array fields element-wise), up to max_lines; returns the number of differing
+// elements FOUND (which may exceed max_lines - the caller prints "and N more"). Defined in
+// core/diff.cpp. Pure; a == b bytes give 0.
+u32 reflect_diff_rows(const ComponentInfo* info, const void* a, const void* b,
+                      DiffLine* out, u32 max_lines);
+
 // The per-component reflection hash (docs/ECS.md §10.2): tl_hash64 over (name_hash, size, align,
 // then per field: name_hash, kind, count, offset, size) - folded FIELD-WISE into a flat little-
 // endian buffer, never over struct bytes (FieldInfo carries a pointer). world.h folds these per

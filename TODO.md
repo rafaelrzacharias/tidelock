@@ -479,6 +479,22 @@ E-2 needs no W2 decision but blocks real game wiring later.
       fail-loud policy. **Recommend (b)** once a real consumer hits it; (a) ships meanwhile
       (the strictest default is the reversible one). One switch statement either way.
 
+- [ ] **E-5 (finding for the netcode/rollback lanes - net-p2/hovel, W3; not this lane's to
+      decide) rollback resim loses the restored tick's readable events.** The snapshot ring
+      captures registered arenas only; the event halves are deliberately outside it and a
+      restore clears them (`ECS.md` §10.4). So after `registry_restore(T)` + resim, tick T+1's
+      `eq_read` sees an EMPTY buffer where the original run saw tick T's emissions - any system
+      that feeds events back into hashed state diverges from the pre-rollback trace at exactly
+      T+1, which is a resim desync by construction, not a bug in either module. Pinned from the
+      ECS side: `world_dual_restore_reproduces_the_hash_trace` runs event-free feedback and
+      reproduces; `sys_dual_reader`'s comment marks the diverging shape. The rollback design
+      (`NETCODE.md` §20, `FRAME-LOOP.md` §8.3) must either (a) include the read half in the
+      ring slot payload (events become SNAPSHOT-flagged, still never hashed), (b) re-run tick T
+      itself from a pre-T snapshot so its emissions regenerate (changes ring indexing), or
+      (c) rule that sim systems may not carry event effects into hashed state across a
+      confirmed-tick boundary - which today's docs do not state and gameplay code WILL violate.
+      Recommend (a): one flag flip + ring sizing, no new ordering rules. For the W3 lane owner.
+
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [ ] **RR-6 A tighter sine?** Measured (`FX-PALETTE.md` §4.4): the ported `SinPoly4` gives
       max 9.06 ulp of `q_t` (its documented 27.13 bits), not the 2 ulp §10.5 had guessed; the
