@@ -84,7 +84,7 @@ successor of Ore's 43 M-tick run.
 | symbol audit | `llvm-nm --undefined-only` over every sim static lib vs the allowlist (`CPP-SUBSET.md` §4) | PR, blocking |
 | include firewall | no banned system include in `src/`; no backend header outside its wrap module; no `float`/`double` tokens in sim TUs; no `static` mutable; no `thread_local`; no `std::` | PR, blocking |
 | WIRE_STRUCT | every struct in `net/wire.h`, `save.h`, `InputFrame` has sizeof + offsetof static_asserts (a script checks the macro was used) | PR, blocking |
-| rebuild-time budget | full rebuild < 10 s, incremental (touch one sim TU) < 2 s on the reference PC; a regression is a failure, like perf | PR, blocking (measured on the CI box with its own budget) |
+| rebuild-time budget | full rebuild < 10 s, incremental (touch one sim TU) < 2 s on the dev PC (an iteration-speed budget, not the retired perf reference — `WORKFLOW.md` §4); a regression is a failure, like perf | PR, blocking (measured on the CI box with its own budget) |
 | fingerprint stability | two clean builds of the same tree produce the same fingerprint | PR |
 | header contracts | every `module.h` has a contract block naming its spec section; every public function in a module header has a contract comment (`CPP-SUBSET.md` §6) — `tools/audit/includes.py` | PR, blocking |
 | `NOMINMAX` | every file including `<windows.h>` defines `NOMINMAX` on an earlier line (`PLATFORM.md` §9.1) — `tools/audit/includes.py` gate 7, the one gate that walks `tests/` as well as `src/` | PR, blocking |
@@ -199,5 +199,5 @@ scenes and Hovel.
 | cross-ISA (PR lane, hosted legs) | each leg: `--record`, then cross-leg `--replay --verify` on the same tree's artifacts; the Deck repeats it nightly as physical hardware when it joins |
 
 *Rev 1 — 2026-08-22; §5/§6/§8 R-1 re-ruled to the `CANON.md` target matrix (hosted native CI
-runners), 2026-08-25; §3/§4/§6/§8 R-1/§9.3 swept for the Pi 4's removal (perf reference = the PC
-now, the Steam Deck later), same date.*
+runners), 2026-08-25; §3/§4/§6/§8 R-1/§9.3 swept for the Pi 4's removal and re-pointed at
+`WORKFLOW.md` §4 for perf grading, same date.*
