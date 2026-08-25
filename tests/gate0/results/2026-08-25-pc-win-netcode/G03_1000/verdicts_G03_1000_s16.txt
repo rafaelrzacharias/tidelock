@@ -1,0 +1,1 @@
+VERDICT G-03 substeps=16 FAIL density_err_p95=0.015625 ke_window_increases_after_settle=1 ticks=7000 run_twice=identical max_colors=2 max_nbr=27 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=2

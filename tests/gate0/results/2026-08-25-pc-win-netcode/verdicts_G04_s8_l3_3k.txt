@@ -1,0 +1,1 @@
+VERDICT G-04 substeps=8 PASS envelope_increases=0 energy_initial=32405201890 energy_max=32405201890 ticks=3000 run_twice=skipped max_colors=72 max_nbr=76 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=72

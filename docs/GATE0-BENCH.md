@@ -174,13 +174,17 @@ for bodies; `sort_u32_kv` on `(cell_key, index)`; neighbor lists built per tick 
    Δp_i = mul<pos_t>(w_i, mul<lambda_t>(dlam, ∇C_i))          // rung 1: accumulated in an i64 per body/particle across the color sweep
    ```
    Solver-local `i64` position accumulators per body/particle are rounded to `pos_t` **once per
-   substep** after the last color (`rne_shr` by the accumulator's extra 16 bits).
+   substep** after the last color (`rne_shr` by the accumulator's extra bits: **12**, the frac-30
+   local of `ALLOY.md` §14.4.3 S1 — that section is the kernel's home; rev 1 of this doc said 16,
+   a restatement drift caught by the W2 gate0 lane).
 4. Velocity: `v = mul<vel_t>(p − p_prev, INV_H)` (via `mul_int`); then the velocity pass:
    friction (clamp tangential Δv by `μ·λ_n`), restitution (`v_n' = −e·v_n` if `|v_n| > threshold`).
 5. Writeback.
 
-Rung 3 (`--ladder 3`): keep each quantity's rounding residual (the low 16 bits dropped in step 3)
-and add it back before the next substep's accumulation.
+Rung 3 (`--ladder 3`): keep each quantity's rounding residual (the low 12 bits dropped in step 3)
+and add it back before the next substep's accumulation. `--ladder 0` reproduces the per-constraint
+`lambda_t` narrowing of `ALLOY.md` §14.4.3's pseudocode (no i64 λ across the sweep) as the
+below-rung-1 reference the CSVs compare against.
 
 ### 8.4 Metrics (all integer/fx; the CSV prints raw and texel units)
 

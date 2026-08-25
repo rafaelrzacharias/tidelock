@@ -1,0 +1,18 @@
+VERDICT G-01 substeps=8 PASS jitter_p95_texel=0.0000 top_drift_texel=0.0000 pop=0 intra_tick_max_texel=0.0001 perturb_quanta=0 ticks=10000 run_twice=identical max_colors=8 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=8
+VERDICT G-02a substeps=8 PASS sustained_penetration_texel=0.0003 tunneling=0 lambda_saturations=0 ticks=2000 run_twice=identical max_colors=4 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=4
+gate0: G02b: a carrier left the sealed box at tick 2 - tunneling, run stopped
+gate0: G02b: a carrier left the sealed box at tick 2 - tunneling, run stopped
+VERDICT G-02b substeps=8 FAIL tunneling=1 (a carrier left the sealed box at tick 2; the trace is truncated) ticks=600 run_twice=identical max_colors=12 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=5 corr_clamps=0 vmax_clamps=7 max_degree=12
+VERDICT G-02 substeps=8 FAIL sustained_penetration_texel=0.0003 tunneling=0 lambda_saturations=0 | tunneling=1 (a carrier left the sealed box at tick 2; the trace is truncated)
+VERDICT G-01 substeps=4 PASS jitter_p95_texel=0.0000 top_drift_texel=0.0001 pop=0 intra_tick_max_texel=0.0001 perturb_quanta=0 ticks=10000 run_twice=identical max_colors=8 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=8
+VERDICT G-02a substeps=4 PASS sustained_penetration_texel=0.0008 tunneling=0 lambda_saturations=0 ticks=2000 run_twice=identical max_colors=4 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=4
+gate0: G02b: a carrier left the sealed box at tick 1 - tunneling, run stopped
+gate0: G02b: a carrier left the sealed box at tick 1 - tunneling, run stopped
+VERDICT G-02b substeps=4 FAIL tunneling=1 (a carrier left the sealed box at tick 1; the trace is truncated) ticks=600 run_twice=identical max_colors=12 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=1 max_degree=12
+VERDICT G-02 substeps=4 FAIL sustained_penetration_texel=0.0008 tunneling=0 lambda_saturations=0 | tunneling=1 (a carrier left the sealed box at tick 1; the trace is truncated)
+VERDICT G-01 substeps=16 PASS jitter_p95_texel=0.0000 top_drift_texel=-0.0001 pop=0 intra_tick_max_texel=0.0001 perturb_quanta=0 ticks=10000 run_twice=identical max_colors=8 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=8
+VERDICT G-02a substeps=16 PASS sustained_penetration_texel=0.0002 tunneling=0 lambda_saturations=0 ticks=2000 run_twice=identical max_colors=4 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=4
+gate0: G02b: a carrier left the sealed box at tick 320 - tunneling, run stopped
+gate0: G02b: a carrier left the sealed box at tick 320 - tunneling, run stopped
+VERDICT G-02b substeps=16 FAIL tunneling=1 (a carrier left the sealed box at tick 320; the trace is truncated) ticks=600 run_twice=identical max_colors=28 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=3 omega_clamps=8549 corr_clamps=0 vmax_clamps=1304 max_degree=28
+VERDICT G-02 substeps=16 FAIL sustained_penetration_texel=0.0002 tunneling=0 lambda_saturations=0 | tunneling=1 (a carrier left the sealed box at tick 320; the trace is truncated)
