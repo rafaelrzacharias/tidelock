@@ -31,6 +31,16 @@ struct WorldFixture {
     World w;
 };
 
+// Fixture storage lives in statics, never on the stack: World carries comps[1024] (~256 KB)
+// and a Windows child process gets a 1 MB stack - two stack fixtures crashed every Windows CI
+// leg while Linux's 8 MB default hid it. Tests are exempt from the src/ static ban
+// (docs/TESTING.md §8 R-2); every user re-runs world_fixture_init, which re-zeroes the slot.
+inline WorldFixture* wt_fixture(u32 slot) {
+    static WorldFixture s[4];
+    TL_CHECK(slot < 4u);
+    return &s[slot];
+}
+
 // Registry + scratch + an empty world. Registration of components/events/systems is each
 // test's own business (order is part of what the tests pin).
 inline bool world_fixture_init(WorldFixture* f, u64 seed) {

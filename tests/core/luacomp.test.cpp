@@ -52,7 +52,7 @@ bool lc_tables_equal(TestCtx* t, const ComponentInfo* lua, const ComponentInfo* 
 }  // namespace
 
 TL_TEST(luacomp_packer_layout_matches_cpp_offsetof, "core,ecs,luacomp,smoke,fast") {
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     TL_ASSERT_TRUE(world_fixture_init(&f, 1u));
     // Register under fresh names so the C++ infos stay comparison references, not collisions.
     Result<ComponentId> ra = world_register_component_luau(&f.w, sv("LuaA"), LA_DECL, 4u, 0u);
@@ -76,8 +76,8 @@ TL_TEST(luacomp_fingerprint_parity_with_a_cpp_twin, "core,ecs,luacomp,determinis
     // docs/ECS.md §6.1: "same fingerprint contribution". A world that registers the C++
     // LMirrorA and one that declares the SAME name + fields from Luau must produce identical
     // reflection hashes.
-    WorldFixture cpp_w;
-    WorldFixture lua_w;
+    WorldFixture& cpp_w = *wt_fixture(0u);
+    WorldFixture& lua_w = *wt_fixture(1u);
     TL_ASSERT_TRUE(world_fixture_init(&cpp_w, 1u));
     TL_ASSERT_TRUE(world_fixture_init(&lua_w, 2u));
     world_register_component(&cpp_w.w, &LMirrorA_info);
@@ -87,7 +87,7 @@ TL_TEST(luacomp_fingerprint_parity_with_a_cpp_twin, "core,ecs,luacomp,determinis
 }
 
 TL_TEST(luacomp_default_row_and_live_column, "core,ecs,luacomp,fast") {
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     TL_ASSERT_TRUE(world_fixture_init(&f, 1u));
     const LuauFieldDecl decl[3] = {
         { sv("hp"), K_i32, 0, 1, 0, 100u },            // default = raw bits (docs/LUAU-LAYER.md §10.6)
@@ -126,7 +126,7 @@ TL_TEST(luacomp_default_row_and_live_column, "core,ecs,luacomp,fast") {
 }
 
 TL_TEST(luacomp_every_reject_code_and_no_meta_residue, "core,ecs,luacomp,edge,fast") {
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     TL_ASSERT_TRUE(world_fixture_init(&f, 1u));
     world_register_component(&f.w, &LMirrorA_info);
     const u64 mark = arena_mark(&f.w.meta);

@@ -78,8 +78,8 @@ void dual_register(WorldFixture* f, bool with_reader) {
 TL_TEST(world_dual_identical_per_arena_hashes_every_tick, "core,ecs,world,determinism,fast") {
     // Two worlds in one process (why static state is banned), one with a guard armed and a
     // deliberately dirtied scratch - neither may reach the hashes.
-    WorldFixture a;
-    WorldFixture b;
+    WorldFixture& a = *wt_fixture(0u);
+    WorldFixture& b = *wt_fixture(1u);
     TL_ASSERT_TRUE(world_fixture_init(&a, 99u));
     TL_ASSERT_TRUE(world_fixture_init(&b, 99u));
     dual_register(&a, true);
@@ -123,7 +123,7 @@ TL_TEST(world_dual_restore_reproduces_the_hash_trace, "core,ecs,world,determinis
     // Run 40 ticks, snapshot, run 40 more recording the trace, restore, re-run 40: identical
     // trace (docs/MEMORY.md §8.8). No event->hashed-state feedback in this half (see
     // sys_dual_reader's note): a restore clears the event halves by contract.
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     TL_ASSERT_TRUE(world_fixture_init(&f, 1234u));
     dual_register(&f, false);
 

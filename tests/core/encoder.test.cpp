@@ -219,7 +219,7 @@ TL_TEST(encoder_malformed_truncated_and_overflow_rejects, "core,ecs,encoder,edge
 
 TL_TEST(encoder_column_payload_round_trips_rows_and_entities, "core,ecs,encoder,fast") {
     // A real column through the world door, encoded and decoded with its entity list.
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     TL_ASSERT_TRUE(world_fixture_init(&f, 5u));
     world_fixture_register_std(&f);
     world_build_schedule(&f.w);

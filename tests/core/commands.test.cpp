@@ -80,7 +80,7 @@ void reg_sys(World* w, SystemFn fn, NameHash label, Phase phase, NameHash before
 }  // namespace
 
 TL_TEST(commands_spawn_id_usable_before_realize, "core,ecs,commands,smoke,fast") {
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     TL_ASSERT_TRUE(world_fixture_init(&f, 3u));
     world_fixture_register_std(&f);
     world_build_schedule(&f.w);
@@ -114,7 +114,7 @@ TL_TEST(commands_spawn_id_usable_before_realize, "core,ecs,commands,smoke,fast")
 }
 
 TL_TEST(commands_destroy_removes_from_every_column_then_lifo_reuse, "core,ecs,commands,fast") {
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     TL_ASSERT_TRUE(world_fixture_init(&f, 3u));
     world_fixture_register_std(&f);
     world_build_schedule(&f.w);
@@ -151,7 +151,7 @@ TL_TEST(commands_destroy_removes_from_every_column_then_lifo_reuse, "core,ecs,co
 TL_TEST(commands_apply_in_schedule_chunk_order_record_order_within, "core,ecs,commands,determinism,fast") {
     // Registration order: cfg1, cfg2, cfg3 - but cfg3 is scheduled BEFORE cfg2 via before/after,
     // so chunk order is cfg1(0), cfg3(1), cfg2(2) and cfg2's LAST record wins the barrier.
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     TL_ASSERT_TRUE(world_fixture_init(&f, 3u));
     world_fixture_register_std(&f);
     reg_sys(&f.w, sys_set_cfg_1, "cfg1"_id, PHASE_UPDATE, 0, 0);
@@ -165,7 +165,7 @@ TL_TEST(commands_apply_in_schedule_chunk_order_record_order_within, "core,ecs,co
 }
 
 TL_TEST(commands_set_field_pokes_one_field_at_the_barrier, "core,ecs,commands,fast") {
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     TL_ASSERT_TRUE(world_fixture_init(&f, 3u));
     world_fixture_register_std(&f);
     world_build_schedule(&f.w);
@@ -195,7 +195,7 @@ TL_TEST(commands_ticks_spawn_event_read_next_tick_under_the_guard, "core,ecs,com
     // Full-tick integration: a spawner emits an event in tick 0; the reader sees it in tick 1
     // with the entity realized and its component applied; the arena-offset guard brackets every
     // tick, so all structural growth must land inside the barrier windows.
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     TL_ASSERT_TRUE(world_fixture_init(&f, 3u));
     world_fixture_register_std(&f);
     g_target = Entity{ 0 };
@@ -230,7 +230,7 @@ TL_TEST(commands_ticks_spawn_event_read_next_tick_under_the_guard, "core,ecs,com
 TL_TEST_EXPECT_FATAL(commands_add_after_destroy_in_one_window_is_fatal, "core,ecs,commands,fatal") {
     // TODO.md E-4: the destroyer's chunk applies first (schedule order), so the adder's
     // CMD_ADD meets a dead entity - currently a TL_CHECK, filed for a ruling.
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     if (!world_fixture_init(&f, 3u)) { return; }
     world_fixture_register_std(&f);
     g_target = Entity{ 0 };

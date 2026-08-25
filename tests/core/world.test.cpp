@@ -5,7 +5,7 @@
 #include "foundation/snapshot.h"
 
 TL_TEST(world_registration_wires_the_registry_in_contract_order, "core,ecs,world,smoke,fast") {
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     TL_ASSERT_TRUE(world_fixture_init(&f, 7u));
     // world_init registers: singletons + the entity slotmap's four columns.
     TL_ASSERT_EQ(f.reg.count, 5u);
@@ -42,7 +42,7 @@ TL_TEST(world_registration_wires_the_registry_in_contract_order, "core,ecs,world
 }
 
 TL_TEST(world_singleton_access_and_empty_columns, "core,ecs,world,fast") {
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     TL_ASSERT_TRUE(world_fixture_init(&f, 1u));
     world_fixture_register_std(&f);
     world_build_schedule(&f.w);
@@ -66,21 +66,21 @@ TL_TEST(world_singleton_access_and_empty_columns, "core,ecs,world,fast") {
 TL_TEST(world_reflection_hash_pins_the_registration_set, "core,ecs,world,determinism,fast") {
     // Same registrations in two worlds -> equal; an extra event type -> different; component
     // order is part of the fold (a, b) != (b, a).
-    WorldFixture a;
-    WorldFixture b;
+    WorldFixture& a = *wt_fixture(0u);
+    WorldFixture& b = *wt_fixture(1u);
     TL_ASSERT_TRUE(world_fixture_init(&a, 1u));
     TL_ASSERT_TRUE(world_fixture_init(&b, 2u));
     world_fixture_register_std(&a);
     world_fixture_register_std(&b);
     TL_EXPECT_EQ(world_reflection_hash(&a.w), world_reflection_hash(&b.w));
 
-    WorldFixture c;
+    WorldFixture& c = *wt_fixture(2u);
     TL_ASSERT_TRUE(world_fixture_init(&c, 1u));
     world_fixture_register_std(&c);
     world_register_event(&c.w, &WPos_info, 8u);   // one more event table
     TL_EXPECT_NE(world_reflection_hash(&a.w), world_reflection_hash(&c.w));
 
-    WorldFixture d;
+    WorldFixture& d = *wt_fixture(3u);
     TL_ASSERT_TRUE(world_fixture_init(&d, 1u));
     world_register_component(&d.w, &WVel_info);   // swapped component order vs _std
     world_register_component(&d.w, &WPos_info);
@@ -92,7 +92,7 @@ TL_TEST(world_reflection_hash_pins_the_registration_set, "core,ecs,world,determi
 TL_TEST(world_snapshot_restore_post_restore_round_trip, "core,ecs,world,determinism,fast") {
     // The MEMORY.md §8.8 shape for the ECS half: capture, mutate structurally, restore,
     // world_post_restore -> derived counts and the world hash equal the captured state's.
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     TL_ASSERT_TRUE(world_fixture_init(&f, 42u));
     world_fixture_register_std(&f);
     world_build_schedule(&f.w);
@@ -166,7 +166,7 @@ TL_TEST(world_snapshot_restore_post_restore_round_trip, "core,ecs,world,determin
 }
 
 TL_TEST_EXPECT_FATAL(world_duplicate_component_is_fatal, "core,ecs,world,fatal") {
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     if (!world_fixture_init(&f, 1u)) { return; }
     world_register_component(&f.w, &WPos_info);
     ++t->checks;
@@ -174,7 +174,7 @@ TL_TEST_EXPECT_FATAL(world_duplicate_component_is_fatal, "core,ecs,world,fatal")
 }
 
 TL_TEST_EXPECT_FATAL(world_register_after_seal_is_fatal, "core,ecs,world,fatal") {
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     if (!world_fixture_init(&f, 1u)) { return; }
     world_register_component(&f.w, &WPos_info);
     world_build_schedule(&f.w);
@@ -183,7 +183,7 @@ TL_TEST_EXPECT_FATAL(world_register_after_seal_is_fatal, "core,ecs,world,fatal")
 }
 
 TL_TEST_EXPECT_FATAL(world_column_of_a_singleton_is_fatal, "core,ecs,world,fatal") {
-    WorldFixture f;
+    WorldFixture& f = *wt_fixture(0u);
     if (!world_fixture_init(&f, 1u)) { return; }
     world_register_component(&f.w, &WCfg_info);
     ++t->checks;
