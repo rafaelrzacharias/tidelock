@@ -46,17 +46,39 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       arithmetic (i64 λ + `lam_narrow`, `w_ang30`, two-pass Jacobi density with C = 1 − ρ,
       per-body Jacobi accumulation); `GATE0-BENCH.md` §2 amended by §7 R-3/R-4/R-5;
       `CANON.md`/`PIVOT-DESIGN.md` §3.1b/§12 synced. `FX_PALETTE_REV = 2`.
-- [ ] **Post-rulings closeout slice (NEXT — the re-measurement Rafael asked for):**
-      (1) `fx_palette.h`: `omega_t = fx<i32,22>`, the vel/omega op-table split (`FX_OP` triples
-      for the new format), derivation asserts (`INT_BITS ≥ 512`, angle→omega narrows 8), the
-      `FX_PALETTE_REV` bump — fx trace pins WILL move: re-pin both traces, all four tiers;
-      (2) `tests/gate0`: judges to the amended §2 criteria (G-02b boulder-only, G-03 = 1k with
-      G-03b recorded-not-graded, G-05 vs 32 ms), the normalize-once pair kernel (91 ns measured
-      form, `FX-PALETTE.md` §3 q_t row's own strategy); (3) re-run the full matrix on one PC,
-      spot-verify bit-identity on the second; new results dir + README, expected movement:
-      G-02b PASS under R-5, G-03 PASS as redefined, G-05 re-graded honestly (~half the pair
-      cost from normalize-once; still above 32 ms until the Newton `isqrt64` lands — W3).
-      One session, Fable 5 high (row + sim arithmetic).
+- [x] **Post-rulings closeout slice — DONE 2026-08-25 (`w2-gate0-closeout`, run on the second
+      PC; the dev-PC spot-verify is the remaining leg, below).** Results + delta table:
+      `tests/gate0/results/2026-08-25-pc2-win-netcode-rev2/README.md`. What the re-measurement
+      says, against the expectations written above:
+      - `fx_palette.h` rev 2 landed as specified; trace pins re-pinned (A `f29c2358a2932bbf`,
+        B `22598f0e81cb2e7f`), tl_tests green on all four tiers. One more decision-commit
+        drift found and fixed: `LUAU-LAYER.md`'s `fx.OMEGA=20`.
+      - **G-02b PASS under R-5 at s4/8/16** as predicted (boulder clean; feather ejected at
+        tick 1/2/150, ω/vmax clamps counted). G-01 PASS everywhere, `--ladder 0` still shows
+        the 0.0009-texel creep (the RR-8 regression signal survives rev 2).
+      - **G-03 as redefined is still FAIL by the letter, NOT the expected PASS — a finding,
+        not tuned:** worst post-settle p95 2.1184 % (the >2 % INVESTIGATE band) + 4 KE-window
+        increases of the 0.014 % breathing the KE rule's letter grades as boiling. Identical
+        numbers to rev 1's 1k run — the redefinition moved WHICH column is graded, not its
+        physics. The 2 % criterion vs the compliant equilibrium (2.0–2.1 %) and the KE-window
+        letter belong to the RR-10 design pass (W3), where they were already filed.
+      - **G-04 REGRESSED vs rev 1 — a finding, not tuned:** s8/20k-ticks went INVESTIGATE →
+        FAIL (liquid particle 1800 ejected at tick 10417); `--ladder 3` 3k went PASS → FAIL
+        (tick 135); s16 escape moved 876 → 2210; s4 unchanged (tick 7). The mixed scene is
+        chaotic-sensitive to the rev-2 evaluation-order change (ω encoding + pair kernel);
+        every escapee is a saturated liquid particle — RR-10's class, no rigid-path failure.
+      - **G-05 re-graded vs 32 ms (§7 R-3): still FAIL, as expected.** Normalize-once bought
+        ~30 % (20k: 153 → 117 ns/pair on this machine, p50 505 → 386 ms); the Newton `isqrt64`
+        + cached W (W3) are the named next steps before SIMD.
+      - **The normalize-once kernel did NOT move the particle-only physics at rung 1:** G-03
+        s4/s8/s16 and G-03b hash traces are bit-identical to rev 1 (measured, every sampled
+        row) even though the reciprocal path disagrees with the two-division normalize on
+        ~1.6 % of (d, r) pairs (sampled 2M) — the grad/correction/writeback RNE layers absorb
+        the sub-quantum difference. `--ladder 3` diverges at tick 20: the residual carry
+        preserves exactly the bits the writeback round discards. Body scenarios diverge from
+        tick 0 (the ω raw encoding changed width — a hash compares encodings, not physics).
+- [ ] Closeout remainder: spot-verify bit-identity of the rev-2 matrix on the dev PC (the
+      cross-machine leg of the two-PC protocol); the Pi legs stay BLOCKED on RR-1.
 
 ## W2 gate0 — the bench is built; what it measured (2026-08-25, `w2-gate0`, PC x86-64 netcode tier)
 

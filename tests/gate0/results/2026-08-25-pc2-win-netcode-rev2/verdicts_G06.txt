@@ -1,0 +1,54 @@
+VERDICT G06_G01 substeps=8 PASS jitter_p95_texel=0.0000 top_drift_texel=-0.0001 pop=0 intra_tick_max_texel=0.0000 perturb_quanta=0 ticks=2000 run_twice=identical max_colors=8 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=8
+VERDICT G06_G02a substeps=8 PASS boulder_pen_sustained_texel=0.0002 boulder_tunnel=0 any_tunnel_recorded=0 feather_ejected=0 lambda_saturations=0 ticks=600 run_twice=identical max_colors=4 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=4
+gate0: G06_G02b: a carrier left the sealed box at tick 2 - tunneling, run stopped
+gate0: G06_G02b: a carrier left the sealed box at tick 2 - tunneling, run stopped
+VERDICT G06_G02b substeps=8 PASS boulder_pen_sustained_texel=0.0000 boulder_tunnel=0 any_tunnel_recorded=1 feather_ejected_at_tick=2 (recorded, not graded; run stopped, trace truncated) lambda_saturations=0 ticks=300 run_twice=identical max_colors=12 max_nbr=0 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=5 corr_clamps=0 vmax_clamps=7 max_degree=12
+VERDICT G06_G03 substeps=8 PASS density_err_p95=0.000000 ke_window_increases_after_settle=0 ticks=1500 run_twice=identical max_colors=2 max_nbr=27 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=2
+gate0: particle 740 escaped at x=-365678 y=1454618 vx=-107566080 vy=69874560 rho=336860522
+gate0: G06_G03b: a carrier left the sealed box at tick 34 - tunneling, run stopped
+gate0: particle 740 escaped at x=-365678 y=1454618 vx=-107566080 vy=69874560 rho=336860522
+gate0: G06_G03b: a carrier left the sealed box at tick 34 - tunneling, run stopped
+VERDICT G06_G03b substeps=8 RECORDED tunneling=1 (a carrier left the sealed box at tick 34; the trace is truncated) ticks=300 run_twice=identical max_colors=2 max_nbr=97 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=2
+VERDICT G06_G04 substeps=8 PASS envelope_increases=0 energy_initial=32405202095 energy_max=32405202095 ticks=3000 run_twice=identical max_colors=76 max_nbr=75 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=76
+gate0: carrier body 347 has 230 constraints at tick 120
+gate0: carrier body 291 has 418 constraints at tick 123
+gate0: carrier body 37 has 266 constraints at tick 124
+gate0: carrier body 55 has 256 constraints at tick 126
+gate0: carrier body 1978 has 324 constraints at tick 127
+gate0: carrier body 1974 has 626 constraints at tick 128
+gate0: carrier body 43 has 451 constraints at tick 129
+gate0: carrier body 1984 has 2528 constraints at tick 130
+gate0: carrier body 1984 has 2897 constraints at tick 131
+gate0: carrier body 1968 has 369 constraints at tick 132
+gate0: carrier body 13 has 382 constraints at tick 133
+gate0: carrier body 13 has 1554 constraints at tick 134
+gate0: carrier body 13 has 2739 constraints at tick 135
+gate0: carrier body 55 has 2095 constraints at tick 136
+gate0: carrier body 69 has 1279 constraints at tick 137
+gate0: carrier body 29 has 1456 constraints at tick 138
+gate0: carrier body 213 has 1225 constraints at tick 139
+gate0: carrier body 221 has 1040 constraints at tick 140
+gate0: carrier body 209 has 711 constraints at tick 141
+gate0: G06_G05: a carrier left the sealed box at tick 141 - tunneling, run stopped
+gate0: carrier body 347 has 230 constraints at tick 120
+gate0: carrier body 291 has 418 constraints at tick 123
+gate0: carrier body 37 has 266 constraints at tick 124
+gate0: carrier body 55 has 256 constraints at tick 126
+gate0: carrier body 1978 has 324 constraints at tick 127
+gate0: carrier body 1974 has 626 constraints at tick 128
+gate0: carrier body 43 has 451 constraints at tick 129
+gate0: carrier body 1984 has 2528 constraints at tick 130
+gate0: carrier body 1984 has 2897 constraints at tick 131
+gate0: carrier body 1968 has 369 constraints at tick 132
+gate0: carrier body 13 has 382 constraints at tick 133
+gate0: carrier body 13 has 1554 constraints at tick 134
+gate0: carrier body 13 has 2739 constraints at tick 135
+gate0: carrier body 55 has 2095 constraints at tick 136
+gate0: carrier body 69 has 1279 constraints at tick 137
+gate0: carrier body 29 has 1456 constraints at tick 138
+gate0: carrier body 213 has 1225 constraints at tick 139
+gate0: carrier body 221 has 1040 constraints at tick 140
+gate0: carrier body 209 has 711 constraints at tick 141
+gate0: G06_G05: a carrier left the sealed box at tick 141 - tunneling, run stopped
+VERDICT G06_G05 substeps=8 FAIL tunneling=1 (a carrier left the sealed box at tick 141; the trace is truncated) p50_us=258334 p95_us=361011 p99_us=386675 ticks_run=142 pair_evals_per_tick=1727396 contact_evals_per_tick=128164 ns_per_pair_eval=149 phase_us_per_tick[broadphase,predict,density,colors,writeback,velocity]=25808,1487,136600,6443,548,92518 ticks=300 run_twice=identical max_colors=2897 max_nbr=96 nbr_overflow=0 lambda_sat=0 vel_clamps=14 omega_clamps=3373 corr_clamps=0 vmax_clamps=255 max_degree=2897
+VERDICT G-06 substeps=8 PASS pc_two_runs=identical pi=BLOCKED(RR-1)

@@ -1,0 +1,5 @@
+gate0: carrier body 6 has 912 constraints at tick 2207
+gate0: carrier body 7 has 990 constraints at tick 2208
+gate0: particle 2015 escaped at x=-1750205 y=5338406 vx=30792960 vy=84288000 rho=0
+gate0: G04: a carrier left the sealed box at tick 2210 - tunneling, run stopped
+VERDICT G-04 substeps=16 FAIL tunneling=1 (a carrier left the sealed box at tick 2210; the trace is truncated) ticks=3000 run_twice=skipped max_colors=990 max_nbr=75 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=41 corr_clamps=0 vmax_clamps=1 max_degree=990
