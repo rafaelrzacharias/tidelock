@@ -98,7 +98,7 @@ successor of Ore's 43 M-tick run.
 | Lane | Contents | Budget |
 |---|---|---|
 | **PR** (blocking) | build all tiers on the `CANON.md` target matrix ({Windows, Linux} × {x86-64, arm64}, hosted native runners, per-leg binary-ISA assertion); unit/property (`--isolate`) on every leg — the fx trace pins inside are the cross-ISA gate; four-way `build_id` diff; dual-sim + replay + worker sweep on the scene set; sim tests under UBSan+ASan on both Linux ISAs; static gates; descriptor-level render tests | < 10 min |
-| **nightly** | long-run fuzz; physical perf/soak on reference hardware (the PC now, the Deck later; replay-diff against PR artifacts); save cross-build load (yesterday's fixture); pixel goldens (software renderer, FLIP-compared, never blocking); fx exhaustive oracle runs; G-06 cross-leg hash diff on the hosted runners | hours |
+| **nightly** | long-run fuzz; perf regression on the elected CI leg (`WORKFLOW.md` §4); physical network soaks once Hovel exists (replay-diff against PR artifacts); save cross-build load (yesterday's fixture); pixel goldens (software renderer, FLIP-compared, never blocking); fx exhaustive oracle runs; G-06 cross-leg hash diff on the hosted runners; the four-leg 8-peer battletest once net-p3..p8 exist (`NETCODE.md` §19.10) | hours |
 | **weekly** | Hovel soak scenarios once Hovel exists; Gate 0 re-run if the palette or the solver changed | 10 h |
 
 Flakiness rules: **no PR-lane retries**; a flaky test is quarantined to nightly with an owner; a

@@ -105,9 +105,10 @@ palette change).
   solver's used columns `[base, used)` each tick (`DETERMINISM.md` §4).
 - **Shadow CSV** (dev config only): `tick, substep, pass, constraint_kind, max_abs_err_fx_vs_double`.
 - **Timing:** p50/p95/p99 of `solve_us` over the last 80% of ticks (warm-up excluded), reported per
-  machine per particle count. The PC number is the **binding** one — min-spec is PC-class until
-  the Deck joins (2026-08-25 ruling) — and also the pivot-level one; shared CI runners never
-  grade timing.
+  machine per particle count. Timing is graded on the **elected CI leg** (`WORKFLOW.md` §4,
+  re-ruled 2026-08-25; the two PCs' committed rev-2 numbers remain the measurement record) —
+  regression-relative, never across CPU models; min-spec and the absolute thresholds re-anchor
+  on the Steam Deck when it is benched.
 - **Pass/fail is computed by the bench itself** and printed as a verdict line per scenario; the
   CSVs are committed under `tests/gate0/results/<date>-<machine>/` so the rev-2 palette cites
   real files.

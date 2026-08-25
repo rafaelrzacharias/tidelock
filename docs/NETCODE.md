@@ -1665,6 +1665,19 @@ fleet option left with the Pi, 2026-08-25). Two free steps first:
 What 8 adds that 3 cannot: the `1−(1−p)^7` curve is only meaningful at 7 remotes; `QUORUM` 8→5
 transitions; the simultaneous-loss deadlock (R10) in its real shape.
 
+**The nightly four-leg battletest (added 2026-08-25; lands in W5 with net-p3..p8):** the *same*
+8-process loopback match — seeded scripted inputs via the Script producer, the S-13 impairment
+shim injecting deterministic loss/jitter/latency, real ENet over loopback so WinSock and the
+POSIX socket paths are both exercised — run **independently on each of the four `CANON.md`
+target legs**, then a cross-leg diff of the per-tick hash traces. Determinism makes the four
+runs the same match, so this is an 8-player game proven bit-identical across
+{Windows, Linux} × {x86-64, arm64} every night, with zero inter-machine packets required.
+Boundary, stated: no live packets ever flow *between* ISAs here (wire-format asymmetry is the
+job of the `TL_WIRE_STRUCT` static asserts and the encoder goldens/byte-stability tests), and
+real NAT stays deferred exactly as §5.5 records. Spectating a match is free by construction —
+every peer holds the full authoritative world, so "seeing" the other seven players is seven
+extra local camera viewports, a render/editor playtest feature filed in `TODO.md`.
+
 ### 19.11 What would falsify the moat
 
 Stated in advance, so the answer is not negotiated after the fact:

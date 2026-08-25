@@ -1,0 +1,90 @@
+# Perf-leg election measurement - docs/WORKFLOW.md §4 (re-ruled 2026-08-25). Runs the G-05
+# sweep three times on every CANON.md target leg and ships the CSVs + verdicts + the run's
+# silicon as artifacts. The election of the perf reference leg is a ruling made FROM this data
+# (TODO.md carries the request), never asserted; shared-runner numbers are regression radar and
+# never compare across CPU models, which is why cpu.txt rides with every run. A G-05 verdict
+# FAIL (exit 3) is data here, not a job failure - the honest 32 ms miss is already on record
+# (GATE0-BENCH.md §2); any other nonzero exit is a real error and fails loudly.
+name: perf
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '43 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  g05:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, ubuntu-24.04-arm, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - name: install clang + ninja (linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang lld llvm ninja-build
+      - name: install ninja (windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+      - name: native LLVM present (windows-arm64)
+        # Same guard as pr.yml: presence is not nativeness; binarch measures the compiler binary.
+        if: matrix.os == 'windows-11-arm'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function NativeClangCl {
+            $c = Get-Command clang-cl -ErrorAction SilentlyContinue
+            if (-not $c) { return $false }
+            (python tools/audit/binarch.py --file $c.Path --expect aarch64 | Out-Host); return ($LASTEXITCODE -eq 0)
+          }
+          if (-not (NativeClangCl)) {
+            choco install llvm -y --no-progress
+            Add-Content $env:GITHUB_PATH "C:\Program Files\LLVM\bin"
+            $env:PATH = "C:\Program Files\LLVM\bin;$env:PATH"
+            if (-not (NativeClangCl)) { throw "no native arm64 clang-cl on this runner" }
+          }
+      - name: preset name
+        shell: bash
+        run: echo "PRESET=netcode-$([ '${{ runner.os }}' = 'Windows' ] && echo win || echo linux)" >> $GITHUB_ENV
+      - name: configure + build (netcode - the timing tier)
+        run: |
+          cmake --preset ${{ env.PRESET }} -DTL_STRICT_TOOLCHAIN=OFF
+          cmake --build --preset ${{ env.PRESET }}
+      - name: record the silicon (the fleet is heterogeneous - cross-model numbers never compare)
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p perf
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            powershell -Command "(Get-CimInstance Win32_Processor).Name" > perf/cpu.txt
+          else
+            lscpu | grep 'Model name' > perf/cpu.txt
+          fi
+          echo "runner=${{ matrix.os }} arch=${{ runner.arch }}" >> perf/cpu.txt
+          cat perf/cpu.txt
+      - name: G-05 x3 (medians and variance are computed offline from the artifacts)
+        shell: bash
+        run: |
+          set -eu
+          bin="out/${{ env.PRESET }}/bin/tl_gate0$([ '${{ runner.os }}' = 'Windows' ] && echo .exe)"
+          python tools/audit/binarch.py --file "$bin" --expect "$([ '${{ runner.arch }}' = 'ARM64' ] && echo aarch64 || echo x86_64)"
+          for i in 1 2 3; do
+            mkdir -p "perf/run$i"
+            rc=0
+            "$bin" --scenario G05 --substeps 8 --out "perf/run$i" | tee "perf/run$i/verdicts.txt" || rc=$?
+            echo "exit=$rc" >> "perf/run$i/verdicts.txt"
+            # exit 3 = a FAIL verdict: recorded data, not a broken run. Anything else nonzero is.
+            [ "$rc" -eq 0 ] || [ "$rc" -eq 3 ] || exit "$rc"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: perf-g05-${{ matrix.os }}
+          path: perf/
+          retention-days: 30

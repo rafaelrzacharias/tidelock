@@ -722,6 +722,18 @@ the drop heights), all declared in the README; no threshold, world constant or r
       (replay-diff against PR artifacts, G-05 on real hardware) runs on the reference PC now and
       gains a self-hosted `deck` runner when the Deck is benched (the Pi left the program,
       2026-08-25). `weekly.yml` unchanged.
+- [ ] **Perf-leg election (`WORKFLOW.md` §4, ruling request).** Run `perf.yml` (dispatch, or its
+      first nightly), pull the four `perf-g05-*` artifacts, compute per-leg medians and variance
+      grouped by CPU model, and file the election of the perf reference leg as a ruling here.
+      Until it is made, G-05 absolute grading stays against the committed PC rev-2 record.
+- [ ] **`ship` playtest artifact** (`WORKFLOW.md` §4): when v0's first playable exists, CI
+      uploads the `ship-win` game binary as a downloadable artifact — personal machines are
+      playtest instances, and the download is how a build reaches one.
+- [ ] **PiP spectator viewports** (`NETCODE.md` §19.10): seven local camera viewports following
+      the remote avatars over the local authoritative world — a render2d/editor playtest
+      feature, W4+ lane; free by lockstep construction, no wire work.
+- [ ] **Four-leg 8-peer battletest job** (`NETCODE.md` §19.10): the seeded loopback match ×
+      four legs + cross-leg hash diff, added to `nightly.yml` when net-p3..p8 exist (W5).
 - [ ] **RR-4 (b) is BUILT** (`tools/audit/targets.py`, `tl_audit_targets`, PR lane). Every sim TU
       is preprocessed and its record layouts dumped for the four `CANON.md` target triples
       (`aarch64-pc-windows-msvc` added 2026-08-25 with the target-matrix ruling), then diffed.

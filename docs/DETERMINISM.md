@@ -189,8 +189,8 @@ Determinism bugs are silent until a player desyncs. Make them fail a test. Run c
    {x86-64, arm64}) builds and runs the pinned-trace tests on hosted native runners in the PR
    lane; traces and `build_id` must match bit-exactly across all four (§8 R-3). It is *required*,
    not optional — and no longer infra-gated on owned hardware. The OS and ISA axes of the matrix
-   separate OS effects from ISA effects; physical perf/soak stays on the reference hardware —
-   the PC now, the Steam Deck later (`TESTING.md` §4).
+   separate OS effects from ISA effects; perf is graded on the elected CI leg (`WORKFLOW.md`
+   §4), and the physical bench serves Hovel's network soaks (`TESTING.md` §4).
 6. **Sanitizer runs:** the dual-sim and replay tests under UBSan+ASan (timing ignored).
 
 A failing hash pinpoints the first diverging tick; per-arena hashing pinpoints the arena; the
