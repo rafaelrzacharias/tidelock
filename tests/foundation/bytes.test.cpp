@@ -92,21 +92,27 @@ TL_TEST(bytes_get_bytes_zero_fills_and_rejects_hostile_length, "foundation,bytes
     TL_EXPECT_EQ(r.err, ERR_BYTES_TRUNCATED);
     for (u32 i = 0; i < 8u; ++i) { TL_EXPECT_EQ(out[i], 0u); }
 
-    // A length large enough to wrap pos + n must be refused by the subtraction spelling, not
-    // slip past a wrapped sum (the decoded-length-field attack).
+    // A decoded length one past the remaining input: err, the whole out buffer scrubbed. The
+    // WRAP half of the bound (`n > len - pos`, never `pos + n > len` - a hostile n near 2^64
+    // wraps the sum) cannot be pinned at runtime: the contract requires `out` to hold n bytes,
+    // and the err path zero-fills all n of them, so a wrap-sized n has no legal call. The
+    // spelling is the reviewed fact (bytes.h); this row pins the boundary the spelling shares
+    // with the naive form.
     br_init(&r, three, 3);
     r.pos = 2;
-    u8 one = 0xAAu;
-    br_get_bytes(&r, &one, 0xFFFFFFFFFFFFFFFFull);
+    u8 two[2] = { 0xAAu, 0xAAu };
+    br_get_bytes(&r, two, 2);   // 1 byte remains
     TL_EXPECT_EQ(r.err, ERR_BYTES_TRUNCATED);
-    TL_EXPECT_EQ(one, 0u);
+    TL_EXPECT_EQ(two[0], 0u);
+    TL_EXPECT_EQ(two[1], 0u);
+    TL_EXPECT_EQ(r.pos, 2u);   // a failed read moves nothing
 
-    // n == 0 is a no-op in every state, including after a failure.
+    // n == 0 is a no-op in every state.
     br_init(&r, three, 3);
     br_get_bytes(&r, nullptr, 0);
     TL_EXPECT_TRUE(br_ok(&r));
     TL_EXPECT_EQ(r.pos, 0u);
-    ++t->checks;   // the two calls above assert by not faulting; count them as exercised
+    ++t->checks;   // the null/0 call asserts by not faulting; count it as exercised
 }
 
 TL_TEST(bytes_writer_exact_fit_and_empty, "foundation,bytes,edge,fast") {
