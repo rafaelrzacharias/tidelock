@@ -7,16 +7,20 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
 `LESSONS.md`; rationale → the doc named on each line. Governing rules: `CLAUDE.md` principles,
 `docs/ARCHITECTURE.md` §0/§4, test-infra-first.
 
-> **Pending review, 2026-08-24 — the W1 ruling-closeout lane (`w1-closeout`).** Its five commits
-> are POST-REVIEW EDITS to already-reviewed code (`tl_log.h`, `arena_registry`, `vmem_arena`,
-> `mem_pool`, the runner, `fx.h`), each implementing a decision already RULED on 2026-08-24 rather
-> than making one. **They are folded into the next wave-boundary review sweep** — no lane-level
-> adversarial review of their own, because the rulings are the contract and the diffs are minimal
-> by instruction. What the sweep must look at first: the `registry.test.cpp` fixture rework (its
-> arena `c` WAS the newly refused flag combination), the re-derived
-> `pool_reserve_edge_on_misaligned_base_returns_null` (its old premise is unreachable now), and
-> the runner's POSIX wait paths, which are written but **never executed on this lane** — no Linux
-> host; the PR lane's ubuntu job is their first run.
+> **Wave-boundary review sweep DONE, 2026-08-25** (fresh-context Fable, cloud session) — the five
+> `w1-closeout` commits reviewed against their 2026-08-24 rulings. Four match their rulings
+> exactly; all three priority targets CLEARED with the arithmetic re-derived (`registry.test.cpp`
+> fixtures lost no subject; the `mem_pool` reserve-edge premise is reachable via the live
+> `end > reserved` half; the POSIX wait paths are sound line-by-line — CI runs #46/#47 were their
+> execution evidence, this sweep their review). Verdict was FIX FIRST on four findings, all
+> landed in the sweep-fixes commit the same day: D1 strict numeric parsing for
+> `--workers/--timeout-ms/--seed/--run-one` (`rc_parse_u63` — a typo'd value silently disarmed
+> the timeout via atoll's 0); D2 a failed wait no longer scores an unobserved child as PASS
+> (serial waitpid non-EINTR, plus the Windows WaitForSingleObject/GetExitCodeProcess twins);
+> D3 the two stale `#if TL_DEV` fatal-row skips in `runner_timeout.test.cpp` went tier-live
+> (the class 088da07 fixed elsewhere and missed here); D4 the mem_pool misaligned-base fixture
+> TL_SKIPs loudly on a non-4K-page host instead of fataling. D5 = RR-16 ruling request (below);
+> D6 recorded (below).
 
 ## Gate 0 — the pivot gate (`docs/GATE0-BENCH.md`, `docs/FX-PALETTE.md`)
 - [x] `src/foundation/fx.h` — `fx<Rep,FRAC>`, `mul<R>`/`div<R>` with RNE + widened intermediates,
@@ -615,6 +619,22 @@ the drop heights), all declared in the README; no threshold, world constant or r
       expectation outside dev. The fatal check itself is still the loose one - see "Tighten
       `TL_TEST_EXPECT_FATAL` to the real contract" below for the exact string, exit code and
       prerequisites.
+- [ ] **RR-16 (sweep D5) — ratify or reverse `de527e3`'s wrap choice.** Alone among the five
+      `w1-closeout` commits it implements a decision that was never RULED: the filed gap at the
+      old fx item ("Either … or …") was resolved by the commit itself to branch 1 — document the
+      C++20 modular wrap of an out-of-range `to<q_t>` conversion on slim tiers (`pos_t` extreme →
+      `INT32_MIN`) rather than saturate. The arithmetic is verified correct as documented; what
+      is missing is Rafael's signature on wrap-vs-saturate as the *contract*, plus the negative-
+      side edge (`-(1<<19)-1` wrapping positive) being documented and tested. One line to ratify;
+      if reversed, it is an fx-lane change with a trace-pin consequence.
+- [ ] **Sweep D4 residue: re-derive the mem_pool misaligned-base fixture for large-page hosts.**
+      The fixture offset (+4096) and both pins assume 4 KB pages; it now TL_SKIPs loudly on
+      anything else. When a >4K-page host enters the matrix, derive the offset from
+      `api.page_size` and re-pin `used = 2·G − page`.
+- [ ] **Sweep D6:** with `reserved` always a granule multiple, `arena_push`'s second over-reserve
+      fatal (`vmem_arena.cpp` `want > reserved`) is dead code by the same argument as
+      `carve_aligned`'s `commit_end` half; the latter is recorded as a kept defensive mirror, the
+      former was not — recorded here now, same disposition (kept, not deleted).
 - [x] **RR-1 — CLOSED AS OBSOLETE, ruled 2026-08-25: the Pi 4 left the program.** The aarch64
       leg of `BUILD.md` §10.5 is carried by the hosted CI arm64 runners (ci-matrix lane); the
       pi4 toolchain file, presets, sysroot row and `cross-pi4` job were removed the same day.

@@ -182,6 +182,14 @@ TL_TEST(pool_reserve_edge_on_misaligned_base_returns_null, "foundation,mem,fast"
     api.decommit = mv_decommit; api.release = mv_release;
     api.page_size = ctx.real.page_size; api._pad0 = 0;
 
+    // The fixture's +4096 offset and both pins below assume a 4 KB host page: on a 16 K/64 K-page
+    // kernel the offset base is not page-aligned and ov_commit's alignment TL_CHECK turns this
+    // into a fatal in a non-fatal row (sweep D4, 2026-08-25). Every CI leg is 4 K today; a
+    // larger-page host re-derives the fixture (filed in TODO.md) rather than silently fataling.
+    if (api.page_size != 4096u) {
+        TL_SKIP("fixture offset and used-pins assume 4 KB pages; re-derive for this host (sweep D4, TODO.md)");
+    }
+
     // Two granules of reserve. On a 64 KB-misaligned base the FIRST carve burns a 60 KB
     // alignment gap before its 64 KB class page (end = 126976), so the second carve's extent
     // (end = 192512) is past the reserve and must come back null rather than reaching
