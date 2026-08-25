@@ -32,6 +32,9 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       (W2 gate0, 2026-08-25 — findings and ruling requests RR-8..RR-15 in the "W2 gate0" section below.)
 - [ ] Run on PC; cross-compile + run on Pi 4 (`docs/BUILD.md` §7); commit CSVs under
       `tests/gate0/results/`. Climb the ladder on any convergence failure (`FX-PALETTE.md` §3.2).
+      **PC half DONE 2026-08-25** (`tests/gate0/results/2026-08-25-pc-win-netcode/README.md`:
+      G-01 PASS, G-02a PASS, G-02b FAIL, G-03 FAIL, G-04 INVESTIGATE, G-05 FAIL, G-06 PASS on the
+      PC leg); the ladder was climbed to rung 3 with no change; the Pi half waits on RR-1.
 - [ ] **Decision commit:** `FX-PALETTE.md` rev 2 (rows DECIDED, or the fallback recorded) +
       `PIVOT-DESIGN.md` §3.1b/§12 updated + `LESSONS.md` entries per rung climbed.
 
@@ -96,6 +99,10 @@ rev-2 decision commit is Rafael's.** Ranked by what it means for `FX-PALETTE.md`
       against the budget. The pre-committed "PC fail → float fallback" cannot rescue a budget
       float cannot meet either: a ruling on the budget (SIMD lanes `FX-PALETTE.md` §9 R-4, a
       sqrt-free kernel, or a threshold that names the arithmetic) before the palette is blamed.
+      Measured per tick (solve + broadphase, mean/max over the ticks before the liquid failed):
+      10k 341/409 ms, 20k 657/757 ms, 50k 1,486/1,712 ms — the 20k number is 160× the 4 ms
+      threshold. G-05 itself is a tunneling FAIL at every count (RR-10: the 9.8/19.5/49 m liquid
+      columns crush their base), so the cost is of a run in progress, not of a steady state.
 - [ ] **RR-14 (spec) G-03 as written cannot be built at CANON spacing.** "5k-particle column, 2 m
       wide, ~1.2 m tall" at 2-texel spacing is 16 columns × 313 rows = 39 m tall (the bench's
       G-03); a 2 m × 1.2 m column is 160 particles. The 39 m column crushes its own base (RR-10)

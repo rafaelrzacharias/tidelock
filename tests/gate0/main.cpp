@@ -499,7 +499,8 @@ int main(int argc, char** argv) {
             RunOut o;
             const u64 saved = a.ticks; if (!a.ticks) a.ticks = ticks6[i];
             char name[32]; snprintf(name, sizeof name, "G06_%s", scenes[i]);
-            (void)judge_scene(&cx, name, scenes[i], name, judges[i], ticks6[i], !strcmp(scenes[i], "G05") ? 10000 : 5000, f, &o);
+            const u32 n6 = !strcmp(scenes[i], "G05") ? 10000u : (!strcmp(scenes[i], "G03") ? 5000u : 0u);   // only G03/G05 take a count; 0 = the scene default
+            (void)judge_scene(&cx, name, scenes[i], name, judges[i], ticks6[i], n6, f, &o);
             a.ticks = saved;
             if (strstr(o.detail, "run_twice_divergence")) diverged = 1;
         }

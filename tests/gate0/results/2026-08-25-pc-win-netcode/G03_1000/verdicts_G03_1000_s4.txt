@@ -1,0 +1,5 @@
+gate0: particle 37 escaped at x=-90206 y=-81373 vx=-3754330 vy=-69385367 rho=435343332
+gate0: G03: a carrier left the sealed box at tick 7 - tunneling, run stopped
+gate0: particle 37 escaped at x=-90206 y=-81373 vx=-3754330 vy=-69385367 rho=435343332
+gate0: G03: a carrier left the sealed box at tick 7 - tunneling, run stopped
+VERDICT G-03 substeps=4 FAIL tunneling=1 (a carrier left the sealed box; the trace is truncated) ticks=7000 run_twice=identical max_colors=2 max_nbr=20 nbr_overflow=0 lambda_sat=0 vel_clamps=0 omega_clamps=0 corr_clamps=0 vmax_clamps=0 max_degree=2
