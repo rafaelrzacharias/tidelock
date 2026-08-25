@@ -20,6 +20,13 @@
   is convention until Rafael flips them off (a one-tap hardening).
 - Inside the lane, `CLAUDE.md`'s operating contract applies unchanged: model gate, slice brief,
   one feature per commit, commit **and** push every turn, docaudit before docs commits.
+- **Merging is autonomous (ruled 2026-08-25).** Once the head is CI-green on all four `CANON.md`
+  legs and §2's verdict is *ship*, the session merges without waiting for Rafael — his word is
+  not a merge precondition; both preconditions are machine-checkable facts, not judgments. What
+  still reaches him, as multiple-choice questions wherever the surface allows: **rulings** (RRs,
+  and anything a spec is silent on), a reviewer's ***redesign*** verdict, **scope changes**, and
+  any edit that *creates or amends a ruling* — there his sign-off is on the ruling itself; once
+  given, the merge that lands it needs no second word.
 - **Merge method: merge commit — never squash, never rebase.** One-feature-per-commit history
   is the project's record (`git log` is where history lives, `README.md` doc map), and rebases
   invalidate the other machines' and sessions' checkouts. The merged branch auto-deletes; a
@@ -70,6 +77,9 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
 - **R-1 One lane = one draft PR**, merge commits, auto-delete; opened at lane start (§1).
 - **R-2 The perf reference retires from owned hardware to the elected CI leg** (§4); the
   election itself waits on `perf.yml`'s first data set and is filed in `TODO.md`.
+- **R-3 Autonomous merges (ruled 2026-08-25, Rafael's request):** green CI + a *ship* verdict
+  merge without a human word; Rafael's phone-side role is rulings, important decisions and
+  choices — put to him as multiple-choice where the surface allows — never merge ceremony (§1).
 
 *Rev 1 — 2026-08-25; §1/§4 amended same day by the slice's own adversarial review (D4/D6: the
 PR-fallback actor named, absolute grading pinned to the PC rev-2 record until the Deck). This
