@@ -723,6 +723,11 @@ the drop heights), all declared in the README; no threshold, world constant or r
       the *network-soak* half (replay-diff against PR artifacts over a real LAN) gains a
       self-hosted `deck` runner when the Deck is benched (the Pi left the program, 2026-08-25).
       `weekly.yml` unchanged.
+- [ ] **Wave-boundary sweep entry (`WORKFLOW.md` §2 valve):** the `w3-merge-autonomy` lane
+      (WORKFLOW §1 autonomous-merge clause + §5 R-3) merged under the valve — it implements
+      Rafael's 2026-08-25 ruling verbatim ("my role through the phone: only rulings, important
+      decisions, choices, multiple-choice — not typing merge"), docs-only, docaudit-gated.
+      The next sweep reviews it alongside whatever else deferred.
 - [ ] **Perf-leg election (`WORKFLOW.md` §4, ruling request).** Run `perf.yml` (dispatch, or its
       first nightly), pull the four `perf-g05-*` artifacts, compute per-leg medians and variance
       grouped by CPU model, and file the election of the perf reference leg as a ruling here.
