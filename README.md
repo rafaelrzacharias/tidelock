@@ -6,6 +6,14 @@
 
 A 2D game engine, a deterministic matter simulation (**Alloy**), and — later — a game.
 
+## License — read this first
+
+**This is a commercial, proprietary project. All rights reserved.** The source is public so it
+can be *read* and so CI can run — that is all. No use, copying, modification, redistribution,
+or derivative work of any kind is permitted without explicit written permission from the author
+(see [`LICENSE`](LICENSE); `vendor/` libraries keep their own upstream licenses). External
+contributions are not accepted: issues and pull requests from outside will be closed unread.
+
 ## The stack
 
 - **Engine**: lean-C-style C++ (no STL, no RTTI, no exceptions, no inheritance, no
