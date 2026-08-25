@@ -409,6 +409,61 @@ the drop heights), all declared in the README; no threshold, world constant or r
   density design, kernel spelling or `isqrt64` — the last two are the cheapest cost wins named in
   D2 and belong to whoever owns RR-13's ruling, not to a review.
 
+## W2 ecs — lane notes and ruling requests (2026-08-25, w2-ecs)
+
+Filed at lane start from the slice brief's big-picture check (CLAUDE.md doc-integrity protocol,
+step 6). Each carries a recommendation and the multiple-choice framing for the morning pass.
+E-1 and E-3 have resolutions the surrounding rulings force; the lane builds on those
+(reversible, doc-reconciled in the same commit that lands the code) and Rafael can overrule.
+E-2 needs no W2 decision but blocks real game wiring later.
+
+- [ ] **E-1 (ruling request) `ECS.md` §10.2's `kind_of` overload set cannot exist under the
+      RR-5 format-keyed ruling.** RR-5 (ruled 2026-08-25) keeps palette rows keyed by format, so
+      `pos_t`/`invmass_t` are ONE C++ type (`fx<i32,18>`) and `stiff_t`/`q_t`/`angle_t`/`dt_t`
+      are one (`fx<i32,30>`): `constexpr FieldKind kind_of(pos_t*)` and `kind_of(invmass_t*)`
+      declare the same function twice — a redefinition error — and a single shared overload
+      cannot return two kinds, so the per-row kinds `K_pos/K_invmass/K_stiff/K_q/K_angle/K_dt`
+      that §10.2's closed enum requires are unreachable from type-based dispatch. Options:
+      (a) **token-keyed kind constants** — `TL_X_INFO` pastes the *spelled* type token
+      (`tl_field_kind_##T`), one `constexpr` constant per legal spelling; preserves the closed
+      set, the unlisted-type-fails-to-compile property, and per-row kinds; costs only that field
+      lists must spell the canonical row name (`pos_t`, never `fx<i32,18>` — which an X-macro
+      argument's comma forbids anyway). (b) format-canonical kinds via one overload per format —
+      makes `K_invmass/K_stiff/K_angle/K_dt` unreachable from C++ while Luau declarations still
+      name them, so a C++ mirror of a Luau component gets a different kind byte (fingerprint +
+      save-decode asymmetry). (c) collapse the enum to format kinds — changes the spec'd enum
+      and the Luau kind-string surface. **Recommend and built (a)**; `ECS.md` §10.2 reconciled
+      in the reflect commit. One-line revert path: the constants become one-per-format.
+- [ ] **E-2 (ruling request) `MAX_ARENAS = 64` cannot hold the component registry the ECS spec
+      requires.** Each registered component column is three registry entries (dense + entity
+      hashed/snapshotted, sparse pages snapshot-only — `ECS.md` §10.3), the entity slotmap is
+      four (`CONTAINERS.md` §8.6a), each singleton is one, plus Alloy pools and data tables —
+      at `MAX_COMPONENT_TYPES = 1024` that is ~3,000+ entries against `CANON.md`'s 64; even a
+      v0-scale game (~30 components) needs ~100. No W2 test exceeds 64, so nothing here blocks,
+      but `app/` wiring of any real game will fatal in `registry_add`. Options: (a) **raise
+      `MAX_ARENAS` to 4096** — `ArenaEntry` is 24 B so the registry grows to ~96 KB and
+      `Snapshot.used[]` to 32 KB, both trivial; the constant is a CANON edit (a ruling by
+      definition). (b) one registry entry per column covering all three ranges — breaks the
+      column-is-the-hash-unit rule and per-arena desync bisection. (c) cap real component counts
+      at ~20 — contradicts `ECS.md` §9 R-1's own rationale ("256 would cap a modded game").
+      **Recommend (a)**, deferred to Rafael (CANON constants move by ruling only).
+- [ ] **E-3 (ruling request) `ECS.md` §10.3 "world_spawn reserves an id immediately by inserting
+      a zero record" contradicts `MEMORY.md` §2 ("registered arenas grow only inside barrier
+      windows") and §1's own "realization (slot commit) happens at the barrier".** An immediate
+      `slotmap_insert` crosses an `arena_push` whenever the slots/gen columns hit a page
+      boundary — mid-tick growth of a GROWS_AT_BARRIER arena, which `guard_barrier_begin`
+      TL_FATALs on. Options: (a) **reserve without growth**: spawn pops the free list (an
+      `array_pop` moves no `used` byte; destroys are deferred, so the free list only shrinks
+      mid-tick and the pop order is a pure function of the call sequence) or takes
+      `slots.count + pending++` for fresh ids, computes the handle from the already-correct
+      `gen[idx]` (post-remove value; 1 for fresh), and records `CMD_SPAWN_REALIZE`; the realize
+      at the barrier does the actual pushes/live-bit set inside the sanctioned window. Preserves
+      "usable id immediately", LIFO determinism, and the growth window. (b) insert immediately
+      and exempt the entity columns from the guard — a hole in the zero-alloc contract.
+      **Recommend and built (a)**; `ECS.md` §10.3 reconciled in the world commit. Jobs-era note:
+      reservation order under parallel systems is a W4 jobs-integration question (chunk-keyed
+      reservation), filed with it there.
+
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [ ] **RR-6 A tighter sine?** Measured (`FX-PALETTE.md` §4.4): the ported `SinPoly4` gives
       max 9.06 ulp of `q_t` (its documented 27.13 bits), not the 2 ulp §10.5 had guessed; the
