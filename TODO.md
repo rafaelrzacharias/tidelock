@@ -759,12 +759,12 @@ the drop heights), all declared in the README; no threshold, world constant or r
       Not attacked (waits for its lane): the Pi leg of both pins (RR-1); the fatal-expected halves
       (runner lane). Wart, not a defect: `fx_int<R>(-2^INT_BITS)` is representable but asserts
       (the contract says `|i| < 2^INT_BITS`; symmetric and documented, left as is).
-- [ ] **Cross-ISA half of `FX-PALETTE.md` §10.6 — re-scoped 2026-08-25 (target-matrix ruling):**
-      `fx_trace_hash_pinned` reproduces `0x1a1803512f224fad` on clang-cl (dev/debug/netcode/ship)
-      and ubuntu clang x86-64. The aarch64 legs no longer wait on RR-1: the PR lane's hosted
-      `ubuntu-24.04-arm` and `windows-11-arm` jobs run both pins natively (ci-matrix lane).
-      Check this off when the first four-leg run is green — CI evidence, not a local claim
-      (`LESSONS.md`: check CI before writing "verified"). A mismatch is UB until proven otherwise
+- [x] **Cross-ISA half of `FX-PALETTE.md` §10.6 — DONE 2026-08-25, CI evidence:** pr run #46
+      (`workflow_dispatch` on the ci-matrix branch, head `023e174`) is green on all 23 jobs:
+      both fx trace pins reproduced natively on `ubuntu-24.04-arm` and `windows-11-arm` across
+      all four tiers — the program's first determinism proof on real arm64 silicon — and the
+      four-way `build_id` diff (R-8) passed, with the per-leg binarch assertion confirming each
+      leg really built its own ISA. A future mismatch is UB until proven otherwise
       (`TESTING.md` §4).
 - [ ] `tools/fxcheck` is not in CI yet: it is a separate CMake project (`cmake -S tools -B
       out/tools`), ~4 min in full. Add a nightly step (`fxcheck` + `oracle.py check-coeffs` +
