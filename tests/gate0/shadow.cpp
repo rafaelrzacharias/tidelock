@@ -53,11 +53,11 @@ i64 compare_locals(const g0::World* a, const g0s::World* b, i64* err_b, i64* err
 
 }  // namespace
 
-i64 shadow_run(const g0scene::Scene* scene, const g0::Consts* k, u32 ticks, FILE* csv, Scratch* scratch, const VMemApi* os, u8 dump, u32 watch) {
+i64 shadow_run(const g0scene::Scene* scene, const g0::Consts* k, u32 mu_percent, u32 alpha_nano, u32 ticks, FILE* csv, Scratch* scratch, const VMemApi* os, u8 dump, u32 watch) {
     g0::World* wa = (g0::World*)scratch_push(scratch, sizeof(g0::World), 64u);
     g0s::World* wb = (g0s::World*)scratch_push(scratch, sizeof(g0s::World), 64u);
     g0::world_init(wa, os, scratch, scene->nb, scene->np, scene->nd, k);
-    g0s::Consts kb = g0s::consts_make(k->substeps, k->ladder, 50, 1302, k->density_iters);
+    g0s::Consts kb = g0s::consts_make(k->substeps, k->ladder, mu_percent, alpha_nano, k->density_iters);
     g0s::world_init(wb, os, scratch, scene->nb, scene->np, scene->nd, &kb);
     g0::world_load(wa, scene);
     g0s::world_load(wb, scene);

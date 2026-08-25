@@ -3,7 +3,7 @@
 // code: printf-class io/clock/filesystem is the exemption of docs/TESTING.md §8 R-2.
 //
 //   tl_gate0 --scenario G01|G02|G03|G04|G05|G06|all --substeps 4|8|16 [--particles n] [--ticks n]
-//            [--ladder 0|1|2|3] --out dir [--shadow] [--once] [--csv-every n] [--seed n] [--dump]
+//            [--ladder 0|1|2|3] --out dir [--shadow] [--once] [--csv-every n] [--seed n] [--dump] [--perturb q]
 //
 // Exit codes: 0 = every requested verdict is PASS or INVESTIGATE; 3 = a FAIL verdict or a G-06
 // divergence; 1 = a usage error. Verdict lines (docs/GATE0-BENCH.md §8.1):
@@ -47,6 +47,8 @@ struct Args {
     u32 iters;          // density Jacobi passes per substep (1 = the doc)
 };
 
+u32 g_perturb = 0;   // --perturb q: G-01's odd stack boxes start q pos_t quanta off-axis (W2 gate0 review: proves the jitter metric can move)
+
 // Strict decimal parser (LESSONS.md: atoll answers 0 for "abc"): every char a digit, no empty.
 bool parse_u64(const char* s, u64* out) {
     if (s == nullptr || *s == 0) return false;
@@ -64,7 +66,7 @@ bool parse_u64(const char* s, u64* out) {
 void usage() {
     fprintf(stderr,
         "tl_gate0 --scenario G01|G02|G03|G04|G05|G06|all --substeps 4|8|16 [--particles n] [--ticks n]\n"
-        "         [--ladder 0|1|2|3] --out dir [--shadow] [--once] [--csv-every n] [--seed n] [--dump]\n"
+        "         [--ladder 0|1|2|3] --out dir [--shadow] [--once] [--csv-every n] [--seed n] [--dump] [--perturb q]\n"
         "(docs/GATE0-BENCH.md section 8.1)\n");
 }
 
@@ -88,6 +90,7 @@ bool parse_args(int argc, char** argv, Args* a) {
         else if (!strcmp(f, "--alpha") && has_val && parse_u64(argv[++i], &v) && v <= 8000) { a->alpha_nano = u32(v); }
         else if (!strcmp(f, "--iters") && has_val && parse_u64(argv[++i], &v) && v >= 1 && v <= 16) { a->iters = u32(v); }
         else if (!strcmp(f, "--watch") && has_val && parse_u64(argv[++i], &v)) { a->watch = u32(v); }
+        else if (!strcmp(f, "--perturb") && has_val && parse_u64(argv[++i], &v) && v <= 1000000) { g_perturb = u32(v); }
         else if (!strcmp(f, "--csv-every") && has_val && parse_u64(argv[++i], &v) && v >= 1) { a->csv_every = u32(v); }
         else if (!strcmp(f, "--seed") && has_val && parse_u64(argv[++i], &v)) { a->seed = v; }
         else { fprintf(stderr, "tl_gate0: bad flag or value at '%s'\n", f); return false; }
@@ -167,9 +170,10 @@ struct RunOut {
     u64* hash;            // per-tick world hash (scratch, `ticks` long)
     u32 verdict;          // 0 PASS, 1 INVESTIGATE, 2 FAIL
     char detail[512];
-    u64 solve_p50, solve_p95, solve_p99;   // over ticks 200..end, solve + broadphase
+    u64 solve_p50, solve_p95, solve_p99;   // over ticks 200..ticks_run (warm-up excluded), solve + broadphase
     u32 max_colors, sat_hits, nbr_overflow, max_nbr, sat_vel, sat_omega, corr_clamps, vmax_clamps, max_degree;
-    u64 pair_evals, contact_evals, ticks_run;
+    u64 pair_evals, contact_evals, ticks_run;   // ticks_run = ticks actually stepped (< ticks when the run stopped on an escape)
+    u64 us_broadphase, us_predict, us_density, us_colors, us_writeback, us_velocity;   // per-phase totals over the run (W2 gate0 review: the G-05 cost accounting)
     u8 escaped;           // a dynamic carrier left the sealed box: tunneling, the run stopped early
     u8 _pad[7];
 };
@@ -181,7 +185,8 @@ const char* VNAME[3] = { "PASS", "INVESTIGATE", "FAIL" };
 struct ScenarioDesc { const char* id; const char* csv_name; u64 default_ticks; u8 has_particles; };
 
 void build_scene(g0scene::Scene* sc, const char* name, u64 seed, u32 particles, VMemArena* arena) {
-    if (!strcmp(name, "G01"))       { g0scene::scene_init(sc, arena, 16, 1, 1); g0scene::scene_g01(sc, seed, particles); }
+    if (!strcmp(name, "G01"))       { g0scene::scene_init(sc, arena, 16, 1, 1); g0scene::scene_g01(sc, seed, particles);
+                                      if (g_perturb) { u32 k = 0; for (u32 b = 0; b < sc->nb; ++b) { if (sc->bodies[b].inv_m.v == 0) continue; if (k & 1u) sc->bodies[b].x.v += i32(g_perturb); k += 1; } } }
     else if (!strcmp(name, "G02a")) { g0scene::scene_init(sc, arena, 16, 1, 1); g0scene::scene_g02a(sc, seed); }
     else if (!strcmp(name, "G02b")) { g0scene::scene_init(sc, arena, 16, 1, 1); g0scene::scene_g02b(sc, seed); }
     else if (!strcmp(name, "G03"))  { g0scene::scene_init(sc, arena, 8, particles, 1); g0scene::scene_g03(sc, seed, particles); }
@@ -218,19 +223,46 @@ void run_scenario(Boot* bt, const g0scene::Scene* sc, const char* csv_name, u32 
     i64 win_max = INT64_MIN, prev_win_max = INT64_MIN, e_initial = 0, e_max = INT64_MIN; u32 env_increases = 0;
     i64 ke_win_max = INT64_MIN, ke_prev_win_max = INT64_MIN; u32 ke_increases = 0;
     const u32 WIN = 1000;
+    // intra-tick probe (G-01): the largest body displacement between two consecutive SUBSTEP
+    // writebacks after settle, in texel*1e4. The per-tick jitter metric cannot see an oscillation
+    // whose period divides a tick; this can (W2 gate0 review).
+    pos_t* sub_bx = (pos_t*)scratch_push(s, u64(sc->nb) * 4u + 16u, 16u);
+    pos_t* sub_by = (pos_t*)scratch_push(s, u64(sc->nb) * 4u + 16u, 16u);
+    u64 intra_max = 0;
+    u64 us_predict = 0, us_density = 0, us_colors = 0, us_writeback = 0, us_velocity = 0, us_broadphase = 0;
+    u32 ticks_run = 0;
     for (u32 b = 0; b < sc->nb; ++b) { prev_bx[b] = w->bx[b]; prev_by[b] = w->by[b]; }
     for (u32 t = 0; t < nt; ++t) {
         const u64 t0 = now_us(bt->api);
         g0::tick_begin(w);
         const u64 t1 = now_us(bt->api);
+        for (u32 b = 0; b < sc->nb; ++b) { sub_bx[b] = w->bx[b]; sub_by[b] = w->by[b]; }
         for (u32 ss = 0; ss < substeps; ++ss) {
+            const u64 p0 = now_us(bt->api);
             g0::substep_predict(w, ss);
+            const u64 p1 = now_us(bt->api);
             g0::substep_density(w);
+            const u64 p2 = now_us(bt->api);
             for (u32 c = 0; c < w->n_colors; ++c) g0::substep_project_color(w, c);
+            const u64 p3 = now_us(bt->api);
             g0::substep_writeback(w);
+            const u64 p4 = now_us(bt->api);
             g0::substep_velocity(w);
+            const u64 p5 = now_us(bt->api);
+            us_predict += p1 - p0; us_density += p2 - p1; us_colors += p3 - p2; us_writeback += p4 - p3; us_velocity += p5 - p4;
+            if (judge == 1 && t > sc->settle_tick) {
+                for (u32 b = 0; b < sc->nb; ++b) {
+                    if (w->bflags[b] & g0::BF_STATIC) continue;
+                    const fx::vec2<pos_t> d = { w->bx[b] - sub_bx[b], w->by[b] - sub_by[b] };
+                    const u64 tx = (u64(fx::len(d).v) * 10000u) / u64(fx::TEXEL.v);
+                    if (tx > intra_max) intra_max = tx;
+                    sub_bx[b] = w->bx[b]; sub_by[b] = w->by[b];
+                }
+            }
         }
         const u64 t2 = now_us(bt->api);
+        us_broadphase += t1 - t0;
+        ticks_run = t + 1u;
         // ---- metrics (fx world, after the substeps, before tick_end frees the transients) ----
         u32 jit_p95 = 0;
         {
@@ -321,20 +353,35 @@ void run_scenario(Boot* bt, const g0scene::Scene* sc, const char* csv_name, u32 
             break;
         }
     }
-    out->escaped = escaped; out->pair_evals = w->pair_evals; out->contact_evals = w->contact_evals; out->ticks_run = escaped ? 0 : nt;
-    // ---- timing over ticks 200..end ----
-    const u32 from = nt > 250 ? 200 : 0;
-    out->solve_p50 = percentile64(cost + from, nt - from, 50, s);
-    out->solve_p95 = percentile64(cost + from, nt - from, 95, s);
-    out->solve_p99 = percentile64(cost + from, nt - from, 99, s);
+    out->escaped = escaped; out->pair_evals = w->pair_evals; out->contact_evals = w->contact_evals; out->ticks_run = ticks_run;
+    out->us_broadphase = us_broadphase; out->us_predict = us_predict; out->us_density = us_density; out->us_colors = us_colors; out->us_writeback = us_writeback; out->us_velocity = us_velocity;
+    // ---- timing over ticks 200..ticks_run (the ticks that RAN: a run stopped by an escape has
+    // a zero tail in `cost`, which used to pull every percentile to 0 - W2 gate0 review) ----
+    const u32 from = ticks_run > 250 ? 200 : 0;
+    out->solve_p50 = percentile64(cost + from, ticks_run - from, 50, s);
+    out->solve_p95 = percentile64(cost + from, ticks_run - from, 95, s);
+    out->solve_p99 = percentile64(cost + from, ticks_run - from, 99, s);
     out->max_colors = w->max_colors_seen; out->sat_hits = w->sat_hits; out->nbr_overflow = w->nbr_overflow; out->max_nbr = w->max_neighbours_seen;
     out->sat_vel = w->sat_vel; out->sat_omega = w->sat_omega; out->corr_clamps = w->corr_clamps; out->vmax_clamps = w->vmax_clamps; out->max_degree = w->max_degree_seen;
     // ---- verdict ----
     char jb[32], pb[32], db[32];
     out->verdict = V_PASS;
+    // the cost accounting, printed for G-05 whether or not the run completed (the cost of the
+    // ticks that ran is evidence either way; the verdict is not)
+    char costd[400];
+    {
+        const u64 tr = ticks_run ? ticks_run : 1;
+        const u64 per_tick_pairs = out->pair_evals / tr, per_tick_contacts = out->contact_evals / tr;
+        snprintf(costd, sizeof costd, "p50_us=%llu p95_us=%llu p99_us=%llu ticks_run=%u pair_evals_per_tick=%llu contact_evals_per_tick=%llu ns_per_pair_eval=%llu phase_us_per_tick[broadphase,predict,density,colors,writeback,velocity]=%llu,%llu,%llu,%llu,%llu,%llu",
+                 (unsigned long long)out->solve_p50, (unsigned long long)out->solve_p95, (unsigned long long)out->solve_p99, ticks_run,
+                 (unsigned long long)per_tick_pairs, (unsigned long long)per_tick_contacts,
+                 (unsigned long long)(per_tick_pairs ? (out->solve_p50 * 1000ull) / per_tick_pairs : 0),
+                 (unsigned long long)(us_broadphase / tr), (unsigned long long)(us_predict / tr), (unsigned long long)(us_density / tr),
+                 (unsigned long long)(us_colors / tr), (unsigned long long)(us_writeback / tr), (unsigned long long)(us_velocity / tr));
+    }
     if (escaped) {   // a carrier through a wall is tunneling whatever the scenario measures: FAIL, and the metrics below are of a truncated run
         out->verdict = V_FAIL;
-        snprintf(out->detail, sizeof out->detail, "tunneling=1 (a carrier left the sealed box; the trace is truncated)");
+        snprintf(out->detail, sizeof out->detail, "tunneling=1 (a carrier left the sealed box at tick %u; the trace is truncated)%s%s", ticks_run - 1u, judge == 5 ? " " : "", judge == 5 ? costd : "");
     } else if (judge == 1) {
         const u32 p95 = percentile(jitter_all, n_jit, 95, s);
         const i64 sink = top_y_end - top_y_at_settle;
@@ -344,7 +391,8 @@ void run_scenario(Boot* bt, const g0scene::Scene* sc, const char* csv_name, u32 
         // PASS: p95 < 0.1 texel, |sink| < 0.1 texel, no pop; INVESTIGATE: p95 < 0.5 texel; FAIL otherwise
         if (pop || p95 >= 5000) out->verdict = V_FAIL;
         else if (p95 >= 1000 || sink_a >= fx::TEXEL.v / 10) out->verdict = V_INVESTIGATE;
-        snprintf(out->detail, sizeof out->detail, "jitter_p95_texel=%s top_drift_texel=%s pop=%u", jb, pb, pop);
+        char ib[32]; fmt_texel(ib, sizeof ib, i64(intra_max) * fx::TEXEL.v / 10000);
+        snprintf(out->detail, sizeof out->detail, "jitter_p95_texel=%s top_drift_texel=%s pop=%u intra_tick_max_texel=%s perturb_quanta=%u", jb, pb, pop, ib, g_perturb);
     } else if (judge == 2) {
         fmt_texel(pb, sizeof pb, pen_sustained_max);
         if (tunnel_any || out->sat_hits > 0) out->verdict = V_FAIL;
@@ -364,11 +412,7 @@ void run_scenario(Boot* bt, const g0scene::Scene* sc, const char* csv_name, u32 
         else if (env_increases > 0) out->verdict = V_INVESTIGATE;
         snprintf(out->detail, sizeof out->detail, "envelope_increases=%u energy_initial=%lld energy_max=%lld", env_increases, (long long)e_initial, (long long)e_max);
     } else {
-        const u64 per_tick_pairs = nt ? out->pair_evals / nt : 0, per_tick_contacts = nt ? out->contact_evals / nt : 0;
-        snprintf(out->detail, sizeof out->detail, "p50_us=%llu p95_us=%llu p99_us=%llu pair_evals_per_tick=%llu contact_evals_per_tick=%llu ns_per_pair_eval=%llu",
-                 (unsigned long long)out->solve_p50, (unsigned long long)out->solve_p95, (unsigned long long)out->solve_p99,
-                 (unsigned long long)per_tick_pairs, (unsigned long long)per_tick_contacts,
-                 (unsigned long long)(per_tick_pairs ? (out->solve_p50 * 1000ull) / per_tick_pairs : 0));
+        snprintf(out->detail, sizeof out->detail, "%s", costd);
     }
     g0::world_release(w, os);
 }
@@ -524,7 +568,7 @@ int main(int argc, char** argv) {
             FILE* f = open_csv(a.out, name, a.substeps, a.ladder, "");
             if (!f) return 1;
             g0::Consts k = g0::consts_make(a.substeps, a.ladder, a.mu_percent, a.alpha_nano, a.iters);
-            const i64 worst = g0shadow::shadow_run(&sc, &k, u32(a.ticks ? a.ticks : ticks6[i]), f, s, &bt.api->vmem, a.dump, a.watch);
+            const i64 worst = g0shadow::shadow_run(&sc, &k, a.mu_percent, a.alpha_nano, u32(a.ticks ? a.ticks : ticks6[i]), f, s, &bt.api->vmem, a.dump, a.watch);
             fclose(f);
             arena_reset_to(&bt.scene_arena, mark);
             TL_SCRATCH_SCOPE_END(s);
