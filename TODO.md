@@ -410,6 +410,60 @@ the drop heights), all declared in the README; no threshold, world constant or r
   D2 and belong to whoever owns RR-13's ruling, not to a review.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **RR-17 net-p1 Phase 1 is blocked: `wire.h` and the encoder need three types no lane has
+      shipped, plus one type no doc owns.** Filed 2026-08-25 by the `w2-net-p1` lane, before any
+      code, per the doc-integrity protocol's brief item (6). `ROADMAP.md` §2's net-p1 row lists
+      `TL_WIRE_STRUCT` as a dependency and the lane brief called it "on main": it is not on main.
+      None of the four is improvisable inside this lane's cone (`ROADMAP.md` §0 rule 2 - a lane
+      never edits another lane's module).
+      1. **`TL_WIRE_STRUCT`** (with `FieldInfo`/`kind_of`/the parallel `TL_OFFSETS_*` list) lives in
+         `core/reflect.h`, owned by `ECS.md` §10.2 - the concurrently-running **w2-ecs** lane.
+         `src/core/` holds only its placeholder TU and `origin` carries no `w2-ecs` branch yet.
+         `NETCODE.md` §20.2 opens "All are `TL_WIRE_STRUCT`", so every struct in `wire.h` is
+         downstream of it.
+      2. **`InputFrame`/`ActionState`/`MAX_ACTIONS`/`ZERO_FRAME`** live in `core/input.h`, owned by
+         `INPUT.md` §9.1 - the **W3 loop+input** lane. `NETCODE.md` §20.3(a)'s `encode_column` and
+         §20.2.2's Column layout are written entirely in those terms, as is `net_internal.h`'s
+         per-slot `RingBuffer<InputFrame>`. `ROADMAP.md` §2 does not list them at all.
+      3. **Phase 1's done criterion reaches into W3 by its own words.** `NETCODE.md` §20.8 Phase 1
+         requires the "`RecordedInput` adapter replays a core recording with identical trace", and
+         §20.6 T2 spells it "replays through the `Replay` producer" - `core/producers/replay.h`,
+         `INPUT.md` §9.1/§9.4, the W3 loop+input lane. A W2 lane cannot close a criterion whose
+         other half is a W3 deliverable, however well the rest of Phase 1 goes.
+      4. **`ByteWriter`/`ByteReader` are named but never defined, and no doc claims ownership.**
+         They appear only in `ECS.md` §10.2, as the signatures `TL_WIRE_STRUCT` generates
+         (`wire_write_Name(ByteWriter*, const Name*)`); `NETCODE.md` §20.1 separately assigns "LE
+         read/write pairs" to `net/wire.h`. Whoever writes one first pins the other lane's ABI -
+         the cross-lane collision `ROADMAP.md` §0 rule 1 exists to prevent. This needs a ruling
+         even if net-p1 is rescheduled, because w2-ecs will hit it first.
+      **Separately, the roadmap row and the spec disagree on this lane's scope.** `ROADMAP.md` §2
+      says net-p1 builds "checkpoint writer, chain"; `NETCODE.md` §20.8 puts `checkpoint.cpp`'s hot
+      tier in Phase 6 and the durable tier + chain in Phase 7, and Phase 1's file list is `wire.h`,
+      `encode.cpp`, `archive.cpp`, `net_internal.h`, T0-T2. The row's own "Done" column cites
+      Phase 1, so Phase 1 governs and the extra words are drift - but they are what a lane brief
+      reads and act on. (§20.2.8's checkpoint/chain *structs* are `wire.h`'s and are in scope; the
+      *writer* and the chain file are not Phase 1's.)
+      **Options for the morning - pick one:**
+      - **(A) Hold net-p1 until `core/reflect.h` lands from w2-ecs**, then run it with a criterion
+        cut at the W2/W3 seam (as in B). Costs a W2 slot now, nothing later.
+      - **(B) RECOMMENDED - apply the header-first rule to the two missing headers, then run
+        net-p1 with a W2-closable criterion.** `ROADMAP.md` §0 rule 1 already requires a lane's
+        first commit to be its `module.h` so dependents compile from day one; that rule simply has
+        not been applied to `core/reflect.h` (w2-ecs owns it) or `core/input.h` (`INPUT.md` owns
+        the file, but its lane is W3 - so this needs an owner assigned). Then amend `NETCODE.md`
+        §20.8 Phase 1 to move the `RecordedInput`/`Replay`-producer clause to a named W3 follow-up,
+        leaving Phase 1 = T0, T1, T1f, T2 minus that clause, plus the < 80 KB measurement - all
+        closable inside W2. Two header commits and one spec amendment unblock the lane.
+      - **(C) net-p1 defines the missing types itself** and the other lanes adopt them. Fastest
+        today and the one I would argue against: it puts `InputFrame` - the sequencing seam
+        (`NETCODE.md` §4) - and the reflection macro under a lane that owns neither doc, and
+        `LESSONS.md` carries the cross-lane ABI-drift class twice already.
+      - **(D) Re-slot net-p1 into W3** behind ecs and loop+input, and give W2 the freed slot.
+      **Item 4 needs its own answer whichever of A-D wins:** `ByteWriter`/`ByteReader` in
+      `core/reflect.h` (recommended - the macro that generates the calls lives there, and `net` is
+      then a consumer like `save` and `script`) or in `net/wire.h` (then `ECS.md` §10.2 must cite
+      it, and `core/` gains a dependency on `net/`, which the `ARCHITECTURE.md` §1 DAG forbids).
+      **The `w2-net-p1` lane is parked at this entry; no `src/net/` code was written.**
 - [ ] **RR-6 A tighter sine?** Measured (`FX-PALETTE.md` §4.4): the ported `SinPoly4` gives
       max 9.06 ulp of `q_t` (its documented 27.13 bits), not the 2 ulp §10.5 had guessed; the
       reference ships nothing better (its 64-bit `Sin` uses the same polynomial). At 1 m lever
