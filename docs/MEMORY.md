@@ -51,7 +51,7 @@ Every long-lived authoritative pool lives in an arena registered at init:
 
 ```cpp
 struct ArenaEntry { NameHash id; VMemArena* arena; u32 flags; /* HASHED | SNAPSHOT | GROWS_AT_BARRIER */ };
-struct ArenaRegistry { ArenaEntry e[MAX_ARENAS /*64*/]; u32 count; };
+struct ArenaRegistry { ArenaEntry e[MAX_ARENAS /*4096*/]; u32 count; };
 void  registry_add(ArenaRegistry*, NameHash id, VMemArena*, u32 flags);   // init only; order = registration order
 u64   registry_hash_all(const ArenaRegistry*, u64 hashes_out[]);           // per-arena rapidhash over [base, used); world hash over those
 void  registry_snapshot(const ArenaRegistry*, Snapshot*);                  // memcpy each [base, used) + used table + fingerprint

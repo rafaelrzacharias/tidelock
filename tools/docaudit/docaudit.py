@@ -43,7 +43,7 @@ CANON = [
     c("MAX_ACTIONS", "32"), c("MAX_PEERS", "8"), c("CONFIRMATION_HORIZON_TICKS", "6"),
     c("REDUNDANCY_TICKS", "9"), c("SUSPECT_TO_EVICT_TICKS", "1800"), c("QUORUM_LOSS_TICKS", "600"),
     c("CHECKSUM_INTERVAL_TICKS", "30"), c("AOE_ISLAND_LIMIT", "4"), c("MAX_COMPONENT_TYPES", "1024"),
-    c("MAX_ARENAS", "64"), c("TICK_HZ", "60"), c("SUBSTEPS", "8"), c("MASS_RATIO_CLAMP", "4096"),
+    c("MAX_ARENAS", "4096"), c("TICK_HZ", "60"), c("SUBSTEPS", "8"), c("MASS_RATIO_CLAMP", "4096"),
     c("sizeof(InputFrame)", "76", r"sizeof\(InputFrame\)\s*==\s*(\d+)"),
     c("sizeof(Handshake)", "120", r"sizeof\(Handshake\)\s*==\s*(\d+)"),
     c("sizeof(PacketHeader)", "40", r"sizeof\(PacketHeader\)\s*==\s*(\d+)"),

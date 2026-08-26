@@ -25,7 +25,7 @@
 
 struct Snapshot;  // foundation/snapshot.h
 
-enum : u32 { MAX_ARENAS = 64 };  // docs/CANON.md "Sizes and caps"
+enum : u32 { MAX_ARENAS = 4096 };  // docs/CANON.md "Sizes and caps" (E-2 ruling 2026-08-26)
 
 // Registry membership flags (docs/MEMORY.md section 1.2): HASHED = folded into the world hash;
 // SNAPSHOT = copied by registry_snapshot; GROWS_AT_BARRIER = may grow inside the barrier-apply
