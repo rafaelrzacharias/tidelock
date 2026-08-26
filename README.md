@@ -34,12 +34,14 @@ contributions are not accepted: issues and pull requests from outside will be cl
 
 ## Status
 
-**Design complete, pre-code.** The founding ruling is **`docs/PIVOT-DESIGN.md`**; every system
-now has its own design doc — start at **`docs/README.md`** (the map and reading order), then
-`CLAUDE.md` (how to work here) and `TODO.md` (the build queue). Next milestone: **Gate 0** —
-the headless fixed-point XPBD+PBF convergence and cost bench (`docs/GATE0-BENCH.md`). Then
-foundation layer → ECS → v0 ("window + moving sprite + 60 Hz") → Hovel (the 3-machine lockstep
-harness) → Alloy.
+**Building — W2 of the wave plan (status re-dated 2026-08-26; `TODO.md` and `docs/ROADMAP.md`
+are the live truth, this paragraph is only a pointer).** The design corpus is complete
+(`docs/PIVOT-DESIGN.md` is the founding ruling; `docs/README.md` is the map). Shipped: the W0
+skeleton and audits; the full W1 foundation (fx palette + det math, arenas/registry,
+containers, RNG/hash, headless platform, test runner, tooling runtimes, jobs); Gate 0 run and
+ruled (`FX-PALETTE.md` rev 2, 2026-08-25); the W2 ECS and netcode Phase 1 merges; four-leg
+hosted CI ({Windows, Linux} × {x86-64, arm64}) green on `main`. In flight: the W2 luau-vm and
+vendor lanes (in adversarial review). Next: W3 — alloy-solver ★ and the v0 lanes.
 
 ## Lineage
 
@@ -57,7 +59,7 @@ game repo owns them).
 - Line endings: `.gitattributes` is the authority (`*.bat`/`*.cmd` CRLF, else LF).
 - Rafael is sole author — no co-author trailers on commits.
 
-## Intended layout (created as built, not upfront)
+## Layout
 
 ```
 src/foundation/   fx palette + det math, arenas, containers, RNG/hash, StrView/interner, jobs

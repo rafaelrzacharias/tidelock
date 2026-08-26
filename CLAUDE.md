@@ -98,7 +98,8 @@ narrow slice at a time. Two rules, one tool:
 
 A 2D game engine in lean-C-style C++, a deterministic fixed-point matter sim (**Alloy**), a Luau
 game layer, and 8-peer deterministic lockstep netcode. Successor to the foundry/Ore program; the Ore
-language is retired. **Design complete, pre-code.** Next milestone: **Gate 0** (`docs/GATE0-BENCH.md`).
+language is retired. **Design corpus complete; building since W1** — current wave and queue: the
+Status section below, `TODO.md`, `docs/ROADMAP.md`.
 
 ## Scope
 - **Engine = game-agnostic** (`docs/ARCHITECTURE.md` §0): no game type, perspective, or gameplay
@@ -184,6 +185,8 @@ PowerShell-first. clang-cl is resolved by the CMake preset (`docs/BUILD.md`); so
 environment in the same call, or use the self-sourcing scripts. Build traps go in `LESSONS.md`.
 
 ## Status
-Design docs rev 1 complete (2026-08-22). No code. Next: **Gate 0** — `fx.h`/`fx_palette.h`/
-`det_math.h` + the headless bench (`docs/GATE0-BENCH.md`). Then foundation week → ECS → v0
-("window + moving sprite + 60 Hz") → Hovel → Alloy. Queue: `TODO.md`.
+Building — W2 (re-dated 2026-08-26; the live truth is `TODO.md` + `docs/ROADMAP.md`, never this
+paragraph). W0–W1 shipped and reviewed; Gate 0 run and ruled (`FX-PALETTE.md` rev 2); W2 ecs +
+net-p1 merged, luau-vm + vendor in review, alloy-substrate launches at the weekly reset. Next:
+W3 (alloy-solver ★ → v0). This paragraph is checked at every wave boundary (`WORKFLOW.md` §3
+artifact 4, R-12).

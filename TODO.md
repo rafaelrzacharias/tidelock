@@ -548,7 +548,13 @@ E-2 needs no W2 decision but blocks real game wiring later.
       enforced module prefixes; revisit only on a real collision.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
-- [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**
+- [x] **RULED 2026-08-26 (Rafael): the doc-relevancy pass — `WORKFLOW.md` §5 R-12.** Lane
+      closeouts (R-7) check the lane's own doc against what shipped; wave boundaries add a pass
+      over the repo's status surfaces (§3 artifact 4: root `README.md` Status, `CLAUDE.md`
+      Status, `docs/README.md` header, merged lanes' doc status lines). Motivating rot fixed in
+      the ruling commit: all three surfaces still read "pre-code" two shipped waves later —
+      the staleness class `docaudit` structurally cannot see (it checks references and
+      constants, not prose claims about state).
       (budget-aware sequencing; two-tier reviews with the Fable full-re-read ship round —
       `ROADMAP.md` §2 amended at the pairing's home; steward economy; lane token discipline
       in every brief). Exercised daily from today. **The concrete W2 application (R-8):**
