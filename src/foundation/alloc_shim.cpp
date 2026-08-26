@@ -1,26 +1,16 @@
 // alloc_shim.cpp - the global-allocator tripwire. Spec: docs/MEMORY.md §2, §8.1.
-// SHIPPED STATELESS, deliberately: the specced CRT-malloc COUNTER needs one word of writable
-// static storage, and the writable-static link gate (docs/CPP-SUBSET.md §1) bans .data/.bss in
-// every src/ lib with no exemption mechanism - a genuine cross-spec contradiction, filed as a
-// ruling request in TODO.md (W1 mem notes; it also hits the tooling-rt lane's log/prof state).
-// Until ruled: operator new/delete are TL_FATAL tripwires in dev/netcode tiers (they need no
-// state), tl_alloc_shim_install reports ERR_MEM_UNSUPPORTED, and tl_crt_alloc_count reads 0 -
-// the guard's CRT check is vacuous but HONEST (install's return value says counting is off).
-// The tripwire takes effect in a binary only if this object is pulled in; referencing
-// tl_crt_alloc_count from the guard does that for every guard user.
+// STATELESS by ruling (2026-08-26): the specced CRT-malloc counter was DROPPED - it needed a
+// word of writable static storage the link gate (docs/CPP-SUBSET.md §1) bans, and the actual
+// mechanism is these TL_FATAL tripwires + the symbol audit + vendor pool hooks. The tripwires
+// take effect in a binary only if this object is pulled in; the guard calls
+// tl_alloc_shim_anchor so every guard user links it.
 #include "foundation/alloc_shim.h"
 #include "foundation/vmem_arena.h"
 #include "foundation/tl_assert.h"
 
 #include <stddef.h>  // size_t - operator new's parameter type is not ours to choose
 
-extern "C" ErrCode tl_alloc_shim_install(void) {
-    return ERR_MEM_UNSUPPORTED;  // counting is off until the writable-static ruling (TODO.md)
-}
-
-extern "C" u64 tl_crt_alloc_count(void) {
-    return 0u;
-}
+extern "C" void tl_alloc_shim_anchor(void) {}
 
 #if TL_TIER_DEV || TL_TIER_NETCODE
 
