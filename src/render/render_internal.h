@@ -18,6 +18,19 @@
 // ---------------------------------------------------------------------------------------------
 #include "render/render.h"
 
+// Resolves which view a layer's WORLD-space content projects through. layer_view[layer] == 0xFF
+// means the layer has no dedicated view of its own (UI/DEBUG - screen-composited targets), but a
+// WORLD-space command CAN still land on one of those layers (world-tracking debug draw, a HUD
+// sprite anchored to a world position) and needs a camera to project through: it falls back to
+// view 0, the primary view. Shared by rect_visible (queue.cpp) and render_emit_geometry
+// (batch.cpp) so the one fallback rule lives in one place (review round 1 D2/D3: an unguarded
+// `view_mat[layer_view[layer]]`/`view_world[layer_view[layer]]` read the 0xFF sentinel as an
+// index - a TL_CHECK abort in rect_visible, an out-of-bounds read in render_emit_geometry).
+inline u8 render_resolve_view(const RenderQueue* q, u8 layer) {
+    const u8 v = q->layer_view[layer];
+    return v == 0xFFu ? 0u : v;
+}
+
 // docs/RENDER2D.md §9.3.5/§9.3.6: fills q->order with the identity permutation, calls
 // sort_u64_kv(q->keys, q->order, n, scratch) (q->keys sorts in place), then scan-batches the
 // sorted (material, layer, blend, clip) runs into q->batches. depth is deliberately not a batch

@@ -44,6 +44,17 @@ void render_emit_geometry(RenderQueue* q) {
     const u32 nb = q->batches.count;
     for (u32 bi = 0; bi < nb; ++bi) {
         const Batch b = q->batches.data[bi];
+        const u8 view = render_resolve_view(q, b.layer);
+
+        // Batch key already fixes the texture (key_material) for every command in this run, so the
+        // size query is loop-invariant - hoisted here instead of once per command (review round 1
+        // M1).
+        u16 tw = 0, th = 0;
+        if (b.tex != 0) {
+            TexHandle t{ b.tex };
+            q->platform->draw.texture_size(q->platform->draw.ctx, t, &tw, &th);
+        }
+
         for (u32 j = b.first; j < b.first + b.count; ++j) {
             const u32 c = q->order.data[j];
             const f32 x = q->data.x[c], y = q->data.y[c], rot = q->data.rot_turns[c];
@@ -51,7 +62,6 @@ void render_emit_geometry(RenderQueue* q) {
             const u8 flags = q->data.flags[c];
             const Rect_u16 uv = q->data.uv[c];
             const u32 rgba = q->data.rgba[c];
-            const u16 tex_bits = q->data.tex[c];
 
             const f32 turn = rot * 6.283185307f;
             const f32 cs = cosf(turn), sn = sinf(turn);
@@ -68,24 +78,19 @@ void render_emit_geometry(RenderQueue* q) {
                 tcx = x; tcy = y;
                 for (u32 k = 0; k < 4; ++k) { drx[k] = rx[k]; dry[k] = ry[k]; }
             } else {
-                const Mat3& M = q->view_mat[q->layer_view[b.layer]];
+                const Mat3& M = q->view_mat[view];
                 world_to_screen(M, x, y, &tcx, &tcy);
                 for (u32 k = 0; k < 4; ++k) {
                     drx[k] = M.m[0] * rx[k] + M.m[1] * ry[k];
                     dry[k] = M.m[3] * rx[k] + M.m[4] * ry[k];
                 }
             }
-            if (q->pres[0].pixel_snap != 0 && (flags & DRAWFLAG_NO_SNAP) == 0) {
+            if (q->pres[view].pixel_snap != 0 && (flags & DRAWFLAG_NO_SNAP) == 0) {
                 tcx = pixel_snap(tcx);
                 tcy = pixel_snap(tcy);
             }
 
             f32 u0, v0, u1, v1;
-            u16 tw = 0, th = 0;
-            if (tex_bits != 0) {
-                TexHandle t{ tex_bits };
-                q->platform->draw.texture_size(q->platform->draw.ctx, t, &tw, &th);
-            }
             if (tw != 0 && th != 0) {
                 u0 = (f32)uv.x / (f32)tw;           v0 = (f32)uv.y / (f32)th;
                 u1 = (f32)(uv.x + uv.w) / (f32)tw;  v1 = (f32)(uv.y + uv.h) / (f32)th;

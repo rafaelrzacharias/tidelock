@@ -3,6 +3,7 @@
 //   rect_visible, render_draw_quad. Spec: docs/RENDER2D.md §9.3.4 (submission/reject).
 // ---------------------------------------------------------------------------------------------
 #include "render/render.h"
+#include "render/render_internal.h"
 #include <math.h>
 #include <string.h>
 
@@ -50,13 +51,18 @@ ErrCode render_init(World* w, const PlatformApi* platform, VMemArena* arena, con
     platform->window.size(platform->window.ctx, &log_w, &log_h);
     q->layout = resolve_layout(draw_w, draw_h, log_w, q->pres[0]);
 
+    // Set before the one fallible step below (review round 1 M5): on a texture_create failure a
+    // caller's cleanup path calling render_shutdown(w) needs w->render already valid - q->target
+    // is all-null from the memset above, so render_shutdown's destroy loop is a no-op, not a null
+    // deref through a never-assigned w->render.
+    w->render = q;
+
     if (pres0->internal_w != 0) {
         Result<TexHandle> t = platform->draw.texture_create(platform->draw.ctx, pres0->internal_w, pres0->internal_h, PIXFMT_RGBA8, TEX_TARGET);
         if (t.err != ERR_OK) { return ERR_RENDER_INIT; }
         q->target[LAYER_WORLD] = t.value;
     }
 
-    w->render = q;
     return ERR_OK;
 }
 
@@ -115,7 +121,7 @@ u16 render_clip_push(World* w, Rect_i32 r) {
 
 void render_clip_pop(World* w) {
     RenderQueue* q = w->render;
-    TL_ASSERT(q->clips.depth > 0);
+    TL_CHECK(q->clips.depth > 0);
     q->clips.depth -= 1;
 }
 
@@ -123,8 +129,9 @@ bool rect_visible(World* w, Rect_f32 r, u8 layer, RectSpace space) {
     RenderQueue* q = w->render;
     Rect_f32 v;
     if (space == RECT_SPACE_WORLD) {
-        TL_CHECK(q->layer_view[layer] < MAX_VIEWS);
-        v = q->view_world[q->layer_view[layer]];
+        const u8 view = render_resolve_view(q, layer);
+        TL_CHECK(view < MAX_VIEWS);
+        v = q->view_world[view];
     } else if (q->clips.depth > 0) {
         const Rect_i32 ci = q->clips.rects[q->clips.stack[q->clips.depth - 1]];
         v = Rect_f32{ (f32)ci.x, (f32)ci.y, (f32)ci.w, (f32)ci.h };
