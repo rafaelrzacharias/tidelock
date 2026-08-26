@@ -174,7 +174,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ECS.md` -> §3, §4, §10.6
 - `FX-PALETTE.md` -> §3
 - `INPUT.md` -> §6
-- `MEMORY.md` -> §2, §5
+- `MEMORY.md` -> §2, §5, §10.2
 - `ROADMAP.md` -> §10.12
 
 ## MEMORY.md
@@ -233,6 +233,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `DETERMINISM.md` -> §5
 - `FRAME-LOOP.md` -> §3, §6
 - `JOBS.md` -> §6, §9.2, §9.3
+- `LUAU-LAYER.md` -> §9.5
 - `MEMORY.md` -> §4, §9.2, §9.5
 - `NETCODE.md` -> §3, §5
 - `RENDER2D.md` -> §0, §9.2, §9.3

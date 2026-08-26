@@ -639,11 +639,19 @@ construction (same tree); `luau_load` still reports it as a load error.
 
 **RR-18, ruled 2026-08-26 (Rafael) — the in-process compile works in every tier.** Luau's
 *Compiler* exposes no allocator hook and allocates with global `operator new` (measured: 32 calls
-per `luau_compile`; the *VM* makes zero — it is fully pooled). `MEMORY.md` §1.5 now records the
-answer: the VM's own pool serves those allocations for the duration of one compile and nothing
-else in the process is inside that window. `script_can_compile_in_process()` remains the one home
-for the fact, so a build that ever cannot has one place to say so; §10.9's dev on-load compile is
-unblocked.
+per `luau_compile`; the *VM* makes zero — it is fully pooled). `MEMORY.md` §1.5 records the answer:
+the **shared vendor pool** (`PLATFORM.md` §9.5's `pool_vendor`) serves those allocations for the
+duration of one compile and nothing else in the process is inside that window. §10.9's dev on-load
+compile is unblocked.
+
+`ScriptVmDesc.compile_pool` is that pool, and it is **required** — a null one is
+`SCRIPT_ERR_BAD_ARG` at creation, never a fall back to the VM's own pool (the binding the D2
+ruling removed, 2026-08-26). Before the window opens, `load_chunk` requires
+`SCRIPT_COMPILE_HEADROOM_MIN` (256 KB) `+ 128 B per source byte` of headroom and refuses with
+`SCRIPT_ERR_COMPILE` otherwise; both constants are derived from the measured cost (90.66x the
+source size at 1 KB, 49.83x at 64 KB, ~88 KB floor) with ~3x margin on the floor and ~1.4x on the
+worst ratio. The refusal exists so the `TL_FATAL` in `vendor_new.cpp` stays what it is meant to be
+— a genuine bug — instead of the only outcome available for an ordinary large source.
 
 **Done** when: every §10.11 test passes in `dev` and `netcode` (fatal-expected ones in child
 processes); the symbol audit shows `lua_*`/`luau_*` symbols only in `tl_script` (`tools/audit/symbols.py --wrap-lib`, built 2026-08-26 — it checks DEFINED as well as undefined names, because a hand-written `extern` needs no header and is precisely the shape the include firewall cannot see); no Luau header outside `src/script/` (`tools/audit/includes.py`'s `SYS_ALLOW_DIRS` + `BACKEND_HEADERS`, both halves with their own planted violations); `TL_ASSERT_NO_TICK_ALLOC` holds for a tick with Luau

@@ -25,6 +25,7 @@
 struct ScriptFixture {
     VMemApi   api;
     VMemArena perm;
+    MemPool   compile_pool;   // stands in for PLATFORM.md §9.5's pool_vendor (D2)
     ScriptVm* vm;
 };
 
@@ -58,6 +59,11 @@ inline bool script_fixture_up(ScriptFixture* f, ScriptVmKind kind, u64 budget_by
     f->vm = nullptr;
     f->api = test_vmem_api();
     if (vmem_arena_init(&f->perm, 0x5c11u, 1u << 20, 0u, &f->api) != ERR_OK) return false;
+    // The compiler's pool is SHARED and separate from the VM's, per the D2 ruling: a compile must
+    // not be able to exhaust - or be refused by - the budget that bounds VM state. 32 MB stands in
+    // for pool_vendor's 64 MB; the measured cost of the largest source in this suite is far below
+    // either.
+    if (pool_init(&f->compile_pool, 0x5c15u, 64u << 20, 32u << 20, &f->api) != ERR_OK) return false;
     ScriptVmDesc d = {};
     d.pool_id = 0x5c12u;
     d.pool_reserve_bytes = budget_bytes < (u64)(64u << 20) ? (u64)(64u << 20) : budget_bytes;
@@ -67,6 +73,7 @@ inline bool script_fixture_up(ScriptFixture* f, ScriptVmKind kind, u64 budget_by
     d.interner = test_interner();
     d.perm = &f->perm;
     d.os = &f->api;
+    d.compile_pool = &f->compile_pool;
     Result<ScriptVm*> r = kind == SCRIPT_VM_SIM  ? script_create_sim(&d)
                         : kind == SCRIPT_VM_UI   ? script_create_ui(&d)
                                                  : script_create_data(&d);
@@ -90,6 +97,10 @@ inline void script_fixture_down(ScriptFixture* f) {
     if (f->perm.base != nullptr) {
         f->api.release(f->api.ctx, f->perm.base, f->perm.reserved);
         f->perm.base = nullptr;
+    }
+    if (f->compile_pool.arena.base != nullptr) {
+        f->api.release(f->api.ctx, f->compile_pool.arena.base, f->compile_pool.arena.reserved);
+        f->compile_pool.arena.base = nullptr;
     }
 }
 

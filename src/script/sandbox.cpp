@@ -410,19 +410,25 @@ ErrCode script_sandbox_open(ScriptVm* vm) {
 
 void script_sandbox_freeze(ScriptVm* vm) {
     lua_State* L = vm->L;
-    // docs/LUAU-LAYER.md §10.2 step 11. setsafeenv first: it tells the VM the global table is
-    // immutable, which is what makes the compiler's import optimisation sound; setreadonly is
-    // what actually raises on a write.
-    lua_setsafeenv(L, LUA_GLOBALSINDEX, 1);
-    // A plain array, not an initializer_list: <initializer_list> is a standard header and the
-    // C++ subset has none (docs/CPP-SUBSET.md section 1).
-    static const char* const FREEZE[] = { LUA_STRLIBNAME, LUA_TABLIBNAME };
-    for (u32 i = 0; i < 2u; ++i) {
-        lua_getglobal(L, FREEZE[i]);
-        if (lua_istable(L, -1)) lua_setreadonly(L, -1, 1);
-        lua_pop(L, 1);
-    }
-    lua_pushvalue(L, LUA_GLOBALSINDEX);
-    lua_setreadonly(L, -1, 1);
-    lua_pop(L, 1);
+    // docs/LUAU-LAYER.md §10.2 step 11, through the vendored implementation rather than around it.
+    //
+    // This was a hand-kept two-name array (`_G`, `string`, `table`) plus setsafeenv, and it MISSED
+    // the string metatable - a fourth table permanently rooted by the VM and reachable from a
+    // sealed sim script through `getmetatable('')`, which is not on the removal list. Measured by
+    // review round 1 (D3): a sealed sim VM accepted `getmetatable('').tl_hidden = 41`, a LATER
+    // chunk in a LATER tick read it back, and it survived ten tick brackets including dev's full
+    // LUA_GCCOLLECT. That is a live breach of §0 - "authoritative state never lives in the Luau
+    // heap" - whose enforcement mechanism (1) is this very freeze; mechanism (2), the growth_ticks
+    // heuristic, is structurally blind to it (one scalar write is a one-time delta, not sustained
+    // growth), and mechanism (3), the dual-sim test, is a later lane's.
+    //
+    // luaL_sandbox does three things: readonly on EVERY table in _G (not a list that has to be
+    // kept), readonly on the string metatable (the one that mattered), then readonly +
+    // setsafeenv on _G. The hand-rolled version reimplemented steps 1 and 3, narrowed step 1 to
+    // two names, and dropped step 2. A hand-kept list where a closure over the property was
+    // available is a class docs/LESSONS.md already carries (entropy_carriers).
+    //
+    // Ordering is not load-bearing: setreadonly is order-independent, and luaL_sandbox sets _G
+    // readonly LAST so its own iteration runs while _G is still writable.
+    luaL_sandbox(L);
 }

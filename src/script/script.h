@@ -38,7 +38,6 @@ constexpr ErrCode ERR_SCRIPT_COMPILE  = (ErrCode)0x0704;  // luau_compile reject
 constexpr ErrCode ERR_SCRIPT_LOAD     = (ErrCode)0x0705;  // luau_load rejected the bytecode
 constexpr ErrCode ERR_SCRIPT_RUNTIME  = (ErrCode)0x0706;  // the chunk raised; script_last_error has it
 constexpr ErrCode ERR_SCRIPT_SEALED   = (ErrCode)0x0707;  // an init-only call after script_seal
-constexpr ErrCode ERR_SCRIPT_NO_COMPILER = (ErrCode)0x0708;  // this build cannot compile in-process (RR-18)
 
 // The longest error message kept per VM. Luau's own messages are chunkname + line + reason; the
 // traceback is appended by the errfunc (docs/LUAU-LAYER.md §10.6) and truncated to fit.
@@ -65,7 +64,22 @@ struct ScriptVmDesc {
     Interner*      interner;             // process interner; may be null for the data VM
     VMemArena*     perm;                 // where the ScriptVm struct lives
     const VMemApi* os;                   // the platform vmem table the pool reserves through
+    // The SHARED vendor pool (`PLATFORM.md` §9.5's `pool_vendor`) the Luau compiler allocates
+    // from, NOT this VM's own pool. Ruled 2026-08-26 (Rafael, review round 1 D2): binding the
+    // compile window to the VM pool made an over-budget COMPILE process-fatal on the same pool
+    // where an over-budget EXECUTION is survivable by contract, and made the trip point a
+    // function of runtime heap occupancy rather than of the source. Required; a null one is
+    // ERR_SCRIPT_BAD_ARG at creation, never a silent fall back to the VM pool.
+    MemPool*       compile_pool;
 };
+
+// The headroom `compile_pool` must show before a compile is attempted, so the refusal is an
+// ErrCode and the fatal in vendor_new.cpp is never reached. DERIVED, not guessed: the Luau
+// compiler's pool peak was measured at 90.66x the source size for a 1 KB source, falling to
+// 49.83x at 64 KB, with an ~88 KB floor for even a tiny one (Luau 0.696, x86-64). The constants
+// below carry ~3x margin on the floor and ~1.4x on the worst ratio.
+enum : u64 { SCRIPT_COMPILE_HEADROOM_MIN = 256u * 1024u };
+enum : u64 { SCRIPT_COMPILE_BYTES_PER_SRC_BYTE = 128u };
 
 // Builds a sim VM: base/table/string only, the §10.2 step 4 removals, the deterministic
 // tostring/string.format replacements, sortedpairs, the fx table, the safepoint budget, and NO
@@ -144,26 +158,25 @@ const MemPoolStats* script_pool_stats(const ScriptVm* vm);
 // silent interpreter fallback - docs/CLAUDE.md's "fail loudly", applied to a missing capability.
 bool script_codegen_available(void);
 
-// Whether this build can run luau_compile in its own process. FALSE in the dev and netcode
-// tiers: Luau's COMPILER exposes no allocator hook and allocates with global `operator new`
-// (measured: 32 calls per compile; the VM itself makes zero), which those tiers' alloc-shim
-// tripwire turns into a TL_FATAL - docs/MEMORY.md §2's "every vendor lib has a hook" premise is
-// wrong for this one library. RR-18 in TODO.md carries the measurement and the options. While
-// this is false, script_run_source and script_eval_int REFUSE with ERR_SCRIPT_NO_COMPILER
-// rather than trapping the process: a build-level constraint reported, never a silent fallback
-// and never a suite-killing abort.
-bool script_can_compile_in_process(void);
-
 // The atom Luau assigns to `s` inside this VM (docs/LUAU-LAYER.md §10.2 step 8): the interner's
 // StrId for a name registered BEFORE the string was created, and -1 for anything else. A read,
 // never a registration - a script that builds a string at runtime must not be able to grow the
-// interner. Returns -1 in a VM created with no interner.
+// interner - and a NameHash match with different bytes reads as -1, because a hash is not an
+// identity (intern() fatals on that collision; a lookup simply says no). Returns -1 in a VM
+// created with no interner.
 i32 script_atom_of(ScriptVm* vm, StrView s);
 
-// Whether the string-atom callback of docs/LUAU-LAYER.md §10.2 step 8 is installed. FALSE in
-// rev 1: Luau's useratom callback takes (const char*, size_t) and NO context pointer, so it
-// cannot reach the process Interner without namespace-scope mutable state, which
-// docs/CPP-SUBSET.md §1's link gate bans outright. The ruling request is in TODO.md. While this
-// is false, lua_tostringatom yields -1 for every string and the W3 proxy's field lookup must
-// hash per access; nothing in this lane depends on it.
+// What the last compile drew from the shared vendor pool - the compile WINDOW's own peak delta,
+// not the enclosing call's. This is the number that discriminates "the compiler allocated from
+// the pool" from "the CRT served it": script_run_source also loads and runs, and both of those
+// allocate through the VM's own hook, so a figure measured across the whole call is dominated by
+// bytes that have nothing to do with RR-18. Zero before the first compile.
+u64 script_last_compile_bytes(const ScriptVm* vm);
+
+// Whether the string-atom callback of docs/LUAU-LAYER.md §10.2 step 8 is installed - true once
+// any VM has been created with an interner (RR-19, ruled 2026-08-26). Luau's callback takes
+// (const char*, size_t) and no context pointer, so the process Interner is reached through the
+// one pointer named in tools/audit/static_allow.txt. A VM created with a NULL interner leaves it
+// uninstalled, and script_atom_of then yields -1 for every string; that is a program with no
+// name registry, not a fallback.
 bool script_useratom_installed(void);

@@ -128,8 +128,21 @@ nowhere narrower, so the only way to budget such a heap is to replace it program
   pool installed it `TL_FATAL`s exactly as §2's tripwire does, so the ban is unchanged outside
   the window; the window is opened around one `luau_compile` call and closed on return, and the
   pool's live-byte counter is asserted back to its pre-compile value.
-- The pool is the **VM's own**: a compile is *for* a VM, so its transient bytes belong to that
-  VM's budget, and no extra reserve exists to size.
+- The pool is the **shared vendor pool** — `PLATFORM.md` §9.5's `pool_vendor` — and NOT the
+  compiling VM's own (**ruled 2026-08-26, Rafael**, on review round 1's D2; this reverses the
+  wording RR-18 shipped with). Binding it to the VM pool put two allocators with **opposite
+  failure semantics** on one budget: `tl_luau_alloc` returns null over budget and Luau turns that
+  into a recoverable error — §8.7's `memory_exhaustion` row pins that as the contract — while the
+  `operator new` replacement `TL_FATAL`s. Measured: a sim VM with a 512 KB budget compiling a
+  200 KB source killed the process, in every tier including `ship`, from the on-load compile path
+  fed by files on disk. It also made the trip point a function of runtime heap occupancy rather
+  than of the source, so a chunk that compiled at startup could kill the process when reloaded
+  after the heap had grown. The VM budget is a bound on VM state; a compile is not VM state.
+- **A headroom check precedes the window**, so the fatal is never the only outcome available for
+  an ordinary large source: short headroom is an `ErrCode` the caller reports. Its constants are
+  derived, not guessed — the Luau compiler's pool peak measured **90.66x** the source size for a
+  1 KB source, falling to **49.83x** at 64 KB, with an ~88 KB floor for even a tiny one (0.696,
+  x86-64); `LUAU-LAYER.md` §10.2 carries the two constants and their margins.
 - §2's tripwire operators moved into their own TU (`alloc_shim_ops.cpp`) so ordinary archive
   semantics let the replacement win without a duplicate-symbol error. They previously shared a
   member with `tl_alloc_shim_anchor`, which the guard force-pulls.
@@ -258,7 +271,8 @@ render interpolation is snapped. That is the only hook; nothing else may observe
 | `scratch.h` | `Scratch` (a `VMemArena` + a `SCRATCH_MAX_SCOPES = 16` marker stack), `scratch_init/push/scope_begin/scope_end/reset`, `TL_SCRATCH_SCOPE_BEGIN/_END` (the explicit pair of `CPP-SUBSET.md` §7b) |
 | `handle.h` | `Handle<Tag,IDX,GEN>`, `handle_make/index/gen/is_null` |
 | `mem_pool.h/.cpp` | the vendor-heap pool (§1.5); the per-lib adaptor functions live in `src/vendor_glue/` — `luau_*` is the W2 luau-vm lane's, the imgui/sdl/enet/stb adaptors the W2 vendor lane's |
-| `alloc_shim.h/.cpp` | `dev`/`netcode` tiers: global `operator new/delete` → `TL_FATAL` tripwires, stateless. The header declares `tl_alloc_shim_anchor()`, the no-op the guard calls so every guard user links the tripwire object (counting dropped by ruling 2026-08-26 — §2) |
+| `alloc_shim.h/.cpp` | the header plus `tl_alloc_shim_anchor()` — the no-op the guard calls so every guard user links the shim (counting dropped by ruling 2026-08-26 — §2). The TRIPWIRE OPERATORS are not here: see the row below |
+| `alloc_shim_ops.cpp` | `dev`/`netcode` tiers: global `operator new/delete` → `TL_FATAL`, stateless, and **alone in this archive member** so a program that must host a vendored library with no allocator hook can supply a pool-backed replacement without a duplicate symbol (§1.5, RR-18). While they shared a member with the anchor — which the guard force-pulls — no replacement was possible |
 
 ### 8.2 `VMemArena`
 

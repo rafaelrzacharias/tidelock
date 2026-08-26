@@ -98,6 +98,48 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       (the steward session dispatches it after the push; the aarch64 evidence rides the CI arm64
       legs — the Pi left the program 2026-08-25).
 
+## W2 luau-vm — review round 1 (2026-08-26, fresh context, Opus 5 high; verdict FIX FIRST)
+
+Ten findings, three HIGH and each independently disqualifying, every one reproduced on head
+`33d6efd`. Full comment on PR #11. Two needed rulings; **Rafael ruled both on 2026-08-26, relayed
+by the steward** — recorded here with that provenance, per `CLAUDE.md`'s doc-integrity protocol.
+
+- [x] **RULED 2026-08-26 (Rafael, via the steward) — D2: the compile window moves to
+      `pool_vendor`.** The RR-18 window drew from the live VM's pool, which put two allocators
+      with OPPOSITE failure semantics on one budget: `tl_luau_alloc` returns null over budget and
+      Luau makes that a recoverable error (the `memory_exhaustion` row pins it as the contract),
+      while the `operator new` replacement `TL_FATAL`s. Measured by the reviewer: a sim VM with a
+      512 KB budget compiling a ~200 KB source killed the process, in EVERY tier including `ship`,
+      from §10.9's on-load compile path fed by files on disk. It also made the trip point depend
+      on runtime heap occupancy rather than on the source. **Ruling:** the window draws from
+      `PLATFORM.md` §9.5's `pool_vendor`, so the VM budget stays a bound on VM state, plus a cheap
+      pre-window headroom check that refuses with `SCRIPT_ERR_COMPILE` instead of ever reaching
+      the fatal. **Shipped:** `ScriptVmDesc.compile_pool` (required — a null one is
+      `SCRIPT_ERR_BAD_ARG`, never a fall back), headroom constants DERIVED from measurement
+      (90.66x the source size at 1 KB, 49.83x at 64 KB, ~88 KB floor → 256 KB + 128 B/byte, ~3x
+      and ~1.4x margin), and `compile_headroom_is_refused_not_fatal`. `MEMORY.md` §1.5,
+      `PLATFORM.md` §9.5, `LUAU-LAYER.md` §10.12 and the RR-18 record above amended.
+- [x] **RULED 2026-08-26 (Rafael, via the steward) — D4: `math.random`/`math.randomseed` are
+      removed from the data VM.** Luau seeds its PCG from `uintptr_t(L) ^ time(NULL) ^ clock()`
+      (`lmathlib.cpp`), and the data VM's OUTPUT is hashed (`LUAU-LAYER.md` §1) — so a data script
+      that draws once produces a peer-divergent table, surfacing as a fingerprint mismatch rather
+      than as an error at the mistake. The reviewer measured two data VMs in one process returning
+      different values for one expression. **Ruling:** remove, because a data table wanting
+      randomness is a bug that should surface where the mistake is. **Shipped:** both names in
+      `DATA_REMOVE`, `LUAU-LAYER.md` §1 amended, and `sandbox.test.cpp`'s pin — which had been
+      BLESSING the hole with `assert(math ~= nil)` — replaced by one that refuses it. The residual
+      `time()`/`clock()` call inside `luaopen_math`'s seeding is inert once `random` is
+      unreachable: it touches only `rngstate`, which nothing can then read.
+- [x] The other eight are the lane's directly and are fixed in this branch; finding→commit is on
+      the PR. The two that changed a claim rather than code are worth keeping visible: **D1** —
+      the RR-18 guard could not fail on its own subject (the floor was measured across
+      `script_run_source`, which also loads and runs; only 28.8 % of the delta was the compiler,
+      and the reviewer's malloc/free swap passed the row). It now measures the WINDOW, via
+      `script_last_compile_bytes`. **D3** — the freeze missed the string metatable, and a sealed
+      sim script kept a field there across ten tick brackets: a live breach of `LUAU-LAYER.md`
+      §0. Now `luaL_sandbox()`, the vendored function the hand-rolled freeze had reimplemented
+      around, minus the one step that mattered.
+
 ## W2 luau-vm — lane notes (2026-08-26, `w2-luau-vm`, PR #11)
 
 Scope shipped: `docs/LUAU-LAYER.md` §10.12's **VM half** — build-order steps 1–2 plus the data-VM
@@ -607,13 +649,13 @@ E-2 needs no W2 decision but blocks real game wiring later.
       symbol; `src/vendor_glue/vendor_new.cpp` is a pool-backed global `operator new`/`delete`
       that `TL_FATAL`s exactly like the tripwire when no pool is installed;
       `src/script/vm.cpp` opens the window around one `luau_compile` and closes it on return,
-      serving the compiler from **the VM's own pool** (a compile is *for* a VM, so its
-      transient bytes belong to that VM's budget) and asserting the live-byte counter back to
-      its pre-compile value. The one pointer is exempted by name in the new
+      serving the compiler from ~~the VM's own pool~~ **the shared vendor pool — amended by the
+      D2 ruling below (2026-08-26), which reversed this clause** — and asserting the live-byte
+      counter back to its pre-compile value. The one pointer is exempted by name in the new
       `tools/audit/static_allow.txt`, read by BOTH gates, keyed by lib + directory + stem,
       with planted violations for each half alone. `MEMORY.md` §1.5/§2, `CPP-SUBSET.md` §1 and
-      `PLATFORM.md` §9.5 amended. **Result: all 19 `tests/script` rows pass in all four
-      tiers**, and §10.9's dev on-load compile is unblocked. The filing, with the measurement
+      `PLATFORM.md` §9.5 amended. **Result: all `tests/script` rows pass in all four
+      tiers** (20 at the time of that claim, which said 19 — the reviewer's record nit), and §10.9's dev on-load compile is unblocked. The filing, with the measurement
       and the two rejected options:
   - [x] **RR-18 (was BLOCKING, w2-luau-vm, 2026-08-26): the alloc-shim tripwire and a vendored C++
       library with no allocator hook cannot both exist.** `MEMORY.md` §2's premise is

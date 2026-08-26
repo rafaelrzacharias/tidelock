@@ -25,6 +25,8 @@ struct ScriptVm {
     lua_State*   L;                       // null only between allocation and a successful create
     MemPool      pool;                    // this VM's entire heap (docs/MEMORY.md §8.6)
     Interner*    interner;                // the process interner; see script_useratom_installed
+    MemPool*     compile_pool;            // the SHARED vendor pool the compiler draws from (D2)
+    u64          last_compile_bytes;      // the last compile window's pool peak delta (D1)
     ScriptVmKind kind;
     u8           init_open;               // 1 until script_seal
     u8           budget_warned;           // UI VM: the per-frame over-budget warning is once

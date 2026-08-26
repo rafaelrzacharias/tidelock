@@ -313,7 +313,9 @@ spellings across the two docs). No `<atomic>`, no `volatile`.
 
 ### 9.5 Vendor hook wiring and init order
 
-Pools (`MEMORY.md` §1.5): `pool_vendor` (SDL + ImGui + stb, 64 MB reserve), `pool_luau_sim`,
+Pools (`MEMORY.md` §1.5): `pool_vendor` (SDL + ImGui + stb — and, since the D2 ruling of
+2026-08-26, the Luau **compiler's** allocations for the duration of one `luau_compile`, which
+have no hook API of their own; 64 MB reserve), `pool_luau_sim`,
 `pool_luau_ui` (64 MB each, owned by `LUAU-LAYER`), `pool_enet` (16 MB, owned by `net/`). All
 `pool_*` calls live in `src/vendor_glue/` (the one folder allowed a static pool pointer, for the
 `STBI_MALLOC` compile-time macro and — since RR-18, ruled 2026-08-26 — for the program-wide

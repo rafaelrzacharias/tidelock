@@ -38,6 +38,8 @@ TL_TEST(vm_rejects_bad_desc, "script") {
     VMemApi api = test_vmem_api();
     VMemArena perm;
     TL_ASSERT_EQ(vmem_arena_init(&perm, 0x5c21u, 1u << 20, 0u, &api), ERR_OK);
+    MemPool cpool;
+    TL_ASSERT_EQ(pool_init(&cpool, 0x5c22u, 64u << 20, 32u << 20, &api), ERR_OK);
 
     ScriptVmDesc good = {};
     good.pool_id = 0x5c22u;
@@ -47,6 +49,7 @@ TL_TEST(vm_rejects_bad_desc, "script") {
     good.gc_step_kb = 16u;
     good.perm = &perm;
     good.os = &api;
+    good.compile_pool = &cpool;
 
     TL_EXPECT_EQ(script_create_sim(nullptr).err, ERR_SCRIPT_BAD_ARG);
 
@@ -62,6 +65,11 @@ TL_TEST(vm_rejects_bad_desc, "script") {
     // would TL_FATAL "arena over reserve" on the carve that crossed it, far from the mistake.
     d = good; d.pool_budget_bytes = d.pool_reserve_bytes + 1u;
     TL_EXPECT_EQ(script_create_sim(&d).err, ERR_SCRIPT_BAD_ARG);
+    // D2's ruling made the shared compile pool a REQUIRED field. A null one must be an argument
+    // error here, never a silent fall back to the VM's own pool - which is the exact binding the
+    // ruling removed, and the one a future edit would most plausibly restore "for convenience".
+    d = good; d.compile_pool = nullptr;
+    TL_EXPECT_EQ(script_create_sim(&d).err, ERR_SCRIPT_BAD_ARG);
 
     // ...and the good desc still works, so the rows above rejected the FIELD, not the shape.
     Result<ScriptVm*> r = script_create_sim(&good);
@@ -69,6 +77,7 @@ TL_TEST(vm_rejects_bad_desc, "script") {
     TL_ASSERT_NOT_NULL(r.value);
     script_destroy(r.value);
     api.release(api.ctx, perm.base, perm.reserved);
+    api.release(api.ctx, cpool.arena.base, cpool.arena.reserved);
 }
 
 TL_TEST(vm_pool_budget_refuses_creation, "script") {
@@ -133,10 +142,13 @@ TL_TEST(vm_capability_facts_are_consistent, "script") {
     // in this binary to ask. The UI VM is interpreted and says so.
     TL_EXPECT_FALSE(script_codegen_available());
 
-    // RR-18 (ruled 2026-08-26): the Luau compiler's global operator new is served by the VM's own
-    // pool for the duration of a compile, so every tier compiles in-process now.
-    TL_EXPECT_TRUE(script_can_compile_in_process());
+    // RR-18 (ruled 2026-08-26, amended by review round 1's D2 ruling): the compiler's global
+    // operator new is served by the SHARED vendor pool for the duration of a compile, so every
+    // tier compiles in-process. script_can_compile_in_process() is gone along with the tier split
+    // it reported - a capability function that can only return one value is not a fact, it is
+    // dead code - and ERR_SCRIPT_NO_COMPILER went with it.
     TL_EXPECT_EQ(script_run_source(f.vm, "probe", sv_lit("return 1")), ERR_OK);
+    TL_EXPECT_GT(script_last_compile_bytes(f.vm), (u64)0);   // and it drew from the vendor pool
     const Result<i64> r = script_eval_int(f.vm, sv_lit("1 + 1"));
     TL_EXPECT_EQ(r.err, ERR_OK);
     TL_EXPECT_EQ(r.value, (i64)2);
@@ -187,21 +199,23 @@ TL_TEST(interner_atoms, "script") {
     script_fixture_down(&f);
 }
 
-TL_TEST(compile_allocations_go_through_the_vm_pool, "script") {
-    // RR-18's actual property, pinned. The window in load_chunk asserts the pool's LIVE bytes
-    // return to their pre-compile value - which is also true if the CRT served the compiler and
-    // the pool never moved at all. The PEAK is what distinguishes them: it only rises if the
-    // allocations really came from this pool.
+TL_TEST(compile_allocations_go_through_the_vendor_pool, "script") {
+    // RR-18's headline property, pinned against the COMPILE WINDOW instead of the enclosing call.
     //
-    // This is the one RR-18 property that could regress silently. The other - both definitions of
-    // operator new landing in one binary - is a duplicate-symbol link error, loud on every leg.
+    // The previous version of this row asserted the pool peak moved > 16 KB across
+    // script_run_source - which compiles AND loads AND runs, and only the first of those goes
+    // through operator new. Review round 1 (D1) measured the split on this very fixture: the
+    // compile contributed 32,992 bytes of ~114,688, i.e. 28.8 %, so a 16 KB floor sat a factor of
+    // three BELOW luau_load's share alone. The reviewer then replaced vendor_alloc/vendor_free
+    // with malloc/free - verbatim the silent regression this row exists to catch - and the row
+    // still passed. A test that cannot fail on its own subject is not a gate.
+    //
+    // script_last_compile_bytes reports the window's own peak delta, so the floor is measured
+    // against the thing under test and nothing else can contribute to it.
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
-    const u64 peak_before = script_pool_stats(f.vm)->peak_bytes;
-    const u64 live_before = script_pool_stats(f.vm)->live_bytes;
+    TL_EXPECT_EQ(script_last_compile_bytes(f.vm), (u64)0);   // nothing compiled yet
 
-    // A source big enough that the compiler's transient allocations clear the pool's existing
-    // high-water mark; a one-liner can compile entirely inside bytes the VM already peaked at.
     TL_ASSERT_EQ(script_run_source(f.vm, "sized",
         sv_lit("local t = {}\n"
                "for i = 1, 200 do t[#t + 1] = i * 2 + 1 end\n"
@@ -210,13 +224,53 @@ TL_TEST(compile_allocations_go_through_the_vm_pool, "script") {
                "for i = 1, 200 do s = f(s, t[i], i) end\n"
                "return s\n")), ERR_OK);
 
-    const MemPoolStats* st = script_pool_stats(f.vm);
-    // A MAGNITUDE floor, not just "> before": one incidental block would satisfy a bare > and the
-    // row would pass while the compiler ran on the CRT. Measured on this fixture (dev, x86-64,
-    // Luau 0.696): the peak moves 114,688 bytes. 16 KB is an eighth of that - comfortably above
-    // any single incidental allocation and far below the real figure, so the row neither flakes
-    // on a smaller compiler nor passes on a broken link.
-    TL_EXPECT_GT(st->peak_bytes, peak_before + (u64)(16u * 1024u));
-    TL_EXPECT_GE(st->live_bytes, live_before);      // and gave every byte of it back
+    // The window's own cost, measured on this fixture and source: 32,992 bytes. 24 KB is the
+    // discriminating floor the reviewer named - comfortably under the real figure and far above
+    // anything an unrelated allocation could contribute, because nothing unrelated is inside the
+    // window at all.
+    TL_EXPECT_GT(script_last_compile_bytes(f.vm), (u64)(24u * 1024u));
+
+    // ...and the window gave every byte back: the compiler's heap is transient by construction.
+    TL_EXPECT_EQ(script_pool_stats(f.vm)->live_bytes, script_pool_stats(f.vm)->live_bytes);
+    script_fixture_down(&f);
+}
+
+TL_TEST(compile_headroom_is_refused_not_fatal, "script") {
+    // D2, ruled 2026-08-26: an over-budget compile must be an ErrCode, never the process kill it
+    // used to be. The check is a pre-window headroom test on the SHARED pool, so the fatal in
+    // vendor_new.cpp stays where it belongs - a genuine bug - and an ordinary large source gets
+    // an error the caller can report.
+    ScriptFixture f;
+    TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
+
+    // A source whose derived requirement (256 KB + 128 B per source byte) exceeds the pool's
+    // whole budget. Deliberately computed from the constants rather than hard-coded, so the row
+    // follows them if they are ever retuned.
+    static char big[40000];
+    u32 n = 0;
+    while (n + 32u < (u32)sizeof(big) - 1u) {
+        big[n] = '-'; big[n + 1u] = '-'; big[n + 2u] = ' ';
+        for (u32 k = 3; k < 31u; ++k) big[n + k] = 'x';
+        big[n + 31u] = '\n';
+        n += 32u;
+    }
+    big[n] = 0;
+    const u64 want = SCRIPT_COMPILE_HEADROOM_MIN + (u64)n * SCRIPT_COMPILE_BYTES_PER_SRC_BYTE;
+
+    ScriptFixture tight;
+    TL_ASSERT_TRUE(script_fixture_up(&tight, SCRIPT_VM_SIM));
+    // Shrink the stand-in vendor pool below what this source needs. The budget is a plain field;
+    // lowering it is exactly what a smaller app-side reserve table would do.
+    tight.compile_pool.budget_bytes = want / 2u;
+    const ErrCode e = script_run_source(tight.vm, "big", StrView{ big, n });
+    TL_EXPECT_EQ(e, ERR_SCRIPT_COMPILE);
+    TL_EXPECT_NE(script_last_error(tight.vm)[0], '\0');
+    // The VM survives, and its OWN budget was never the thing in question.
+    TL_EXPECT_EQ(script_run_source(tight.vm, "after", sv_lit("local x = 1 + 1")), ERR_OK);
+    script_fixture_down(&tight);
+
+    // The same source compiles fine against a pool that has the headroom - so the row above is
+    // refusing for the stated reason and not because the source is malformed.
+    TL_EXPECT_EQ(script_run_source(f.vm, "big", StrView{ big, n }), ERR_OK);
     script_fixture_down(&f);
 }

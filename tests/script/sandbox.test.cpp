@@ -86,6 +86,28 @@ TL_TEST(sandbox_readonly, "script") {
         "local ok = pcall(function() fx.pos = 1 end) assert(not ok)\n"
         "local ok2 = pcall(function() string.sub = nil end) assert(not ok2)\n"
         "local ok3 = pcall(function() table.insert = nil end) assert(not ok3)\n"));
+
+    // Review round 1, D3: the STRING METATABLE is the fourth table a sealed sim script can reach
+    // - `getmetatable('')` is not on the removal list, the table is permanently rooted by the VM,
+    // and the freeze used to miss it. A field written there survived across ticks and across
+    // chunks, which is a live breach of docs/LUAU-LAYER.md §0. The write must raise.
+    TL_EXPECT_TRUE(script_ok(f.vm,
+        "local mt = getmetatable('')\n"
+        "assert(mt ~= nil, 'the string metatable is reachable - that is the point')\n"
+        "local ok, err = pcall(function() mt.tl_hidden = 41 end)\n"
+        "assert(not ok, 'a sealed sim VM accepted a write to the string metatable')\n"
+        "assert(string.find(err, 'readonly') ~= nil, err)\n"
+        "local ok2 = pcall(function() mt.__index = nil end)\n"
+        "assert(not ok2, 'the metatable__index was writable')\n"));
+
+    // ...and the property the write would have bought: nothing a script can reach survives to a
+    // later chunk. Stated as the ACROSS-TICKS shape the defect actually took, so a future freeze
+    // that re-narrows itself fails here rather than in a dual-sim run three lanes later.
+    TL_EXPECT_TRUE(script_ok(f.vm, "local ok = pcall(function() getmetatable('').tl_probe = 7 end)"));
+    script_tick_begin(f.vm);
+    script_tick_end(f.vm);
+    TL_EXPECT_TRUE(script_ok(f.vm,
+        "assert(getmetatable('').tl_probe == nil, 'state crossed a tick boundary in the Luau heap')"));
     script_fixture_down(&f);
 }
 

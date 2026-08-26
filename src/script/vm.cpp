@@ -86,7 +86,7 @@ ErrCode take_error(ScriptVm* vm, ErrCode code) {
 Result<ScriptVm*> create(ScriptVmKind kind, const ScriptVmDesc* d) {
     if (d == nullptr || d->perm == nullptr || d->os == nullptr ||
         d->pool_reserve_bytes == 0 || d->pool_budget_bytes == 0 ||
-        d->pool_budget_bytes > d->pool_reserve_bytes) {
+        d->pool_budget_bytes > d->pool_reserve_bytes || d->compile_pool == nullptr) {
         return Result<ScriptVm*>{ nullptr, ERR_SCRIPT_BAD_ARG };
     }
 
@@ -95,6 +95,7 @@ Result<ScriptVm*> create(ScriptVmKind kind, const ScriptVmDesc* d) {
     memset(vm, 0, sizeof(ScriptVm));
     vm->kind = kind;
     vm->interner = d->interner;
+    vm->compile_pool = d->compile_pool;
     vm->budget_safepoints = d->budget_safepoints;
     vm->budget_left = (i64)d->budget_safepoints;
     vm->gc_step_kb = d->gc_step_kb;
@@ -146,25 +147,44 @@ Result<ScriptVm*> create(ScriptVmKind kind, const ScriptVmDesc* d) {
 // Compiles `source` and leaves the loaded chunk on the stack. The bytecode buffer luau_compile
 // returns is malloc'd by contract and freed here on every path.
 ErrCode load_chunk(ScriptVm* vm, const char* chunkname, StrView source) {
-    if (!script_can_compile_in_process()) {
-        return script_set_error(vm, ERR_SCRIPT_NO_COMPILER,
-                                "this tier cannot compile Luau source in-process: the Luau "
-                                "compiler allocates with global operator new, which the "
-                                "alloc-shim tripwire makes fatal in dev and netcode "
-                                "(TODO.md RR-18)");
-    }
     lua_CompileOptions opts = script_compile_options();
     size_t bc_size = 0;
-    // RR-18 (ruled 2026-08-26): Luau's Compiler has no allocator hook and allocates with global
-    // operator new. The window below is the whole answer - the VM's own pool serves those
-    // allocations (a compile is FOR this VM, so its transient bytes belong to this VM's budget),
-    // and outside it a global new is fatal exactly as before. The compiler frees everything it
-    // allocated before returning, which is asserted after the window closes.
-    const u64 live_before = pool_stats(&vm->pool)->live_bytes;
-    vendor_heap_install(&vm->pool);
+    // RR-18, as amended by review round 1's D2 ruling (2026-08-26, Rafael): Luau's Compiler has
+    // no allocator hook and allocates with global operator new, and the window below serves those
+    // allocations from the SHARED VENDOR POOL - `PLATFORM.md` §9.5's pool_vendor - not from this
+    // VM's own pool. Two reasons, both measured rather than argued:
+    //   - the two allocators drawing on one pool had OPPOSITE failure semantics. tl_luau_alloc
+    //     returns null over budget, which Luau turns into a recoverable ERR_SCRIPT_RUNTIME (the
+    //     memory_exhaustion row pins that as the contract); vendor_alloc TL_FATALs. A sim VM with
+    //     a 512 KB budget compiling a 200 KB source killed the process, in every tier including
+    //     ship, from a path fed by files on disk.
+    //   - drawing from the live VM's pool made the trip point a function of runtime heap
+    //     occupancy: a chunk that compiled at startup could kill the process when reloaded after
+    //     the heap had grown, with reproducibility depending on GC state.
+    // The headroom check makes the refusal an ErrCode, so vendor_alloc's fatal - which is correct
+    // for a genuine bug - is not the only outcome available for an ordinary large source.
+    MemPool* cpool = vm->compile_pool;
+    const MemPoolStats* cst = pool_stats(cpool);
+    const u64 want = SCRIPT_COMPILE_HEADROOM_MIN +
+                     (u64)source.len * SCRIPT_COMPILE_BYTES_PER_SRC_BYTE;
+    const u64 have = cpool->budget_bytes > cst->live_bytes
+                   ? cpool->budget_bytes - cst->live_bytes : 0;
+    if (have < want) {
+        return script_set_error(vm, ERR_SCRIPT_COMPILE,
+                                "the shared vendor pool has too little headroom to compile this "
+                                "source (docs/MEMORY.md section 1.5)");
+    }
+    const u64 live_before = cst->live_bytes;
+    const u64 peak_before = cst->peak_bytes;
+    vendor_heap_install(cpool);
     char* bc = luau_compile(source.ptr, (size_t)source.len, &opts, &bc_size);
     vendor_heap_install(nullptr);
-    TL_ASSERT(pool_stats(&vm->pool)->live_bytes == live_before);
+    // What the window itself cost, for the test that guards RR-18's headline mechanism. Measured
+    // HERE and not across script_run_source because that call also loads and runs, and both of
+    // those go through tl_luau_alloc - review round 1 (D1) showed the confound is larger than the
+    // signal, so a floor measured against the whole call cannot discriminate.
+    vm->last_compile_bytes = pool_stats(cpool)->peak_bytes - peak_before;
+    TL_ASSERT(pool_stats(cpool)->live_bytes == live_before);
     (void)live_before;
     if (bc == nullptr) {
         return script_set_error(vm, ERR_SCRIPT_COMPILE, "luau_compile returned no bytecode");
@@ -395,13 +415,9 @@ i32 script_atom_of(ScriptVm* vm, StrView s) {
     return (i32)atom;
 }
 
-bool script_can_compile_in_process(void) {
-    // TRUE in every tier since RR-18 was ruled (2026-08-26): the Luau compiler's global
-    // operator new is served by the VM's own pool for the duration of the compile
-    // (vendor_glue/vendor_new.h), so the alloc-shim tripwire no longer stands in its way. The
-    // function stays as the one home for the fact - a build that ever cannot compile in-process
-    // has one place to say so, and the tests already ask rather than mirroring a tier macro.
-    return true;
+u64 script_last_compile_bytes(const ScriptVm* vm) {
+    TL_ASSERT(vm != nullptr);
+    return vm->last_compile_bytes;
 }
 
 bool script_useratom_installed(void) {
