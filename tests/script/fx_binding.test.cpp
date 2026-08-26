@@ -26,6 +26,27 @@ i64 eval(ScriptVm* vm, const char* expr, bool* ok) {
     return r.value;
 }
 
+// A comparison that cannot pass on a Luau-side failure. `eval` returns 0 when the expression
+// raised, so a row whose expected value is 0 - and `fx.mul_q(0, x)`, `fx.lerp(a, a, t)` and every
+// zero-vector case among them - passed on the fallback while the binding was broken. Review round
+// 1 (D10) found `ok` written fourteen times and read once. Returns true only if the evaluation
+// SUCCEEDED and matched, so the caller's counter counts comparisons rather than iterations.
+bool eval_eq(TestCtx* t, ScriptVm* vm, const char* expr, i64 want, u32* checked) {
+    bool ok = false;
+    const i64 got = eval(vm, expr, &ok);
+    ++t->checks;
+    if (!ok) {
+        tl_test_fail(t, __FILE__, (u32)__LINE__, expr, true);
+        return false;
+    }
+    if (got != want) {
+        tl_test_fail(t, __FILE__, (u32)__LINE__, expr, true);
+        return false;
+    }
+    *checked += 1u;
+    return true;
+}
+
 // True iff `expr` FAILS in `vm` - the shape every argument-check row needs. A binding that
 // accepts a bad argument and returns a wrong number is the failure this catches; a binding that
 // accepts it and returns a right number is still a failure, because the contract is the check.
@@ -86,7 +107,9 @@ TL_TEST(fx_ops_match_cpp, "script") {
 
     // A seeded sweep, generated INSIDE each helper's contract (docs/LESSONS.md: a full-range
     // property test leaves the contract and traps in dev, and then it is a trap where it is not
-    // vacuous). Every row compares the Luau result with the C++ helper's raw bits.
+    // vacuous). Every row compares the Luau result with the C++ helper's raw bits, through
+    // eval_eq - which FAILS on a Luau-side error instead of comparing eval's 0 fallback, and
+    // counts the comparisons it actually made.
     for (u32 i = 0; i < 256u; ++i) {
         const u64 r = rng_for(0x5c12u, i, 7u, 1u, 0u);
         const i32 a = (i32)(i64)((r & 0xffffffffu) % 2000001u) - 1000000;      // +-1e6
@@ -94,83 +117,123 @@ TL_TEST(fx_ops_match_cpp, "script") {
         const i32 qv = (i32)(i64)((r >> 13) % (u64)(2u * (u32)q_t::ONE)) - q_t::ONE;  // q in +-1
         const i32 sv_ = (i32)(i64)((r >> 27) % (u64)(2u * (u32)scalar_t::ONE)) - scalar_t::ONE;
 
-        bool ok = false;
         // fx.mul_q(q, a) is mul<A>(q_t, A) for every row A: the shift is always 30.
         (void)snprintf(expr, sizeof(expr), "fx.mul_q(%d, %d)", (int)qv, (int)a);
-        TL_EXPECT_EQ(eval(f.vm, expr, &ok), (i64)fx::mul<pos_t>(fx::fx_raw<q_t>(qv), fx::fx_raw<pos_t>(a)).v);
-        TL_EXPECT_TRUE(ok);
+        (void)eval_eq(t, f.vm, expr,
+                      (i64)fx::mul<pos_t>(fx::fx_raw<q_t>(qv), fx::fx_raw<pos_t>(a)).v, &checked);
 
         // fx.mul_scalar(s, a) is mul<A>(scalar_t, A): the shift is always 16.
         (void)snprintf(expr, sizeof(expr), "fx.mul_scalar(%d, %d)", (int)sv_, (int)a);
-        TL_EXPECT_EQ(eval(f.vm, expr, &ok), (i64)fx::mul<vel_t>(fx::fx_raw<scalar_t>(sv_), fx::fx_raw<vel_t>(a)).v);
+        (void)eval_eq(t, f.vm, expr,
+                      (i64)fx::mul<vel_t>(fx::fx_raw<scalar_t>(sv_), fx::fx_raw<vel_t>(a)).v, &checked);
 
-        // fx.div_q(a, b) is div<q_t>(A, A), same row both sides.
-        // div<q_t> ASSERTS when the quotient leaves q_t's +-2 range, so the oracle cannot be
-        // called to discover whether it is in range (docs/LESSONS.md: generate inside the
-        // contract). The raw quotient is computed here first, and only in-range pairs are swept.
+        // fx.div_q(a, b) is div<q_t>(A, A), same row both sides. div<q_t> ASSERTS when the
+        // quotient leaves q_t's range, so the oracle cannot be called to discover whether it is in
+        // range (docs/LESSONS.md: generate inside the contract) - the raw quotient is computed
+        // first and only in-range pairs are swept.
         if (b != 0) {
             const i64 raw_q = fx::rne_div((i64)a * ((i64)1 << q_t::FRAC_BITS), (i64)b);
             if (raw_q >= (i64)INT32_MIN && raw_q <= (i64)INT32_MAX) {
                 (void)snprintf(expr, sizeof(expr), "fx.div_q(%d, %d)", (int)a, (int)b);
-                TL_EXPECT_EQ(eval(f.vm, expr, &ok),
-                             (i64)fx::div<q_t>(fx::fx_raw<pos_t>(a), fx::fx_raw<pos_t>(b)).v);
+                (void)eval_eq(t, f.vm, expr,
+                              (i64)fx::div<q_t>(fx::fx_raw<pos_t>(a), fx::fx_raw<pos_t>(b)).v, &checked);
             }
         }
 
         // fx.mul_pos_vel_dt(x, v) is the integrate step x + mul<pos_t>(v, H).
         (void)snprintf(expr, sizeof(expr), "fx.mul_pos_vel_dt(%d, %d)", (int)a, (int)b);
-        TL_EXPECT_EQ(eval(f.vm, expr, &ok),
-                     (i64)(fx::fx_raw<pos_t>(a) + fx::mul<pos_t>(fx::fx_raw<vel_t>(b), fx::H)).v);
+        (void)eval_eq(t, f.vm, expr,
+                      (i64)(fx::fx_raw<pos_t>(a) + fx::mul<pos_t>(fx::fx_raw<vel_t>(b), fx::H)).v, &checked);
 
         // fx.vel_from_delta(dx) is mul_int<vel_t>(pos_t, INV_H) - exact, a two-bit widening.
         const i32 small = a / 512;                       // inside the |dx| * 1920 < 2^31 contract
         (void)snprintf(expr, sizeof(expr), "fx.vel_from_delta(%d)", (int)small);
-        TL_EXPECT_EQ(eval(f.vm, expr, &ok),
-                     (i64)fx::mul_int<vel_t>(fx::fx_raw<pos_t>(small), fx::INV_H).v);
+        (void)eval_eq(t, f.vm, expr,
+                      (i64)fx::mul_int<vel_t>(fx::fx_raw<pos_t>(small), fx::INV_H).v, &checked);
 
         // fx.lerp(a, b, t) is lerp<A>(A, A, q_t), one RNE.
         (void)snprintf(expr, sizeof(expr), "fx.lerp(%d, %d, %d)", (int)a, (int)b, (int)qv);
-        TL_EXPECT_EQ(eval(f.vm, expr, &ok),
-                     (i64)fx::lerp<pos_t>(fx::fx_raw<pos_t>(a), fx::fx_raw<pos_t>(b), fx::fx_raw<q_t>(qv)).v);
+        (void)eval_eq(t, f.vm, expr,
+                      (i64)fx::lerp<pos_t>(fx::fx_raw<pos_t>(a), fx::fx_raw<pos_t>(b),
+                                           fx::fx_raw<q_t>(qv)).v, &checked);
 
         // fx.dist / fx.normalize: the pos x pos path, inside the broadphase-sized contract.
         const i32 dx = a / 64, dy = b / 64;
-        (void)snprintf(expr, sizeof(expr), "fx.dist(0, 0, %d, %d)", (int)dx, (int)dy);
         const fx::vec2<pos_t> d = { fx::fx_raw<pos_t>(dx), fx::fx_raw<pos_t>(dy) };
-        TL_EXPECT_EQ(eval(f.vm, expr, &ok), (i64)fx::len(d).v);
+        (void)snprintf(expr, sizeof(expr), "fx.dist(0, 0, %d, %d)", (int)dx, (int)dy);
+        (void)eval_eq(t, f.vm, expr, (i64)fx::len(d).v, &checked);
         if (dx != 0 || dy != 0) {
             const fx::vec2<q_t> u = fx::normalize(d);
             (void)snprintf(expr, sizeof(expr), "select(1, fx.normalize(%d, %d))", (int)dx, (int)dy);
-            TL_EXPECT_EQ(eval(f.vm, expr, &ok), (i64)u.x.v);
+            (void)eval_eq(t, f.vm, expr, (i64)u.x.v, &checked);
             (void)snprintf(expr, sizeof(expr), "select(2, fx.normalize(%d, %d))", (int)dx, (int)dy);
-            TL_EXPECT_EQ(eval(f.vm, expr, &ok), (i64)u.y.v);
+            (void)eval_eq(t, f.vm, expr, (i64)u.y.v, &checked);
         }
 
-        // fx.sincos / fx.atan2 / fx.atan2_q against det_math, bit for bit (never "close enough":
-        // the kernels are pure integer, so the binding must reproduce them exactly).
+        // fx.sincos / fx.atan2 against det_math, bit for bit (never "close enough": the kernels
+        // are pure integer, so the binding must reproduce them exactly).
         const i32 ang = (i32)(u32)(r >> 7);
-        q_t s = fx::fx_raw<q_t>(0), c = fx::fx_raw<q_t>(0);
-        fx::sincos(fx::fx_raw<angle_t>(ang), &s, &c);
+        q_t sn = fx::fx_raw<q_t>(0), cs = fx::fx_raw<q_t>(0);
+        fx::sincos(fx::fx_raw<angle_t>(ang), &sn, &cs);
         (void)snprintf(expr, sizeof(expr), "select(1, fx.sincos(%d))", (int)ang);
-        TL_EXPECT_EQ(eval(f.vm, expr, &ok), (i64)s.v);
+        (void)eval_eq(t, f.vm, expr, (i64)sn.v, &checked);
         (void)snprintf(expr, sizeof(expr), "select(2, fx.sincos(%d))", (int)ang);
-        TL_EXPECT_EQ(eval(f.vm, expr, &ok), (i64)c.v);
+        (void)eval_eq(t, f.vm, expr, (i64)cs.v, &checked);
         if (dx != 0 || dy != 0) {
             (void)snprintf(expr, sizeof(expr), "fx.atan2(%d, %d)", (int)dy, (int)dx);
-            TL_EXPECT_EQ(eval(f.vm, expr, &ok),
-                         (i64)fx::atan2(fx::fx_raw<pos_t>(dy), fx::fx_raw<pos_t>(dx)).v);
+            (void)eval_eq(t, f.vm, expr,
+                          (i64)fx::atan2(fx::fx_raw<pos_t>(dy), fx::fx_raw<pos_t>(dx)).v, &checked);
         }
 
         // The saturating quanta ops, over the full i32 range - saturation is the point.
         const i32 big_a = (i32)(u32)(r >> 3), big_b = (i32)(u32)(r >> 19);
         (void)snprintf(expr, sizeof(expr), "fx.sat_add(%d, %d)", (int)big_a, (int)big_b);
-        TL_EXPECT_EQ(eval(f.vm, expr, &ok), (i64)fx::sat_add(big_a, big_b));
+        (void)eval_eq(t, f.vm, expr, (i64)fx::sat_add(big_a, big_b), &checked);
         (void)snprintf(expr, sizeof(expr), "fx.sat_sub(%d, %d)", (int)big_a, (int)big_b);
-        TL_EXPECT_EQ(eval(f.vm, expr, &ok), (i64)fx::sat_sub(big_a, big_b));
-        checked += 1u;
+        (void)eval_eq(t, f.vm, expr, (i64)fx::sat_sub(big_a, big_b), &checked);
     }
-    // Per docs/LESSONS.md: count what was actually swept, or a row that generated nothing passes.
-    TL_EXPECT_EQ(checked, 256u);
+    // COMPARISONS, not iterations (review round 1, D10): the old counter incremented once per
+    // loop pass and would have read 256 with every comparison inside it broken. The floor is the
+    // unconditional rows only - 11 per pass - so a conditional row dropping out cannot mask it.
+    TL_EXPECT_GE(checked, 256u * 11u);
+    script_fixture_down(&f);
+}
+
+TL_TEST(fx_overflow_is_reported_with_the_real_result, "script") {
+    // Review round 1, D8: check_fits_i32 printed `q >> 32` - the HIGH HALF - so a result whose
+    // high half is 0 read "result 0 does not fit the row". Never observed, because no row
+    // exercised an overflow at all: the sweep above stays in range by construction. This is that
+    // row, and it is deliberately built on a case whose high half IS 0, so it fails against the
+    // defect rather than merely printing a different wrong number.
+    ScriptFixture f;
+    TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
+
+    // mul_q(INT32_MAX, INT32_MAX) shifts (2^31-1)^2 right by 30 -> 4,294,967,292, whose high
+    // half is exactly 0. Values computed against the same rne_shr the binding uses.
+    TL_EXPECT_TRUE(script_ok(f.vm,
+        "local ok, err = pcall(fx.mul_q, 2147483647, 2147483647)\n"
+        "assert(not ok, 'an overflowing mul_q was accepted')\n"
+        "assert(string.find(err, 'does not fit the row') ~= nil, tostring(err))\n"
+        "assert(string.find(err, '4294967292') ~= nil, 'the message did not print the result: ' .. err)\n"
+        "assert(string.find(err, 'result 0 ') == nil, 'the message printed the high half: ' .. err)\n"
+        "assert(string.find(err, 'fx.mul_q') ~= nil, err)\n"));
+
+    // The other three ops that share the helper, so the fix is not pinned at one call site.
+    TL_EXPECT_TRUE(script_ok(f.vm,
+        "local ok1, e1 = pcall(fx.mul_scalar, 2147483647, 2147483647)\n"
+        "assert(not ok1 and string.find(e1, '70368744112128') ~= nil, tostring(e1))\n"
+        "local ok2, e2 = pcall(fx.lerp, 2147483647, 0, -2147483648)\n"
+        "assert(not ok2 and string.find(e2, '6442450941') ~= nil, tostring(e2))\n"
+        "local ok3, e3 = pcall(fx.div_q, 2147483647, 1)\n"
+        "assert(not ok3 and string.find(e3, '2305843008139952128') ~= nil, tostring(e3))\n"));
+
+    // ...and the in-range neighbours still work, so the rows above fail for overflow and not
+    // because these entry points reject everything.
+    bool ok = false;
+    TL_EXPECT_EQ(eval(f.vm, "fx.mul_q(1073741824, 1000)", &ok), (i64)1000);
+    TL_EXPECT_TRUE(ok);
+    TL_EXPECT_EQ(eval(f.vm, "fx.div_q(1000, 1000)", &ok), (i64)q_t::ONE);
+    TL_EXPECT_TRUE(ok);
     script_fixture_down(&f);
 }
 

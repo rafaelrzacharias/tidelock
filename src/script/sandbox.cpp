@@ -33,7 +33,20 @@ const char* const SIM_REMOVE[] = {
 
 // docs/LUAU-LAYER.md §10.2 step 4, last sentence. `os` is additionally never opened (see
 // open_libraries); it is listed so the assertion covers it either way.
-const char* const DATA_REMOVE[] = { "os", "io", "loadstring", "getfenv", "setfenv", nullptr };
+//
+// `math.random`/`math.randomseed` join the list by RULING (2026-08-26, Rafael - review round 1's
+// D4). Luau seeds its PCG from `uintptr_t(L) ^ time(NULL) ^ clock()` (lmathlib.cpp), and the data
+// VM's OUTPUT IS HASHED (docs/LUAU-LAYER.md §1) - so a data script that draws once produces a
+// peer-divergent table, and the divergence surfaces as a fingerprint mismatch on handshake rather
+// than as an error where the mistake is. A data table wanting randomness is a bug, and it should
+// fail at the call. The rest of `math` stays: it is pure and its output is a function of its
+// input. The `time()`/`clock()` reads inside luaopen_math's seeding are inert once `random` is
+// unreachable - they touch only `rngstate`, which nothing can then read.
+const char* const DATA_REMOVE[] = {
+    "os", "io", "loadstring", "getfenv", "setfenv",
+    "math.random", "math.randomseed",
+    nullptr,
+};
 
 // Sets `path` to nil, where `path` is either a global name or `table.field`. Returns false if a
 // dotted path names a global that is not a table - which would mean the removal silently did

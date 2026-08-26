@@ -13,9 +13,17 @@
 //   does NOT install it links foundation's TL_FATAL tripwires instead (alloc_shim_ops.cpp, its
 //   own archive member precisely so the two never collide).
 // Invariants: install before the first allocation the vendored library makes and uninstall after
-//   its last; between those points EVERY global new in the process comes from `pool`, including
-//   any accidental one from src/ - which is why the symbol audit's ban on new/delete in src/ libs
-//   is the check that still matters, not this. Not reentrant; not thread-safe (the pool is not).
+//   its last; between those points every global new THAT THIS TU REPLACES comes from `pool`,
+//   including any accidental one from src/ - which is why the symbol audit's ban on new/delete in
+//   src/ libs is the check that still matters, not this. Not reentrant; not thread-safe (the pool
+//   is not).
+// Coverage, narrowed to what is true (review round 1): the six ordinary forms are replaced. The
+//   ALIGNED forms (`operator new(size_t, align_val_t)` and friends) and the `nothrow` overloads
+//   are neither replaced here nor tripwired in foundation, so an over-aligned or nothrow
+//   allocation would reach the CRT. `nm` finds no reference to any of them anywhere in the build,
+//   so this is a bound on the claim rather than a live hole - and it cannot be closed the obvious
+//   way, because `std::align_val_t` and `std::nothrow_t` are `std::` names that
+//   docs/CPP-SUBSET.md §1 bans outright. If a vendored library ever needs one, that is a ruling.
 // Determinism: never authoritative, never registered, never hashed (docs/MEMORY.md §5). Bytes
 //   allocated here belong to a compile, not to a tick.
 // Threading: one owner. The Luau compiler runs on the thread that asked for the compile.

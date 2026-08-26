@@ -56,6 +56,28 @@ TL_TEST(sandbox_data_vm_removals, "script") {
     // It keeps the stock set otherwise - a data file is arithmetic and tables, and its OUTPUT is
     // what is hashed (docs/ASSETS-AND-DATA.md §3), not the VM it was built in.
     TL_EXPECT_TRUE(script_ok(f.vm, "assert(math ~= nil and pairs ~= nil and type(fx.pos) == 'function')"));
+
+    // ...EXCEPT the two that are seeded from an address and the wall clock (ruled 2026-08-26,
+    // review round 1's D4). This assertion previously read `assert(math ~= nil)` and nothing
+    // more, which BLESSED the hole - it is what turned an omission into a decision nobody made,
+    // so the replacement names both functions rather than the table.
+    TL_EXPECT_TRUE(script_ok(f.vm,
+        "assert(math.random == nil, 'math.random survived in the data VM')\n"
+        "assert(math.randomseed == nil, 'math.randomseed survived in the data VM')\n"
+        "assert(math.floor ~= nil and math.abs ~= nil, 'the pure half of math must remain')\n"
+        "assert(math.floor(2.7) == 2 and math.max(1, 5) == 5)\n"));
+
+    // The property the removal buys, stated as the failure it prevents: a data table's output is
+    // hashed, so two VMs in one process must agree. Any expression a data file can write is a
+    // pure function of its inputs now, and the same expression in two VMs gives the same bytes.
+    ScriptFixture g;
+    TL_ASSERT_TRUE(script_fixture_up(&g, SCRIPT_VM_DATA));
+    const Result<i64> a = script_eval_int(f.vm, sv_lit("math.floor(math.pi * 1000000)"));
+    const Result<i64> b = script_eval_int(g.vm, sv_lit("math.floor(math.pi * 1000000)"));
+    TL_EXPECT_EQ(a.err, ERR_OK);
+    TL_EXPECT_EQ(b.err, ERR_OK);
+    TL_EXPECT_EQ(a.value, b.value);
+    script_fixture_down(&g);
     // The sim VM's fx.to_f64 exclusion is not a data-VM rule: a data file writes literals.
     TL_EXPECT_TRUE(script_ok(f.vm, "assert(fx.to_f64 == nil)"));
     script_fixture_down(&f);
@@ -197,4 +219,45 @@ TL_TEST(sortedpairs_order, "script") {
         "for k in sortedpairs({ b=1, [2]=2, a=3, [1]=4 }) do order[#order+1] = tostring(k) end\n"
         "assert(table.concat(order, ',') == '1,2,a,b', table.concat(order, ','))\n"));
     script_fixture_down(&f);
+}
+
+TL_TEST(fx_table_per_vm_kind, "script") {
+    // Review round 1, D7: vm.h's contract said the data VM got "the literal constructors and the
+    // constants" while script_bind_fx bound the full table to every kind, and nothing checked
+    // either claim. Reconciled in favour of the code - every op is a pure integer function, so
+    // none can make a hashed data table peer-divergent, and refusing them bought nothing - and
+    // pinned here so the contract and the binding cannot drift apart again silently.
+    static const ScriptVmKind KINDS[] = { SCRIPT_VM_SIM, SCRIPT_VM_UI, SCRIPT_VM_DATA };
+    for (u32 i = 0; i < 3u; ++i) {
+        ScriptFixture f;
+        TL_ASSERT_TRUE(script_fixture_up(&f, KINDS[i]));
+        // The whole table, in every kind: literals, constants, the op set and the integer helpers.
+        TL_EXPECT_TRUE(script_ok(f.vm,
+            "local want = {'pos','vel','invmass','stiff','q','angle','omega','scalar','raw',"
+            "'mul_q','mul_scalar','div_q','mul_pos_vel_dt','vel_from_delta','dist','normalize',"
+            "'sincos','atan2','atan2_q','lerp','sat_add','sat_sub','imin','imax','iabs','iclamp',"
+            "'str','rng_below','rng_q'}\n"
+            "for _, n in ipairs(want) do\n"
+            "  assert(type(fx[n]) == 'function', n .. ' missing from the fx table')\n"
+            "end\n"
+            "for _, n in ipairs({'H','INV_H','G_SUBSTEP','TEXEL','V_MAX_WORLD','POS','OMEGA'}) do\n"
+            "  assert(type(fx[n]) == 'number', n .. ' missing from the fx constants')\n"
+            "end\n"));
+        script_fixture_down(&f);
+    }
+
+    // `to_f64` is the ONE kind-gated entry, and it is gated the way round: the UI VM draws and
+    // prints, and neither feeds state; a scaled double is exactly what must never exist in the
+    // sim VM, and the data VM's output is hashed so it must not be there either.
+    ScriptFixture ui, sim, data;
+    TL_ASSERT_TRUE(script_fixture_up(&ui, SCRIPT_VM_UI));
+    TL_EXPECT_TRUE(script_ok(ui.vm, "assert(type(fx.to_f64) == 'function')"));
+    TL_EXPECT_TRUE(script_ok(ui.vm, "assert(fx.to_f64(fx.pos(12.5), fx.POS) == 12.5)"));
+    script_fixture_down(&ui);
+    TL_ASSERT_TRUE(script_fixture_up(&sim, SCRIPT_VM_SIM));
+    TL_EXPECT_TRUE(script_ok(sim.vm, "assert(fx.to_f64 == nil)"));
+    script_fixture_down(&sim);
+    TL_ASSERT_TRUE(script_fixture_up(&data, SCRIPT_VM_DATA));
+    TL_EXPECT_TRUE(script_ok(data.vm, "assert(fx.to_f64 == nil)"));
+    script_fixture_down(&data);
 }

@@ -87,17 +87,66 @@ def tooling_stems(root):
 # that CALLS into Luau) as well as definitions (a lib that reimplements a lua_* name). The C
 # names are what to match: vendor/luau is built with LUA_API=extern "C", so there is no mangling
 # to see through, and that is also why the check can be a prefix match rather than a demangle.
-VENDOR_SYMBOL_PREFIXES = (("lua_", "luaL_", "luau_", "luaopen_"), )
+# The C API, matched on the RAW name under either platform's leading-underscore convention.
+VENDOR_C_PREFIXES = ("lua_", "luaL_", "luau_", "luaopen_")
+# ...and everything else, matched on the DEMANGLED name. Luau's internal VM API is C++-linkage
+# (`_Z12luaS_newlstrP9lua_StatePKcm`) and the Compiler carries 8,483 mangled `Luau::` symbols;
+# review round 1 (D5) measured that a lib with a hand-written C++-linkage extern taking a
+# `lua_State*` - verbatim the escape this gate's error message describes - passed with 0
+# violations. Both existing fixtures were `extern "C"`, so neither could ever have caught it.
+#
+# A word-boundary search rather than a prefix test, because MSVC demangling puts the return type
+# and calling convention first (`int __cdecl luaS_newlstr(...)`) where Itanium does not. The
+# lookbehind is what keeps our OWN names out: `tl_luau_alloc` has `luau` preceded by `_`.
+VENDOR_DEMANGLED = re.compile(r'(?<![A-Za-z0-9_])(lua[A-Za-z0-9_]*|Luau::)')
 
 
-def vendor_symbol(sym):
-    """True for a Luau public C symbol, under either platform's leading-underscore convention."""
-    bare = sym.lstrip("_")
-    for group in VENDOR_SYMBOL_PREFIXES:
-        for p in group:
-            if bare.startswith(p):
-                return True
-    return False
+def vendor_symbol(raw, demangled):
+    """True for any Luau symbol - the public C API by raw name, the C++ surface by demangled one.
+    Both are checked because a name the demangler does not recognise comes back unchanged, and a
+    name it does recognise no longer starts with the identifier."""
+    bare = raw.lstrip("_")
+    if any(bare.startswith(p) for p in VENDOR_C_PREFIXES):
+        return True
+    return bool(VENDOR_DEMANGLED.search(demangled))
+
+
+def symbol_display_pairs(nm, path):
+    """[(raw, demangled)] for every symbol in `path`, defined and undefined alike.
+
+    Two nm runs over one archive, zipped by line position: `--demangle` rewrites the NAME column
+    and leaves every other column and the line order untouched, so position is a reliable key
+    where a name is not (a demangled signature contains spaces, and the raw/demangled forms of
+    one symbol share nothing to join on). A length mismatch is a hard error rather than a
+    best-effort zip - silently comparing two differently-sized lists is the class docs/LESSONS.md
+    tracks as the empty-list silent pass."""
+    raw_lines = run(nm, [], path).splitlines()
+    dem_lines = run(nm, ["--demangle"], path).splitlines()
+    if len(raw_lines) != len(dem_lines):
+        sys.exit("symbols: nm and nm --demangle disagree on line count for %s (%d vs %d)"
+                 % (path, len(raw_lines), len(dem_lines)))
+    out = []
+    for rl, dl in zip(raw_lines, dem_lines):
+        rp = rl.split()
+        # Skip everything that is not a symbol line. An archive listing interleaves MEMBER HEADER
+        # lines (`luau_alloc.cpp.o:`) and blanks with the symbols, and a parse that took the last
+        # whitespace field unconditionally read those filenames as symbols - which is how the
+        # first run of this gate reported `luau_alloc.cpp.o` and `luacomp.cpp.o` as Luau symbols
+        # leaking out of the wrap module. The type column is the discriminator: exactly one
+        # character, and it is the second-to-last field on a defined symbol and the first on an
+        # undefined one.
+        if len(rp) < 2:
+            continue
+        kind = rp[0] if len(rp) == 2 else rp[-2]
+        if len(kind) != 1 or not kind.isalpha():
+            continue
+        raw = rp[-1]
+        dp = dl.split()
+        # The demangled name is everything after the address+type columns, rejoined: a signature
+        # has spaces in it, so parts[-1] would be `long)`.
+        dem = " ".join(dp[len(rp) - 1:]) if len(dp) >= len(rp) else dl.strip()
+        out.append((raw, dem))
+    return out
 
 
 def static_allow_libs(root):
@@ -268,14 +317,13 @@ def main():
         for name, path in layers + data_only:
             if name in a.wrap_lib:
                 continue
-            seen = (names(run(a.nm, ["--undefined-only"], path), undefined=True)
-                    | names(run(a.nm, ["--defined-only"], path), undefined=False))
-            for sym in sorted(seen):
-                if vendor_symbol(sym):
+            for raw, dem in sorted(set(symbol_display_pairs(a.nm, path))):
+                if vendor_symbol(raw, dem):
+                    shown = dem if dem and dem != raw else raw
                     violations.append(
                         "%s: Luau symbol %s outside the wrap module %s - a lua_State* can leave "
                         "the module through a hand-written extern with no #include to catch it "
-                        "(docs/LUAU-LAYER.md section 10.12)" % (name, sym, "/".join(a.wrap_lib)))
+                        "(docs/LUAU-LAYER.md section 10.12)" % (name, shown, "/".join(a.wrap_lib)))
 
     for v in violations:
         print("ERROR " + v)

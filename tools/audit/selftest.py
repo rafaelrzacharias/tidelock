@@ -547,6 +547,15 @@ LUAU_LEAK_CPP = ('extern "C" int lua_pcall(void*, int, int, int);\n'
 # undefined-reference-only check completely.
 LUAU_DEFINE_CPP = ('extern "C" int luaopen_base(void*);\n'
                    "int luaopen_base(void*) { return 0; }\n")
+# ONE FIXTURE PER LINKAGE FAMILY (review round 1, D5). Both plants above are `extern "C"`, so
+# neither could ever catch Luau's C++-linkage surface - the VM's internal API (`_Z12luaS_newlstr
+# P9lua_StatePKcm`) and the Compiler's 8,483 mangled `Luau::` symbols. The reviewer measured a
+# lib shaped exactly like the first of these passing the gate with 0 violations. Same lesson as
+# the `__GNUC__` entry in LESSONS.md: one fixture per family, not one per rule.
+LUAU_CXX_LEAK_CPP = ("int luaS_newlstr(void*, const char*, unsigned long);\n"
+                     "int tl_cxx_leak(void* L) { return luaS_newlstr(L, \"x\", 1); }\n")
+LUAU_NS_LEAK_CPP = ("namespace Luau { int compileOrThrow(const char*); }\n"
+                    "int tl_ns_leak(const char* s) { return Luau::compileOrThrow(s); }\n")
 
 
 def build_lib(cxx, ar, root, name, sources):
@@ -629,6 +638,23 @@ def test_symbols(tmp, nm, objdump, ar, cxx):
         record("symbols: the wrap module may reference Luau", rc2 == 0, out2.strip()[:200])
     else:
         record("symbols: a Luau symbol referenced outside the wrap module", False, (err or err2)[:200])
+
+    cxxleak, errc = build_lib(cxx, ar, root, "luaucxx", [LUAU_CXX_LEAK_CPP])
+    nsleak, errn = build_lib(cxx, ar, root, "luauns", [LUAU_NS_LEAK_CPP])
+    if cxxleak and nsleak and wrap:
+        args = base + ["--layer", "upper=" + upper, "--data-only", "luaucxx=" + cxxleak,
+                       "--wrap-lib", "wrapmod", "--data-only", "wrapmod=" + wrap]
+        rc, out = run(args)
+        record("symbols: a C++-linkage Luau symbol outside the wrap module",
+               rc == 1 and "luaS_newlstr" in out, out.strip()[:200])
+        args = base + ["--layer", "upper=" + upper, "--data-only", "luauns=" + nsleak,
+                       "--wrap-lib", "wrapmod", "--data-only", "wrapmod=" + wrap]
+        rc, out = run(args)
+        record("symbols: a Luau:: namespace symbol outside the wrap module",
+               rc == 1 and "Luau::" in out, out.strip()[:200])
+    else:
+        record("symbols: a C++-linkage Luau symbol outside the wrap module", False,
+               (errc or errn)[:200])
 
     defined, err = build_lib(cxx, ar, root, "luaudef", [LUAU_DEFINE_CPP])
     if defined:

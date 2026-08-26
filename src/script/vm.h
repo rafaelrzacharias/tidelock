@@ -60,8 +60,15 @@ ErrCode script_sandbox_open(ScriptVm* vm);
 void script_sandbox_freeze(ScriptVm* vm);
 
 // docs/LUAU-LAYER.md §10.3: creates the `fx` global for this VM kind. Implemented in bind_fx.cpp.
-// The sim VM gets the whole table; the UI VM additionally gets fx.to_f64; the data VM gets the
-// literal constructors and the constants (a table compile writes fx literals and nothing else).
+// EVERY kind gets the whole table; the UI VM additionally gets `fx.to_f64`, which is the one
+// entry that turns a row back into a double and therefore the one entry the sim VM must not have.
+//
+// This sentence used to claim the data VM got "the literal constructors and the constants" only,
+// which the code never did (review round 1, D7). Reconciled in favour of the code: every op in
+// the table is a pure integer function, so none of them can make a data table peer-divergent -
+// which is the only property that matters for a VM whose OUTPUT is hashed - and a data file that
+// wants `fx.mul_q` to express a derived constant has no reason to be refused. The restriction had
+// no stated benefit and no test; what each kind gets is now pinned by fx_table_per_vm_kind.
 void script_bind_fx(ScriptVm* vm);
 
 // docs/LUAU-LAYER.md §10.2 step 8: installs the string-atom callback on `L` against the process

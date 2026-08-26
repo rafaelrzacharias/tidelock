@@ -65,12 +65,30 @@ i32 check_raw(lua_State* L, int idx) { return (i32)check_int(L, idx, INT32_MIN, 
 // Pushes a raw row value. Every row is 32-bit (docs/CANON.md), so this is exact in a Luau double.
 void push_raw(lua_State* L, i32 v) { lua_pushinteger(L, v); }
 
+// Writes `v` as decimal into `buf` (>= 24 bytes) and returns it. lua_pushfstring's %d is an int,
+// and every number these bindings need to print is an i64 - check_int hit the same trap two
+// functions down and check_fits_i32 reintroduced it, printing `q >> 32` (the HIGH HALF) as the
+// result, so the smallest failing case q == 2^31 read "result 0 does not fit the row".
+const char* i64_str(i64 v, char* buf) {
+    const bool neg = v < 0;
+    u64 mag = neg ? (u64)(-(v + 1)) + 1u : (u64)v;      // -INT64_MIN has no positive i64 form
+    char digits[24];
+    u32 dn = 0;
+    do { digits[dn++] = (char)('0' + (int)(mag % 10u)); mag /= 10u; } while (mag != 0);
+    u32 n = 0;
+    if (neg) buf[n++] = '-';
+    while (dn != 0) buf[n++] = digits[--dn];
+    buf[n] = 0;
+    return buf;
+}
+
 // Raises when a computed result leaves the 32-bit row it is supposed to land in. Separate from
 // check_int because this is an OUTPUT bound: the inputs were legal and the operation overflowed,
 // which is a script logic error and is reported as such rather than wrapped.
 void check_fits_i32(lua_State* L, i64 q, const char* what) {
     if (q < (i64)INT32_MIN || q > (i64)INT32_MAX) {
-        luaL_error(L, "%s: result %d does not fit the row", what, (int)(q >> 32));
+        char buf[24];
+        luaL_error(L, "%s: result %s does not fit the row", what, i64_str(q, buf));
     }
 }
 

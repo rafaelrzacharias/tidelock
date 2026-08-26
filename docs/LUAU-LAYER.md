@@ -37,7 +37,7 @@ Persistent script state = a component (Luau-declared, `ECS.md` §6.1) or a singl
 |---|---|---|---|---|
 | **sim** | `ipairs`, `sortedpairs` (ours), `table` (array ops), `string` (pure fns only), `fx` (det math bindings), engine bindings (§3). **Removed:** `math` (stock), `os`, `io`, `debug`, `pairs`/`next`, `coroutine`, `string.rep`, `require` beyond the init phase, `loadstring` | inside the lockstep contract; bytecode in the fingerprint | own `mem_pool`, budgeted | **interpreter only** (native codegen is another codegen surface) |
 | **ui/editor** | stock Luau + ImGui/draw/text bindings + read-only world access; `pairs` allowed | free | own pool | NCG allowed |
-| **data** | stock Luau minus `os`/`io`; used once per table compile then destroyed (`ASSETS-AND-DATA.md` §3) | its *output* is hashed | throwaway | — |
+| **data** | stock Luau minus `os`/`io` **and minus `math.random`/`math.randomseed`** (ruled 2026-08-26 — Luau seeds its PCG from `uintptr_t(L) ^ time(NULL) ^ clock()`, and this VM's output is hashed, so a single draw makes a peer-divergent table that surfaces as a fingerprint mismatch instead of an error at the mistake); used once per table compile then destroyed (`ASSETS-AND-DATA.md` §3) | its *output* is hashed | throwaway | — |
 
 The sim VM and the UI VM never share a `lua_State`; the UI VM reads the world through the same
 read bindings the inspector uses and can only *write* by issuing commands (which are sealed).
