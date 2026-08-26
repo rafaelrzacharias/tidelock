@@ -3110,6 +3110,20 @@ right; it is the template the others now follow.
       `draw_geometry` is a 4th call in the raw log, deliberately not part of that stat. Fixed the
       row and the doc's reconciliation footer in the same commit as `backend_sdl.cpp` and its
       `present_descriptor` test, which assert the corrected numbers.
+- [ ] **CI infra gap found (not this lane's to fix — flagging for whoever owns `.github/workflows/`
+      or the repo's webhook config): the `pull_request` webhook silently stopped firing for PR #13
+      after commit `e59f32f`.** All 6 of this round's review-fix commits (`0005038` through
+      `aa36864`) show zero workflow runs in the Actions API (`gh api
+      repos/.../actions/runs?branch=w3-render2d` / the equivalent MCP call) — not queued, not
+      failed, simply absent — despite `pr.yml`'s `on: pull_request` trigger and every earlier push
+      on this same PR triggering normally. Worked around this once via `workflow_dispatch` (the
+      trigger `pr.yml`'s own header comment says exists for exactly this: "a session branch can be
+      proven green before it merges"); all 23 checks came back green once manually kicked. Cause
+      not diagnosed (webhook delivery gap on GitHub's side vs. something repo-side) - flagging
+      because a lane that does not think to cross-check the Actions API against `git log` would
+      see a PR sitting with zero check runs and could misread it as "CI hasn't started" indefinitely
+      rather than "the trigger never fired," and because a merge gate that trusts webhook delivery
+      alone has a silent blind spot here.
 
 ## Alloy (`docs/ALLOY.md` — headless-first; its own build queue in "Gates & rulings ledger")
 - [ ] **W3 alloy-liquids-gases OPENING task — the liquid design pass (the RR-10 ruling,
