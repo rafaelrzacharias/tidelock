@@ -3,7 +3,9 @@
 > **Status:** rev 1 (2026-08-22), amended through 2026-08-26 — the W2 luau-vm lane built the
 > §10.12 VM half and folded in the rulings RR-18/19/20 (compiler heap pooled on `pool_vendor`,
 > atoms live, CodeGen out) and the data-VM determinism rules (`math.random` removed; reference
-> stringification raises). **DECIDED** except §9. Expands `PIVOT-DESIGN.md` §7.
+> stringification raises); RR-21 (2026-08-26, W3 assets+data) extends §1's "output is hashed" rule
+> to the C++-side table reader `script.h` gained for the data-table compiler. **DECIDED** except
+> §9. Expands `PIVOT-DESIGN.md` §7.
 > §10 is the implementation specification (file layout, VM construction, binding signatures,
 > proxies, reload, bytecode pipeline, tests); it is placed before the rulings by convention.
 > **Owns:** `src/script/` (VM setup, bindings, reload, trampolines), `script/` (the game).
@@ -44,6 +46,18 @@ Persistent script state = a component (Luau-declared, `ECS.md` §6.1) or a singl
 
 The sim VM and the UI VM never share a `lua_State`; the UI VM reads the world through the same
 read bindings the inspector uses and can only *write* by issuing commands (which are sealed).
+
+**RR-21 (ruled 2026-08-26, `TODO.md`) extends this row's "output is hashed" rule to `script.h`'s
+C++-side table reader** (`script_eval`/`script_table_get`/`script_table_geti`/`script_table_len`/
+`script_table_next`, added for `ASSETS-AND-DATA.md` §8.3's data-table compiler). `script_table_next`
+walks a table via `lua_next` — Luau's internal hash-table order, the same order-fragile hazard
+§1.1 already rejected `pairs` over, now reachable from C++ too. Its own contract comment states
+the binding condition: that order is **not part of the deterministic surface** and must never
+feed a compiled table, a hash, or any other output two peers must agree on bit-for-bit. The
+data-table compiler's own answer is to never call it: it walks SCHEMA-ORDERED, by name
+(`script_table_get`) and by array position (`script_table_len`/`script_table_geti`), pinned by
+`tests/core/data/data_compile.test.cpp`'s `data_compile_two_field_orders_hash_identically` (two
+scripts with the same rows but swapped field-key order compile to identical bytes).
 
 ### 1.1 Why `pairs` is removed from the sim VM (alternatives recorded)
 

@@ -13,7 +13,7 @@ TL_TEST(data_find_row_and_row_lookup, "core,data") {
     VMemArena arena;
     TL_ASSERT_EQ(vmem_arena_init(&arena, "data_tables_test_arena"_id, 1u * 1024u * 1024u, 0u, &api), ERR_OK);
 
-    TableSchema schema{ &DtRow_info, "granite"_id, 8u, 0u };
+    TableSchema schema{ &DtRow_info, sv("granite"), 8u, 0u };
     DataTable table{};
     table.schema = &schema;
     DtRow rows[3] = { { 10 }, { 20 }, { 30 } };

@@ -3160,7 +3160,7 @@ tl_audit 113 selftest checks green on both tiers.
 Filed at lane start from the slice brief's big-picture check (`CLAUDE.md` doc-integrity protocol,
 step 6), before the data-table compiler's `.cpp` was written.
 
-- [ ] **RR-21 (ruling request) `ASSETS-AND-DATA.md` §8.3's data-table compiler needs to read a
+- [x] **RR-21 (ruling request) `ASSETS-AND-DATA.md` §8.3's data-table compiler needs to read a
       Luau table from C++, and `src/script/script.h` exposes no such call.** §8.3 step 1: "run
       each script; each returns a table `{ <table_name> = { {name=...}, ... }, ... }`"; step 3
       walks each row's named fields against the schema. The shipped data-VM surface
@@ -3206,6 +3206,50 @@ step 6), before the data-table compiler's `.cpp` was written.
       registry + loaders and `save.h/.cpp` land first; `data_tables.h` lands header-first per
       `ROADMAP.md` §0 rule 1 with a `TL_FATAL("unimplemented — RR-21")` compile body until this
       ruling resolves one way or the other.
+      **RULED 2026-08-26 (Rafael, relayed by the steward, as recommended): option (a).** This
+      lane is granted a scoped exception (the `encoder.h` precedent) to add the generic table-
+      read surface to `src/script/`: `Result<ScriptValue> script_eval(ScriptVm*, StrView)`
+      returning a tagged union (nil/bool/int/string/table-ref), plus `script_table_get`/
+      `script_table_geti`/`script_table_len`/`script_table_next` over a table-ref. The firewall
+      holds - `lua_State*` and Luau headers stay strictly under `src/script/`.
+      **ONE BINDING CONDITION:** the data VM's output is hashed (`LUAU-LAYER.md` §1), so raw Luau
+      table-iteration order must never reach a compiled table or any other hashed output. The
+      data-table compiler walks SCHEMA-ORDERED via named lookups (`script_table_get`) and array-
+      ordered via `script_table_geti`/`script_table_len` - never `script_table_next`.
+      `script_table_next`'s own contract comment (`script.h`) and `LUAU-LAYER.md` §1 both state
+      explicitly that its iteration order is not part of the deterministic surface and must never
+      feed sim state or hashed output; pinned by `table_reader.test.cpp`'s
+      `script_table_next_walks_every_pair_exactly_once` (a runaway/duplicate walk would fail the
+      `seen <= 3` assert) and, for the compiler's own path, `data_compile.test.cpp`'s
+      `data_compile_two_field_orders_hash_identically` (two source scripts with the SAME rows but
+      swapped field-key order inside each row hash identically - proof the compiler's own walk
+      never touches Luau's hash-table order at all).
+      **Shipped:** `script.h`/`vm.cpp` (the reader surface, `src/script/`); `core/data_tables.h`'s
+      `data_compile` now takes `MemPool* compile_pool` (script.h's `ScriptVmDesc::compile_pool`
+      is required, `RR-18`/D2 - a signature addition over §8.3's parameter list, the caller
+      supplies a `pool_init`-built pool or its own `pool_vendor()`) and `Span<const StrView>
+      script_sources` (already-loaded TEXT, not paths - `data_compile` has no `PlatformApi` to
+      read a file with; the caller reads via its own `platform->file.read_all` first).
+      `TableSchema.table_name` is a `StrView`, not a bare `NameHash` (the compiler needs the
+      actual bytes for the lookup - the same StrView-not-NameHash reasoning `assets.h`'s loaders
+      already settled). Data scripts this pass compiles are authored as a bare table-literal
+      EXPRESSION (`{ materials = {...} }`, no leading `return`) - `script_eval`'s own expression-
+      only shape; a `return {...}` statement chunk needs a separate exec-and-capture primitive
+      nothing yet needs, refining §3's "each returns a table" phrasing into the mechanism
+      actually built. **data_compile's implementation lives in `src/script/data_compile.cpp`, not
+      `core/data_tables.cpp`** - the module DAG (`ARCHITECTURE.md` §1: `"script": (script, core,
+      ...)`) only lets a module downstream of BOTH core and script drive the VM the compiler
+      needs, and core itself cannot include `script/`; `core/data_tables.h` still owns the public
+      declaration and `core/data_tables.cpp` keeps the pure `data_find_row`/`data_row` lookups
+      that need no script.h access. Field-kind scope this pass ships: integer/bool, with
+      `ComponentInfo::default_row` as the missing-field fallback (§8.3's own "per-field default
+      table" is more granular than anything built yet). fx-literal fields (§7 R-2), `K_StrId`
+      fields, handle/reference fields (§8.3 pass 2) and cross-table validators `TL_FATAL`, named -
+      no Alloy schema exists anywhere in the tree yet (`alloy-substrate` is still queued,
+      `ROADMAP.md` §2) to compile a real one against; building any of them against a guessed
+      shape would be the Layr trap. Tests: `tests/script/table_reader.test.cpp` (the new script.h
+      surface directly), `tests/core/data/data_compile.test.cpp` (round-trip, the determinism
+      pin, missing-field/out-of-range/unknown-table/duplicate-name named errors).
 
 ## W3 assets+data — header-first commit notes (2026-08-26, w3-assets-data)
 
@@ -3268,11 +3312,9 @@ change a DECIDED design, `CLAUDE.md` rule 8).
   real encoder against; building one now would be guessing a layout with no consumer to test it
   against. `SAVE_ENC_REFLECTED`/`SAVE_ENC_ECS_COLUMN` (the two kinds every registered arena in
   the tree today actually needs) are the ones this lane implements and tests.
-- **RR-21 (TODO.md, filed at lane start): `data_tables.cpp`'s compile body is blocked** - the
-  data-table compiler needs a C++-side reader of a Luau table, and `script.h` (a different,
-  already-merged lane's module) exposes none. `data_tables.h`'s public header does not depend on
-  the resolution and ships complete; `data_compile`/`data_find_row`/`data_row` are `TL_FATAL`
-  stubs until it resolves.
+- **RR-21 RULED, superseding this note** - see the "W3 assets+data — header-first commit notes"
+  section's own RR-21 entry above for the full record (option (a), the script.h table-reader
+  surface, the binding determinism condition, and where `data_compile`'s real body landed).
 
 ## W3 assets+data — save v1 + gate allowlist note (2026-08-26, w3-assets-data)
 

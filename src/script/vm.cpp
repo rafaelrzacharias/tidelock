@@ -362,6 +362,218 @@ Result<i64> script_eval_int(ScriptVm* vm, StrView expr) {
     return Result<i64>{ (i64)x, ERR_OK };
 }
 
+namespace {
+
+// Converts the Luau value at stack index `idx` into a tagged ScriptValue (RR-21). A table is
+// PINNED via lua_ref (non-destructive of the stack - lua_ref reads by index, docs/LUAU-LAYER.md
+// §10.6's own `lua_ref(L, fn_idx)` shape); every other case copies out and leaves the stack
+// untouched too. The caller pops `idx` itself once done with it.
+ErrCode to_script_value(ScriptVm* vm, int idx, ScriptValue* out) {
+    lua_State* L = vm->L;
+    memset(out, 0, sizeof(ScriptValue));
+    switch (lua_type(L, idx)) {
+        case LUA_TNIL:
+            out->kind = SCRIPT_VAL_NIL;
+            return ERR_OK;
+        case LUA_TBOOLEAN:
+            out->kind = SCRIPT_VAL_BOOL;
+            out->i = lua_toboolean(L, idx) ? 1 : 0;
+            return ERR_OK;
+        case LUA_TNUMBER: {
+            const double x = lua_tonumber(L, idx);
+            // Exactness, not truncation - the same rule script_eval_int enforces.
+            if (!(x >= -9007199254740992.0 && x <= 9007199254740992.0) || x != (double)(i64)x) {
+                return script_set_error(vm, ERR_SCRIPT_RUNTIME,
+                                        "value is not an exact integer within +-2^53");
+            }
+            out->kind = SCRIPT_VAL_INT;
+            out->i = (i64)x;
+            return ERR_OK;
+        }
+        case LUA_TSTRING: {
+            size_t len = 0;
+            const char* s = lua_tolstring(L, idx, &len);
+            if (len >= (size_t)SCRIPT_VALUE_STR_MAX) {
+                return script_set_error(vm, ERR_SCRIPT_RUNTIME,
+                                        "string value exceeds SCRIPT_VALUE_STR_MAX");
+            }
+            memcpy(out->str, s, len);
+            out->str[len] = 0;
+            out->str_len = (u32)len;
+            out->kind = SCRIPT_VAL_STRING;
+            return ERR_OK;
+        }
+        case LUA_TTABLE:
+            out->kind = SCRIPT_VAL_TABLE;
+            out->table.ref = lua_ref(L, idx);
+            return ERR_OK;
+        default:
+            return script_set_error(vm, ERR_SCRIPT_RUNTIME, luaL_typename(L, idx));
+    }
+}
+
+}  // namespace
+
+Result<ScriptValue> script_eval(ScriptVm* vm, StrView expr) {
+    TL_ASSERT(vm != nullptr && vm->L != nullptr);
+    script_clear_error(vm);
+    ScriptValue zero{};
+    if (expr.ptr == nullptr || expr.len == 0) {
+        return Result<ScriptValue>{ zero, script_set_error(vm, ERR_SCRIPT_BAD_ARG, "script_eval: empty expression") };
+    }
+    // "return (<expr>)" - script_eval_int's own trick, duplicated rather than factored out of
+    // already-shipped, tested code for a one-lane scoped exception (RR-21).
+    char buf[SCRIPT_ERR_MAX];
+    const char* prefix = "return (";
+    u32 n = 0;
+    while (prefix[n] != 0) { buf[n] = prefix[n]; ++n; }
+    if (expr.len + n + 2u >= (u32)sizeof(buf)) {
+        return Result<ScriptValue>{ zero, script_set_error(vm, ERR_SCRIPT_BAD_ARG, "script_eval: expression too long") };
+    }
+    memcpy(buf + n, expr.ptr, (size_t)expr.len);
+    n += expr.len;
+    buf[n] = ')';
+    buf[n + 1u] = 0;
+
+    lua_State* L = vm->L;
+    lua_pushcfunction(L, &script_traceback, "traceback");
+    const int errfunc = lua_gettop(L);
+    const ErrCode le = load_chunk(vm, "eval", StrView{ buf, n + 1u });
+    if (le != ERR_OK) {
+        lua_remove(L, errfunc);
+        return Result<ScriptValue>{ zero, le };
+    }
+    const int rc = lua_pcall(L, 0, 1, errfunc);
+    lua_remove(L, errfunc);
+    if (rc != 0) return Result<ScriptValue>{ zero, take_error(vm, ERR_SCRIPT_RUNTIME) };
+
+    ScriptValue out{};
+    const ErrCode ce = to_script_value(vm, -1, &out);
+    lua_pop(L, 1);
+    if (ce != ERR_OK) return Result<ScriptValue>{ zero, ce };
+    return Result<ScriptValue>{ out, ERR_OK };
+}
+
+Result<ScriptValue> script_table_get(ScriptVm* vm, ScriptTableRef t, StrView key) {
+    TL_ASSERT(vm != nullptr && vm->L != nullptr);
+    script_clear_error(vm);
+    ScriptValue zero{};
+    lua_State* L = vm->L;
+    lua_getref(L, t.ref);
+    if (lua_type(L, -1) != LUA_TTABLE) {
+        lua_pop(L, 1);
+        return Result<ScriptValue>{ zero, script_set_error(vm, ERR_SCRIPT_BAD_ARG, "script_table_get: not a table") };
+    }
+    lua_pushlstring(L, key.ptr, (size_t)key.len);
+    lua_gettable(L, -2);
+    ScriptValue out{};
+    const ErrCode ce = to_script_value(vm, -1, &out);
+    lua_pop(L, 2);   // the looked-up value, then the table itself
+    if (ce != ERR_OK) return Result<ScriptValue>{ zero, ce };
+    return Result<ScriptValue>{ out, ERR_OK };
+}
+
+Result<ScriptValue> script_table_geti(ScriptVm* vm, ScriptTableRef t, u32 index) {
+    TL_ASSERT(vm != nullptr && vm->L != nullptr);
+    script_clear_error(vm);
+    ScriptValue zero{};
+    lua_State* L = vm->L;
+    lua_getref(L, t.ref);
+    if (lua_type(L, -1) != LUA_TTABLE) {
+        lua_pop(L, 1);
+        return Result<ScriptValue>{ zero, script_set_error(vm, ERR_SCRIPT_BAD_ARG, "script_table_geti: not a table") };
+    }
+    lua_rawgeti(L, -1, (int)index);
+    ScriptValue out{};
+    const ErrCode ce = to_script_value(vm, -1, &out);
+    lua_pop(L, 2);
+    if (ce != ERR_OK) return Result<ScriptValue>{ zero, ce };
+    return Result<ScriptValue>{ out, ERR_OK };
+}
+
+u32 script_table_len(ScriptVm* vm, ScriptTableRef t) {
+    TL_ASSERT(vm != nullptr && vm->L != nullptr);
+    lua_State* L = vm->L;
+    lua_getref(L, t.ref);
+    if (lua_type(L, -1) != LUA_TTABLE) {
+        lua_pop(L, 1);
+        return 0u;
+    }
+    const u32 n = (u32)lua_objlen(L, -1);
+    lua_pop(L, 1);
+    return n;
+}
+
+namespace {
+
+// Pushes back a previously-yielded key (NIL/BOOL/INT/STRING only - script_table_next's own
+// contract refuses a table key rather than risk desyncing lua_next's walk on a reconstructed
+// copy). Returns false, pushing nothing, for an unsupported kind.
+bool push_script_value_key(lua_State* L, const ScriptValue* key) {
+    switch (key->kind) {
+        case SCRIPT_VAL_NIL:    lua_pushnil(L); return true;
+        case SCRIPT_VAL_BOOL:   lua_pushboolean(L, key->i != 0); return true;
+        case SCRIPT_VAL_INT:    lua_pushnumber(L, (double)key->i); return true;
+        case SCRIPT_VAL_STRING: lua_pushlstring(L, key->str, (size_t)key->str_len); return true;
+        default: return false;
+    }
+}
+
+}  // namespace
+
+bool script_table_next(ScriptVm* vm, ScriptTableRef t, ScriptValue* key, ScriptValue* out_value) {
+    TL_ASSERT(vm != nullptr && vm->L != nullptr && key != nullptr && out_value != nullptr);
+    script_clear_error(vm);
+    lua_State* L = vm->L;
+    lua_getref(L, t.ref);
+    if (lua_type(L, -1) != LUA_TTABLE) {
+        lua_pop(L, 1);
+        (void)script_set_error(vm, ERR_SCRIPT_BAD_ARG, "script_table_next: not a table");
+        return false;
+    }
+    // lua_next's protocol: the key to continue from must be on the stack (nil to begin); it pops
+    // that key and pushes the next key/value pair, or pushes nothing and returns 0 when done.
+    // The cursor is carried as a VALUE (`*key`), not a live stack slot, because this VM may run
+    // other Luau code between two separate calls into this function (nothing here assumes it does
+    // not) - so the key is genuinely round-tripped through Luau every call, never left parked.
+    if (!push_script_value_key(L, key)) {
+        lua_pop(L, 1);   // the table
+        (void)script_set_error(vm, ERR_SCRIPT_RUNTIME, "script_table_next: table keys are not supported");
+        return false;
+    }
+    const int has_more = lua_next(L, -2);
+    if (!has_more) {
+        lua_pop(L, 1);   // the table
+        return false;
+    }
+    ScriptValue new_key{};
+    ErrCode key_err = to_script_value(vm, -2, &new_key);
+    (void)to_script_value(vm, -1, out_value);   // a value error (e.g. a function) still returns
+                                          // true - the caller sees the VM's last_error, matching
+                                          // script_table_get's per-value error surface
+    lua_pop(L, 3);   // value, key, table
+    // to_script_value succeeds (tags SCRIPT_VAL_TABLE) for a table key, which push_script_value_key
+    // cannot round-trip - reject it here explicitly rather than silently stalling next call, and
+    // release the ref to_script_value just pinned so refusing does not leak it.
+    if (new_key.kind == SCRIPT_VAL_TABLE) {
+        script_table_unref(vm, new_key.table);
+        key_err = script_set_error(vm, ERR_SCRIPT_RUNTIME, "script_table_next: table keys are not supported");
+    }
+    if (key_err != ERR_OK) {
+        // A Luau table key, or a key outside NIL/BOOL/INT/STRING/TABLE (script_table_next's own
+        // closed set): named here, at the point the walk would otherwise silently stall next call.
+        return false;
+    }
+    *key = new_key;
+    return true;
+}
+
+void script_table_unref(ScriptVm* vm, ScriptTableRef t) {
+    TL_ASSERT(vm != nullptr && vm->L != nullptr);
+    if (t.ref == LUA_NOREF || t.ref == LUA_REFNIL) return;
+    lua_unref(vm->L, t.ref);
+}
+
 const char* script_last_error(const ScriptVm* vm) {
     TL_ASSERT(vm != nullptr);
     return vm->err;

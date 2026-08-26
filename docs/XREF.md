@@ -20,6 +20,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ROADMAP.md` -> §14.7
 
 ## ARCHITECTURE.md
+- `ASSETS-AND-DATA.md` -> §1
 - `BUILD.md` -> §1
 - `CANON.md` -> §1
 - `CPP-SUBSET.md` -> §1
@@ -37,7 +38,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `DETERMINISM.md` -> §5
 - `ECS.md` -> §3, §5
 - `FRAME-LOOP.md` -> §3
-- `LUAU-LAYER.md` -> §3, §3.5, §5, §7
+- `LUAU-LAYER.md` -> §3, §3.5, §5, §7, §8.3
 - `NETCODE.md` -> §5
 - `RENDER2D.md` -> §2
 - `ROADMAP.md` -> §8.5

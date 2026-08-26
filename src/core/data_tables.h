@@ -47,6 +47,7 @@
 #include "foundation/array.h"
 #include "foundation/strview.h"
 #include "foundation/handle.h"
+#include "foundation/mem_pool.h"
 
 // The data_tables module's ErrCode range is 0x034x (docs/CANON.md "Types": per-module ranges).
 constexpr ErrCode ERR_DATA_TOO_MANY_ROWS   = (ErrCode)0x0340;  // a table's row count exceeds its schema's max_rows
@@ -58,6 +59,7 @@ constexpr ErrCode ERR_DATA_UNKNOWN_TABLE   = (ErrCode)0x0345;  // a data script 
 constexpr ErrCode ERR_DATA_VALIDATOR       = (ErrCode)0x0346;  // a cross-table validator (ALLOY.md §11.1 / a game's own) rejected
 constexpr ErrCode ERR_DATA_SCRIPT          = (ErrCode)0x0347;  // the data VM failed to run the script (compile/runtime error)
 constexpr ErrCode ERR_DATA_TABLE_LIMIT     = (ErrCode)0x0348;  // more schemas were passed than MAX_TABLES
+constexpr ErrCode ERR_DATA_DUPLICATE_NAME  = (ErrCode)0x0349;  // two rows in one table share a `name`
 
 // Log-side name for a data-table ErrCode; "ERR_?" outside this header's codes.
 constexpr const char* err_data_name(ErrCode e) {
@@ -70,7 +72,8 @@ constexpr const char* err_data_name(ErrCode e) {
          : e == ERR_DATA_UNKNOWN_TABLE ? "ERR_DATA_UNKNOWN_TABLE"
          : e == ERR_DATA_VALIDATOR ? "ERR_DATA_VALIDATOR"
          : e == ERR_DATA_SCRIPT ? "ERR_DATA_SCRIPT"
-         : e == ERR_DATA_TABLE_LIMIT ? "ERR_DATA_TABLE_LIMIT" : "ERR_?";
+         : e == ERR_DATA_TABLE_LIMIT ? "ERR_DATA_TABLE_LIMIT"
+         : e == ERR_DATA_DUPLICATE_NAME ? "ERR_DATA_DUPLICATE_NAME" : "ERR_?";
 }
 
 // DataHandle: the resource-handle shape (docs/CANON.md "Types": Handle<_, 12, 4>, u16, listed
@@ -96,7 +99,11 @@ enum : u32 { DATA_SCHEMA_FLAGS_NONE = 0 };
 // table key the compiler looks the array up by (`{ <table_name> = {...} }`, §3 step 1).
 struct TableSchema {
     const ComponentInfo* row;
-    NameHash              table_name;
+    StrView               table_name;   // the Luau key ({ <table_name> = {...} }) - a string, not
+                                        // just its hash: the compiler needs the actual bytes for
+                                        // the lookup (script_table_get), the same StrView-not-
+                                        // NameHash reasoning assets.h's loaders already settled
+                                        // (TODO.md, W3 assets+data lane notes)
     u32                   max_rows;
     u32                   flags;
 };
@@ -126,24 +133,36 @@ struct DataTables {
     u64        hash;
 };
 
-// Creates the data VM (docs/LUAU-LAYER.md §1), runs each of `script_paths` in order, and for
-// every schema in `schemas` (registration order): fetches the Luau array named `schema->table_name`
-// from whichever script defined it (ERR_DATA_UNKNOWN_TABLE if none did and the schema has no
-// declared-empty allowance); walks each row against `schema->row`'s FieldInfo (missing field ->
-// its declared default or ERR_DATA_MISSING_FIELD; integer kinds range-checked, ERR_DATA_BAD_INT;
-// fx kinds accept only an exactly-representable literal or `fx.raw(bits)`, ERR_DATA_BAD_FX_LITERAL
-// - §7 R-2; handle/ref kinds resolve by name in pass 2, ERR_DATA_DANGLING_REF); runs every
-// registered cross-table validator (ERR_DATA_VALIDATOR names table/row/field); computes `hash`;
+// Creates the data VM (docs/LUAU-LAYER.md §1) and runs each of `script_sources` in order
+// (already-loaded source TEXT, not paths - data_compile has no PlatformApi to read a file with,
+// same reasoning as `compile_pool` below; the caller reads script files through its own
+// platform->file.read_all before calling this, a signature addition over §8.3's abbreviated
+// `script_paths` naming), and for every schema in `schemas` (registration order): fetches the
+// Luau array named `schema->table_name` from whichever script defined it
+// (ERR_DATA_UNKNOWN_TABLE if none did); walks it IN ARRAY ORDER (script_table_len/
+// script_table_geti - RR-21's binding condition: never script_table_next's unordered walk) and
+// each row's fields BY NAME (script_table_get) against `schema->row`'s FieldInfo, schema-ordered
+// (missing field -> `schema->row->default_row`'s bytes at that offset, or ERR_DATA_MISSING_FIELD
+// if the schema declares none; integer kinds range-checked, ERR_DATA_BAD_INT); computes `hash`;
 // destroys the data VM. The first error anywhere aborts with nothing written - no partial
 // DataTables survives a failed compile (docs/CPP-SUBSET.md §3). `perm` backs the returned
 // DataTables* and its `arena`'s reserve (a permanent, caller-owned arena - e.g. World::meta);
-// `perm_id` names `arena` for the caller's later registry_add call. ERR_DATA_TABLE_LIMIT if
+// `perm_id` names `arena` for the caller's later registry_add call. `compile_pool` is the shared
+// vendor pool `ScriptVmDesc::compile_pool` requires (docs/LUAU-LAYER.md §10.12 RR-18/D2) - a
+// signature addition over §8.3's abbreviated parameter list; the caller supplies it (its own
+// `pool_vendor()`, or a dedicated `MemPool` from `pool_init` for a caller with no platform
+// context, e.g. a test - both satisfy the contract, which asks for a correctly-managed shared
+// pool, not specifically the process-wide singleton). ERR_DATA_TABLE_LIMIT if
 // `schemas.count > MAX_TABLES`; ERR_DATA_SCRIPT if any script fails to run.
 //
-// NOT YET IMPLEMENTED (RR-21): the body is a TL_FATAL("unimplemented - RR-21, see TODO.md") stub
-// until the data VM gains a C++-side table reader (script.h, a different lane's module).
-Result<DataTables*> data_compile(Span<const TableSchema> schemas, Span<const StrView> script_paths,
-                                 VMemArena* perm, NameHash perm_id, const VMemApi* os);
+// SCOPE THIS PASS SHIPS (RR-21, recorded in TODO.md's W3 assets+data lane notes): integer/bool
+// field kinds. fx-literal fields (§7 R-2), StrId fields, handle/reference fields (§8.3 pass 2)
+// and cross-table validators TL_FATAL, named - no Alloy schema exists anywhere in the tree yet
+// (alloy-substrate is still queued, docs/ROADMAP.md §2) to compile a real one against; building
+// any of them against a guessed shape would be the Layr trap.
+Result<DataTables*> data_compile(Span<const TableSchema> schemas, Span<const StrView> script_sources,
+                                 VMemArena* perm, NameHash perm_id, const VMemApi* os,
+                                 MemPool* compile_pool);
 
 // The dense id for `name` in table `t`, or DataHandle{} (null) if absent. Pure, all tiers.
 DataHandle data_find_row(const DataTable* t, NameHash name);

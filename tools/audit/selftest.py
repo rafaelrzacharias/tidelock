@@ -368,6 +368,11 @@ INCLUDE_CASES = [
     ("stb_image.h does not leak to a neighbouring module", "src/render/z6.cpp",
      "#include <stb_image.h>\n",
      "system include <stb_image.h> is not on the allowlist"),
+    # the grant is scoped to src/core/loaders specifically, not all of src/core - a sibling file
+    # in the same module one directory up must still be refused.
+    ("stb_image.h does not leak to the rest of src/core", "src/core/z7.cpp",
+     "#include <stb_image.h>\n",
+     "system include <stb_image.h> is not on the allowlist"),
     # vendor_glue's own DAG entry is scoped to foundation only, not the whole tree platform/core
     # reach - a copy-paste of core's tuple would have let it reach platform silently.
     ("vendor_glue may not include platform even though core/render/net can",
