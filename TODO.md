@@ -852,6 +852,12 @@ E-2 needs no W2 decision but blocks real game wiring later.
       the *network-soak* half (replay-diff against PR artifacts over a real LAN) gains a
       self-hosted `deck` runner when the Deck is benched (the Pi left the program, 2026-08-25).
       `weekly.yml` unchanged.
+- [ ] **Wave-boundary sweep entry (`WORKFLOW.md` §2 valve):** `w2-max-arenas` (steward,
+      2026-08-26) implements the E-2 ruling verbatim — `MAX_ARENAS` 64 → 4096 in its four homes
+      (`arena_registry.h`, `CANON.md`, docaudit's pin, `MEMORY.md`'s inline value) + the
+      full-house registry test re-derived (actors arena-backed, 1-byte fills, a dedicated ring
+      at the 64-B-per-arena packed cap). debug/dev-linux green locally; the other legs are the
+      PR's CI. Review deferred to the sweep per the valve.
 - [ ] **Wave-boundary sweep entry (`WORKFLOW.md` §2 valve):** the `w3-merge-autonomy` lane
       (WORKFLOW §1 autonomous-merge clause + §5 R-3) merged under the valve — it implements
       Rafael's 2026-08-25 ruling verbatim ("my role through the phone: only rulings, important
