@@ -137,6 +137,15 @@ nowhere narrower, so the only way to budget such a heap is to replace it program
   `tools/audit/static_allow.txt` (lib + directory + stem), which is the ONE home both gates read.
   `PLATFORM.md` §9.5 had already sanctioned exactly this pointer for `src/vendor_glue/`; until
   now no gate knew about it.
+- **Tier consequence, stated rather than discovered.** §2's tripwire is a `dev`/`netcode` rule;
+  the replacement exists in **every** tier, because a program that installs a vendor heap needs
+  it wherever it runs. So in a binary that links `tl_vendor_glue`, a global `new` or `delete`
+  outside an install window is fatal in `debug` and `ship` too, where it previously reached the
+  CRT silently. That is the stronger reading of §1.5's own objection to the CRT ("invisible to
+  the alloc guard") and is consistent with the ban `CPP-SUBSET.md` §1 already enforces at link
+  time for `src/`; it is called out here because it changes what those two tiers do, and a
+  behaviour change that only shows up under an unrelated failure is the kind this project
+  refuses to leave implicit.
 
 ---
 

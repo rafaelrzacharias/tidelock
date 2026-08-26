@@ -81,7 +81,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `FX-PALETTE.md` -> §1, §2, §4, §5, §6, §7, §9
 - `JOBS.md` -> §1
 - `LUAU-LAYER.md` -> §6
-- `MEMORY.md` -> §4, §7
+- `MEMORY.md` -> §1, §4, §7
 - `NETCODE.md` -> §9
 - `PLATFORM.md` -> §1, §4
 - `RENDER2D.md` -> §1, §7
