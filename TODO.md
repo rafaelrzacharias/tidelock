@@ -539,6 +539,22 @@ E-2 needs no W2 decision but blocks real game wiring later.
       ("checkpoint writer, chain" are Phases 6–7) fixed same commit. The lane is un-parked.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **`NETCODE.md` §20.2's opening sentence contradicts three of its own struct definitions.**
+      Filed 2026-08-26 by `w2-net-p1` (doc bug, not a blocker - the concrete definitions win and
+      the lane built to them). §20.2 opens "All are `TL_WIRE_STRUCT` (`CPP-SUBSET.md` §9 R-2):
+      concrete, non-template, explicitly padded, leading `u32 format_version`", but
+      `CheckpointArenaEntry` (§20.2.8, 16 B), `ChainRecord` (§20.2.8, 184 B) and
+      `ArchiveStreamHeader` (§20.2.9, 8 B) are each written with NO leading `format_version`,
+      and their pinned sizes only close without one. They are repeated elements inside a
+      container that has already versioned itself in its own header, so a per-element version
+      would be redundant bytes on every row - the definitions are right and the sentence is too
+      broad. (`ChainRecord` additionally embeds `ChainEntry`, which `TL_WIRE_STRUCT`'s field
+      table cannot express: the kinds are scalars, arrays and handles, not nested records.)
+      `net/wire.h` declares all three as plain PODs with the same `sizeof`/`offsetof` pins and
+      carries this note. **Recommendation: amend the sentence** to "All are `TL_WIRE_STRUCT`
+      except the repeated elements of an already-versioned container - `CheckpointArenaEntry`,
+      `ChainRecord`, `ArchiveStreamHeader` - which carry the same layout pins without a
+      per-element `format_version`." One sentence in `NETCODE.md` §20.2; no code changes.
 - [x] **RR-17 net-p1 Phase 1 blocked (filed here 2026-08-25 by the `w2-net-p1` lane, before any
       `src/net/` code). RULED 2026-08-26 (B) — the record is the `W2 net-p1 — RR-17` section
       above, on main; the full four-blocker filing is in this branch's history and on PR #5.

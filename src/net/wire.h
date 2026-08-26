@@ -32,9 +32,11 @@
 // net holds 0x04xx (docs/NETCODE.md §20; mem 0x01xx, jobs 0x02xx, bytes 0x06xx, alloy 0x0Axx).
 // Truncation is bytes' code (ERR_BYTES_TRUNCATED) and arrives through the reader's sticky err;
 // the codes here are malformed CONTENT, which only a reader that knows the format can name.
+// The nonzero-pad refusal docs/NETCODE.md §20.2 requires is ERR_WIRE_PAD_NONZERO (0x0301,
+// core/reflect.h) - the generated readers already return it, so net does not mint a second code
+// for one condition (CLAUDE.md: one fact, one home).
 constexpr ErrCode ERR_NET_MALFORMED       = (ErrCode)0x0401;  // a field's value cannot occur in a valid stream
 constexpr ErrCode ERR_NET_VERSION         = (ErrCode)0x0402;  // format_version newer than this build understands
-constexpr ErrCode ERR_NET_PAD_NONZERO     = (ErrCode)0x0403;  // a _padN byte was not zero (docs/NETCODE.md §20.2)
 constexpr ErrCode ERR_NET_VARINT_OVERFLOW = (ErrCode)0x0404;  // a uvarint ran past the width of its target
 
 // Log-side name for a net ErrCode; "ERR_?" outside the net range.
@@ -42,7 +44,6 @@ constexpr const char* err_net_name(ErrCode e) {
     return e == ERR_OK                    ? "ERR_OK"
          : e == ERR_NET_MALFORMED         ? "ERR_NET_MALFORMED"
          : e == ERR_NET_VERSION           ? "ERR_NET_VERSION"
-         : e == ERR_NET_PAD_NONZERO       ? "ERR_NET_PAD_NONZERO"
          : e == ERR_NET_VARINT_OVERFLOW   ? "ERR_NET_VARINT_OVERFLOW"
          : "ERR_?";
 }
@@ -198,3 +199,511 @@ constexpr i32 wire_wrap_add_i32(i32 a, i32 b) { return (i32)((u32)a + (u32)b); }
 
 // a - b, wrapping on i32 overflow instead of trapping. The exact inverse of wire_wrap_add_i32.
 constexpr i32 wire_wrap_sub_i32(i32 a, i32 b) { return (i32)((u32)a - (u32)b); }
+
+// --- §20.2 wire structs -----------------------------------------------------------------------
+// Every struct below is a TL_WIRE_STRUCT (docs/CPP-SUBSET.md §9 R-2): concrete, non-template,
+// explicitly padded, leading u32 format_version, an offsetof static_assert per field generated
+// from the parallel TL_OFFSETS_ list, written and read through foundation/bytes.h's little-endian
+// pair rather than memcpy'd. The generated reader zero-fills, propagates the sticky truncation
+// code, and refuses a nonzero _padN with ERR_WIRE_PAD_NONZERO; refusing a NEWER format_version is
+// the caller's policy and is spelled once, in wire_check_version above.
+//
+// The offsets restate docs/NETCODE.md §20.2's numbers. That restatement is the point - it is what
+// pins the layout - and it cannot drift silently: a wrong number fails the build at the
+// TL_X_WIRE_OFFSET assert, and the sizeof pin catches a field list that has gone out of step.
+//
+// NOTE (spec, docs/NETCODE.md §20.2): the section opens "All are TL_WIRE_STRUCT", but three of
+// its own struct definitions carry no leading format_version - CheckpointArenaEntry,
+// ChainRecord and ArchiveStreamHeader. They are repeated elements INSIDE a container that
+// already versioned itself once in its header, so a per-element version would be redundant
+// bytes on every row. They are declared as plain PODs at the end of this section with the same
+// sizeof/offsetof pins. Recorded in TODO.md rather than resolved here: the concrete definitions
+// win over the summary sentence, but the sentence should say so.
+
+// PacketHeader - docs/NETCODE.md §20.2.1: INPUT channel, every packet
+#define TL_FIELDS_PacketHeader(X, XA, XH) \
+    X(u8, kind) \
+    X(u8, slot) \
+    X(u8, frame_count) \
+    X(u8, slot_mask) \
+    X(u64, base_tick) \
+    X(u64, last_confirmed_tick) \
+    X(u64, hold_base_tick) \
+    X(u32, epoch) \
+    X(u8, hold_count) \
+    X(u8, delay_ticks) \
+    X(u16, payload_bytes)
+#define TL_OFFSETS_PacketHeader(XO) \
+    XO(kind, 4) \
+    XO(slot, 5) \
+    XO(frame_count, 6) \
+    XO(slot_mask, 7) \
+    XO(base_tick, 8) \
+    XO(last_confirmed_tick, 16) \
+    XO(hold_base_tick, 24) \
+    XO(epoch, 32) \
+    XO(hold_count, 36) \
+    XO(delay_ticks, 37) \
+    XO(payload_bytes, 38)
+TL_WIRE_STRUCT(PacketHeader)
+static_assert(sizeof(PacketHeader) == 40u, "docs/NETCODE.md §20.2.1");
+
+// LogRecord - docs/NETCODE.md §20.2.3: every sequenced one-shot; stable id is (origin_slot, seq)
+#define TL_FIELDS_LogRecord(X, XA, XH) \
+    X(u8, kind) \
+    X(u8, slot) \
+    X(u8, origin_slot) \
+    X(u8, _pad0) \
+    X(u32, seq) \
+    X(u32, payload) \
+    X(u64, effective_tick)
+#define TL_OFFSETS_LogRecord(XO) \
+    XO(kind, 4) \
+    XO(slot, 5) \
+    XO(origin_slot, 6) \
+    XO(_pad0, 7) \
+    XO(seq, 8) \
+    XO(payload, 12) \
+    XO(effective_tick, 16)
+TL_WIRE_STRUCT(LogRecord)
+static_assert(sizeof(LogRecord) == 24u, "docs/NETCODE.md §20.2.3");
+
+// ControlHeader - docs/NETCODE.md §20.2.4: CONTROL channel (mesh, unreliable)
+#define TL_FIELDS_ControlHeader(X, XA, XH) \
+    X(u8, kind) \
+    X(u8, slot) \
+    X(u16, payload_bytes) \
+    X(u64, tick) \
+    X(u32, epoch) \
+    X(u32, _pad0)
+#define TL_OFFSETS_ControlHeader(XO) \
+    XO(kind, 4) \
+    XO(slot, 5) \
+    XO(payload_bytes, 6) \
+    XO(tick, 8) \
+    XO(epoch, 16) \
+    XO(_pad0, 20)
+TL_WIRE_STRUCT(ControlHeader)
+static_assert(sizeof(ControlHeader) == 24u, "docs/NETCODE.md §20.2.4");
+
+// Suspicion - docs/NETCODE.md §20.2.4: gossip; idempotent; re-sent while nonzero
+#define TL_FIELDS_Suspicion(X, XA, XH) \
+    X(u8, suspect_mask) \
+    XA(u8, _pad0, 3) \
+    X(u32, seq) \
+    X(u32, _pad1)
+#define TL_OFFSETS_Suspicion(XO) \
+    XO(suspect_mask, 4) \
+    XO(_pad0, 5) \
+    XO(seq, 8) \
+    XO(_pad1, 12)
+TL_WIRE_STRUCT(Suspicion)
+static_assert(sizeof(Suspicion) == 16u, "docs/NETCODE.md §20.2.4");
+
+// EpochClaim - docs/NETCODE.md §20.2.4: successor's claim of current + 1
+#define TL_FIELDS_EpochClaim(X, XA, XH) \
+    X(u32, epoch) \
+    X(u64, last_confirmed_tick) \
+    X(u32, claim_seq) \
+    X(u8, candidate_slot) \
+    XA(u8, _pad0, 3)
+#define TL_OFFSETS_EpochClaim(XO) \
+    XO(epoch, 4) \
+    XO(last_confirmed_tick, 8) \
+    XO(claim_seq, 16) \
+    XO(candidate_slot, 20) \
+    XO(_pad0, 21)
+TL_WIRE_STRUCT(EpochClaim)
+static_assert(sizeof(EpochClaim) == 24u, "docs/NETCODE.md §20.2.4");
+
+// EpochAck - docs/NETCODE.md §20.2.4: grant or refusal, with a named reason
+#define TL_FIELDS_EpochAck(X, XA, XH) \
+    X(u32, epoch) \
+    X(u64, my_last_confirmed_tick) \
+    X(u32, claim_seq) \
+    X(u8, granted) \
+    X(u8, refuse_reason) \
+    XA(u8, _pad0, 2)
+#define TL_OFFSETS_EpochAck(XO) \
+    XO(epoch, 4) \
+    XO(my_last_confirmed_tick, 8) \
+    XO(claim_seq, 16) \
+    XO(granted, 20) \
+    XO(refuse_reason, 21) \
+    XO(_pad0, 22)
+TL_WIRE_STRUCT(EpochAck)
+static_assert(sizeof(EpochAck) == 24u, "docs/NETCODE.md §20.2.4");
+
+// HashDigest - docs/NETCODE.md §20.2.4: 24 B + 8*arena_count: the arena vector follows the struct
+#define TL_FIELDS_HashDigest(X, XA, XH) \
+    X(u32, arena_count) \
+    X(u64, tick) \
+    X(u64, fold)
+#define TL_OFFSETS_HashDigest(XO) \
+    XO(arena_count, 4) \
+    XO(tick, 8) \
+    XO(fold, 16)
+TL_WIRE_STRUCT(HashDigest)
+static_assert(sizeof(HashDigest) == 24u, "docs/NETCODE.md §20.2.4");
+
+// MeasurementVector - docs/NETCODE.md §20.2.4: lobby seating input; measured, never sequenced
+#define TL_FIELDS_MeasurementVector(X, XA, XH) \
+    X(u32, upstream_kbps) \
+    XA(u16, rtt_p50_ms, 8) \
+    XA(u16, rtt_p95_ms, 8) \
+    XA(u8, loss_pct, 8)
+#define TL_OFFSETS_MeasurementVector(XO) \
+    XO(upstream_kbps, 4) \
+    XO(rtt_p50_ms, 8) \
+    XO(rtt_p95_ms, 24) \
+    XO(loss_pct, 40)
+TL_WIRE_STRUCT(MeasurementVector)
+static_assert(sizeof(MeasurementVector) == 48u, "docs/NETCODE.md §20.2.4");
+
+// CustodyHandoff - docs/NETCODE.md §20.2.4: signed over bytes [0,120)
+#define TL_FIELDS_CustodyHandoff(X, XA, XH) \
+    X(u32, handoff_seq) \
+    XA(u8, from_pubkey, 32) \
+    XA(u8, to_pubkey, 32) \
+    XA(u8, chain_head, 32) \
+    X(u64, effective_tick) \
+    X(u8, forced) \
+    XA(u8, _pad0, 7) \
+    XA(u8, signature, 64)
+#define TL_OFFSETS_CustodyHandoff(XO) \
+    XO(handoff_seq, 4) \
+    XO(from_pubkey, 8) \
+    XO(to_pubkey, 40) \
+    XO(chain_head, 72) \
+    XO(effective_tick, 104) \
+    XO(forced, 112) \
+    XO(_pad0, 113) \
+    XO(signature, 120)
+TL_WIRE_STRUCT(CustodyHandoff)
+static_assert(sizeof(CustodyHandoff) == 184u, "docs/NETCODE.md §20.2.4");
+
+// Leave - docs/NETCODE.md §20.2.4: to the coordinator; it sequences LR_LEAVE
+#define TL_FIELDS_Leave(X, XA, XH) \
+    X(u32, leave_seq) \
+    X(u64, requested_effective_tick)
+#define TL_OFFSETS_Leave(XO) \
+    XO(leave_seq, 4) \
+    XO(requested_effective_tick, 8)
+TL_WIRE_STRUCT(Leave)
+static_assert(sizeof(Leave) == 16u, "docs/NETCODE.md §20.2.4");
+
+// LobbyProbe - docs/NETCODE.md §20.2.4: RTT probe; send_time_us is echoed back verbatim
+#define TL_FIELDS_LobbyProbe(X, XA, XH) \
+    X(u32, probe_seq) \
+    X(u64, send_time_us) \
+    X(u64, echo_time_us) \
+    X(u8, is_reply) \
+    XA(u8, _pad0, 7)
+#define TL_OFFSETS_LobbyProbe(XO) \
+    XO(probe_seq, 4) \
+    XO(send_time_us, 8) \
+    XO(echo_time_us, 16) \
+    XO(is_reply, 24) \
+    XO(_pad0, 25)
+TL_WIRE_STRUCT(LobbyProbe)
+static_assert(sizeof(LobbyProbe) == 32u, "docs/NETCODE.md §20.2.4");
+
+// BulkHeader - docs/NETCODE.md §20.2.5: BULK channel (reliable + fragmented, point-to-point)
+#define TL_FIELDS_BulkHeader(X, XA, XH) \
+    X(u8, kind) \
+    X(u8, slot) \
+    X(u16, _pad0) \
+    X(u64, transfer_id) \
+    X(u32, chunk_index) \
+    X(u32, chunk_count) \
+    X(u32, offset) \
+    X(u32, len)
+#define TL_OFFSETS_BulkHeader(XO) \
+    XO(kind, 4) \
+    XO(slot, 5) \
+    XO(_pad0, 6) \
+    XO(transfer_id, 8) \
+    XO(chunk_index, 16) \
+    XO(chunk_count, 20) \
+    XO(offset, 24) \
+    XO(len, 28)
+TL_WIRE_STRUCT(BulkHeader)
+static_assert(sizeof(BulkHeader) == 32u, "docs/NETCODE.md §20.2.5");
+
+// LogRequest - docs/NETCODE.md §20.2.5: "send me the confirmed log for [from, to]"
+#define TL_FIELDS_LogRequest(X, XA, XH) \
+    X(u32, _pad0) \
+    X(u64, from_tick) \
+    X(u64, to_tick)
+#define TL_OFFSETS_LogRequest(XO) \
+    XO(_pad0, 4) \
+    XO(from_tick, 8) \
+    XO(to_tick, 16)
+TL_WIRE_STRUCT(LogRequest)
+static_assert(sizeof(LogRequest) == 24u, "docs/NETCODE.md §20.2.5");
+
+// BulkAck - docs/NETCODE.md §20.2.5: the §5.4 epilogue [final_tick][final_ref_hash][all_agree]
+#define TL_FIELDS_BulkAck(X, XA, XH) \
+    X(u8, all_agree) \
+    XA(u8, _pad0, 3) \
+    X(u64, final_tick) \
+    X(u64, final_ref_hash)
+#define TL_OFFSETS_BulkAck(XO) \
+    XO(all_agree, 4) \
+    XO(_pad0, 5) \
+    XO(final_tick, 8) \
+    XO(final_ref_hash, 16)
+TL_WIRE_STRUCT(BulkAck)
+static_assert(sizeof(BulkAck) == 24u, "docs/NETCODE.md §20.2.5");
+
+// Handshake - docs/NETCODE.md §15.1: sent before any input flows; any mismatch ends the session
+#define TL_FIELDS_Handshake(X, XA, XH) \
+    X(u32, session_model) \
+    X(u32, origin) \
+    X(u32, max_actions) \
+    XA(u8, build_id, 32) \
+    XA(u8, session_fingerprint, 32) \
+    X(u64, tick0_state_hash) \
+    XA(u8, world_chain_head, 32)
+#define TL_OFFSETS_Handshake(XO) \
+    XO(session_model, 4) \
+    XO(origin, 8) \
+    XO(max_actions, 12) \
+    XO(build_id, 16) \
+    XO(session_fingerprint, 48) \
+    XO(tick0_state_hash, 80) \
+    XO(world_chain_head, 88)
+TL_WIRE_STRUCT(Handshake)
+static_assert(sizeof(Handshake) == 120u, "docs/NETCODE.md §15.1");
+
+// JoinChallenge - docs/NETCODE.md §20.2.7: server -> joiner, first message on connect
+#define TL_FIELDS_JoinChallenge(X, XA, XH) \
+    X(u32, _pad0) \
+    XA(u8, nonce, 32)
+#define TL_OFFSETS_JoinChallenge(XO) \
+    XO(_pad0, 4) \
+    XO(nonce, 8)
+TL_WIRE_STRUCT(JoinChallenge)
+static_assert(sizeof(JoinChallenge) == 40u, "docs/NETCODE.md §20.2.7");
+
+// JoinRequest - docs/NETCODE.md §20.2.7: joiner -> server, immediately followed by its Handshake
+#define TL_FIELDS_JoinRequest(X, XA, XH) \
+    X(u32, requested_slot) \
+    XA(u8, identity_pubkey, 32) \
+    XA(u8, held_chain_head, 32) \
+    X(u64, held_durable_tick) \
+    XA(u8, signature, 64)
+#define TL_OFFSETS_JoinRequest(XO) \
+    XO(requested_slot, 4) \
+    XO(identity_pubkey, 8) \
+    XO(held_chain_head, 40) \
+    XO(held_durable_tick, 72) \
+    XO(signature, 80)
+TL_WIRE_STRUCT(JoinRequest)
+static_assert(sizeof(JoinRequest) == 144u, "docs/NETCODE.md §20.2.7");
+
+// JoinReply - docs/NETCODE.md §20.2.7: accepted/refused, with the succession list and a named reason
+#define TL_FIELDS_JoinReply(X, XA, XH) \
+    X(u32, epoch) \
+    X(u64, join_effective_tick) \
+    X(u64, checkpoint_tick) \
+    X(u64, confirmed_tick) \
+    XA(u8, succession, 8) \
+    X(u8, accepted) \
+    X(u8, slot) \
+    X(u8, reason) \
+    X(u8, coordinator_slot) \
+    X(u8, live_mask) \
+    XA(u8, _pad0, 3)
+#define TL_OFFSETS_JoinReply(XO) \
+    XO(epoch, 4) \
+    XO(join_effective_tick, 8) \
+    XO(checkpoint_tick, 16) \
+    XO(confirmed_tick, 24) \
+    XO(succession, 32) \
+    XO(accepted, 40) \
+    XO(slot, 41) \
+    XO(reason, 42) \
+    XO(coordinator_slot, 43) \
+    XO(live_mask, 44) \
+    XO(_pad0, 45)
+TL_WIRE_STRUCT(JoinReply)
+static_assert(sizeof(JoinReply) == 48u, "docs/NETCODE.md §20.2.7");
+
+// CheckpointHeader - docs/NETCODE.md §20.2.8: the checkpoint file image's leading header
+#define TL_FIELDS_CheckpointHeader(X, XA, XH) \
+    X(u32, session_model) \
+    X(u32, origin) \
+    X(u32, arena_count) \
+    XA(u8, build_id, 32) \
+    XA(u8, session_fingerprint, 32) \
+    X(u64, tick) \
+    X(u64, seed) \
+    X(u64, state_hash) \
+    XA(u8, custody_pubkey, 32) \
+    XA(u8, chain_entry, 32) \
+    X(u32, chain_index) \
+    X(u32, tier) \
+    X(u64, payload_bytes) \
+    X(u32, payload_crc32) \
+    X(u32, header_crc32)
+#define TL_OFFSETS_CheckpointHeader(XO) \
+    XO(session_model, 4) \
+    XO(origin, 8) \
+    XO(arena_count, 12) \
+    XO(build_id, 16) \
+    XO(session_fingerprint, 48) \
+    XO(tick, 80) \
+    XO(seed, 88) \
+    XO(state_hash, 96) \
+    XO(custody_pubkey, 104) \
+    XO(chain_entry, 136) \
+    XO(chain_index, 168) \
+    XO(tier, 172) \
+    XO(payload_bytes, 176) \
+    XO(payload_crc32, 184) \
+    XO(header_crc32, 188)
+TL_WIRE_STRUCT(CheckpointHeader)
+static_assert(sizeof(CheckpointHeader) == 192u, "docs/NETCODE.md §20.2.8");
+
+// ChainGenesis - docs/NETCODE.md §20.2.8: chain[0] = BLAKE2b-256(le_bytes(ChainGenesis))
+#define TL_FIELDS_ChainGenesis(X, XA, XH) \
+    X(u32, _pad0) \
+    X(u64, tick0_state_hash) \
+    X(u64, world_seed) \
+    XA(u8, creation_nonce, 32)
+#define TL_OFFSETS_ChainGenesis(XO) \
+    XO(_pad0, 4) \
+    XO(tick0_state_hash, 8) \
+    XO(world_seed, 16) \
+    XO(creation_nonce, 24)
+TL_WIRE_STRUCT(ChainGenesis)
+static_assert(sizeof(ChainGenesis) == 56u, "docs/NETCODE.md §20.2.8");
+
+// ChainEntry - docs/NETCODE.md §20.2.8: chain[K] = BLAKE2b-256(le_bytes(ChainEntry)), K >= 1
+#define TL_FIELDS_ChainEntry(X, XA, XH) \
+    X(u32, chain_index) \
+    XA(u8, prev, 32) \
+    XA(u8, log_segment_hash, 32) \
+    X(u64, state_hash) \
+    X(u64, tick) \
+    XA(u8, session_fingerprint, 32) \
+    XA(u8, custody_pubkey, 32)
+#define TL_OFFSETS_ChainEntry(XO) \
+    XO(chain_index, 4) \
+    XO(prev, 8) \
+    XO(log_segment_hash, 40) \
+    XO(state_hash, 72) \
+    XO(tick, 80) \
+    XO(session_fingerprint, 88) \
+    XO(custody_pubkey, 120)
+TL_WIRE_STRUCT(ChainEntry)
+static_assert(sizeof(ChainEntry) == 152u, "docs/NETCODE.md §20.2.8");
+
+// ArchiveSegmentHeader - docs/NETCODE.md §20.2.9: one archive segment's header
+#define TL_FIELDS_ArchiveSegmentHeader(X, XA, XH) \
+    X(u32, max_actions) \
+    X(u64, base_tick) \
+    X(u32, tick_count) \
+    X(u8, slot_mask) \
+    XA(u8, _pad0, 3) \
+    X(u32, record_count) \
+    X(u32, log_record_count) \
+    XA(u8, build_id, 32) \
+    XA(u8, session_fingerprint, 32) \
+    X(u32, payload_bytes) \
+    X(u32, payload_crc32) \
+    X(u32, segment_seq) \
+    X(u32, header_crc32)
+#define TL_OFFSETS_ArchiveSegmentHeader(XO) \
+    XO(max_actions, 4) \
+    XO(base_tick, 8) \
+    XO(tick_count, 16) \
+    XO(slot_mask, 20) \
+    XO(_pad0, 21) \
+    XO(record_count, 24) \
+    XO(log_record_count, 28) \
+    XO(build_id, 32) \
+    XO(session_fingerprint, 64) \
+    XO(payload_bytes, 96) \
+    XO(payload_crc32, 100) \
+    XO(segment_seq, 104) \
+    XO(header_crc32, 108)
+TL_WIRE_STRUCT(ArchiveSegmentHeader)
+static_assert(sizeof(ArchiveSegmentHeader) == 112u, "docs/NETCODE.md §20.2.9");
+
+// HashTraceHeader - docs/NETCODE.md §20.2.9: the RecordedInput file's hash-trace header
+#define TL_FIELDS_HashTraceHeader(X, XA, XH) \
+    X(u32, arena_count) \
+    X(u64, base_tick) \
+    X(u32, tick_count) \
+    X(u32, _pad0)
+#define TL_OFFSETS_HashTraceHeader(XO) \
+    XO(arena_count, 4) \
+    XO(base_tick, 8) \
+    XO(tick_count, 16) \
+    XO(_pad0, 20)
+TL_WIRE_STRUCT(HashTraceHeader)
+static_assert(sizeof(HashTraceHeader) == 24u, "docs/NETCODE.md §20.2.9");
+
+// --- the three repeated-element structs (no per-element format_version; see the note above) ---
+
+// One registered SNAPSHOT arena's extent inside a checkpoint image, in registry order
+// (docs/NETCODE.md §20.2.8). An element of CheckpointHeader's array, which is already versioned.
+struct CheckpointArenaEntry {
+    u64 id;      // 0  NameHash
+    u64 used;    // 8  bytes of [base, used)
+};
+static_assert(sizeof(CheckpointArenaEntry) == 16u, "docs/NETCODE.md §20.2.8");
+static_assert(offsetof(CheckpointArenaEntry, used) == 8u, "docs/NETCODE.md §20.2.8");
+
+// One line of the chain file: the entry and the hash it produced (docs/NETCODE.md §20.2.8).
+// chain file = ChainGenesis + ChainRecord[K].
+struct ChainRecord {
+    ChainEntry entry;   //   0
+    u8         hash[32];// 152  chain[K] = BLAKE2b-256(le_bytes(entry))
+};
+static_assert(sizeof(ChainRecord) == 184u, "docs/NETCODE.md §20.2.8");
+static_assert(offsetof(ChainRecord, hash) == 152u, "docs/NETCODE.md §20.2.8");
+
+// One archive stream's header: a (slot, channel) pair's record count (docs/NETCODE.md §20.2.9).
+// An element inside ArchiveSegmentHeader's payload, which carries the version and the crc32.
+struct ArchiveStreamHeader {
+    u32 record_count;   // 0
+    u8  channel;        // 4  0..31 action, 32 pointer_x, 33 pointer_y, 34 flag escape
+    u8  slot;           // 5
+    u16 _pad0;          // 6
+};
+static_assert(sizeof(ArchiveStreamHeader) == 8u, "docs/NETCODE.md §20.2.9");
+static_assert(offsetof(ArchiveStreamHeader, channel) == 4u, "docs/NETCODE.md §20.2.9");
+static_assert(offsetof(ArchiveStreamHeader, slot) == 5u, "docs/NETCODE.md §20.2.9");
+
+// --- the kind enums (docs/NETCODE.md §20.2's `kind` field comments) ---------------------------
+// Named so the encoder, the archive and the tests cannot disagree about a magic number. Values
+// are the spec's; 0 is deliberately unused in every one, so a zero-filled buffer is never a
+// valid kind.
+enum PacketKind : u8 { PK_UPSTREAM = 1, PK_DOWNSTREAM = 2, PK_MIRROR = 3, PK_KEEPALIVE = 4 };
+
+enum LogRecordKind : u8 {
+    LR_JOIN = 1, LR_LEAVE = 2, LR_SUSPECT = 3, LR_RESUME = 4, LR_EVICT = 5,
+    LR_DELAY = 6, LR_EPOCH = 7, LR_CUSTODY = 8, LR_END = 9
+};
+
+enum ControlKind : u8 {
+    CK_SUSPICION = 1, CK_EPOCH_CLAIM = 2, CK_EPOCH_ACK = 3, CK_HASH_DIGEST = 4,
+    CK_MEASUREMENT = 5, CK_CUSTODY = 6, CK_LEAVE = 7, CK_LOBBY_PROBE = 8
+};
+
+enum BulkKind : u8 {
+    BK_JOIN_CHALLENGE = 1, BK_JOIN_REQUEST = 2, BK_HANDSHAKE = 3, BK_JOIN_REPLY = 4,
+    BK_SNAPSHOT_CHUNK = 5, BK_LOG_SEGMENT = 6, BK_LOG_REQUEST = 7, BK_ACK = 8
+};
+
+// Archive stream channels (docs/NETCODE.md §20.2.9): 0..31 are the actions, then the three
+// non-action streams. 36 streams per slot, written in ascending channel order.
+constexpr u8  ARCHIVE_CH_POINTER_X  = 32u;
+constexpr u8  ARCHIVE_CH_POINTER_Y  = 33u;
+constexpr u8  ARCHIVE_CH_FLAG_ESCAPE = 34u;
+constexpr u32 ARCHIVE_CH_COUNT      = 36u;
+static_assert(ARCHIVE_CH_POINTER_X == NET_FRAME_MAX_ACTIONS,
+              "the action channels are 0..MAX_ACTIONS-1, so pointer_x starts at MAX_ACTIONS");
