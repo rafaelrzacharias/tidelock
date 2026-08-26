@@ -77,6 +77,29 @@ def tooling_stems(root):
     return set(m.group(1).split())
 
 
+# docs/LUAU-LAYER.md section 10.12's other done criterion: "the symbol audit shows lua_*/luau_*
+# symbols only in tl_script". The include firewall (tools/audit/includes.py, BACKEND_HEADERS) keeps
+# the HEADERS in one module; this keeps the SYMBOLS there, which is the claim that actually
+# matters - a hand-written extern declaration needs no header at all, and that is exactly how a
+# lua_State* would escape the wrap module without tripping a single include check.
+#
+# Checked on every registered lib except the wrap lib itself, and on undefined references (a lib
+# that CALLS into Luau) as well as definitions (a lib that reimplements a lua_* name). The C
+# names are what to match: vendor/luau is built with LUA_API=extern "C", so there is no mangling
+# to see through, and that is also why the check can be a prefix match rather than a demangle.
+VENDOR_SYMBOL_PREFIXES = (("lua_", "luaL_", "luau_", "luaopen_"), )
+
+
+def vendor_symbol(sym):
+    """True for a Luau public C symbol, under either platform's leading-underscore convention."""
+    bare = sym.lstrip("_")
+    for group in VENDOR_SYMBOL_PREFIXES:
+        for p in group:
+            if bare.startswith(p):
+                return True
+    return False
+
+
 def stem_of_member(member):
     """The source stem an archive member's object file was compiled from, independent of the
     object-naming convention the generator used (CMake+Ninja nests it under CMakeFiles/<target>.dir/
@@ -141,6 +164,11 @@ def main():
                          "half of src/foundation/). Both this and --root are required for any "
                          "exemption at all: a stem named log/prof/probe/crash in any OTHER lib is "
                          "an ordinary writable-static violation (docs/CPP-SUBSET.md §9 R-4).")
+    ap.add_argument("--wrap-lib", action="append", default=[], metavar="NAME",
+                    help="a lib that MAY reference the vendored Luau C API (docs/LUAU-LAYER.md "
+                         "section 10.12: lua_*/luau_* symbols only in tl_script). Every other "
+                         "registered lib is checked, defined AND undefined. Omit for no check at "
+                         "all rather than a silently empty one - see the zero-check below.")
     ap.add_argument("--sanitized", action="store_true",
                     help="declare that this build has sanitizers on; the audit then refuses to "
                          "run rather than reporting the sanitizer runtime's own globals")
@@ -197,10 +225,32 @@ def main():
             violations.append("%s: %s has %d bytes of %s - writable static storage in src/ "
                               "(docs/CPP-SUBSET.md §1)" % (name, member, size, section))
 
+    # The vendored-symbol confinement (docs/LUAU-LAYER.md section 10.12). A filter that matches
+    # nothing must be an error, not a clean run (docs/LESSONS.md, third occurrence of that class):
+    # if --wrap-lib names a lib that is not registered, the check would silently cover everything
+    # or nothing depending on spelling, so the name is verified against the registered set first.
+    if a.wrap_lib:
+        registered = {n for n, _ in layers} | {n for n, _ in data_only}
+        for w in a.wrap_lib:
+            if w not in registered:
+                sys.exit("symbols: --wrap-lib %s is not a registered lib (%s)"
+                         % (w, ", ".join(sorted(registered))))
+        for name, path in layers + data_only:
+            if name in a.wrap_lib:
+                continue
+            seen = (names(run(a.nm, ["--undefined-only"], path), undefined=True)
+                    | names(run(a.nm, ["--defined-only"], path), undefined=False))
+            for sym in sorted(seen):
+                if vendor_symbol(sym):
+                    violations.append(
+                        "%s: Luau symbol %s outside the wrap module %s - a lua_State* can leave "
+                        "the module through a hand-written extern with no #include to catch it "
+                        "(docs/LUAU-LAYER.md section 10.12)" % (name, sym, "/".join(a.wrap_lib)))
+
     for v in violations:
         print("ERROR " + v)
-    print("symbols: %d audited layers + %d data-only libs, %d violations"
-          % (len(layers), len(data_only), len(violations)))
+    print("symbols: %d audited layers + %d data-only libs, %d wrap libs, %d violations"
+          % (len(layers), len(data_only), len(a.wrap_lib), len(violations)))
     return 1 if violations else 0
 
 

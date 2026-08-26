@@ -642,8 +642,7 @@ This also blocks §10.9's dev on-load compile permanently, which is why it is a 
 a lane decision.
 
 **Done** when: every §10.11 test passes in `dev` and `netcode` (fatal-expected ones in child
-processes); the symbol audit shows `lua_*`/`luau_*` symbols only in `tl_script`; CI grep finds no
-Luau header outside `src/script/`; `TL_ASSERT_NO_TICK_ALLOC` holds for a tick with Luau
+processes); the symbol audit shows `lua_*`/`luau_*` symbols only in `tl_script` (`tools/audit/symbols.py --wrap-lib`, built 2026-08-26 — it checks DEFINED as well as undefined names, because a hand-written `extern` needs no header and is precisely the shape the include firewall cannot see); no Luau header outside `src/script/` (`tools/audit/includes.py`'s `SYS_ALLOW_DIRS` + `BACKEND_HEADERS`, both halves with their own planted violations); `TL_ASSERT_NO_TICK_ALLOC` holds for a tick with Luau
 systems running (pool allocations are inside the Luau pool, outside the registered set, and the
 guard watches registered arenas + scratch only — the pool counter is asserted separately to be
 flat across a steady-state tick after the GC step); the regen scene is bit-identical across the `CANON.md`

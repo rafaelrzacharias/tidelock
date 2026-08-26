@@ -513,6 +513,17 @@ LIBM_CPP = ('extern "C" double sqrt(double);\n'
             "double tl_m(double x) { return sqrt(x); }\n")
 
 
+# docs/LUAU-LAYER.md section 10.12: lua_*/luau_* symbols live in the wrap module and nowhere
+# else. The plant is deliberately a HAND-WRITTEN extern with no #include: that is the shape the
+# include firewall cannot see, and therefore the only shape this gate is worth having for.
+LUAU_LEAK_CPP = ('extern "C" int lua_pcall(void*, int, int, int);\n'
+                 "int tl_leak(void* L) { return lua_pcall(L, 0, 0, 0); }\n")
+# A lib that DEFINES a lua_* name is the other half: reimplementing the symbol escapes an
+# undefined-reference-only check completely.
+LUAU_DEFINE_CPP = ('extern "C" int luaopen_base(void*);\n'
+                   "int luaopen_base(void*) { return 0; }\n")
+
+
 def build_lib(cxx, ar, root, name, sources):
     objs = []
     for i, src in enumerate(sources):
@@ -573,6 +584,44 @@ def test_symbols(tmp, nm, objdump, ar, cxx):
                rc == 1 and "sqrt" in out, out.strip()[:200])
     else:
         record("symbols: a libm call from an audited lib", False, err[:200])
+
+    # --- the Luau confinement (docs/LUAU-LAYER.md section 10.12) -------------------------------
+    leak, err = build_lib(cxx, ar, root, "luauleak", [LUAU_LEAK_CPP])
+    wrap, err2 = build_lib(cxx, ar, root, "wrapmod", [LUAU_LEAK_CPP])
+    if leak and wrap:
+        # `upper` and not `lower` as the base layer: the lower fixture carries a deliberate
+        # upward reference, and a negative row that passes on someone else's violation pins
+        # nothing (docs/LESSONS.md).
+        args = base + ["--layer", "upper=" + upper, "--data-only", "luauleak=" + leak,
+                       "--data-only", "wrapmod=" + wrap, "--wrap-lib", "wrapmod"]
+        rc, out = run(args)
+        record("symbols: a Luau symbol referenced outside the wrap module",
+               rc == 1 and "lua_pcall" in out and "luauleak" in out, out.strip()[:200])
+        # ...and the wrap module itself is NOT reported, or the gate would ban the one module that
+        # exists to hold these symbols - a gate that fails its own subject proves nothing.
+        rc2, out2 = run(base + ["--layer", "upper=" + upper, "--data-only", "wrapmod=" + wrap,
+                                "--wrap-lib", "wrapmod"])
+        record("symbols: the wrap module may reference Luau", rc2 == 0, out2.strip()[:200])
+    else:
+        record("symbols: a Luau symbol referenced outside the wrap module", False, (err or err2)[:200])
+
+    defined, err = build_lib(cxx, ar, root, "luaudef", [LUAU_DEFINE_CPP])
+    if defined:
+        rc, out = run(base + ["--layer", "upper=" + upper, "--data-only", "luaudef=" + defined,
+                              "--data-only", "wrapmod=" + wrap, "--wrap-lib", "wrapmod"])
+        record("symbols: a Luau symbol DEFINED outside the wrap module",
+               rc == 1 and "luaopen_base" in out, out.strip()[:200])
+    else:
+        record("symbols: a Luau symbol DEFINED outside the wrap module", False, err[:200])
+
+    # A filter that matches nothing must be an error, not a clean run (docs/LESSONS.md): a
+    # misspelled --wrap-lib would otherwise check every lib INCLUDING the wrap module, or - worse
+    # on a future refactor - nothing at all, and report 0 violations either way.
+    if wrap:
+        rc, out = run(base + ["--layer", "upper=" + upper, "--data-only", "wrapmod=" + wrap,
+                              "--wrap-lib", "tl_scrpit"])
+        record("symbols: a --wrap-lib naming no registered lib is an error",
+               rc != 0 and "not a registered lib" in out, out.strip()[:200])
 
     # Weak undefined symbols are an ELF concept; the same source on COFF produces no `w` entry
     # (and drags in _fltused), so this one is built for ELF explicitly.
