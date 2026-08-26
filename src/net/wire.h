@@ -21,11 +21,13 @@
 //   (docs/NETCODE.md §20.3(a)) and byte-identical on every target in the CANON.md matrix.
 // Threading: values only; one writer/reader per thread. `net` is outside the sim boundary
 //   (docs/NETCODE.md §20) - nothing here is hashed into world state.
-// Includes: foundation/tl_types.h, foundation/bytes.h, foundation/tl_assert.h, core/reflect.h.
+// Includes: foundation/tl_types.h, foundation/bytes.h, foundation/tl_assert.h,
+//   foundation/net_limits.h (MAX_PEERS), core/reflect.h.
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
 #include "foundation/tl_assert.h"
 #include "foundation/bytes.h"
+#include "foundation/net_limits.h"
 #include "core/reflect.h"
 
 // --- ErrCode range ---------------------------------------------------------------------------
@@ -60,8 +62,9 @@ constexpr const char* err_net_name(ErrCode e) {
 }
 
 // --- constants (docs/NETCODE.md §20 preamble; the tunables' doc home is docs/CANON.md) --------
+// MAX_PEERS lives in foundation/net_limits.h (shared with core/input.h; module-DAG-forced, see
+// that header's contract block; formerly a duplicate declaration here, TODO.md RR-24).
 constexpr u32 NET_FORMAT_VERSION = 1u;    // every wire struct's field 0
-constexpr u32 MAX_PEERS          = 8u;    // docs/CANON.md; the slot_mask/hold bitmaps are one byte
 constexpr u32 SLOT_RING_TICKS    = 32u;   // per-slot frame ring, power of two
 
 // The redundancy window and the confirmation horizon the ring must cover (docs/CANON.md).
@@ -80,7 +83,6 @@ constexpr u32 CHECKPOINT_HOT_TICKS         = 300u; // docs/CANON.md; s20.2.9's f
 static_assert((SLOT_RING_TICKS & (SLOT_RING_TICKS - 1u)) == 0u, "SLOT_RING_TICKS is a power of two");
 static_assert(SLOT_RING_TICKS >= REDUNDANCY_TICKS + CONFIRMATION_HORIZON_TICKS + 6u,
               "SLOT_RING_TICKS must cover the redundancy window + the confirmation horizon + 6 (docs/NETCODE.md §20)");
-static_assert(MAX_PEERS <= 8u, "slot_mask, live_mask and the hold bitmaps are one byte wide (docs/NETCODE.md §20.2.2)");
 
 // The §20.3(a) packet-size backoff floor is a real floor, not advice.
 static_assert(MIN_TICKS_PER_PACKET <= MAX_TICKS_PER_PACKET, "");

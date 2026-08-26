@@ -27,18 +27,18 @@
 //   action map's edit commands, are).
 // Threading: single-threaded; input_set_producer and world_register_component(&PeerSlots_info)
 //   are init-only.
-// Includes: foundation/tl_types.h, foundation/tl_assert.h, core/reflect.h (PeerSlots' component
-//   door), <stddef.h> (offsetof).
+// Includes: foundation/tl_types.h, foundation/tl_assert.h, foundation/net_limits.h (MAX_PEERS),
+//   core/reflect.h (PeerSlots' component door), <stddef.h> (offsetof).
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
 #include "foundation/tl_assert.h"
+#include "foundation/net_limits.h"
 #include "core/reflect.h"
 #include <stddef.h>
 
-// docs/CANON.md "MAX_PEERS" (value 8, NETCODE-owned there); this is the C++ home - see the header
-// comment above for why core carries it rather than net.
-constexpr u32 MAX_PEERS = 8u;
-static_assert(MAX_PEERS <= 8u, "slot_mask/live_mask/hold bitmaps are one byte wide (docs/NETCODE.md section 20.2.2)");
+// docs/CANON.md "MAX_PEERS" (value 8, NETCODE-owned there); foundation/net_limits.h is the one
+// C++ home, shared with net/wire.h (module-DAG-forced: net depends on core, never the reverse, so
+// neither module's own header can be the other's source - see that header's contract block).
 
 // docs/INPUT.md §1 R: compile-time; changing it is a wire-format version bump.
 enum : u32 { MAX_ACTIONS = 32u };

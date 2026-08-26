@@ -62,7 +62,9 @@ void script_add_event(ScriptProducer* sp, u64 tick, ActionId action, i8 value, S
 // Convenience builders (docs/INPUT.md §9.4: "helpers press(a, tick=10), hold(a, v, from, to)").
 // One-tick pulse: down this tick only, auto-clears on the next produce() call.
 void script_press(ScriptProducer* sp, ActionId action, u64 tick, i8 value, u8 slot);
-// Continuous hold over [from, to]: HOLD_START at `from`, HOLD_END at `to`. TL_CHECK(from <= to).
+// Continuous hold over [from, to): HOLD_START at `from`, HOLD_END at `to` (down is released ON
+// tick `to`, not after it - matches SCRIPT_OP_HOLD_END's own clear-on-this-tick semantics above
+// and the shipped test). TL_CHECK(from <= to).
 void script_hold(ScriptProducer* sp, ActionId action, i8 value, u64 from, u64 to, u8 slot);
 // Sets the value/down state at `tick`, holding until the next event on this (slot, action).
 void script_set(ScriptProducer* sp, ActionId action, i8 value, u64 tick, u8 slot);

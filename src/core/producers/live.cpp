@@ -47,13 +47,11 @@ void live_producer_init(LiveProducer* lp, ActionMap* map, u8 local_slot, ImGuiCa
     memset(lp, 0, sizeof(LiveProducer));
     lp->map = map;
     lp->local_slot = local_slot;
-    lp->last_context = map->active_context;
     lp->capture = capture;
 }
 
 ProduceResult live_produce_frame(LiveProducer* lp, const RawEvent* events, u32 event_count,
                                  u64 tick, InputFrame* out, u8* live_mask) {
-    memcpy(lp->prev_key_down, lp->key_down, sizeof(lp->key_down));
     lp->mouse_dx_accum = 0.0f;
     lp->mouse_dy_accum = 0.0f;
 
@@ -257,7 +255,6 @@ ProduceResult live_produce_frame(LiveProducer* lp, const RawEvent* events, u32 e
 
     out[lp->local_slot] = frame;
     *live_mask = (u8)(1u << lp->local_slot);
-    lp->last_context = m->active_context;
     return PRODUCE_READY;
 }
 

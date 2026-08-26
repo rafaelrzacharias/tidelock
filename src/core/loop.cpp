@@ -69,7 +69,18 @@ f32 engine_frame(Engine* e) {
     }
     if (steps == MAX_STEPS) { e->accumulator = 0.0; }   // spiral-of-death cap: drop time
     e->last_steps = steps;
-    const f32 alpha = (f32)(e->accumulator / FIXED_DT_SECONDS);
+    // PRODUCE_WAIT breaks the loop above without consuming accumulator time, so accumulator can
+    // still hold several whole ticks' worth of unconsumed time here (unboundedly, under a long
+    // stall) - alpha must stay in [0, 1) per loop.h's contract (docs/FRAME-LOOP.md section 0), so
+    // take only the fractional remainder past whatever whole ticks are stuck pending (a plain
+    // clamp to FIXED_DT_SECONDS instead of this would return exactly 1.0, not < 1.0, whenever the
+    // stall lands on a whole-tick multiple). Truncating cast, not fmod: accumulator is never
+    // negative (real_dt only adds; the loop above only subtracts whole FIXED_DT_SECONDS steps or
+    // zeroes it at the MAX_STEPS cap), so (u64) truncation is floor here, and this avoids pulling
+    // in libm for a one-line division.
+    const f64 whole_ticks = (f64)(u64)(e->accumulator / FIXED_DT_SECONDS);
+    const f64 pending = e->accumulator - whole_ticks * FIXED_DT_SECONDS;
+    const f32 alpha = (f32)(pending / FIXED_DT_SECONDS);
     e->last_alpha = alpha;
     run_phase(&e->world, PHASE_PRE_RENDER);
     run_phase(&e->world, PHASE_RENDER);

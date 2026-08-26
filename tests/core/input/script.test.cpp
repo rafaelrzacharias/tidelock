@@ -64,6 +64,30 @@ TL_TEST(script_set_persists_until_changed, "core,input,script,fast") {
     }
 }
 
+TL_TEST(script_produce_catches_up_a_skipped_tick, "core,input,script,fast") {
+    // produce() is never called for ticks 0..5 (a caller that jumps ahead rather than driving
+    // every tick in sequence) - the event scheduled at tick 5, and everything after it, must
+    // still fire on the next call rather than being lost forever (review round 1 finding 3: the
+    // cursor's break condition used to be `!=`, which stalled permanently the first time a
+    // produce() call landed past a pending event's tick).
+    ScriptFixture f;
+    TL_ASSERT_TRUE(script_fixture_init(&f, 8u, 0b1u));
+    script_press(&f.sp, (ActionId)3u, 5u, 1, 0u);
+    script_press(&f.sp, (ActionId)4u, 7u, 1, 0u);
+
+    InputFrame out[MAX_PEERS];
+    u8 live_mask = 0u;
+    TL_ASSERT_EQ(script_produce(&f.sp, 6u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_EQ(out[0].actions[3].flags, (u8)(AS_DOWN | AS_PRESSED));   // the stale tick-5 event, caught up
+    TL_EXPECT_EQ(out[0].actions[3].value, (i8)1);
+    TL_EXPECT_EQ(out[0].actions[4].flags, (u8)0);
+
+    TL_ASSERT_EQ(script_produce(&f.sp, 7u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_EQ(out[0].actions[3].flags, (u8)AS_RELEASED);              // its one-tick pulse still auto-clears
+    TL_EXPECT_EQ(out[0].actions[4].flags, (u8)(AS_DOWN | AS_PRESSED));   // and the on-time tick-7 event still fires
+    TL_EXPECT_EQ(out[0].actions[4].value, (i8)1);
+}
+
 TL_TEST(script_multiple_slots_independent, "core,input,script,fast") {
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_init(&f, 8u, 0b11u));

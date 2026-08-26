@@ -116,10 +116,20 @@ TL_TEST(fold_deadzone_axial_shape, "core,input,fold,deadzone,fast") {
     TL_ASSERT_EQ(live_produce_frame(&f.lp, &small, 1u, 0u, out, &live_mask), PRODUCE_READY);
     TL_EXPECT_EQ(out[0].actions[look_x].value, (i8)0);
 
-    // Full deflection: rescaled past the deadzone to (approximately) full scale.
+    // Full deflection: rescaled past the deadzone to 0.99993896484375, * 127 = 126.99224... -
+    // RNE rounds up to 127; plain truncation would give 126 (this is the discriminating case a
+    // truncation mutation at live.cpp's quantization call site is caught by - a TL_EXPECT_GT
+    // floor is satisfied by both answers and catches neither).
     RawEvent full = pad_axis_ev(0u, 0u, 32767);
     TL_ASSERT_EQ(live_produce_frame(&f.lp, &full, 1u, 1u, out, &live_mask), PRODUCE_READY);
-    TL_EXPECT_GT(out[0].actions[look_x].value, (i8)100);
+    TL_EXPECT_EQ(out[0].actions[look_x].value, (i8)127);
+
+    // Symmetry (docs/INPUT.md section 9.6 "analog quantization +/-127 and symmetry"): the mirrored
+    // negative deflection rescales to -0.99993896484375, * 127 = -126.99224... - RNE rounds away
+    // from zero to -127, matching -(q(32767)) exactly.
+    RawEvent full_neg = pad_axis_ev(0u, 0u, -32767);
+    TL_ASSERT_EQ(live_produce_frame(&f.lp, &full_neg, 1u, 2u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_EQ(out[0].actions[look_x].value, (i8)-127);
 }
 
 TL_TEST(fold_socd_neutral_and_last_wins, "core,input,fold,socd,fast") {

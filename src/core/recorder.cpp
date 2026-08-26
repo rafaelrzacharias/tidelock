@@ -49,7 +49,13 @@ void recorder_tick(Recorder* rec, World* w, const InputFrame* frames) {
     u64 per_arena[MAX_ARENAS];
     RecordedInputRow row{};
     row.world_hash = registry_hash_all(w->registry, per_arena);
-    memcpy(row.frames, frames, sizeof(row.frames));
+    // Only [0, peer_count) is ever written back out (recorder_write/recorder_read_body both key
+    // their loops on peer_count, per this header's format) - slots beyond it are zeroed here, not
+    // memcpy'd from the caller's buffer, so the in-memory row already matches what a write/read
+    // round trip would reconstruct (RecordedInputRow row{} there is zero-init too), instead of
+    // carrying whatever a producer left in Engine::frames' non-live slots from an earlier tick
+    // (review round 1 finding 10 - no test compared a full row byte-for-byte across that seam).
+    memcpy(row.frames, frames, (u64)rec->peer_count * sizeof(InputFrame));
     array_push(&rec->rows, row);
 }
 
@@ -94,6 +100,15 @@ ErrCode recorder_read_header(ByteReader* r, RecordedInputHeader* out, const u8 e
         && memcmp(out->session_fingerprint, expected_session_fingerprint, 32u) != 0) {
         return ERR_RECORDER_FINGERPRINT;
     }
+    // Both counts below are about to size (or be used to size) the caller's out_rows buffer and
+    // drive recorder_read_body's write loop - bound them against reality before handing them
+    // back, rather than trusting a corrupt/truncated/malicious file (this header's contract block).
+    if (out->peer_count > MAX_PEERS) { return ERR_RECORDER_PEER_COUNT; }
+    const u64 row_bytes = 76ull * (u64)out->peer_count + 8ull;   // InputFrame's pinned 76 B + world_hash
+    const u64 remaining = r->len > r->pos ? r->len - r->pos : 0u;
+    if (remaining < 4ull || out->frame_count > (remaining - 4ull) / row_bytes) {   // -4: the crc32 trailer
+        return ERR_BYTES_TRUNCATED;
+    }
     return ERR_OK;
 }
 
@@ -103,9 +118,9 @@ ErrCode recorder_read_body(ByteReader* r, const RecordedInputHeader* header, Rec
         RecordedInputRow row{};
         for (u32 p = 0; p < header->peer_count; ++p) { get_input_frame(r, &row.frames[p]); }
         row.world_hash = br_get_u64(r);
+        if (!br_ok(r)) { return r->err; }   // checked every row, not once after the whole loop
         out_rows[i] = row;
     }
-    if (!br_ok(r)) { return r->err; }
     const u64 body_len = r->pos - body_start;
     const u32 computed_crc = crc32(r->base + body_start, body_len);
     const u32 stored_crc = br_get_u32(r);

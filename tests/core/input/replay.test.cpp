@@ -1,14 +1,65 @@
 // replay.test.cpp - record -> replay -> identical frames and hash trace; fingerprint mismatch
 // refused (docs/DETERMINISM.md §9.2, docs/INPUT.md §7/§9.4).
 #include "runner/tl_test.h"
+#include "core/loop.h"
 #include "core/producers/replay.h"
 #include "core/producers/script.h"
 #include "core/world_test_util.h"
+#include <string.h>
 
 namespace {
 
 u8 g_build_id[32] = { 1, 2, 3, 4 };
 u8 g_fingerprint[32] = { 5, 6, 7, 8 };
+
+// The lane's central done criterion (docs/INPUT.md §7, §9.6; docs/FRAME-LOOP.md §8.4): record ->
+// replay -> identical frames and identical hash trace. Folds w->input[0]'s raw action 0 value
+// into every WPos entity's x every tick, so the recorder's world_hash actually moves with input
+// (a hash trace that never depended on input would pass this test for the wrong reason).
+void sys_fold_input_into_wpos(World* w) {
+    Span<WPos> col = world_column<WPos>(w);
+    for (u32 i = 0; i < col.count; ++i) { col.data[i].x += w->input[0].actions[0].value; }
+}
+
+// One Engine + its own recorder, wired identically to the other side (same seed, same
+// registration order, same fold system) - the two halves of the record/replay comparison.
+struct ReplayEngineHalf {
+    VMemApi api;
+    ArenaRegistry reg;
+    Scratch scratch;
+    VMemArena rec_arena;
+    Engine e;
+    Recorder rec;
+};
+
+bool replay_engine_half_init(ReplayEngineHalf* h, u64 seed, NameHash scratch_id, NameHash rec_arena_id) {
+    h->api = test_vmem_api();
+    memset(&h->reg, 0, sizeof(h->reg));
+    if (scratch_init(&h->scratch, scratch_id, 32u * 1024u * 1024u, &h->api) != ERR_OK) { return false; }
+    WorldDesc d{};
+    d.seed = seed;
+    if (engine_init(&h->e, &h->reg, &h->scratch, &h->api, nullptr, &d) != ERR_OK) { return false; }
+    world_register_component(&h->e.world, &WPos_info);
+    SystemDesc sd{};
+    sd.fn = sys_fold_input_into_wpos;
+    sd.label = "fold_input"_id;
+    sd.phase = PHASE_UPDATE;
+    sd.reads = Span<const ComponentId>{ nullptr, 0 };
+    sd.writes = Span<const ComponentId>{ nullptr, 0 };
+    sd.before = Span<const NameHash>{ nullptr, 0 };
+    sd.after = Span<const NameHash>{ nullptr, 0 };
+    sd.flags = 0;
+    world_register_system(&h->e.world, &sd);
+    world_build_schedule(&h->e.world);
+    registry_seal(&h->reg);   // registry_hash_all (recorder_tick's) requires it (arena_registry.cpp)
+    Entity ent = world_spawn(&h->e.world);
+    world_add(&h->e.world, ent, WPos{ 0, 0 });
+    world_flush(&h->e.world);
+    if (vmem_arena_init(&h->rec_arena, rec_arena_id, 1024u * 1024u, 0u, &h->api) != ERR_OK) { return false; }
+    recorder_init(&h->rec, &h->rec_arena, 16u, 0u, seed, 1u, 0b1u, g_build_id, g_fingerprint);
+    recorder_attach(&h->e, &h->rec);
+    return true;
+}
 
 }  // namespace
 
@@ -61,6 +112,36 @@ TL_TEST(recorder_write_read_roundtrip, "core,input,replay,recorder,fast") {
     }
 }
 
+TL_TEST(recorder_tick_zeroes_frames_past_peer_count, "core,input,replay,recorder,fast") {
+    // Review round 1 finding 10: the caller's Engine::frames buffer persists across ticks and a
+    // producer only ever writes its own live slots (docs/INPUT.md §4) - slots >= peer_count can
+    // carry an earlier tick's non-live garbage. recorder_tick must not memcpy that garbage into
+    // the row it stores, since only [0, peer_count) round-trips through recorder_write/read.
+    WorldFixture* wf = wt_fixture(3);
+    TL_ASSERT_TRUE(world_fixture_init(wf, 1u));
+    world_fixture_register_std(wf);
+    world_build_schedule(&wf->w);
+    registry_seal(&wf->reg);
+
+    VMemArena rec_arena;
+    TL_ASSERT_EQ(vmem_arena_init(&rec_arena, "replay.test.zero.rec"_id, 64u * 1024u, 0u, &wf->api), ERR_OK);
+    Recorder rec;
+    recorder_init(&rec, &rec_arena, 4u, 0u, 1u, 1u, 0b1u, g_build_id, g_fingerprint);   // peer_count = 1
+
+    InputFrame frames[MAX_PEERS];
+    for (u32 p = 0; p < MAX_PEERS; ++p) { frames[p] = input_zero_frame(); }
+    // Garbage in a non-live slot (>= peer_count) - as if left over from a producer that once
+    // populated it on an earlier, different-peer_count tick.
+    frames[1].tick = 999u;
+    frames[1].actions[0].value = (i8)-77;
+    frames[1].pointer_x = 12345;
+
+    recorder_tick(&rec, &wf->w, frames);
+
+    InputFrame zero = input_zero_frame();
+    TL_EXPECT_EQ(memcmp(&rec.rows.data[0].frames[1], &zero, sizeof(InputFrame)), 0);
+}
+
 TL_TEST(recorder_read_refuses_fingerprint_mismatch, "core,input,replay,recorder,fast") {
     WorldFixture* wf = wt_fixture(1);
     TL_ASSERT_TRUE(world_fixture_init(wf, 1u));
@@ -89,6 +170,71 @@ TL_TEST(recorder_read_refuses_fingerprint_mismatch, "core,input,replay,recorder,
     RecordedInputHeader header{};
     u8 wrong_fingerprint[32] = { 9, 9, 9 };
     TL_EXPECT_EQ(recorder_read_header(&r, &header, wrong_fingerprint), ERR_RECORDER_FINGERPRINT);
+}
+
+TL_TEST(recorder_read_header_refuses_frame_count_past_buffer_end, "core,input,replay,recorder,fast") {
+    // Review round 1 finding 7: frame_count is fully corruption/attacker-controlled. A header
+    // claiming far more rows than the (short, truncated-looking) buffer could possibly hold must
+    // be refused here, before a caller sizes out_rows or recorder_read_body walks off the end of
+    // one it already sized too small.
+    WorldFixture* wf = wt_fixture(2);
+    TL_ASSERT_TRUE(world_fixture_init(wf, 1u));
+
+    VMemArena rec_arena;
+    TL_ASSERT_EQ(vmem_arena_init(&rec_arena, "replay.test.badcount.rec"_id, 64u * 1024u, 0u, &wf->api), ERR_OK);
+    Recorder rec;
+    recorder_init(&rec, &rec_arena, 4u, 0u, 1u, 1u, 0b1u, g_build_id, g_fingerprint);
+    InputFrame frames[MAX_PEERS];
+    for (u32 p = 0; p < MAX_PEERS; ++p) { frames[p] = input_zero_frame(); }
+    world_fixture_register_std(wf);
+    world_build_schedule(&wf->w);
+    registry_seal(&wf->reg);
+    recorder_tick(&rec, &wf->w, frames);   // one real row
+
+    VMemArena buf_arena;
+    TL_ASSERT_EQ(vmem_arena_init(&buf_arena, "replay.test.badcount.buf"_id, 64u * 1024u, 0u, &wf->api), ERR_OK);
+    const u64 needed = recorder_bytes_needed(&rec);
+    u8* buf = (u8*)arena_push(&buf_arena, needed, 8u);
+    ByteWriter w;
+    bw_init(&w, buf, needed);
+    recorder_write(&rec, &w);
+
+    // Corrupt the on-wire frame_count (offset 96, u64 LE - RecordedInputHeader's own field table)
+    // to claim far more rows than this short buffer could hold, without changing its length.
+    u64 huge_count = 0xFFFFFFFFFFFFu;
+    memcpy(buf + 96, &huge_count, 8u);
+
+    ByteReader r;
+    br_init(&r, buf, w.len);
+    RecordedInputHeader header{};
+    TL_EXPECT_EQ(recorder_read_header(&r, &header, g_fingerprint), ERR_BYTES_TRUNCATED);
+}
+
+TL_TEST(recorder_read_header_refuses_peer_count_over_max, "core,input,replay,recorder,fast") {
+    // Review round 1 finding 7: an unchecked peer_count > MAX_PEERS would overflow
+    // RecordedInputRow::frames[MAX_PEERS] in recorder_read_body's per-peer loop.
+    u8 buf[128 + 4];
+    memset(buf, 0, sizeof(buf));
+    ByteWriter w;
+    bw_init(&w, buf, sizeof(buf));
+    RecordedInputHeader h{};
+    h.format_version = RECORDED_INPUT_FORMAT_VERSION;
+    memcpy(h.magic, RECORDED_INPUT_MAGIC, 4u);
+    memcpy(h.build_id, g_build_id, 32u);
+    memcpy(h.session_fingerprint, g_fingerprint, 32u);
+    h.seed = 1u;
+    h.base_tick = 0u;
+    h.peer_count = (u8)(MAX_PEERS + 1u);
+    h.live_mask = 0b1u;
+    h.flags = 0u;
+    h.frame_count = 0u;
+    wire_write_RecordedInputHeader(&w, &h);
+    bw_put_u32(&w, 0u);   // crc32 trailer (frame_count == 0, so this is the whole body)
+
+    ByteReader r;
+    br_init(&r, buf, w.len);
+    RecordedInputHeader header{};
+    TL_EXPECT_EQ(recorder_read_header(&r, &header, g_fingerprint), ERR_RECORDER_PEER_COUNT);
 }
 
 TL_TEST(replay_producer_serves_rows_then_waits, "core,input,replay,fast") {
@@ -124,4 +270,50 @@ TL_TEST(replay_producer_serves_rows_then_waits, "core,input,replay,fast") {
     TL_EXPECT_TRUE(replay_exhausted(&rp));
 
     TL_EXPECT_EQ(replay_produce(&rp, 12u, out, &live_mask), PRODUCE_WAIT);
+}
+
+TL_TEST(record_replay_reproduces_identical_hash_trace, "core,input,replay,determinism,fast") {
+    // Pass A: 12 ticks off the Script producer, recorded.
+    ReplayEngineHalf a;
+    TL_ASSERT_TRUE(replay_engine_half_init(&a, 1234u, "replay.test.det.a.scratch"_id, "replay.test.det.a.rec"_id));
+    VMemArena sp_arena;
+    TL_ASSERT_EQ(vmem_arena_init(&sp_arena, "replay.test.det.sp"_id, 64u * 1024u, 0u, &a.api), ERR_OK);
+    ScriptProducer sp;
+    script_producer_init(&sp, &sp_arena, 8u, 0b1u);
+    script_hold(&sp, (ActionId)0u, 3, 2u, 8u, 0u);   // down (value 3) for ticks [2, 8)
+
+    u8 live_mask = 0u;
+    for (u32 i = 0; i < 12u; ++i) {
+        script_produce(&sp, a.e.world.state->tick, a.e.frames, &live_mask);
+        engine_tick_once(&a.e, a.e.frames);
+    }
+    TL_ASSERT_EQ(a.rec.rows.count, 12u);
+    // Input actually moved hashed state - a hash trace that never depended on input would pass
+    // the comparison below for the wrong reason.
+    TL_EXPECT_NE(a.rec.rows.data[0].world_hash, a.rec.rows.data[11].world_hash);
+
+    // Pass B: a fresh Engine, same seed, driven by Replay over pass A's rows, its own recorder.
+    ReplayEngineHalf b;
+    TL_ASSERT_TRUE(replay_engine_half_init(&b, 1234u, "replay.test.det.b.scratch"_id, "replay.test.det.b.rec"_id));
+
+    RecordedInputHeader header{};
+    header.format_version = RECORDED_INPUT_FORMAT_VERSION;
+    header.base_tick = 0u;
+    header.frame_count = a.rec.rows.count;
+    header.peer_count = 1u;
+    header.live_mask = 0b1u;
+    ReplayProducer rp;
+    replay_producer_init(&rp, &header, a.rec.rows.data);
+
+    while (replay_produce(&rp, b.e.world.state->tick, b.e.frames, &live_mask) != PRODUCE_WAIT) {
+        engine_tick_once(&b.e, b.e.frames);
+    }
+    TL_ASSERT_EQ(b.rec.rows.count, a.rec.rows.count);
+
+    // The contract: replaying pass A's recorded frames through a fresh world reproduces the exact
+    // same per-tick frames and the exact same hash trace.
+    for (u32 i = 0; i < a.rec.rows.count; ++i) {
+        TL_EXPECT_EQ(b.rec.rows.data[i].world_hash, a.rec.rows.data[i].world_hash);
+        TL_EXPECT_EQ(memcmp(&b.rec.rows.data[i].frames[0], &a.rec.rows.data[i].frames[0], sizeof(InputFrame)), 0);
+    }
 }

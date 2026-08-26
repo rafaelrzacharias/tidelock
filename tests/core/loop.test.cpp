@@ -107,11 +107,16 @@ TL_TEST(engine_frame_produce_wait_renders_without_ticking, "core,loop,producewai
     input_set_producer(&f.e, InputProducer{ nullptr, wait_produce });
 
     clock_ctx.now = 5u;   // several ticks worth of elapsed time
-    engine_frame(&f.e);
+    const f32 alpha = engine_frame(&f.e);
     TL_EXPECT_EQ(f.e.last_steps, 0u);
     TL_EXPECT_EQ(f.e.world.state->tick, 0u);
     // Accumulated time is preserved across a WAIT (docs/FRAME-LOOP.md §0: "render again, no tick").
     TL_EXPECT_TRUE(f.e.accumulator > 0.0);
+    // ... which loop.h's contract still bounds alpha to [0, 1) against (review round 1 finding 2:
+    // an unclamped `accumulator / FIXED_DT_SECONDS` returned alpha >= 1.0 here, since a WAIT can
+    // leave accumulator holding several whole ticks' worth of unconsumed time).
+    TL_EXPECT_TRUE(alpha >= 0.0f && alpha < 1.0f);
+    TL_EXPECT_TRUE(f.e.accumulator >= FIXED_DT_SECONDS);   // the case that actually exercises the clamp
 }
 
 TL_TEST(engine_barrier_order_event_and_command_visible_next_tick, "core,loop,barrier,fast") {

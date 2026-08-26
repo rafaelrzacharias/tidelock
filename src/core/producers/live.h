@@ -56,19 +56,17 @@ struct ImGuiCaptureApi { void* ctx; void (*want_capture)(void* ctx, u8* want_mou
 
 // Per-binding SOCD state for DEV_KEYS_AXIS bindings with SOCD_LAST_WINS/SOCD_FIRST_WINS
 // (docs/INPUT.md §2); indexed by the binding's position in ActionMap::bindings.
-struct LiveSocdState { i8 last_dir; u8 first_locked; u8 _pad0[2]; };
+struct LiveSocdState { i8 last_dir; u8 _pad0[3]; };
 
 // The Live producer's persistent state (docs/INPUT.md §9.3's "state:" line, plus the chord/SOCD
 // bookkeeping this lane adds - see this header's contract block).
 struct LiveProducer {
     ActionMap* map;
     u8 local_slot;
-    u8 last_context;
-    u8 _pad0[2];
+    u8 _pad0[3];
     ImGuiCaptureApi capture;                 // capture.ctx may be null: no masking
 
     u8 key_down[LIVE_MAX_KEYS];
-    u8 prev_key_down[LIVE_MAX_KEYS];         // last tick's snapshot, for fresh-press detection
     u16 mods;                                // current modifier bits (platform.h RawEvent.key.mods)
 
     u8 mouse_button_down[LIVE_MAX_MOUSE_BUTTONS];

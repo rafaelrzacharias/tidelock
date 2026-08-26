@@ -3174,18 +3174,25 @@ airlock + action map, Live/Script/Replay producers, the recorder — built on br
 blocking (each has a working, documented interim resolution recorded in the touched headers'
 contract blocks):
 
-- [ ] **RR-24 (w3-loop-input): `MAX_PEERS`'s doc-home (`CANON.md`: "owned by NETCODE") and its
-      C++ symbol-home collide with the module DAG.** `net/wire.h` already defines
-      `constexpr u32 MAX_PEERS = 8u;` (net-p1, merged); `core/input.h` needs the same constant at
-      compile time (`ScriptProducer`'s per-slot state, `PeerSlots`), and
-      `tools/audit/includes.py`'s `MODULE_DAG` has `net: (net, core, ...)` — net depends on core,
-      never the reverse — so core cannot reach net's copy. Interim: `core/input.h` defines its
-      own `constexpr u32 MAX_PEERS = 8u;`, cited from `CANON.md`, same value — a real, temporary
-      duplicate, harmless today because `net/wire.h` does not yet include `core/input.h`.
-      Resolution: at the same commit that lands the RR-17 `WireFrame`->`InputFrame` handoff
-      `net/wire.h` already documents, delete `net/wire.h`'s own `MAX_PEERS` — core's becomes the
-      one definition, legal precisely because net already depends on core. Not this lane's file
-      to edit (`net/`, cone discipline, `WORKFLOW.md`).
+- [x] **RR-24 (w3-loop-input): `MAX_PEERS`'s doc-home (`CANON.md`: "owned by NETCODE") and its
+      C++ symbol-home collided with the module DAG. RESOLVED in this lane (review round 1 finding
+      4).** `net/wire.h` (net-p1, merged) and `core/input.h` (this lane) each defined their own
+      `constexpr u32 MAX_PEERS = 8u;`; nothing in the merged tree included both headers in one TU,
+      so it compiled clean and the "harmless today" call below held only until a fresh-context
+      review actually included both and hit `error: redefinition of 'MAX_PEERS'`. Fixed at the
+      root rather than deferred to the RR-17 handoff commit: `foundation/net_limits.h` is now the
+      one C++ home (`foundation` sits below both `core` and `net` in `tools/audit/includes.py`'s
+      `MODULE_DAG`, so this needs no upward edge either module lacked); `core/input.h` and
+      `net/wire.h` both include it and neither declares the constant itself anymore. The `net/`
+      edit is a one-line, behavior-preserving substitution (same value, same symbol name) — not
+      the `WireFrame`->`InputFrame` handoff `net/wire.h`'s own comment still correctly defers to
+      Phase 2 (`NETCODE.md` §20.8's RR-17 ruling), which this leaves untouched.
+      ~~Interim: `core/input.h` defines its own `constexpr u32 MAX_PEERS = 8u;`, cited from
+      `CANON.md`, same value — a real, temporary duplicate, harmless today because `net/wire.h`
+      does not yet include `core/input.h`. Resolution: at the same commit that lands the RR-17
+      `WireFrame`->`InputFrame` handoff `net/wire.h` already documents, delete `net/wire.h`'s own
+      `MAX_PEERS` — core's becomes the one definition, legal precisely because net already depends
+      on core. Not this lane's file to edit (`net/`, cone discipline, `WORKFLOW.md`).~~
 
 - [ ] **RR-25 (w3-loop-input): `SystemFn`'s `void(*)(World*)` shape has no path to Engine-level
       context — hit twice in this slice, plus a third half still open.** (a) `FRAME-LOOP.md` §4's
@@ -3219,6 +3226,36 @@ contract blocks):
       detection needs a commands.cpp/ecs hook this lane does not own). Not blocking this lane's
       own done criterion (`FRAME-LOOP.md` §8.4's test list is satisfied by the generic mechanism
       plus a synthetic test component); flagged for whoever finishes wiring Transform.
+
+**Review round 1 (fresh-context adversarial, PR #15) — fix-first verdict, addressed in a follow-up
+commit on this branch.** 6 of 13 findings fixed with regression tests: the missing record->replay
+hash-trace test (finding 1, `tests/core/input/replay.test.cpp`); `engine_frame`'s alpha reaching
+>= 1.0 under a `PRODUCE_WAIT` stall (finding 2, `loop.cpp`/`FRAME-LOOP.md` §0); `script_produce`
+permanently stranding its timeline past a skipped tick (finding 3, `script.cpp`); the `MAX_PEERS`
+collision, RR-24 above (finding 4); `script_hold`'s header claiming `[from, to]` against the
+code's and test's `[from, to)` (finding 5, `script.h`); the analog-quantization tests not
+discriminating RNE from truncation (finding 6, `fold.test.cpp`). Plus three of the "minor -
+fix or file" items: `recorder_read_body` trusting a file-supplied `frame_count`/`peer_count`
+unbounded (finding 7, now refused at `recorder_read_header`, `ERR_RECORDER_PEER_COUNT` +
+the sticky truncation code); the three dead `LiveProducer`/`LiveSocdState` fields (finding 8,
+deleted); producers leaving non-live `Engine::frames` slots un-zeroed into the recorded row
+(finding 10, `recorder_tick` now zeroes past `peer_count`). Filed rather than fixed (genuinely
+"minor", per the review's own grading, and each larger than a one-line follow-up):
+- **Finding 9** (untested shipped surface): `interp_snap_entity`, `live_produce` (the ring-drain
+  path — every fold test calls `live_produce_frame` directly), `engine_shutdown`, and the three
+  init-only `TL_FATAL` doors (`input_set_producer`/`interp_register_pair`/`recorder_attach` after
+  the first tick) have zero test coverage. `docs/TESTING.md` §9.1's fatal-expected mechanism
+  covers the last group; needs a pass through `tests/core/loop.test.cpp`.
+- **Finding 11**: `FRAME-LOOP.md` §6's headless rule ("the loop runs as fast as the CPU allows,
+  `accumulator` is forced to `FIXED_DT` per iteration") is not implemented — `engine_frame` uses
+  the real clock in headless too; `is_headless` only gates `present()`. Needs a design decision
+  (does `Engine` need to know it is headless, or does the headless platform's `Clock` fake a
+  steady `FIXED_DT` tick rate?) before it is a one-line fix.
+- **Finding 12**: further untested `INPUT.md` §9.6 rows: `SOCD_FIRST_WINS`'s release-fallback
+  branch (`live.cpp:212-214`, at time of review), `DZ_TRIGGER`, `DZ_NONE`, `DZ_RADIAL` (a
+  documented no-op alias for `DZ_AXIAL` — nothing pins even the alias), the ImGui capture mask
+  (`INPUT.md` §5), pad connect/disconnect state zeroing, and a nonzero `pointer_x`/`pointer_y`
+  through the recorder's LE round trip (every recorded frame in every shipped test is `(0, 0)`).
 
 Recorded simplifications (implementation choices within this lane's own files, not ruling
 requests — revisit if a real consumer needs more): the RecordedInput header's exact byte offsets

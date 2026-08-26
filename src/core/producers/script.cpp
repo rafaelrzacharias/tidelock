@@ -55,7 +55,11 @@ ProduceResult script_produce(void* ctx, u64 tick, InputFrame* out, u8* live_mask
 
     while (sp->cursor < sp->events.count) {
         const ScriptedEvent& ev = array_at(&sp->events, sp->cursor);
-        if (ev.tick != tick) { break; }
+        // > (not !=): a caller that skips over a scheduled tick (produce() not called for every
+        // tick in sequence) still applies the stale event on the next call rather than losing it
+        // - and every event after it - permanently. Events are appended in non-decreasing tick
+        // order (script_add_event's TL_CHECK), so the cursor never needs to look backward.
+        if (ev.tick > tick) { break; }
         switch ((ScriptOp)ev.op) {
             case SCRIPT_OP_SET:
                 sp->down[ev.slot][ev.action] = (ev.value != 0) ? 1u : 0u;

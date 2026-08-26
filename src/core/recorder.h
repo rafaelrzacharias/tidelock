@@ -72,6 +72,7 @@ constexpr ErrCode ERR_RECORDER_BAD_MAGIC   = (ErrCode)0x0321;  // header magic !
 constexpr ErrCode ERR_RECORDER_FINGERPRINT = (ErrCode)0x0322;  // session_fingerprint mismatch (docs/DETERMINISM.md section 9.2)
 constexpr ErrCode ERR_RECORDER_VERSION     = (ErrCode)0x0323;  // format_version this build has no reader for
 constexpr ErrCode ERR_RECORDER_CRC         = (ErrCode)0x0324;  // body crc32 mismatch
+constexpr ErrCode ERR_RECORDER_PEER_COUNT  = (ErrCode)0x0325;  // header peer_count > MAX_PEERS (RecordedInputRow::frames overflow)
 
 constexpr u32 RECORDED_INPUT_FORMAT_VERSION = 1u;
 
@@ -117,10 +118,16 @@ u64 recorder_write(const Recorder* rec, ByteWriter* w);
 // Reads a RecordedInput stream back: validates magic/format_version/the body crc32, checks
 // `expected_session_fingerprint` (null to skip the check) against the stored one
 // (ERR_RECORDER_FINGERPRINT on mismatch, docs/DETERMINISM.md §9.2: "the Replay producer refuses a
-// file whose session_fingerprint differs"). `out_rows` must hold the decoded header's
-// frame_count entries - callers read the header FIRST (recorder_read_header) to size it.
-// Returns ERR_RECORDER_BAD_MAGIC, the sticky truncation code, ERR_NET_MALFORMED-shaped crc
-// mismatch (spelled locally, see recorder.cpp), or ERR_RECORDER_FINGERPRINT.
+// file whose session_fingerprint differs"). Also validates the two counts the caller is about to
+// SIZE A BUFFER FROM, before handing them back: `peer_count` <= MAX_PEERS (ERR_RECORDER_PEER_COUNT
+// - otherwise recorder_read_body's `row.frames[p]` loop overflows RecordedInputRow's fixed
+// MAX_PEERS-wide array) and `frame_count` fits in the reader's remaining bytes at the declared
+// per-row size (the sticky truncation code otherwise - a corrupt/truncated file's frame_count is
+// fully attacker/corruption-controlled and would otherwise size the caller's out_rows buffer, or
+// drive recorder_read_body's write loop, from an unbounded value). `out_rows` must hold the
+// decoded header's frame_count entries - callers read the header FIRST (this function) to size it.
+// Returns ERR_RECORDER_BAD_MAGIC, the sticky truncation code, ERR_RECORDER_PEER_COUNT,
+// ERR_RECORDER_FINGERPRINT, or ERR_RECORDER_VERSION.
 ErrCode recorder_read_header(ByteReader* r, RecordedInputHeader* out, const u8 expected_session_fingerprint[32]);
 
 // Reads `header->frame_count` rows plus the trailing body crc32; `out_rows` must hold
