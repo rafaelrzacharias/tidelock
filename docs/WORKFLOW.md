@@ -37,7 +37,9 @@
   merge gets a closeout sweep**: the steward reads what the lane filed and triages each entry —
   act now, route to a named lane, or hold for the §3 wave sweep — before the lane is closed;
   a wave does not close with an untriaged filing. (The pilot's proof: net-p1's last two commits
-  filed two ruling requests, one security-shaped, that no batch had seen.)
+  filed two ruling requests, one security-shaped, that no batch had seen.) The sweep also
+  checks the lane's own doc for accuracy against what shipped — status line, claims, staleness
+  (R-12).
 - **An autonomous lane runs to its ship gate without ending its turn (ruled 2026-08-26).**
   "Commit and push every turn" is a rule against leaving work unpushed, never a reason to stop:
   a lane does NOT end its turn at commit boundaries — it commits, pushes, and continues
@@ -76,7 +78,12 @@
 
 A wave closes with: (1) the ★ lane's done criterion met (`ARCHITECTURE.md` §9); (2) a
 **wave-boundary review sweep** covering everything §2's valve deferred, verdict recorded in
-`TODO.md`; (3) `ROADMAP.md`'s retro line (its own footer requires it). Benchmarks run only
+`TODO.md`; (3) `ROADMAP.md`'s retro line (its own footer requires it); (4) a **doc-relevancy
+pass (R-12)**: the prose surfaces that restate program state — root `README.md`'s Status,
+`CLAUDE.md`'s Status, `docs/README.md`'s header, and each merged lane's doc status line — are
+re-read against the tree and corrected or re-dated. `docaudit` catches dangling references and
+contradicted constants; this pass catches the staleness it structurally cannot see ("pre-code"
+outliving the code). Benchmarks run only
 where a gate doc defines one (`GATE0-BENCH.md`, the `ALLOY.md` test gates, `NETCODE.md` §19
 milestones) — a wave is a scheduling unit, not a measurement protocol.
 
@@ -136,6 +143,11 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
 - **R-11 Lane token discipline (ruled 2026-08-26, Rafael):** tag-scoped iteration, local
   validation before every push, read-once specs, terse output, cheap subagents for search;
   every lane brief cites it (§6).
+- **R-12 Doc-relevancy pass (ruled 2026-08-26, Rafael):** staleness in a status line is drift
+  like any other. Every lane closeout sweep (R-7) also checks the lane's own doc — its status
+  line and its claims — against what actually shipped; every wave boundary adds the pass over
+  the repo's status surfaces (§3, artifact 4). Filed after both W2 code lanes shipped against
+  a root `README.md`, `CLAUDE.md` Status and `docs/README.md` header still reading "pre-code".
 
 ## 6. The token budget — scheduling and session economy (ruled 2026-08-26)
 
@@ -171,4 +183,5 @@ policy ("never low effort on sim or netcode code") outranks every line here.
 PR-fallback actor named, absolute grading pinned to the PC rev-2 record until the Deck). This
 doc shipped as the first §1-governed PR — opened via the App grant, review verdict recorded on
 it. §1/§4/§5 amended 2026-08-26 by the morning ruling pass after the W2 autonomy pilot (R-2
-election, R-4, R-5). §5/§6 amended 2026-08-26 evening: the token-budget rulings R-8..R-11.*
+election, R-4, R-5). §5/§6 amended 2026-08-26 evening: the token-budget rulings R-8..R-11. §1/§3/§5 amended
+2026-08-26 evening: R-12, the doc-relevancy pass.*
