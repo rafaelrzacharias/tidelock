@@ -77,6 +77,13 @@ pin down. **Never low effort on sim or netcode code.** Every lane's merge gets a
 review by a *different, higher-or-equal* model in a fresh context (`CLAUDE.md` rule 5): Sonnet
 lanes reviewed by Opus; Opus/Fable lanes reviewed by Fable. Before launching a lane, look up its
 model here — the launch prompt names it.
+**The steward (orchestrator) session is *Fable 5 high* (ruled 2026-08-26).** It is the
+adjudicator of last resort — closeout sweeps (`WORKFLOW.md` §1 R-7), lane-filing triage, and
+the recommendations that become rulings — so it must be higher-or-equal to the strongest lane
+it adjudicates, by the same review policy above; steward mistakes become rulings, then docs.
+High, not max: its hard work is judgment over evidence (a recommendation refuted by new
+measurement must be caught, not executed); derivation-heavy work lives in lanes and reviews.
+A new steward window states this gate in its anchor phase like any lane.
 
 | Wave | Lane | Model | Builds | Depends on | Done (the doc's criterion) |
 |---|---|---|---|---|---|

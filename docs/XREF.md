@@ -284,4 +284,5 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `GATE0-BENCH.md` -> §4
 - `NETCODE.md` -> §4
 - `RENDER2D.md` -> §4
+- `ROADMAP.md` -> §1
 - `TESTING.md` -> §4
