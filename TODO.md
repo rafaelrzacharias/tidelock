@@ -719,6 +719,22 @@ E-2 needs no W2 decision but blocks real game wiring later.
       Rafael's identity (the rewrite above). Remaining, not blocking: the standing
       tighten-rebuild-budget-after-~10-runs entry (this round only exercised the re-baseline).
 
+## w2-vendor — round-1 findings pushed, CI re-confirmed green (2026-08-26)
+
+- [x] **All D1-D8 pushed (`83f1d77`, `6f67660`) and CI re-confirmed 23/23 green on head
+      `6f67660`** (run 32986528223) — full local suite also green (425 tests, 416 passed/9
+      skipped/0 failed). Finding→commit summary posted to PR #12 (comment 5427793346); PR body
+      updated to match. Watching for the round-2 delta-scoped review.
+      **Process note**: the `pull_request` synchronize webhook did not appear to fire for either
+      push — no check-runs registered against the PR for ~15 minutes after each, despite the
+      commits landing correctly on GitHub. Ruled out a runner-capacity problem by manually firing
+      `workflow_dispatch` on the branch, which picked up runners within seconds and ran clean.
+      Looks like a one-off webhook delivery gap, not a CI or infra issue — noted on the PR in case
+      it recurs. (Separately, a main-branch push around the same window — 8e77e813c, unrelated
+      settings.json housekeeping — showed all 23 jobs stuck `queued` before the run auto-failed;
+      that one really may have been a transient runner-availability blip, but it self-resolved:
+      the `workflow_dispatch` run six minutes later got real runners immediately.)
+
 ## w2-vendor — round-1 adversarial review (2026-08-26, PR #12 comment 5427150513)
 
 - [x] **Verdict: FIX FIRST. D1+D2 (High) fixed this commit; D4's doc/naming-drift piece fixed
