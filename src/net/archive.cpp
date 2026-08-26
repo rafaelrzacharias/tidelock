@@ -29,7 +29,7 @@
 // The header is written with both zeroed, the payload is appended, and the two are then patched
 // in place - a crc cannot be computed over bytes that have not been written yet.
 enum : u32 {
-    AR_HDR_BYTES        = (u32)sizeof(ArchiveSegmentHeader),   // 52 since the option-A ruling
+    AR_HDR_BYTES        = (u32)sizeof(ArchiveSegmentHeader),   // 56 since the option-A ruling
     AR_PAYLOAD_CRC_OFF  = 40u,
     AR_HEADER_CRC_OFF   = 48u,
     AR_HEADER_CRC_SPAN  = 48u,                                  // crc32 over bytes [0,48)
@@ -42,6 +42,8 @@ static_assert(offsetof(ArchiveSegmentHeader, record_count)  == AR_RECORD_COUNT_O
 static_assert(offsetof(ArchiveSegmentHeader, payload_bytes) == AR_PAYLOAD_BYTES_OFF, "");
 static_assert(offsetof(ArchiveSegmentHeader, payload_crc32) == AR_PAYLOAD_CRC_OFF, "");
 static_assert(offsetof(ArchiveSegmentHeader, header_crc32)  == AR_HEADER_CRC_OFF, "");
+// The size too: it was a comment, and a comment is the only thing in this block that can drift.
+static_assert(AR_HDR_BYTES == 56u, "the option-A segment header is 56 bytes");
 
 // The action channel's packed word: value in the high bits, the down bit in bit 0.
 static u32 ar_action_word(i8 value, u8 flags) {
@@ -83,12 +85,12 @@ static ErrCode ar_get_stream_header(ByteReader* r, ArchiveStreamHeader* h) {
     if (key >= (u32)MAX_PEERS * ARCHIVE_CH_REAL_COUNT) { return ERR_NET_MALFORMED; }
     h->slot    = (u8)(key / ARCHIVE_CH_REAL_COUNT);
     h->channel = (u8)(key % ARCHIVE_CH_REAL_COUNT);
-    // docs/NETCODE.md §20.2.9 defines 35 channels: 0..31 action, 32 pointer_x, 33 pointer_y,
-    // 34 flag escape. Its layout line says "for ch in 0..35" and ARCHIVE_CH_COUNT follows it, so
-    // a bound of >= ARCHIVE_CH_COUNT would leave 35 a VALID channel byte that the dispatch's
-    // else-branch would then treat as the escape channel - a second spelling of one segment.
-    // Bounded by the highest real channel instead. Doc off-by-one filed in TODO.md.
-    if (h->channel > ARCHIVE_CH_MAX || h->slot >= (u8)MAX_PEERS) { return ERR_NET_MALFORMED; }
+    // The key bound above is the ONLY guard here, and it is load-bearing: slot and channel are
+    // both narrowed to u8 by the split, so without it `key` and `key + 256*35` would name the
+    // same stream - two spellings of one segment, in a format whose bytes are hashed into the
+    // chain. After the bound both values are in range BY CONSTRUCTION, so a per-field re-check
+    // would be dead code that reads as protection; the invariant is asserted instead.
+    TL_ASSERT(h->channel <= ARCHIVE_CH_MAX && h->slot < (u8)MAX_PEERS);
     return ERR_OK;
 }
 
@@ -372,11 +374,16 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
     // FORMAT bound on the log array, checked before anything walks it. The sequencer announces
     // at most MAX_LOG_RECORDS_PER_PACKET records per packet and one packet per tick, so a
     // segment covering `tick_count` ticks cannot carry more than that many - and a segment
-    // covering no ticks carries none. Without this the duplicate scan below is quadratic in a
-    // number an untrusted peer picks (§20.2.5's BK_LOG_SEGMENT): 200,000 records is 4.6 MB on
-    // the wire and was 17.8 s to decode against 19 ms to encode. Deriving the bound from
-    // tick_count - which the caller already bounds with out_frame_capacity_per_slot - means no
-    // new constant and no attacker-controlled dimension.
+    // covering no ticks carries none. This removed the AMPLIFICATION that made the duplicate
+    // scan dangerous: 200,000 records was 4.6 MB on the wire, 19 ms to encode and 17.8 s to
+    // decode, and decode:encode is now ~1.3x.
+    //
+    // What it does NOT remove is absolute cost as a function of tick_count, which an untrusted
+    // peer still chooses (§20.2.5's BK_LOG_SEGMENT) - the caller bounds it only with
+    // out_frame_capacity_per_slot, and §20.2.9 states no maximum. Both duplicate scans are
+    // O(log_record_count^2) = O(tick_count^2): 40,000 ticks is 61 s to decode. Closing that
+    // needs either a format maximum on tick_count or a §20.2.3 rule that `seq` ascends per
+    // origin_slot (which would make the scan 8 counters); both are rulings, filed in TODO.md.
     if ((u64)out_header->log_record_count
         > (u64)MAX_LOG_RECORDS_PER_PACKET * (u64)tick_count) {
         return ERR_NET_MALFORMED;

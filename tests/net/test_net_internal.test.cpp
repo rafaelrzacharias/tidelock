@@ -121,13 +121,17 @@ TL_TEST(net_log_store_distinguishes_duplicate_from_full, "net,internal,edge,fast
     r.format_version = NET_FORMAT_VERSION;
     r.kind = (u8)LR_JOIN;
     r.origin_slot = 0u;
-    r.effective_tick = 1u;
+    // Spread over ticks: the store now also refuses more than MAX_LOG_RECORDS_PER_PACKET at one
+    // effective_tick, which is the bound the archive enforces (docs/NETCODE.md §20.2.9). Piling
+    // the whole capacity on one tick would build a set the encoder must abort on.
     for (u32 i = 0; i < LOG_STORE_CAPACITY; ++i) {
         r.seq = i;
+        r.effective_tick = 1u + (u64)(i / MAX_LOG_RECORDS_PER_PACKET);
         TL_ASSERT_EQ(log_store_add(&s, &r), ERR_OK);
     }
     TL_EXPECT_EQ(s.count, LOG_STORE_CAPACITY);
     r.seq = LOG_STORE_CAPACITY;
+    r.effective_tick = 1u + (u64)(LOG_STORE_CAPACITY / MAX_LOG_RECORDS_PER_PACKET);
     TL_EXPECT_EQ(log_store_add(&s, &r), ERR_NET_STORE_FULL);   // data loss, named as such
     TL_EXPECT_EQ(s.count, LOG_STORE_CAPACITY);
 }
@@ -225,4 +229,30 @@ TL_TEST(net_log_store_signals_truncation_rather_than_returning_a_short_count, "n
     truncated = true;
     TL_EXPECT_EQ(log_store_at_tick(&s, 9999u, out, 8u, &truncated), 0u);
     TL_EXPECT_FALSE(truncated);                      // nothing at that tick is not truncation
+}
+
+TL_TEST(net_log_store_refuses_more_than_a_packet_of_records_at_one_tick, "net,internal,edge,fast") {
+    // Round 4 finding F11: docs/NETCODE.md §20.2.9 bounds a segment at
+    // MAX_LOG_RECORDS_PER_PACKET records per tick, and archive_encode_segment TL_CHECKs it -
+    // which ABORTS. A caller assembling a tick from this store must find out here instead.
+    LogStore s;
+    log_store_clear(&s);
+    LogRecord r = {};
+    r.format_version = NET_FORMAT_VERSION;
+    r.kind = (u8)LR_DELAY;
+    r.effective_tick = 4242u;
+    for (u32 i = 0; i < MAX_LOG_RECORDS_PER_PACKET; ++i) {
+        r.origin_slot = (u8)(i % MAX_PEERS);
+        r.seq = i;
+        TL_ASSERT_EQ(log_store_add(&s, &r), ERR_OK);
+        TL_EXPECT_EQ(log_store_count_at_tick(&s, 4242u), i + 1u);
+    }
+    r.origin_slot = 0u;
+    r.seq = 9999u;
+    TL_EXPECT_EQ(log_store_add(&s, &r), ERR_NET_MALFORMED);   // one too many for this tick
+    TL_EXPECT_EQ(log_store_count_at_tick(&s, 4242u), MAX_LOG_RECORDS_PER_PACKET);
+    // A different tick is unaffected - the bound is per tick, not per store.
+    r.effective_tick = 4243u;
+    TL_EXPECT_EQ(log_store_add(&s, &r), ERR_OK);
+    TL_EXPECT_EQ(log_store_count_at_tick(&s, 4243u), 1u);
 }

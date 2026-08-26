@@ -805,6 +805,13 @@ void encode_column(ByteWriter* w, const WireFrame* frames, u32 n);
 // bit set or a `changed` bit at or past MAX_ACTIONS, ERR_NET_VARINT_OVERFLOW on a bad varint.
 // On any error out[] holds only decoded-or-zero frames and must not be acted on. `out` must hold
 // frame_count entries; frame_count may be 0. Never runs inside a tick.
+//
+// CONSUMPTION IS THE CALLER'S TO CHECK. A column is self-delimiting only given frame_count, so a
+// shorter-than-expected parse can succeed and leave trailing bytes unread: rewriting the first
+// `changed` byte of a 10-byte two-frame column makes it decode in 7. The archive pins its extent
+// with payload_bytes and checks exact consumption; §20.2.2's packet reader must likewise compare
+// r->pos against PacketHeader.payload_bytes, or one frame set has unlimited spellings inside a
+// packet - which matters wherever those bytes are hashed (§20.2.8).
 ErrCode decode_column(ByteReader* r, WireFrame* out, u32 frame_count, u64 base_tick);
 
 // --- the archive segment codec (docs/NETCODE.md §20.2.9 layout, §13.3 encoding) ---------------

@@ -110,6 +110,17 @@ inline bool log_store_has(const LogStore* s, u8 origin_slot, u32 seq) {
     return false;
 }
 
+// The archive refuses more than MAX_LOG_RECORDS_PER_PACKET records at one effective_tick
+// (docs/NETCODE.md §20.2.9, the bound archive_encode_segment TL_CHECKs). Counting them here is
+// what stops a caller assembling a tick the encoder would then abort on: the invariant belongs
+// where records are ADMITTED, not only where they are written out.
+inline u32 log_store_count_at_tick(const LogStore* s, u64 tick) {
+    TL_ASSERT(s != nullptr);
+    u32 n = 0;
+    for (u32 i = 0; i < s->count; ++i) { if (s->records[i].effective_tick == tick) { ++n; } }
+    return n;
+}
+
 // Adds `rec`. ERR_OK when it was stored; ERR_NET_DUPLICATE_RECORD when its (origin_slot, seq)
 // was already present - a no-op per R6, expected rather than exceptional, since a record is
 // announced in `pending` and then arrives again in its tick's SeqSection; ERR_NET_STORE_FULL
@@ -119,6 +130,12 @@ inline ErrCode log_store_add(LogStore* s, const LogRecord* rec) {
     TL_ASSERT(s != nullptr && rec != nullptr);
     if (log_store_has(s, rec->origin_slot, rec->seq)) { return ERR_NET_DUPLICATE_RECORD; }
     if (s->count >= LOG_STORE_CAPACITY) { return ERR_NET_STORE_FULL; }
+    // ERR_NET_MALFORMED rather than a fatal: a caller that has produced too many records for one
+    // tick has a bug, but finding out here beats finding out inside the encoder's TL_CHECK,
+    // which aborts the process.
+    if (log_store_count_at_tick(s, rec->effective_tick) >= MAX_LOG_RECORDS_PER_PACKET) {
+        return ERR_NET_MALFORMED;
+    }
     s->records[s->count] = *rec;
     ++s->count;
     return ERR_OK;

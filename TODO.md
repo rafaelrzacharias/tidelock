@@ -548,6 +548,28 @@ E-2 needs no W2 decision but blocks real game wiring later.
       enforced module prefixes; revisit only on a real collision.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **`NETCODE.md` §20.2.9 states no maximum `tick_count`, and the archive decoder's cost is
+      quadratic in it.** Filed 2026-08-26 by `w2-net-p1` (round 4 finding F8; the code comment
+      that claimed otherwise is corrected in the same commit). The earlier log-array ruling
+      removed the AMPLIFICATION - decode:encode was 941x, it is now ~1.3x - but not the absolute
+      cost, because `log_record_count` is bounded by `MAX_LOG_RECORDS_PER_PACKET * tick_count`
+      and both duplicate scans are O(n^2), i.e. **O(tick_count^2)**. `tick_count` is chosen by
+      whoever wrote the segment, and §20.2.5's `BK_LOG_SEGMENT` makes that an untrusted peer.
+      Measured (clang 18, -O1, one slot): 300 ticks 2.9 ms · 3,000 ticks 309 ms · 10,000 ticks
+      3.65 s · **40,000 ticks 61 s**. Today's only bound is the caller's
+      `out_frame_capacity_per_slot`, which is a buffer size, not a format rule.
+      **Options:** (A) **RECOMMENDED - a §20.2.3 rule that `seq` ascends per `origin_slot`.**
+      Records already ascend by `(effective_tick, origin_slot, seq)`, and the coordinator assigns
+      `effective_tick = max(requested, frontier + 1)` with a frontier that only grows, so per
+      origin a higher `seq` cannot have an earlier tick - the rule looks like a restatement of
+      what the sequencer already does. It makes the duplicate scan **8 counters instead of
+      O(n^2)**, and it is strictly stronger than the global scan. It needs a ruling because it is
+      an inference about the protocol, not about the format, and this lane will not assume it.
+      (B) A format maximum on `tick_count` in §20.2.9 (`CHECKPOINT_HOT_TICKS` is the natural
+      one - segments close on it anyway). Cheap, and it also bounds the decoder's frame buffer.
+      (C) Both. (D) Leave it: the amplification is gone and Phase 2's transport will bound
+      datagram size anyway - which is true of `INPUT`/`CONTROL` but not of `BULK`, where
+      `BK_LOG_SEGMENT` is explicitly a large reliable transfer.
 - [x] **RULED 2026-08-26 (Rafael, as recommended): RATIFIED** — §20.2.9 now says 35 channels,
       `ch in 0..34`, amended with the option-A framing work on `w2-net-p1`. Original filing:
       **`NETCODE.md` §20.2.9 has an off-by-one in its channel count, and the code had encoded it

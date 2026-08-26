@@ -70,7 +70,8 @@ static u64 ar_encode(u8* buf, u64 cap, const WireFrame* per_slot, u32 slot_count
 // A synthetic peer's frame stream: mostly still, with occasional presses, an analog axis that
 // ramps, and a pointer that moves in straight runs - the shape the transition encoding is FOR.
 // A uniformly random stream would measure the worst case, not the design target.
-static void ar_synth_frames(WireFrame* out, u32 tick_count, u32 slot, u64 seed) {
+static void ar_synth_frames(WireFrame* out, u32 tick_count, u32 slot, u64 seed,
+                            bool busy = false) {
     i32 px = 1000 + (i32)slot * 37;
     i32 py = -500 - (i32)slot * 11;
     i32 vx = 0, vy = 0;
@@ -79,8 +80,13 @@ static void ar_synth_frames(WireFrame* out, u32 tick_count, u32 slot, u64 seed) 
     for (u32 i = 0; i < tick_count; ++i) {
         const u64 h = nt_mix64(seed ^ slot, i);
         // A button changes roughly every 40 ticks - ~5,000-8,000 transitions over 30 minutes,
-        // "set by the human, not the clock" (docs/NETCODE.md §13.3).
-        if ((h & 0x3Fu) == 0u) {
+        // "set by the human, not the clock" (docs/NETCODE.md §13.3). `busy` raises that rate for
+        // the FUZZ corpus only: at the session rate a 5-tick fuzz segment averages 0.23 toggles,
+        // so 97% of its streams were pointer streams and it produced 22 escape streams in a
+        // million segments - it was a pointer-channel fuzz wearing an archive fuzz's name
+        // (round 4 finding F2). The size measurement keeps the session rate, which is the point
+        // of that row.
+        if ((h & (busy ? 0x3u : 0x3Fu)) == 0u) {
             const u32 a = (u32)((h >> 8) % 12u);      // a dozen actions see real use
             down[a] = (u8)(down[a] ? 0u : 1u);
         }
@@ -105,6 +111,12 @@ static void ar_synth_frames(WireFrame* out, u32 tick_count, u32 slot, u64 seed) 
         }
         f.actions[5].value = axis;                       // an analog axis, down bit clear
         if (axis != 0) { f.actions[5].flags = 0u; }
+        if (busy) {
+            // Flags the derived edges cannot produce, so the escape channel is actually
+            // exercised: "pressed" with no down bit, and "released" while still down.
+            if (((h >> 52) & 0x7u) == 0u) { f.actions[9].value = 0; f.actions[9].flags = 2u; }
+            if (((h >> 56) & 0x7u) == 0u) { f.actions[11].value = 1; f.actions[11].flags = 5u; }
+        }
         px += vx; py += vy;
         f.pointer_x = px;
         f.pointer_y = py;
@@ -404,9 +416,9 @@ static void ar_fuzz_cases(TestCtx* t, u64 seed_base, u32 cases, bool structural)
     VMemArena arena = {};
     TL_ASSERT_EQ(vmem_arena_init(&arena, 0xA5C21u, 64u << 20, 0u, &api), ERR_OK);
 
-    const u32 max_ticks = 6u;
+    const u32 max_ticks = 11u;   // wider than 5: multi-byte varints and longer runs
     WireFrame* src = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * max_ticks * MAX_PEERS, 16u);
-    const u64 cap = archive_segment_max_bytes(MAX_PEERS, max_ticks, 4u);
+    const u64 cap = archive_segment_max_bytes(MAX_PEERS, max_ticks, 8u * max_ticks);
     u8* buf   = (u8*)arena_push(&arena, cap, 16u);
     u8* again = (u8*)arena_push(&arena, cap, 16u);
     WireFrame* got = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * max_ticks * MAX_PEERS, 16u);
@@ -418,9 +430,9 @@ static void ar_fuzz_cases(TestCtx* t, u64 seed_base, u32 cases, bool structural)
         // Shape varies too: tick_count 0..5 and slot_count 0..3, so the degenerate cases are
         // inside the corpus rather than outside it.
         const u32 ticks = (u32)(seed % (u64)max_ticks);
-        const u32 slots = (u32)((seed >> 8) % 4u);
+        const u32 slots = (u32)((seed >> 8) % (u64)(MAX_PEERS + 1u));
         for (u32 sl = 0; sl < slots; ++sl) {
-            ar_synth_frames(src + (u64)sl * (ticks ? ticks : 1u), ticks, sl, seed);
+            ar_synth_frames(src + (u64)sl * (ticks ? ticks : 1u), ticks, sl, seed, true);
         }
         ArchiveInput in[MAX_PEERS];
         for (u32 sl = 0; sl < slots; ++sl) {
@@ -660,9 +672,12 @@ TL_TEST(archive_regression_slot_in_mask_must_carry_both_pointer_streams, "net,ar
     api.release(api.ctx, arena.base, arena.reserved);
 }
 
-TL_TEST(archive_regression_channel_35_is_not_the_escape_channel, "net,archive,regression,fast") {
-    // Round 1 finding 3. ARCHIVE_CH_COUNT follows §20.2.9's "0..35", which is one too many;
-    // channel 35 must be refused, not aliased onto 34.
+TL_TEST(archive_regression_stream_key_splits_to_slot_and_channel, "net,archive,regression,fast") {
+    // Round 1 finding 3 was "channel 35 aliases onto the escape channel" under the retired
+    // byte-per-field header. The option-A key makes channel 35 UNREPRESENTABLE, so that forgery
+    // no longer means what it said (round 4 finding F6). What matters now is the split: a key
+    // one past the escape channel is slot 1 channel 0, which the slot_mask rule refuses, and a
+    // key past the whole space is refused by the bound - the row below covers that half.
     VMemApi api = test_vmem_api();
     VMemArena arena = {};
     TL_ASSERT_EQ(vmem_arena_init(&arena, 0xA5C1Bu, 4u << 20, 0u, &api), ERR_OK);
@@ -873,10 +888,11 @@ TL_TEST(archive_regression_untested_stream_and_record_rules, "net,archive,regres
         u8 forged[1024];
         for (u64 i = 0; i < AR_T_HDR; ++i) { forged[i] = base[i]; }
         u64 o = AR_T_HDR;
-        forged[o++] = 0u; forged[o++] = 0u; forged[o++] = 0u; forged[o++] = 0u;  // record_count 0
-        forged[o++] = 0u;                                                        // channel 0
-        forged[o++] = 0u;                                                        // slot 0
-        forged[o++] = 0u; forged[o++] = 0u;                                      // _pad0
+        // Two canonical uvarints, the post-option-A stream header. Spliced as the RETIRED
+        // 8-byte struct these bytes parsed as several (record_count 0, key 0) headers and the
+        // segment was refused for a different reason than this row names - round 4 finding F1.
+        forged[o++] = 0u;                                     // uvarint record_count = 0
+        forged[o++] = (u8)archive_stream_key(0u, 0u);         // uvarint key = slot 0, channel 0
         for (u64 i = AR_T_HDR; i < bn; ++i) { forged[o++] = base[i]; }
         const u32 pb = (u32)(o - AR_T_HDR);
         for (u32 i = 0; i < 4u; ++i) { forged[AR_T_PBYTES_OFF + i] = (u8)((pb >> (8u*i)) & 0xFFu); }
@@ -1048,4 +1064,162 @@ TL_TEST(archive_file_header_carries_the_identity_once, "net,archive,fast") {
     // The segment header no longer carries the identity at all - that is the whole saving.
     TL_EXPECT_EQ(sizeof(ArchiveSegmentHeader), (u64)56u);
     TL_EXPECT_LT(sizeof(ArchiveSegmentHeader), (u64)112u);
+}
+
+// --- rows for the refusals round 4 found untested ---------------------------------------------
+// Each was verified live: deleting its rule left all 60 net rows green, including the 10^6-case
+// fuzz. F3 and F4 are real second spellings; F5 is the only guard against key aliasing.
+
+TL_TEST(archive_regression_action_records_must_advance_a_tick, "net,archive,regression,fast") {
+    // Round 4 finding F3. Two action records both at delta_tick 0: the first closes an empty run
+    // and contributes nothing, so the segment decodes to exactly what a one-record segment
+    // produces - two byte spellings of one frame set, in a format whose bytes are hashed into
+    // ChainEntry.log_segment_hash (§20.2.8).
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, 0xA5C24u, 4u << 20, 0u, &api), ERR_OK);
+
+    u8 seg[512];
+    for (u32 i = 0; i < sizeof(seg); ++i) { seg[i] = 0u; }
+    u32 o = 0;
+    auto put32 = [&](u32 v) { for (u32 i = 0; i < 4u; ++i) { seg[o + i] = (u8)((v >> (8u*i)) & 0xFFu); } o += 4u; };
+    auto put64 = [&](u64 v) { for (u32 i = 0; i < 8u; ++i) { seg[o + i] = (u8)((v >> (8u*i)) & 0xFFu); } o += 8u; };
+    auto putvar = [&](u32 v) { while (v >= 0x80u) { seg[o++] = (u8)(v | 0x80u); v >>= 7; } seg[o++] = (u8)v; };
+    const u32 ticks = 2u;
+    put32(NET_FORMAT_VERSION); put32(NET_FRAME_MAX_ACTIONS); put64(1000u); put32(ticks);
+    seg[20] = 0x01u; o = 24u;
+    put32(4u);                       // record_count: 2 action + 1 ptr_x + 1 ptr_y
+    put32(0u); put32(AR_FILE_ID); put32(0u); put32(0u); put32(0u); put32(0u);
+    o = AR_T_HDR;
+    const u32 payload_start = o;
+    putvar(2u); putvar(archive_stream_key(0u, 0u));   // action 0, TWO records
+    seg[o++] = 0x00u; seg[o++] = 0x03u;               // delta 0, word 3
+    seg[o++] = 0x00u; seg[o++] = 0x05u;               // delta 0 AGAIN - the forgery
+    putvar(1u); putvar(archive_stream_key(0u, ARCHIVE_CH_POINTER_X));
+    seg[o++] = 0x00u; seg[o++] = 0x00u;
+    putvar(1u); putvar(archive_stream_key(0u, ARCHIVE_CH_POINTER_Y));
+    seg[o++] = 0x00u; seg[o++] = 0x00u;
+    const u32 pb = o - payload_start;
+    for (u32 i = 0; i < 4u; ++i) { seg[AR_T_PBYTES_OFF + i] = (u8)((pb >> (8u*i)) & 0xFFu); }
+    ar_repair_crcs(seg, o);
+    TL_EXPECT_EQ(ar_try_decode(seg, o, ticks, &arena), ERR_NET_MALFORMED);
+    api.release(api.ctx, arena.base, arena.reserved);
+}
+
+TL_TEST(archive_regression_pointer_stream_may_not_over_declare, "net,archive,regression,fast") {
+    // Round 4 finding F4. A pointer stream declaring a record the tick walk can never REACH: the
+    // surplus is never consumed, so the segment decodes to what a correctly-declared segment
+    // produces - a second spelling. `record_count == seen_records` cannot see it (seen_records
+    // sums the DECLARED counts) and `record_count > tick_count` cannot either.
+    //
+    // Built by hand: bumping a declared count on an encoded segment is NOT enough, because the
+    // decoder then simply reads one more record out of the following stream's bytes and the
+    // counts still agree at the end. The record has to be unreachable, which needs the velocity
+    // records to run out before the tick walk does.
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, 0xA5C25u, 4u << 20, 0u, &api), ERR_OK);
+
+    u8 seg[512];
+    for (u32 i = 0; i < sizeof(seg); ++i) { seg[i] = 0u; }
+    u32 o = 0;
+    auto put32 = [&](u32 v) { for (u32 i = 0; i < 4u; ++i) { seg[o + i] = (u8)((v >> (8u*i)) & 0xFFu); } o += 4u; };
+    auto put64 = [&](u64 v) { for (u32 i = 0; i < 8u; ++i) { seg[o + i] = (u8)((v >> (8u*i)) & 0xFFu); } o += 8u; };
+    auto putvar = [&](u32 v) { while (v >= 0x80u) { seg[o++] = (u8)(v | 0x80u); v >>= 7; } seg[o++] = (u8)v; };
+    const u32 ticks = 3u;
+    put32(NET_FORMAT_VERSION); put32(NET_FRAME_MAX_ACTIONS); put64(1000u); put32(ticks);
+    seg[20] = 0x01u; o = 24u;
+    put32(4u);                       // record_count = 3 (declared by ptr_x) + 1 (ptr_y)
+    put32(0u); put32(AR_FILE_ID); put32(0u); put32(0u); put32(0u); put32(0u);
+    o = AR_T_HDR;
+    const u32 payload_start = o;
+    // pointer_x DECLARES 3 but carries 2: absolute at tick 0, one velocity at tick 2. The tick
+    // walk finishes at tick 2, so a third record could never be read.
+    putvar(3u); putvar(archive_stream_key(0u, ARCHIVE_CH_POINTER_X));
+    seg[o++] = 0x00u; seg[o++] = 0x00u;               // delta 0, svarint(0) - absolute
+    seg[o++] = 0x02u; seg[o++] = 0x02u;               // delta 2, svarint(1) - velocity at tick 2
+    putvar(1u); putvar(archive_stream_key(0u, ARCHIVE_CH_POINTER_Y));
+    seg[o++] = 0x00u; seg[o++] = 0x00u;
+    const u32 pb = o - payload_start;
+    for (u32 i = 0; i < 4u; ++i) { seg[AR_T_PBYTES_OFF + i] = (u8)((pb >> (8u*i)) & 0xFFu); }
+    ar_repair_crcs(seg, o);
+    TL_EXPECT_EQ(ar_try_decode(seg, o, ticks, &arena), ERR_NET_MALFORMED);
+
+    // Declared correctly, the same bytes decode: the over-declaration was the only objection.
+    seg[AR_T_HDR] = 2u;                                        // ptr_x declares 2
+    for (u32 i = 0; i < 4u; ++i) { seg[AR_T_RECS_OFF + i] = (u8)((3u >> (8u*i)) & 0xFFu); }
+    ar_repair_crcs(seg, o);
+    TL_EXPECT_EQ(ar_try_decode(seg, o, ticks, &arena), ERR_OK);
+    api.release(api.ctx, arena.base, arena.reserved);
+}
+
+TL_TEST(archive_regression_stream_key_bound_stops_aliasing, "net,archive,regression,fast") {
+    // Round 4 finding F5. slot and channel are both narrowed to u8 by the key split, so without
+    // the bound `key` and `key + 256*35` name the same stream: two spellings of one segment.
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, 0xA5C26u, 4u << 20, 0u, &api), ERR_OK);
+    const u32 ticks = 2u;
+    WireFrame* src = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * ticks, 16u);
+    for (u32 i = 0; i < ticks; ++i) { src[i] = nt_zero_frame(0u); }
+    u8 seg[512];
+    const u64 n = ar_encode(seg, sizeof(seg), src, 1u, ticks, nullptr, 0u, 0u);
+    TL_ASSERT_EQ(ar_try_decode(seg, n, ticks, &arena), ERR_OK);
+
+    // Rewrite pointer_x's key as key + 256*35, which truncates to the same (slot, channel).
+    const u32 aliased = archive_stream_key(0u, ARCHIVE_CH_POINTER_X) + 256u * ARCHIVE_CH_REAL_COUNT;
+    u8 forged[512];
+    for (u64 i = 0; i < AR_T_HDR + 1u; ++i) { forged[i] = seg[i]; }
+    u64 o = AR_T_HDR + 1u;
+    u32 v = aliased;
+    while (v >= 0x80u) { forged[o++] = (u8)(v | 0x80u); v >>= 7; }
+    forged[o++] = (u8)v;
+    for (u64 i = AR_T_HDR + 2u; i < n; ++i) { forged[o++] = seg[i]; }
+    const u32 pb = (u32)(o - AR_T_HDR);
+    for (u32 i = 0; i < 4u; ++i) { forged[AR_T_PBYTES_OFF + i] = (u8)((pb >> (8u*i)) & 0xFFu); }
+    ar_repair_crcs(forged, o);
+    TL_EXPECT_EQ(ar_try_decode(forged, o, ticks, &arena), ERR_NET_MALFORMED);
+    // The bound itself, stated: the last legal key is slot 7's escape channel.
+    TL_EXPECT_EQ(archive_stream_key((u8)(MAX_PEERS - 1u), ARCHIVE_CH_MAX),
+                 MAX_PEERS * ARCHIVE_CH_REAL_COUNT - 1u);
+    api.release(api.ctx, arena.base, arena.reserved);
+}
+
+TL_TEST(archive_regression_effective_tick_range_survives_a_u64_wrap, "net,archive,regression,edge,fast") {
+    // Round 4 finding F7a. The range test is spelled as a subtraction because
+    // base_tick + tick_count wraps u64 near the top of the range - and the additive form would
+    // then refuse every record in a legitimate segment. No fuzz corpus reaches this (~2^-60 per
+    // draw), so it needs a row that goes there deliberately.
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, 0xA5C27u, 4u << 20, 0u, &api), ERR_OK);
+    const u32 ticks = 4u;
+    const u64 base = 0xFFFFFFFFFFFFFFFCull;   // base + ticks wraps to 0
+    WireFrame* src = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * ticks, 16u);
+    for (u32 i = 0; i < ticks; ++i) { src[i] = nt_zero_frame(0u); }
+    LogRecord rec = {};
+    rec.format_version = NET_FORMAT_VERSION;
+    rec.kind = (u8)LR_DELAY;
+    rec.effective_tick = base;                // the first tick of the segment
+
+    ArchiveInput in[1];
+    in[0].frames = src; in[0].slot = 0u; in[0]._pad0 = 0u;
+    const u64 cap = archive_segment_max_bytes(1u, ticks, 1u);
+    u8* seg = (u8*)arena_push(&arena, cap, 16u);
+    ByteWriter w;
+    bw_init(&w, seg, cap);
+    const u64 n = archive_encode_segment(&w, base, ticks, in, 1u, &rec, 1u, 0u, AR_FILE_ID);
+    TL_ASSERT_GT(n, (u64)0);
+
+    ArchiveSegmentHeader h = {};
+    WireFrame* got = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * ticks * MAX_PEERS, 16u);
+    LogRecord out[2] = {};
+    u32 rc = 0;
+    ByteReader r;
+    br_init(&r, seg, n);
+    TL_EXPECT_EQ(archive_decode_segment(&r, &h, got, ticks, out, 2u, &rc), ERR_OK);
+    TL_EXPECT_EQ(rc, 1u);
+    TL_EXPECT_EQ(out[0].effective_tick, base);
+    TL_EXPECT_EQ(h.base_tick, base);
+    api.release(api.ctx, arena.base, arena.reserved);
 }
