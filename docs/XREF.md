@@ -179,7 +179,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 
 ## MEMORY.md
 - `ALLOY.md` -> §1.1, §1.2, §6
-- `ARCHITECTURE.md` -> §1, §8.8
+- `ARCHITECTURE.md` -> §1, §8.6, §8.8
 - `ASSETS-AND-DATA.md` -> §3, §5
 - `BUILD.md` -> §1.5
 - `CONTAINERS.md` -> §1.2, §3, §7, §8.2, §8.4

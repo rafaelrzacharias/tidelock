@@ -113,7 +113,7 @@ authoritative; none is hashed or snapshotted. Options weighed:
 
 `mem_pool.h` is a power-of-two size-class freelist (≤ 64 KB classes; larger → direct page
 commit) with a per-pool budget and a counter the profiler reads. **Engine and sim code never call
-it** (CI grep: `pool_alloc` appears only in `vendor_glue/`). Luau gets one pool per VM; ImGui and
+it** (the gate and its exemption list are §8.6's). Luau gets one pool per VM; ImGui and
 SDL share one; ENet its own (net buffers are sized by the protocol anyway).
 
 ---
@@ -223,7 +223,7 @@ render interpolation is snapped. That is the only hook; nothing else may observe
 | `snapshot.h/.cpp` | `Snapshot`, `SnapshotRing`, `ring_init/push/find` |
 | `scratch.h` | `Scratch` (a `VMemArena` + a `SCRATCH_MAX_SCOPES = 16` marker stack), `scratch_init/push/scope_begin/scope_end/reset`, `TL_SCRATCH_SCOPE_BEGIN/_END` (the explicit pair of `CPP-SUBSET.md` §7b) |
 | `handle.h` | `Handle<Tag,IDX,GEN>`, `handle_make/index/gen/is_null` |
-| `mem_pool.h/.cpp` | the vendor-heap pool (§1.5); the per-lib adaptor functions live in `vendor_glue/` (the W2 vendor lane) |
+| `mem_pool.h/.cpp` | the vendor-heap pool (§1.5); the per-lib adaptor functions live in `src/vendor_glue/` — `luau_*` is the W2 luau-vm lane's, the imgui/sdl/enet/stb adaptors the W2 vendor lane's |
 | `alloc_shim.h/.cpp` | `dev`/`netcode` tiers: global `operator new/delete` → `TL_FATAL` tripwires, stateless. The header declares `tl_alloc_shim_anchor()`, the no-op the guard calls so every guard user links the tripwire object (counting dropped by ruling 2026-08-26 — §2) |
 
 ### 8.2 `VMemArena`
@@ -350,8 +350,12 @@ assert). Stats (`live_bytes`, `peak`, per-class counts, `large_count`) are read 
 Adaptors (one per vendored lib, in `vendor_glue/`): `tl_luau_alloc(void* ud, void* p, size_t
 osize, size_t nsize)`, `tl_imgui_alloc/free`, `tl_sdl_malloc/calloc/realloc/free`
 (`SDL_SetMemoryFunctions` before `SDL_Init`), `tl_enet_malloc/free` (`ENetCallbacks`),
-`STBI_MALLOC/REALLOC/FREE` macros pointing at the shared pool. Grep rule: `pool_alloc` appears
-only in `mem_pool.cpp` and `vendor_glue/`.
+`STBI_MALLOC/REALLOC/FREE` macros pointing at the shared pool. **Gate** (`tools/audit/includes.py`,
+built 2026-08-26 with its first caller, the Luau VM pool): the three allocation verbs
+`pool_alloc`/`pool_realloc`/`pool_free` appear only in `src/foundation/mem_pool.cpp`, in
+`mem_pool.h`'s own declarations, and under `src/vendor_glue/`. `pool_init`/`pool_reset` are
+lifecycle (`app/` builds the pools) and `pool_stats` is the profiler's read; all three stay
+legal above this line.
 
 ### 8.7 Tests (`tests/foundation/`)
 

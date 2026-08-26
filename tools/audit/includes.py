@@ -40,6 +40,10 @@ SYS_ALLOW_DIRS = {                        # additional system headers, by path p
     "src/editor": {"math.h"},
     "src/platform": {"math.h"},
     "src/foundation": {"rapidhash.h"},
+    # Luau is vendored with its own include dirs on the target (vendor/luau/CMakeLists.txt),
+    # so its public headers are spelled bare and reach gate 1 as system includes. The set is
+    # closed: lua.h (the C API), lualib.h (luaopen_*/luaL_*), luacode.h (luau_compile).
+    "src/script": {"lua.h", "lualib.h", "luacode.h"},
 }
 BACKEND_FREE = ("src/platform/impl_sdl3", "src/platform/impl_headless")   # OS headers live here
 
@@ -61,8 +65,15 @@ BACKEND_HEADERS = {                       # token in the include path -> allowed
     "SDL_ttf": ("src/platform/impl_sdl3",),
     "imgui": ("src/editor",),
     "enet": ("src/net",),
-    "luau": ("src/script",),
+    # The vendored tree spells its public headers bare (<lua.h>, <lualib.h>, <luacode.h>)
+    # and its internal ones under Luau/. The pre-vendoring token here was a bare "luau",
+    # which matched no upstream spelling at all AND matched our own
+    # #include "vendor_glue/luau_alloc.h" - a gate that fires on the wrong file and never
+    # on the right one. Measured against the real tree at the 0.696 pin (W2 luau-vm).
     "lua.h": ("src/script",),
+    "lualib.h": ("src/script",),
+    "luacode.h": ("src/script",),
+    "Luau/": ("src/script",),
     "monocypher": ("src/net",),
     "stb_": ("src/platform/impl_sdl3", "src/core"),
     "rapidhash": ("src/foundation",),
@@ -73,14 +84,20 @@ BACKEND_HEADERS = {                       # token in the include path -> allowed
 # only sim/views.h.
 MODULE_DAG = {
     "foundation": ("foundation",),
+    # vendor_glue/ holds the per-library allocator adaptors (docs/MEMORY.md §8.6). It sits
+    # directly above foundation and below every wrap module: a vendored lib's hook API is
+    # routed through it, so it may never reach a module that would let a vendor heap see
+    # engine state.
+    "vendor_glue": ("vendor_glue", "foundation"),
     "platform": ("platform", "foundation"),
     "sim": ("sim", "foundation"),
     "core": ("core", "foundation", "platform"),
     "render": ("render", "core", "foundation", "platform"),
     "net": ("net", "core", "foundation", "platform"),
     "editor": ("editor", "core", "render", "foundation", "platform"),
-    "script": ("script", "core", "foundation", "platform"),
-    "app": ("app", "editor", "net", "render", "script", "sim", "core", "platform", "foundation"),
+    "script": ("script", "core", "foundation", "platform", "vendor_glue"),
+    "app": ("app", "editor", "net", "render", "script", "sim", "core", "platform",
+            "vendor_glue", "foundation"),
 }
 RENDER_SIM_HEADER = "sim/views.h"
 
@@ -195,6 +212,17 @@ GREP_BANS = (
     (re.compile(r'\b__?rdtsc\b'), "rdtsc (docs/CPP-SUBSET.md §4)"),
     (re.compile(r'__builtin_ia32_'), "ISA intrinsic builtin (docs/CPP-SUBSET.md §4)"),
 )
+# docs/MEMORY.md §1.5/§8.6: mem_pool is the ONE general allocator in the binary and it exists for
+# VENDOR heaps. Engine and sim code never call it - the doc has promised a CI grep for this since
+# rev 1 and TODO.md carried "not built yet" until the first caller (the Luau VM pool) arrived.
+# A phantom gate is worth nothing (LESSONS.md), so it lands with its first user.
+# The three allocation verbs only: pool_init/pool_reset are lifecycle (app/ wiring builds the
+# pools) and pool_stats is the profiler's read, all legitimate above this line.
+POOL_VERBS = re.compile(r'\bpool_(?:alloc|realloc|free)\b')
+# mem_pool.h's own declarations are named here for the same reason the doc names them: the header
+# IS the API, and TODO.md's entry for this gate asks for exactly this exemption.
+POOL_ALLOWED = ("src/foundation/mem_pool.cpp", "src/foundation/mem_pool.h", "src/vendor_glue/")
+
 TLS_SPELLINGS = re.compile(r'\bthread_local\b|\b__thread\b|__declspec\s*\(\s*thread\s*\)')
 
 CONTAINER_OPEN = re.compile(r'^\s*(?:template\s*<.*>\s*)?'
@@ -598,6 +626,10 @@ def check_file(root, path, nondet, tooling, errors):
         for rx, why in GREP_BANS:
             if rx.search(tline):
                 errors.append("%s:%d: %s" % (rel, i, why))
+        if POOL_VERBS.search(tline) and not rel.startswith(POOL_ALLOWED):
+            errors.append("%s:%d: mem_pool's allocation API outside %s - it is the vendor heap, "
+                          "not an engine allocator (docs/MEMORY.md §1.5, §8.6): %s"
+                          % (rel, i, ", ".join(POOL_ALLOWED), raw_lines[i - 1].strip()[:60]))
         if BUILD_CLOCK.search(tline):
             errors.append("%s:%d: compile-time wall clock in src/ - two peers building the same "
                           "tree get different bytes (docs/CPP-SUBSET.md §5)" % (rel, i))

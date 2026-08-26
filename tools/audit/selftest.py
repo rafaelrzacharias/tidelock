@@ -333,6 +333,34 @@ INCLUDE_CASES = [
      "src/platform/os_nom_commented.cpp",
      "/*\n#define NOMINMAX\n*/\n#include <windows.h>\nvoid os_nom_commented(void) {}\n",
      "no `#define NOMINMAX`"),
+    # W2 luau-vm: the vendored Luau tree's gate entries and mem_pool's grep. Every one of these
+    # passed before the entry existed. LESSONS.md: a vendored lib needs BOTH SYS_ALLOW_DIRS and
+    # BACKEND_HEADERS, which check independently - so both halves get their own fixture.
+    ("a Luau public header outside src/script", "src/core/luau_leak.cpp",
+     '#include <lua.h>\n#include "foundation/tl_types.h"\nu32 leak(void) { return 1u; }\n',
+     "backend header lua.h outside its wrap module"),
+    ("lualib.h outside src/script - the spelling the pre-vendoring 'luau' token never matched",
+     "src/render/luau_leak2.cpp",
+     '#include <lualib.h>\n#include "foundation/tl_types.h"\nu32 leak2(void) { return 2u; }\n',
+     "backend header lualib.h outside its wrap module"),
+    ("an internal Luau/ header outside src/script", "src/net/luau_leak3.cpp",
+     '#include <Luau/Common.h>\n#include "foundation/tl_types.h"\nu32 leak3(void) { return 3u; }\n',
+     "backend header Luau/ outside its wrap module"),
+    ("a Luau header is not on the system allowlist outside src/script", "src/editor/luau_leak4.cpp",
+     '#include <luacode.h>\n#include "foundation/tl_types.h"\nu32 leak4(void) { return 4u; }\n',
+     "system include <luacode.h> is not on the allowlist"),
+    ("mem_pool's allocator called from engine code", "src/core/pool_leak.cpp",
+     '#include "foundation/tl_types.h"\nvoid* leak5(void* p);\n'
+     "void* leak5(void* p) { return pool_alloc(p, 16u); }\n",
+     "mem_pool's allocation API outside"),
+    ("mem_pool's free called from a sim TU", "src/sim/pool_leak2.cpp",
+     '#include "foundation/tl_types.h"\nvoid leak6(void* p, void* q);\n'
+     "void leak6(void* p, void* q) { pool_free(p, q); }\n",
+     "mem_pool's allocation API outside"),
+    ("mem_pool's realloc called from the script module itself", "src/script/pool_leak3.cpp",
+     '#include "foundation/tl_types.h"\nvoid* leak7(void* p, void* q);\n'
+     "void* leak7(void* p, void* q) { return pool_realloc(p, q, 8u); }\n",
+     "mem_pool's allocation API outside"),
 ]
 
 # Things that must NOT fire: the gates have to be usable, not just loud.
@@ -358,6 +386,20 @@ INCLUDE_CLEAN = [
      "static u32 const K = 2u;\n"
      "static constexpr u32 C = 3u;\n"
      "u32 use(void) { return helper() + K + C; }\n"),
+    # W2 luau-vm: the sanctioned spellings. Without these the entries above could be "fixed" by
+    # banning the headers everywhere, which passes every negative fixture and breaks the one
+    # module that needs them.
+    ("src/script may spell the vendored Luau headers", "src/script/ok_luau.cpp",
+     '#include <lua.h>\n#include <lualib.h>\n#include <luacode.h>\n'
+     '#include "foundation/tl_types.h"\nu32 ok_luau(void) { return 1u; }\n'),
+    ("src/vendor_glue may call the pool allocator", "src/vendor_glue/ok_pool.cpp",
+     '#include "foundation/tl_types.h"\n'
+     "void* ok_pool(void* p);\nvoid* ok_pool(void* p) { return pool_alloc(p, 16u); }\n"),
+    ("mem_pool.h may declare the pool allocator", "src/foundation/mem_pool.h",
+     '#pragma once\n// Spec: docs/MEMORY.md §8.6 (the real path: the exemption is by path, not by stem).\n'
+     '#include "foundation/tl_types.h"\n\n'
+     "// Allocates size bytes from the class freelist or the large path. Null when over budget.\n"
+     "void* pool_alloc(void* p, u64 size);\n"),
     ("a message literal keeps const char*", "src/sim/ok6.cpp",
      '#include "foundation/tl_types.h"\n'
      "void fail(const char* msg);\nvoid f(void) { fail(\"bad\"); }\n"),

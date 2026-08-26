@@ -56,6 +56,7 @@ include(cmake/fingerprint.cmake)
 
 add_subdirectory(vendor)
 add_subdirectory(src/foundation)
+add_subdirectory(src/vendor_glue)
 add_subdirectory(src/platform)
 add_subdirectory(src/sim)
 add_subdirectory(src/core)
