@@ -39,9 +39,11 @@ are the live truth, this paragraph is only a pointer).** The design corpus is co
 (`docs/PIVOT-DESIGN.md` is the founding ruling; `docs/README.md` is the map). Shipped: the W0
 skeleton and audits; the full W1 foundation (fx palette + det math, arenas/registry,
 containers, RNG/hash, headless platform, test runner, tooling runtimes, jobs); Gate 0 run and
-ruled (`FX-PALETTE.md` rev 2, 2026-08-25); the W2 ECS and netcode Phase 1 merges; four-leg
-hosted CI ({Windows, Linux} × {x86-64, arm64}) green on `main`. In flight: the W2 luau-vm and
-vendor lanes (in adversarial review). Next: W3 — alloy-solver ★ and the v0 lanes.
+ruled (`FX-PALETTE.md` rev 2, 2026-08-25); the W2 ECS and netcode Phase 1 merges; the W2
+luau-vm and vendor merges (2026-08-26 — Luau 0.696, SDL3, SDL_ttf + FreeType, ImGui, ENet,
+Monocypher and stb, every allocator pooled and gated); four-leg hosted CI ({Windows, Linux} ×
+{x86-64, arm64}) green on `main`. In flight: alloy-substrate (launches at the weekly reset).
+Next: W3 — alloy-solver ★ and the v0 lanes.
 
 ## Lineage
 

@@ -1,6 +1,9 @@
 # Platform — the porting seam (tidelock, rev 1)
 
-> **Status:** design rev 1, 2026-08-22. **DECIDED** except §10. Carries foundry's platform seam
+> **Status:** rev 1 (2026-08-22), amended through 2026-08-26 — §9.5 carries the shipped W2
+> vendor hookups (FreeType via the patched `ftsystem.c` seam, the SDL3 `xsettings` residue
+> qualifier) and the vendor_glue writable-static exemption as gated. **DECIDED** except §10.
+> Carries foundry's platform seam
 > (struct-of-fn-ptrs, SDL3) and names the new seams the pivot needs: virtual memory, OS entropy,
 > threads — each a fn-ptr table resolved once at boot, never a per-call virtual.
 > **Owns:** `src/platform/platform.h` (the contract), `impl_sdl3/`, `impl_headless/`.

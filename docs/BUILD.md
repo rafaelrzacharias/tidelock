@@ -1,7 +1,10 @@
 # Build — toolchain, build system, tiers, vendoring, the fingerprint (tidelock, rev 1)
 
-> **Status:** design rev 1, 2026-08-22. **DECIDED** except §9. Expands `PIVOT-DESIGN.md` §11 and
-> §8's fingerprint; the build system choice is new.
+> **Status:** rev 1 (2026-08-22), amended through 2026-08-26 — §4's verbatim-deviation rule
+> recorded with its first use (FreeType's `ftsystem.c`), the seven W2 vendor pins + Luau in
+> `vendor/VERSIONS`, and the rebuild budget re-baselined on the vendored tree. **DECIDED**
+> except §9. Expands `PIVOT-DESIGN.md` §11 and §8's fingerprint; the build system choice is
+> new.
 
 ---
 

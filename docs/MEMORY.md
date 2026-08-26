@@ -1,6 +1,9 @@
 # Memory — arenas, the registered set, handles (tidelock, rev 1)
 
-> **Status:** design rev 1, 2026-08-22. **DECIDED** except §7. Expands `PIVOT-DESIGN.md` §4.
+> **Status:** rev 1 (2026-08-22), amended through 2026-08-26 — RR-18's program-wide
+> `operator new` replacement (§1.5/§2), the per-frame CRT-malloc counter dropped, and the W2
+> vendor lane's §8.6 adaptors (SDL3/SDL_ttf/FreeType/ImGui/ENet/stb) live with the `pool_alloc`
+> gate. **DECIDED** except §7. Expands `PIVOT-DESIGN.md` §4.
 > **Lineage:** D3 / ALLOY §9.1 / §13 / D16-M1 from foundry, ported nearly verbatim.
 > **Owns:** `src/foundation/vmem_arena.h`, `arena_registry.h`, `scratch.h`, `handle.h`, `mem_pool.h`.
 

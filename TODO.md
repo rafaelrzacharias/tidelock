@@ -710,7 +710,26 @@ E-2 needs no W2 decision but blocks real game wiring later.
       namespace convention: STATUS QUO recorded in `CPP-SUBSET.md` §0 — global namespace with
       enforced module prefixes; revisit only on a real collision.
 
-## W2 vendor — lane notes (2026-08-26, `w2-vendor`, in progress)
+> **Lane closeout sweep DONE, 2026-08-26 (steward, `WORKFLOW.md` §1 R-7 + R-12) — merged as
+> `e66c4f90` (PR #12, merge commit; five review rounds to a SHIP verdict whose doc-only
+> conditions the steward folded as `f8394c67`). The both-lanes merge `3b336aad` resolved the
+> filed keep-both-sides conflicts, combined the two writable-static gate shapes (vendor_glue
+> whole-DIRECTORY per `PLATFORM.md` §9.5; `static_allow.txt`'s (lib, directory, stem) rows
+> everywhere else — the luau fixture that planted `src/vendor_glue/other.cpp` is retired with a
+> pointer, subsumed by the directory ruling), passed the full local gauntlet on the first
+> combined tree (441/441 tests, docaudit, includes/symbols audits clean) and went 23/23 CI
+> green on the PR.** Triage of this lane's filings: (1) the SDL3 `xsettings` raw-malloc residue
+> HOLDS as the impl_sdl3 platform lane's decision (patch-with-declaration / accept-and-document
+> / upstream-report) — correctly routed, no action now. (2) the FreeType vendoring-policy
+> ruling request stands OPEN for Rafael (`BUILD.md` §4 already carries the rule; his word
+> blesses or narrows it). (3) the rebuild-budget re-baseline on the FULL merged tree rides
+> `e66c4f90`'s own main-push CI run — the first measurement of both lanes' TUs under the 50 s
+> budget; the number is recorded against this entry when that run reports. (4) R-12 doc check:
+> `MEMORY.md`/`PLATFORM.md`/`BUILD.md` status lines still read "design rev 1, 2026-08-22"
+> after both lanes amended all three — re-dated in this sweep commit — and README/CLAUDE.md
+> still carried "in review"/"in flight" for lanes now merged — moved to merged.
+
+## W2 vendor — lane notes (2026-08-26, `w2-vendor`, PR #12 — merged as `e66c4f90`)
 
 - [x] **SDL3 vendored** at `release-3.2.30` (`vendor/sdl3`, `vendor/VERSIONS`): the full upstream
       CMake project minus test/examples/docs/IDE-project dirs (unreachable with
