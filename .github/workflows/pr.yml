@@ -244,8 +244,10 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y clang lld llvm ninja-build libx11-dev libxext-dev
       - run: python tools/rebuild_budget.py --preset netcode-linux --strict-toolchain off --full-budget 50 --incremental-budget 5
         # The CI box's own budget, passed explicitly as the tool's contract requires (it must
-        # never inherit the reference PC's docs/BUILD.md numbers). PROVISIONAL at the leg move
-        # (2026-08-26): one measured ubuntu build of this tree took 12.1 s; 25/5 keeps a 2x
-        # regression visible while ~10 runs of TSV data accumulate, then the budget tightens to
-        # measured median x 1.15 by the standing TODO.md entry.
+        # never inherit the reference PC's docs/BUILD.md numbers). PROVISIONAL, re-baselined by
+        # the W2 vendor lane (2026-08-26, six libs added): the measured full build on this leg is
+        # 25.28 s; 50/5 is ~2x that measurement (rounded DOWN from 50.56, deliberately, matching
+        # the original provisional's own headroom multiple) and keeps a 2x regression visible
+        # while ~10 runs of TSV data accumulate on this tree, then the budget tightens to measured
+        # median x 1.15 by the standing TODO.md entry.
 

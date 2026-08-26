@@ -345,6 +345,20 @@ INCLUDE_CASES = [
     ("core/ may not include vendor_glue - the DAG entry is not bidirectional", "src/core/z2.cpp",
      '#include "vendor_glue/pool_vendor.h"\n',
      "violates the module DAG"),
+    # review round 1, D3: platform/net/editor's new downward-only vendor_glue entry must not leak
+    # to sim or foundation - neither has any vendored-lib install to make, and sim especially must
+    # never reach a vendor allocator (docs/CPP-SUBSET.md: no vendor heap on a sim path).
+    ("sim/ may not include vendor_glue even after D3 widens platform/net/editor",
+     "src/sim/z2b.cpp", '#include "vendor_glue/pool_vendor.h"\n',
+     "violates the module DAG"),
+    ("foundation/ may not include vendor_glue even after D3 widens platform/net/editor",
+     "src/foundation/z2c.cpp", '#include "vendor_glue/pool_vendor.h"\n',
+     "violates the module DAG"),
+    # review round 1, D8: SYS_ALLOW_DIRS["src/vendor_glue"] had no negative fixture - confirmed
+    # working by hand in the review (an arbitrary system header still refused), never pinned.
+    ("vendor_glue's system-header allowlist does not become unbounded", "src/vendor_glue/z5.cpp",
+     "#include <windows.h>\n",
+     "system include <windows.h> is not on the allowlist"),
     # vendor_glue's own DAG entry is scoped to foundation only, not the whole tree platform/core
     # reach - a copy-paste of core's tuple would have let it reach platform silently.
     ("vendor_glue may not include platform even though core/render/net can",
@@ -439,6 +453,16 @@ INCLUDE_CLEAN = [
      "src/vendor_glue/ok12.cpp",
      '#include "foundation/mem_pool.h"\nstatic MemPool g_pool_vendor;\n'
      "MemPool* use(void) { return &g_pool_vendor; }\n"),
+    # review round 1, D3: platform/net/editor gained a downward-only vendor_glue MODULE_DAG entry
+    # so sdl3_glue.h/enet_glue.h/imgui_glue.h's named callers (impl_sdl3, net/, src/editor) have a
+    # legal include path to the install functions they name. Positive fixtures for all three.
+    ("platform/ may now include vendor_glue (review round 1, D3)",
+     "src/platform/impl_sdl3/ok13.cpp",
+     '#include "vendor_glue/sdl3_glue.h"\nvoid ok13(void) { vendor_glue_sdl3_install(); }\n'),
+    ("net/ may now include vendor_glue (review round 1, D3)", "src/net/ok14.cpp",
+     '#include "vendor_glue/enet_glue.h"\nbool ok14(void) { return vendor_glue_enet_install(); }\n'),
+    ("editor/ may now include vendor_glue (review round 1, D3)", "src/editor/ok15.cpp",
+     '#include "vendor_glue/imgui_glue.h"\nvoid ok15(void) { vendor_glue_imgui_install(); }\n'),
     # Gate 7's positive half in src/ and in tests/. The src/ one is the fixture above (it carries
     # the #define now, and would fail this whole clean run without it); these two pin the
     # remaining shapes: the define does not have to be adjacent to the include, and a file with no

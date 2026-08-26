@@ -321,7 +321,7 @@ Pools (`MEMORY.md` §1.5): `pool_vendor` (SDL + ImGui + stb + FreeType, 64 MB re
 | Lib | Hook | Pool |
 |---|---|---|
 | SDL3 | `SDL_SetMemoryFunctions(tl_sdl_malloc, tl_sdl_calloc, tl_sdl_realloc, tl_sdl_free)` — **before** `SDL_Init` | `pool_vendor` |
-| Dear ImGui | `ImGui::SetAllocatorFunctions(tl_imgui_alloc, tl_imgui_free, &pool_vendor)` — before `CreateContext` | `pool_vendor` |
+| Dear ImGui | `ImGui::SetAllocatorFunctions(tl_imgui_alloc, tl_imgui_free)` — before `CreateContext` (no `user_data`; the adaptor closes over `pool_vendor()` directly) | `pool_vendor` |
 | stb_image / stb_sprintf | `#define STBI_MALLOC/REALLOC/FREE` → `tl_stbi_*` (stb_sprintf allocates nothing) | `pool_vendor` |
 | Luau | `lua_newstate(glue_luau_alloc, &pool_luau_x)` per VM | per VM |
 | ENet | `enet_initialize_with_callbacks(ENET_VERSION, &{tl_enet_malloc, tl_enet_free, tl_enet_no_memory → TL_FATAL})` | `pool_enet` |

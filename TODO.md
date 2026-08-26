@@ -758,39 +758,65 @@ E-2 needs no W2 decision but blocks real game wiring later.
       "ImGui/SDL assert" — neither did (SDL's own wrapper turns a NULL into `SDL_OutOfMemory()`,
       an error not a crash; ImGui had nothing). Fixed the code, not just the doc:
       `tl_imgui_alloc` now `TL_FATAL`s on exhaustion, matching ENet's pattern; §8.6 corrected to
-      describe what each of the three actually does. **Remaining D4 piece, not yet done:** the
-      review's `PLATFORM.md`/`MEMORY.md` diff also covers ImGui/SDL/ENet beyond the FreeType/
-      naming-drift slice above only where it overlapped this fix; re-check the review comment in
-      full before closing D4 if anything else in it is still open.
+      describe what each of the three actually does. Also fixed (follow-up commit, full review
+      text re-read): `PLATFORM.md` §9.5's ImGui row named `&pool_vendor` as `SetAllocatorFunctions`'
+      third argument (`user_data`) — the real call passes none, the adaptor closes over
+      `pool_vendor()` directly; doc corrected to match. **D4 closed.**
 
-## w2-vendor — follow-up commits still owed from round-1 (not yet done)
+## w2-vendor — follow-up commits still owed from round-1
 
-- [ ] **D3 (Medium).** `tools/audit/includes.py`'s `MODULE_DAG` for `platform`/`editor`/`net`
-      does not include `"vendor_glue"`, so `vendor_glue_sdl3_install()` etc. have no legal caller
-      per the audit even though the glue headers already promise that reachability. Either widen
-      the three tuples (with a fixture pinning `sim`/`foundation` still cannot reach it), or file
-      the alternative (per-consumer-lane, deferred) explicitly here instead of leaving it silent.
-- [ ] **D5 (Low-Medium).** Run the prune-safety sweep `LESSONS.md` itself prescribes across all
-      six vendored trees (the FreeType `builds/windows/ftsystem.c` "missing file" bug earlier
-      this lane was exactly this class of mistake). The review already found three more
-      referenced-but-deleted paths, all latent (behind conditions no CI leg takes):
-      `builds/wince/ftdebug.c`, `builds/mac/freetype-Info.plist`, `examples/*.c` under
-      `SDLTTF_SAMPLES`. At minimum, the freetype `vendor/VERSIONS` row must declare what pruning
-      was done, the way the sdl3/sdl_ttf rows already do (it currently declares none).
-- [ ] **D6 (Low).** Restore FreeType's actual license text: `docs/FTL.TXT` and `docs/GPLv2.TXT`
-      under `vendor/sdl_ttf/external/freetype/` — `LICENSE.TXT` points at them but the `docs/`
-      dir holding them was pruned. The FTL's advertising clause makes this a real compliance
-      gap, not a nit.
-- [ ] **D7 (Low).** `.github/workflows/pr.yml`'s `rebuild-budget` job: a stale comment six lines
-      below the actual `--full-budget 50` line still says "12.1s ... 25/5 keeps a 2x regression
-      visible" from before this lane's re-baseline. Fix the comment; also state explicitly that
-      the "~2x, rounded to 50" arithmetic rounds DOWN from 50.56 (deliberate, not a typo).
-- [ ] **D8 (Nits).** `src/vendor_glue/sdl3_glue.cpp`'s `SDL_SetMemoryFunctions` call discards its
-      `bool` return (unreachable failure here, but a discarded status in an otherwise fail-loudly
-      tree). Add a negative selftest fixture for `SYS_ALLOW_DIRS["src/vendor_glue"]` in
-      `tools/audit/selftest.py` (confirmed still working by hand, but untested). Remove the dead
-      `BACKEND_HEADERS["monocypher"]` → `"src/vendor_glue"` entry in `tools/audit/includes.py`
-      (nothing in `src/vendor_glue` includes monocypher).
+- [x] **D3 (Medium) — fixed.** `tools/audit/includes.py`'s `MODULE_DAG` for `platform`/`editor`/
+      `net` gained a downward-only `"vendor_glue"` entry each (docstring records who consumes it:
+      `impl_sdl3` for SDL3, `net/` for ENet, `src/editor` for ImGui, per each glue header's own
+      "Purpose" comment). `sim`/`foundation` deliberately left out — neither has a vendored-lib
+      install to make. Selftest fixtures added for all five: three positive (`platform`/`net`/
+      `editor` may now include `vendor_glue`), two negative (`sim`/`foundation` still cannot,
+      pinning D3's fix did not leak past its three named consumers).
+- [x] **D8 (Nits) — fixed.** `src/vendor_glue/sdl3_glue.cpp`'s `SDL_SetMemoryFunctions` return is
+      now `TL_CHECK`ed (read `vendor/sdl3/src/stdlib/SDL_malloc.c` first: it only fails on a null
+      function-pointer argument, unreachable with these fixed hooks, but a discarded status is
+      still a bug waiting for the next refactor to make it reachable). Added the missing negative
+      selftest fixture for `SYS_ALLOW_DIRS["src/vendor_glue"]` (an arbitrary system header is
+      still refused). Removed the dead `BACKEND_HEADERS["monocypher"]` → `"src/vendor_glue"` entry
+      (confirmed: nothing in `src/vendor_glue` includes monocypher, only `src/vendor_glue/
+      CMakeLists.txt` links it; `"src/net"` stays, the real future consumer `docs/NETCODE.md`
+      names).
+
+## w2-vendor — follow-up commits still owed from round-1, closed
+
+- [x] **D5 (Low-Medium) — fixed for the gap the review named; the general sweep tool is a
+      separate, deferred task (see below).** Confirmed all three of the review's
+      referenced-but-deleted paths by reading the pinned tree's own `CMakeLists.txt` (cloned at
+      `9973564c...` in `/tmp/freetype_src`, still cached from the earlier `builds/windows/`
+      restore): `builds/wince/ftdebug.c` (only reachable under `WINCE`), `builds/mac/
+      freetype-Info.plist` (only under `BUILD_FRAMEWORK`) — both conditions this tree never sets;
+      `examples/*.c` under SDL_ttf's own `SDLTTF_SAMPLES` (OFF, `vendor/CMakeLists.txt`). All
+      confirmed genuinely unreachable, not just "no CI leg happens to take them" — this project's
+      CMake options structurally cannot enable any of the three. `vendor/VERSIONS`' freetype row
+      now declares the full `builds/` prune (11 non-CMake-build subdirs: amiga/ansi/atari/beos/
+      dos/mac/meson/os2/symbian/vms/wince — confirmed by diffing the pinned clone's `builds/`
+      listing against the vendored one) and names the two dangling-but-latent CMakeLists.txt
+      references by path and guard condition, the way sdl3/sdl_ttf's rows already do.
+      **Deferred, not done:** a general-purpose prune-safety sweep tool that greps every
+      vendored `CMakeLists.txt` for source-list references and diffs against the tree on disk,
+      runnable across all six vendored trees on demand. A first attempt at scripting this inline
+      produced ~390 candidates, almost all `check_include_file`-style system-header probes (not
+      tree-relative source references) — false positives outnumbering signal by two orders of
+      magnitude with a naive regex. Doing this properly is its own small tool, not a five-minute
+      grep, and CI's four-leg matrix is already the backstop that catches a REACHABLE dangling
+      reference (as it did for `builds/windows/ftsystem.c` earlier this lane) — sdl3/imgui/enet/
+      monocypher/stb have all passed CI clean on every leg, so nothing outstanding there is
+      reachable today. File as a real task if a systematic sweep is wanted, not improvised here.
+- [x] **D6 (Low) — fixed.** Restored `vendor/sdl_ttf/external/freetype/docs/FTL.TXT` and
+      `GPLv2.TXT` verbatim from the pinned commit's own tree (byte-diffed against the cached
+      clone to confirm identical) — `LICENSE.TXT`'s own text names exactly these two files and no
+      others as its pointer targets (checked: the BDF/PCF/zlib/HarfBuzz/MD5 mentions below them
+      are all "compatible to the above two licenses", not further pointer files).
+- [x] **D7 (Low) — fixed.** `.github/workflows/pr.yml`'s `rebuild-budget` step comment ("one
+      measured ubuntu build ... 12.1 s; 25/5 keeps a 2x regression visible") was six lines below
+      the block comment that already re-baselined to 50/5 — rewrote it to state the current
+      25.28 s measurement and the 50/5 budget, and said explicitly that "~2x, rounded to 50"
+      rounds 50.56 DOWN (deliberate, not an error).
 
 ## w2-vendor — BLOCKING ruling request: commit identity (2026-08-26)
 

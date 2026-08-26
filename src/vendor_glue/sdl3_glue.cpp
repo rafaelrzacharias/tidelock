@@ -1,6 +1,7 @@
 // sdl3_glue.h - SDL3's four allocator hooks over pool_vendor. Spec: docs/MEMORY.md §8.6.
 #include "vendor_glue/sdl3_glue.h"
 #include "vendor_glue/pool_vendor.h"
+#include "foundation/tl_assert.h"
 
 #include <SDL3/SDL.h>
 #include <string.h>
@@ -30,5 +31,8 @@ void SDLCALL tl_sdl_free(void* mem) {
 }  // namespace
 
 void vendor_glue_sdl3_install(void) {
-    SDL_SetMemoryFunctions(tl_sdl_malloc, tl_sdl_calloc, tl_sdl_realloc, tl_sdl_free);
+    // SDL_SetMemoryFunctions only fails on a null function pointer (vendor/sdl3/src/stdlib/
+    // SDL_malloc.c) - unreachable with these fixed hooks, but a discarded status in a fail-loudly
+    // tree is still a bug waiting for the next refactor to make it reachable.
+    TL_CHECK(SDL_SetMemoryFunctions(tl_sdl_malloc, tl_sdl_calloc, tl_sdl_realloc, tl_sdl_free));
 }

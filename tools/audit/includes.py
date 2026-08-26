@@ -70,7 +70,7 @@ BACKEND_HEADERS = {                       # token in the include path -> allowed
     # glue lands, same shape as this commit's SDL3/enet/monocypher/stb_ prefixes.
     "luau": ("src/script",),
     "lua.h": ("src/script",),
-    "monocypher": ("src/net", "src/vendor_glue"),
+    "monocypher": ("src/net",),
     "stb_": ("src/platform/impl_sdl3", "src/core", "src/vendor_glue"),
     "rapidhash": ("src/foundation",),
 }
@@ -80,17 +80,21 @@ BACKEND_HEADERS = {                       # token in the include path -> allowed
 # only sim/views.h.
 MODULE_DAG = {
     "foundation": ("foundation",),
-    "platform": ("platform", "foundation"),
+    "platform": ("platform", "foundation", "vendor_glue"),
     "sim": ("sim", "foundation"),
     "core": ("core", "foundation", "platform"),
     "render": ("render", "core", "foundation", "platform"),
-    "net": ("net", "core", "foundation", "platform"),
-    "editor": ("editor", "core", "render", "foundation", "platform"),
+    "net": ("net", "core", "foundation", "platform", "vendor_glue"),
+    "editor": ("editor", "core", "render", "foundation", "platform", "vendor_glue"),
     "script": ("script", "core", "foundation", "platform"),
     "app": ("app", "editor", "net", "render", "script", "sim", "core", "platform", "foundation"),
     # vendor_glue (docs/PLATFORM.md §9.5, docs/MEMORY.md §8.6): per-lib allocator hookups. Reaches
     # only foundation/mem_pool.h - it never touches core/platform/render, and its vendor headers
     # arrive via BACKEND_HEADERS-gated system includes, not this local-include DAG.
+    # platform/net/editor gain a DOWNWARD-only entry to it (review round 1, D3): sdl3_glue.h names
+    # the impl_sdl3 platform lane as `vendor_glue_sdl3_install()`'s caller, enet_glue.h names net/,
+    # imgui_glue.h names src/editor - none of the three install functions had a legal caller before
+    # this. sim/foundation are deliberately left out: neither has any vendored-lib install to make.
     "vendor_glue": ("vendor_glue", "foundation"),
 }
 RENDER_SIM_HEADER = "sim/views.h"
