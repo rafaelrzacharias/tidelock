@@ -102,8 +102,9 @@ generation bump so stale handles fail loudly (debug) or read as absent (release)
 
 ### 1.5 The one exception: vendor heaps (DECIDED — alternatives recorded)
 
-Luau, ImGui, SDL, ENet, and stb need `realloc`/`free` semantics. None of their heaps is
-authoritative; none is hashed or snapshotted. Options weighed:
+Luau, ImGui, SDL, ENet, stb, and FreeType (SDL_ttf's mandatory, vendored-transitively dependency)
+need `realloc`/`free` semantics. None of their heaps is authoritative; none is hashed or
+snapshotted. Options weighed:
 
 | Option | Determinism | Performance | LOC / cognitive | Correctness surface |
 |---|---|---|---|---|
@@ -113,8 +114,9 @@ authoritative; none is hashed or snapshotted. Options weighed:
 
 `mem_pool.h` is a power-of-two size-class freelist (≤ 64 KB classes; larger → direct page
 commit) with a per-pool budget and a counter the profiler reads. **Engine and sim code never call
-it** (CI grep: `pool_alloc` appears only in `vendor_glue/`). Luau gets one pool per VM; ImGui and
-SDL share one; ENet its own (net buffers are sized by the protocol anyway).
+it** (CI grep: `pool_alloc` appears only in `vendor_glue/`). Luau gets one pool per VM; ImGui,
+SDL, stb, and FreeType share one (`pool_vendor`); ENet its own (net buffers are sized by the
+protocol anyway).
 
 ---
 
@@ -128,7 +130,9 @@ SDL share one; ENet its own (net buffers are sized by the protocol anyway).
   code is a link error (the symbol audit) for sim libs and a `TL_FATAL` tripwire shim for the
   rest; vendor libs are routed through `mem_pool` via their hook APIs (`lua_newstate(alloc_fn)`,
   `ImGui::SetAllocatorFunctions`, `SDL_SetMemoryFunctions`, `enet_initialize_with_callbacks`,
-  `STBI_MALLOC`). **The per-frame CRT-malloc COUNTER is dropped (ruled 2026-08-26):** it needed
+  `STBI_MALLOC`, FreeType's `builds/<platform>/ftsystem.c` platform-customization seam — the one
+  vendored lib with no runtime hook API, §8.6). **The per-frame CRT-malloc COUNTER is dropped
+  (ruled 2026-08-26):** it needed
   writable static storage the §1 link gate bans, and the tripwires + the symbol audit + the
   per-pool budgets already fail loudly on every path the counter watched.
 - **Hash-region integrity test per pool** (`DETERMINISM.md` §4).
@@ -344,12 +348,18 @@ gap out of its own reserve). Allocations > 64 KB: a dedicated 64 KB-granular car
 (the bump pointer is not moved — fragmentation of the *address* space is accepted, pages are
 returned and the freed carve leaves the budget). `pool_realloc`: same class (or same large
 carve) → return the same pointer; else alloc + memcpy(min) + free. Budget: `pool.budget_bytes`
-checked at every carve; exceeding it returns `NULL` (Luau raises its own memory error; ImGui/SDL
-assert). Stats (`live_bytes`, `peak`, per-class counts, `large_count`) are read by the profiler.
+checked at every carve; exceeding it returns `NULL` (Luau raises its own memory error; SDL's own
+allocator wrapper turns a NULL into `SDL_OutOfMemory()` — an SDL error, not a crash; ImGui and
+ENet have no such wrapper and never check `IM_ALLOC`/`enet_malloc`'s return before writing through
+it, so their adaptors `TL_FATAL` instead of handing them a NULL that would null-deref far from
+this call site). Stats (`live_bytes`, `peak`, per-class counts, `large_count`) are read by the
+profiler.
 
 Adaptors (one per vendored lib, in `vendor_glue/`): `tl_luau_alloc(void* ud, void* p, size_t
 osize, size_t nsize)`, `tl_imgui_alloc/free`, `tl_sdl_malloc/calloc/realloc/free`
 (`SDL_SetMemoryFunctions` before `SDL_Init`), `tl_enet_malloc/free` (`ENetCallbacks`),
+`tl_freetype_alloc/realloc/free` (FreeType's `builds/<platform>/ftsystem.c` seam — SDL_ttf's
+`TTF_Init()` exposes no runtime allocator-registration API, docs/PLATFORM.md §9.5),
 `STBI_MALLOC/REALLOC/FREE` macros pointing at the shared pool. Grep rule: `pool_alloc` appears
 only in `mem_pool.cpp` and `vendor_glue/`.
 

@@ -313,19 +313,20 @@ spellings across the two docs). No `<atomic>`, no `volatile`.
 
 ### 9.5 Vendor hook wiring and init order
 
-Pools (`MEMORY.md` §1.5): `pool_vendor` (SDL + ImGui + stb, 64 MB reserve), `pool_luau_sim`,
+Pools (`MEMORY.md` §1.5): `pool_vendor` (SDL + ImGui + stb + FreeType, 64 MB reserve), `pool_luau_sim`,
 `pool_luau_ui` (64 MB each, owned by `LUAU-LAYER`), `pool_enet` (16 MB, owned by `net/`). All
 `pool_*` calls live in `src/vendor_glue/` (the one folder allowed a static pool pointer, for the
 `STBI_MALLOC` compile-time macro).
 
 | Lib | Hook | Pool |
 |---|---|---|
-| SDL3 | `SDL_SetMemoryFunctions(glue_malloc, glue_calloc, glue_realloc, glue_free)` — **before** `SDL_Init` | `pool_vendor` |
-| Dear ImGui | `ImGui::SetAllocatorFunctions(glue_imgui_alloc, glue_imgui_free, &pool_vendor)` — before `CreateContext` | `pool_vendor` |
-| stb_image / stb_sprintf | `#define STBI_MALLOC/REALLOC/FREE` → `glue_stb_*` (stb_sprintf allocates nothing) | `pool_vendor` |
+| SDL3 | `SDL_SetMemoryFunctions(tl_sdl_malloc, tl_sdl_calloc, tl_sdl_realloc, tl_sdl_free)` — **before** `SDL_Init` | `pool_vendor` |
+| Dear ImGui | `ImGui::SetAllocatorFunctions(tl_imgui_alloc, tl_imgui_free, &pool_vendor)` — before `CreateContext` | `pool_vendor` |
+| stb_image / stb_sprintf | `#define STBI_MALLOC/REALLOC/FREE` → `tl_stbi_*` (stb_sprintf allocates nothing) | `pool_vendor` |
 | Luau | `lua_newstate(glue_luau_alloc, &pool_luau_x)` per VM | per VM |
-| ENet | `enet_initialize_with_callbacks(ENET_VERSION, &{glue_enet_malloc, glue_enet_free, glue_enet_no_memory → TL_FATAL})` | `pool_enet` |
-| SDL_ttf | inherits SDL's functions (it calls `SDL_malloc`) | `pool_vendor` |
+| ENet | `enet_initialize_with_callbacks(ENET_VERSION, &{tl_enet_malloc, tl_enet_free, tl_enet_no_memory → TL_FATAL})` | `pool_enet` |
+| SDL_ttf | its own `SDL_malloc`/`SDL_free` call sites inherit SDL3's hook; has no adaptor `.cpp` of its own | `pool_vendor` |
+| FreeType | no runtime allocator-registration API SDL_ttf's `TTF_Init()` exposes — hooked at FreeType's own platform-customization seam instead: `builds/<platform>/ftsystem.c`'s `ft_alloc`/`ft_realloc`/`ft_free`/`FT_New_Memory` call `tl_freetype_alloc`/`realloc`/`free` (`src/vendor_glue/freetype_glue.cpp`), a declared verbatim deviation (`vendor/VERSIONS`' freetype row) | `pool_vendor` |
 | Monocypher, rapidhash | allocate nothing | — |
 
 `platform_sdl3_init(config)` order: (1) build `vmem` (no state needed) → allocate the platform

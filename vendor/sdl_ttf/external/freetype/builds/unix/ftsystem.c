@@ -35,6 +35,21 @@
 #define MAP_FILE  0x00
 #endif
 
+  /* DEVIATION FROM VENDORED VERBATIM (docs/BUILD.md section 4; declared in vendor/VERSIONS'
+   * freetype row): ft_alloc/ft_realloc/ft_free below, and FT_New_Memory's own allocation of the
+   * FT_MemoryRec struct, are routed through tl_freetype_alloc/realloc/free instead of directly
+   * calling malloc/realloc/free. This file - builds/<platform>/ftsystem.c - is FreeType's own
+   * designated platform-customization seam (the reason the memory backend lives in builds/ at
+   * all, split out from the platform-agnostic src/), so this is the sanctioned extension point
+   * for docs/MEMORY.md section 8.6's pool_vendor hookup, not a patch to FreeType's logic. The
+   * three functions are implemented in src/vendor_glue/freetype_glue.cpp with C linkage. */
+extern void*
+tl_freetype_alloc( long size );
+extern void*
+tl_freetype_realloc( long cur_size, long new_size, void* block );
+extern void
+tl_freetype_free( void* block );
+
 #ifdef MUNMAP_USES_VOIDP
 #define MUNMAP_ARG_CAST  void *
 #else
@@ -110,7 +125,7 @@
   {
     FT_UNUSED( memory );
 
-    return malloc( size );
+    return tl_freetype_alloc( size );
   }
 
 
@@ -145,9 +160,8 @@
               void*      block )
   {
     FT_UNUSED( memory );
-    FT_UNUSED( cur_size );
 
-    return realloc( block, new_size );
+    return tl_freetype_realloc( cur_size, new_size, block );
   }
 
 
@@ -172,7 +186,7 @@
   {
     FT_UNUSED( memory );
 
-    free( block );
+    tl_freetype_free( block );
   }
 
 
@@ -405,7 +419,7 @@
     FT_Memory  memory;
 
 
-    memory = (FT_Memory)malloc( sizeof ( *memory ) );
+    memory = (FT_Memory)tl_freetype_alloc( (long)sizeof ( *memory ) );
     if ( memory )
     {
       memory->user    = NULL;

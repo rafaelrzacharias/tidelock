@@ -44,10 +44,16 @@ TL_TEST(stb_glue_decodes_a_1x1_bmp_through_pool_vendor, "vendor_glue,stb,smoke")
     };
     static_assert(sizeof bmp == 58, "");
 
+    u64 baseline = pool_stats(pool_vendor())->live_bytes;
     i32 w = 0, h = 0;
     u8* pixels = vendor_glue_stbi_load_from_memory(bmp, (i32)sizeof bmp, &w, &h);
     TL_ASSERT_TRUE(pixels != nullptr);
+    // The decoded buffer must show up in pool_vendor's own accounting, not merely decode - the
+    // default STBI_MALLOC would satisfy every assertion above this line identically
+    // (docs/TESTING.md §7 "measure, don't assert").
+    TL_EXPECT_TRUE(pool_stats(pool_vendor())->live_bytes > baseline);
     TL_EXPECT_TRUE(w == 1 && h == 1);
     TL_EXPECT_TRUE(pixels[0] == 0xFF && pixels[1] == 0x00 && pixels[2] == 0x00 && pixels[3] == 0xFF);
     vendor_glue_stbi_free(pixels);
+    TL_EXPECT_EQ(pool_stats(pool_vendor())->live_bytes, baseline);
 }

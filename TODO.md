@@ -719,6 +719,79 @@ E-2 needs no W2 decision but blocks real game wiring later.
       Rafael's identity (the rewrite above). Remaining, not blocking: the standing
       tighten-rebuild-budget-after-~10-runs entry (this round only exercised the re-baseline).
 
+## w2-vendor — round-1 adversarial review (2026-08-26, PR #12 comment 5427150513)
+
+- [x] **Verdict: FIX FIRST. D1+D2 (High) fixed this commit; D4's doc/naming-drift piece fixed
+      alongside per the review's "same commit" instruction; D3/D5/D6/D7/D8 filed as follow-up
+      commits below (history is frozen post-review, `WORKFLOW.md` §1 R-4 — each is a new commit).**
+- [x] **D1 (High) — FreeType (vendored transitively under SDL_ttf) allocated via plain libc
+      `malloc`/`realloc`/`free`, entirely bypassing `pool_vendor`.** `SDL_ttf.c`'s `TTF_Init()`
+      calls `FT_Init_FreeType()` with no custom `FT_Memory` injection point — verified directly
+      (`grep`'d both `SDL_ttf.c` and the vendored `ftsystem.c`) before accepting the review's
+      claim. **Fix:** FreeType's own platform-customization seam — `builds/unix/ftsystem.c` and
+      `builds/windows/ftsystem.c` (the reason that memory backend lives split out from the
+      platform-agnostic `src/` at all) — patched so `ft_alloc`/`ft_realloc`/`ft_free` and
+      `FT_New_Memory`'s own struct allocation route through new `tl_freetype_alloc/realloc/free`
+      hooks (`src/vendor_glue/freetype_glue.cpp`) into `pool_vendor`, instead of `malloc`/
+      `realloc`/`free` (Unix) or `HeapAlloc`/`HeapReAlloc`/`HeapFree` (Windows). Declared as a
+      verbatim deviation in `vendor/VERSIONS`' freetype row (`docs/BUILD.md` §4). **Verified
+      load-bearing, not tautological:** temporarily reverted `ft_alloc` to `return malloc(
+      size );`, rebuilt, ran `sdl_ttf_init_quit*` — genuine crash (`TL_FATAL origin=TL_ASSERT
+      mem_pool.cpp:142: h->live > 0u`, `pool_free` choking on a foreign libc pointer since
+      `ft_free` still routed to the pool); restored, rebuilt, reconfirmed 11/11 `vendor_glue`
+      tests pass.
+- [x] **D2 (High) — none of the six `tests/vendor_glue/*.test.cpp` measured pool usage; all
+      "proved" the call succeeded, which a default (unhooked) allocator satisfies identically
+      (`docs/TESTING.md` §7 "measure, don't assert").** Fixed: all six rewritten to bracket
+      install+exercise with `pool_stats(pool_vendor())` (or `pool_enet()`) `live_bytes` deltas —
+      `sdl3_glue`, `imgui_glue`, `stb_glue` (the decode test only; snprintf allocates nothing),
+      `enet_glue`, `sdl_ttf_glue` (also corrected its header comment, which asserted a FreeType
+      routing that did not exist before D1). All 425 `tl_tests` still pass (416 passed, 9 skipped,
+      0 failed).
+- [x] **D4 (Medium), FreeType/naming-drift slice — fixed alongside D1 in this commit.**
+      `docs/PLATFORM.md` §9.5: added a FreeType row to the wiring table; fixed the `pool_vendor`
+      lib list (was "SDL + ImGui + stb"). `docs/MEMORY.md` §1.5/§8.6: FreeType added to the
+      pooled-libs list and the adaptor-function list. Reconciled the `glue_*` (doc) vs `tl_*`
+      (code) naming drift `PLATFORM.md` §9.5 had against the real `src/vendor_glue/*.cpp` symbol
+      names. Also: ImGui's adaptor silently null-derefed on pool exhaustion (ImGui never checks
+      `IM_ALLOC`'s return, unlike ENet's dedicated `no_memory` callback) while §8.6 claimed
+      "ImGui/SDL assert" — neither did (SDL's own wrapper turns a NULL into `SDL_OutOfMemory()`,
+      an error not a crash; ImGui had nothing). Fixed the code, not just the doc:
+      `tl_imgui_alloc` now `TL_FATAL`s on exhaustion, matching ENet's pattern; §8.6 corrected to
+      describe what each of the three actually does. **Remaining D4 piece, not yet done:** the
+      review's `PLATFORM.md`/`MEMORY.md` diff also covers ImGui/SDL/ENet beyond the FreeType/
+      naming-drift slice above only where it overlapped this fix; re-check the review comment in
+      full before closing D4 if anything else in it is still open.
+
+## w2-vendor — follow-up commits still owed from round-1 (not yet done)
+
+- [ ] **D3 (Medium).** `tools/audit/includes.py`'s `MODULE_DAG` for `platform`/`editor`/`net`
+      does not include `"vendor_glue"`, so `vendor_glue_sdl3_install()` etc. have no legal caller
+      per the audit even though the glue headers already promise that reachability. Either widen
+      the three tuples (with a fixture pinning `sim`/`foundation` still cannot reach it), or file
+      the alternative (per-consumer-lane, deferred) explicitly here instead of leaving it silent.
+- [ ] **D5 (Low-Medium).** Run the prune-safety sweep `LESSONS.md` itself prescribes across all
+      six vendored trees (the FreeType `builds/windows/ftsystem.c` "missing file" bug earlier
+      this lane was exactly this class of mistake). The review already found three more
+      referenced-but-deleted paths, all latent (behind conditions no CI leg takes):
+      `builds/wince/ftdebug.c`, `builds/mac/freetype-Info.plist`, `examples/*.c` under
+      `SDLTTF_SAMPLES`. At minimum, the freetype `vendor/VERSIONS` row must declare what pruning
+      was done, the way the sdl3/sdl_ttf rows already do (it currently declares none).
+- [ ] **D6 (Low).** Restore FreeType's actual license text: `docs/FTL.TXT` and `docs/GPLv2.TXT`
+      under `vendor/sdl_ttf/external/freetype/` — `LICENSE.TXT` points at them but the `docs/`
+      dir holding them was pruned. The FTL's advertising clause makes this a real compliance
+      gap, not a nit.
+- [ ] **D7 (Low).** `.github/workflows/pr.yml`'s `rebuild-budget` job: a stale comment six lines
+      below the actual `--full-budget 50` line still says "12.1s ... 25/5 keeps a 2x regression
+      visible" from before this lane's re-baseline. Fix the comment; also state explicitly that
+      the "~2x, rounded to 50" arithmetic rounds DOWN from 50.56 (deliberate, not a typo).
+- [ ] **D8 (Nits).** `src/vendor_glue/sdl3_glue.cpp`'s `SDL_SetMemoryFunctions` call discards its
+      `bool` return (unreachable failure here, but a discarded status in an otherwise fail-loudly
+      tree). Add a negative selftest fixture for `SYS_ALLOW_DIRS["src/vendor_glue"]` in
+      `tools/audit/selftest.py` (confirmed still working by hand, but untested). Remove the dead
+      `BACKEND_HEADERS["monocypher"]` → `"src/vendor_glue"` entry in `tools/audit/includes.py`
+      (nothing in `src/vendor_glue` includes monocypher).
+
 ## w2-vendor — BLOCKING ruling request: commit identity (2026-08-26)
 
 - [x] **RULED 2026-08-26 (Rafael, relayed by the steward): option (D) — the STEWARD ran the

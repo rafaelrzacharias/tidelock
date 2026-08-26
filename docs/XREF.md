@@ -232,7 +232,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `DETERMINISM.md` -> §5
 - `FRAME-LOOP.md` -> §3, §6
 - `JOBS.md` -> §6, §9.2, §9.3
-- `MEMORY.md` -> §4, §9.2
+- `MEMORY.md` -> §4, §9.2, §9.5
 - `NETCODE.md` -> §3, §5
 - `RENDER2D.md` -> §0, §9.2, §9.3
 - `ROADMAP.md` -> §9

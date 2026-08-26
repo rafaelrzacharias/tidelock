@@ -29,6 +29,22 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+  /* DEVIATION FROM VENDORED VERBATIM (docs/BUILD.md section 4; declared in vendor/VERSIONS'
+   * freetype row): ft_alloc/ft_realloc/ft_free below, and FT_New_Memory's own allocation of the
+   * FT_MemoryRec struct, are routed through tl_freetype_alloc/realloc/free instead of directly
+   * calling HeapAlloc/HeapReAlloc/HeapFree. This file - builds/<platform>/ftsystem.c - is
+   * FreeType's own designated platform-customization seam (the reason the memory backend lives
+   * in builds/ at all, split out from the platform-agnostic src/), so this is the sanctioned
+   * extension point for docs/MEMORY.md section 8.6's pool_vendor hookup, not a patch to
+   * FreeType's logic. The three functions are implemented in src/vendor_glue/freetype_glue.cpp
+   * with C linkage; the process heap this file otherwise reserves goes unused. */
+extern void*
+tl_freetype_alloc( long size );
+extern void*
+tl_freetype_realloc( long cur_size, long new_size, void* block );
+extern void
+tl_freetype_free( void* block );
+
 
   /**************************************************************************
    *
@@ -68,7 +84,9 @@
   ft_alloc( FT_Memory  memory,
             long       size )
   {
-    return HeapAlloc( memory->user, 0, size );
+    FT_UNUSED( memory );
+
+    return tl_freetype_alloc( size );
   }
 
 
@@ -102,9 +120,9 @@
               long       new_size,
               void*      block )
   {
-    FT_UNUSED( cur_size );
+    FT_UNUSED( memory );
 
-    return HeapReAlloc( memory->user, 0, block, new_size );
+    return tl_freetype_realloc( cur_size, new_size, block );
   }
 
 
@@ -127,7 +145,9 @@
   ft_free( FT_Memory  memory,
            void*      block )
   {
-    HeapFree( memory->user, 0, block );
+    FT_UNUSED( memory );
+
+    tl_freetype_free( block );
   }
 
 
@@ -466,7 +486,7 @@
 
 
     heap   = GetProcessHeap();
-    memory = heap ? (FT_Memory)HeapAlloc( heap, 0, sizeof ( *memory ) )
+    memory = heap ? (FT_Memory)tl_freetype_alloc( (long)sizeof ( *memory ) )
                   : NULL;
 
     if ( memory )
