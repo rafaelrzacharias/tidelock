@@ -3047,7 +3047,10 @@ right; it is the template the others now follow.
       two branches conflict on this one file — whichever merges second must rebase onto the
       first's `core/transform.h`, not redeclare it.** No ruling needed unless a real conflict
       lands; recorded here so the steward's closeout sweep checks it.
-- [ ] **RR-21 (not blocking, w3-render2d): `core/reflect.h`'s `FieldKind` enum has no float row.**
+- [ ] **RR-23 (not blocking, w3-render2d — renumbered from RR-21, ruled 2026-08-26: two lanes
+      allocated concurrently from the shared RR counter; `w3-assets-data`'s RR-21, filed ~30 min
+      earlier and already RULED, keeps the number): `core/reflect.h`'s `FieldKind` enum has no
+      float row.**
       `docs/RENDER2D.md` §9.2 pins `Camera2D`/`CameraPrev`/`CameraFollow` as f32-fielded
       "render-side components" registered per `docs/FRAME-LOOP.md` §8.2 step 4, but
       `TL_COMPONENT`/`TL_FIELDS_Name` (`docs/ECS.md` §10.2) can only reflect the closed
