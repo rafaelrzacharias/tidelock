@@ -357,6 +357,12 @@ INCLUDE_CASES = [
      '#include "foundation/tl_types.h"\nvoid leak6(void* p, void* q);\n'
      "void leak6(void* p, void* q) { pool_free(p, q); }\n",
      "mem_pool's allocation API outside"),
+    # The <stdlib.h> grant is scoped to src/vendor_glue (the folder that owns vendor heap
+    # plumbing); it also admits malloc, so it must not leak to the wrap module next door.
+    ("stdlib.h in the script module, where the vendor_glue grant does not reach",
+     "src/script/stdlib_leak.cpp",
+     '#include <stdlib.h>\n#include "foundation/tl_types.h"\nu32 leak8(void) { return 8u; }\n',
+     "system include <stdlib.h> is not on the allowlist"),
     ("mem_pool's realloc called from the script module itself", "src/script/pool_leak3.cpp",
      '#include "foundation/tl_types.h"\nvoid* leak7(void* p, void* q);\n'
      "void* leak7(void* p, void* q) { return pool_realloc(p, q, 8u); }\n",
@@ -392,6 +398,10 @@ INCLUDE_CLEAN = [
     ("src/script may spell the vendored Luau headers", "src/script/ok_luau.cpp",
      '#include <lua.h>\n#include <lualib.h>\n#include <luacode.h>\n'
      '#include "foundation/tl_types.h"\nu32 ok_luau(void) { return 1u; }\n'),
+    ("src/vendor_glue may spell stdlib.h for the vendored malloc'd buffer it must free",
+     "src/vendor_glue/ok_free.cpp",
+     '#include <stdlib.h>\n#include "foundation/tl_types.h"\n'
+     "void ok_free(void* p);\nvoid ok_free(void* p) { free(p); }\n"),
     ("src/vendor_glue may call the pool allocator", "src/vendor_glue/ok_pool.cpp",
      '#include "foundation/tl_types.h"\n'
      "void* ok_pool(void* p);\nvoid* ok_pool(void* p) { return pool_alloc(p, 16u); }\n"),

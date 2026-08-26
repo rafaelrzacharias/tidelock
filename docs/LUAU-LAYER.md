@@ -3,7 +3,7 @@
 > **Status:** design rev 1, 2026-08-22. **DECIDED** except §9. Expands `PIVOT-DESIGN.md` §7.
 > §10 is the implementation specification (file layout, VM construction, binding signatures,
 > proxies, reload, bytecode pipeline, tests); it is placed before the rulings by convention.
-> **Owns:** `src/core/script/` (VM setup, bindings, reload, trampolines), `script/` (the game).
+> **Owns:** `src/script/` (VM setup, bindings, reload, trampolines), `script/` (the game).
 > **Role:** games bring **data + meaning** — tables, tuning, gameplay systems, spawn logic, UI.
 > Script reload is the iteration mechanism (replaces game-DLL hot reload, which is deleted along
 > with its `migrate(T)`/layout-hash problem class).
@@ -171,14 +171,14 @@ dispatch and error path: §10.6.
 
 ## 10. Implementation specification (rev 1, 2026-08-22 — build from this, not from §0–§9)
 
-Engine side obeys `CPP-SUBSET.md`; the TUs in `src/core/script/` are the Luau wrap module and are
+Engine side obeys `CPP-SUBSET.md`; the TUs in `src/script/` are the Luau wrap module and are
 the only place a Luau header or a `lua_State*` may appear (`ARCHITECTURE.md` §3). Everything above
 (`app/`, `editor/`) sees `ScriptVm*` and our types.
 
 ### 10.1 File layout
 
 ```
-src/core/script/
+src/script/
   script.h        public: ScriptVm, script_create_sim/ui/data, script_tick_begin/end, script_reload,
                   script_load_manifest, ErrCode enum SCRIPT_*; no Luau types
   vm.h / vm.cpp   lua_State lifecycle per VM kind; allocator; interrupt; useratom; GC step; error path
@@ -213,7 +213,7 @@ returns `Result<ScriptVm*>` with `SCRIPT_*` codes; no partial VM survives.
    pool's budget is part of the reserve table, hence fingerprinted (`MEMORY.md` §7 R-2).
 2. **`lua_newstate(script_alloc, pool)`**, `void* script_alloc(void* ud, void* ptr, size_t osize,
    size_t nsize)`: `nsize == 0` → `pool_free(ud, ptr, osize)`, return `NULL`; `ptr == NULL` →
-   `pool_alloc(ud, nsize)`; else `pool_realloc(ud, ptr, osize, nsize)`. Over budget →
+   `pool_alloc(ud, nsize)`; else `pool_realloc(ud, ptr, nsize)` (`osize` is accepted for ABI compatibility and ignored: `mem_pool` recovers the old size from the block's page header, `MEMORY.md` §8.6). Over budget →
    **return `NULL`**; Luau raises its memory error (`LUA_ERRMEM`, message `"not enough memory"`),
    which unwinds to the nearest protected call — always ours (§10.6 trampoline, §10.9 init
    `pcall`) — and takes the error path: `TL_FATAL` in netcode/ship, pause + console in dev. The
@@ -223,12 +223,17 @@ returns `Result<ScriptVm*>` with `SCRIPT_*` codes; no partial VM survives.
    |---|---|
    | sim | `luaopen_base`, `luaopen_table`, `luaopen_string` |
    | ui | `luaL_openlibs` (everything) |
-   | data | `luaL_openlibs` minus `luaopen_os`, `luaopen_io` (`luaL_openlibs` opens neither in Luau; call the list explicitly so the set is written down) |
+   | data | the explicit list minus `luaopen_os` (**corrected 2026-08-26, w2-luau-vm, measured at the 0.696 pin:** Luau's `linit.cpp` DOES open `os`; there is no `luaopen_io` in Luau at all. Each VM opens its list explicitly, so the opened set is readable in `sandbox.cpp` and cannot drift when upstream adds a library) |
 4. **Removals (sim VM)** — `lua_pushnil` + `lua_setfield` on the named table, in this order, each
    asserted absent afterwards by the sandbox test: `_G.math`, `_G.os`, `_G.io`, `_G.debug`
    (never opened, asserted anyway), `_G.pairs`, `_G.next`, `_G.coroutine`, `_G.loadstring`,
    `_G.collectgarbage`, `_G.gcinfo`, `_G.getfenv`, `_G.setfenv`, `_G.newproxy`, `_G.print`,
-   `string.rep`, `table.foreach`, `table.foreachi` (they call `next`). `_G.require` is installed
+   `_G.rawequal`, `_G.rawget`, `_G.rawset` (**added 2026-08-26**: `CANON.md` "Luau sim VM" is the
+   home of this list and already named the three — the proxies forbid raw access — and this list
+   had drifted from it), `string.rep`, `table.foreach`, `table.foreachi` (they call `next`).
+   The "asserted absent afterwards" check runs in `script_sandbox_open` itself, not only in the
+   test: a removal that silently did nothing is a hole in the sandbox, and a hole found by a test
+   nobody ran is not a gate (`LESSONS.md`). VM creation fails with `SCRIPT_ERR_SANDBOX`. `_G.require` is installed
    in step 7 and removed at the end of init (§10.9). Data VM removes `os`, `io`, `loadstring`,
    `getfenv`, `setfenv`. UI VM removes nothing.
 5. **Replacements (sim VM):** `tostring` → C function returning the type name for tables,
@@ -241,7 +246,8 @@ returns `Result<ScriptVm*>` with `SCRIPT_*` codes; no partial VM survives.
    `draw`, `console`. `log.info` is what `print` would have been.
 7. **`require`** installed (§10.9); `_G.world` = the `WorldView` table (§10.6).
 8. **Callbacks:** `lua_Callbacks* cb = lua_callbacks(L)`; `cb->interrupt = script_interrupt`;
-   `cb->useratom = script_useratom`; `cb->panic = script_panic` (`TL_FATAL` — reached only on an
+   `cb->useratom = script_useratom`
+   (**NOT INSTALLED as of 2026-08-26 — ruling request RR-19 in `TODO.md`:** Luau's `useratom` carries no context pointer and no `lua_State*`, so reaching the process `Interner` needs namespace-scope mutable state, which `CPP-SUBSET.md` §1 bans. `script_useratom_installed()` reports the fact; `lua_tostringatom` yields −1 until the ruling lands); `cb->panic = script_panic` (`TL_FATAL` — reached only on an
    error outside any protected call, which is a bug in this module); `cb->userthread = NULL`
    (sim has no coroutines; the dev debugger thread is created by C, §10.10). Dev: `debugbreak`,
    `debugstep`, `debuginterrupt` (§10.10).
@@ -262,7 +268,10 @@ returns `Result<ScriptVm*>` with `SCRIPT_*` codes; no partial VM survives.
 9. **Codegen:** `luau_codegen_create(L)` is called only for the UI VM, and only when
    `luau_codegen_supported()`; every UI chunk is passed through `luau_codegen_compile` after
    `luau_load`. Sim and data VMs never call `luau_codegen_create` — the interpreter is the only
-   executor (§1).
+   executor (§1). **The CodeGen library is NOT vendored as of 2026-08-26** (ruling request
+   RR-20 in `TODO.md`, with the measured build-time cost), so there is no
+   `luau_codegen_supported()` in the binary to ask; `script_codegen_available()` reports that
+   fact rather than falling back to the interpreter in silence.
 10. **Run init** (§10.9): `main.luau` executes under `lua_pcall`; `ecs.component`/`ecs.system`/
     `input.action`/`ecs.event` are legal only while `vm->init_open` is true.
 11. **Seal:** `lua_setsafeenv(L, LUA_GLOBALSINDEX, true)` then `lua_setreadonly(L, idx, 1)` on
@@ -274,12 +283,13 @@ returns `Result<ScriptVm*>` with `SCRIPT_*` codes; no partial VM survives.
 
 C function. Collects keys with `lua_next` into a scratch array (push-marked, popped on return) of
 `TValue`-free records `{ kind: u8 (0 = number, 1 = string); double n; const char* s; u32 len; }`;
-sorts with the foundation `sort` (stable merge, `CONTAINERS.md` §4): numbers before strings;
+sorts with a stable bottom-up merge local to `sandbox.cpp` (**corrected 2026-08-26**: `CONTAINERS.md` §4's `sort_u32_kv`/`sort_u64_kv` is an LSD *radix* over an INTEGER key with no comparator, and §6 puts the only comparison sort in `tools/` — neither can express a total order over mixed number/string keys, so the one place that needs it carries it): numbers before strings;
 numbers ascending by value (NaN is impossible — integers only; a non-integer key is a Luau error);
 strings bytewise (`memcmp` over `min(len)`, shorter first on tie). Keys of any other type (table,
 boolean, userdata) → error `"sortedpairs: unsupported key type"`. Returns an iterator C closure
-over a Luau table copy of the sorted key array (one allocation per walk; the scratch is freed on
-return). The iterator reads `t[key]` by `lua_rawget`, so a value set to `nil` mid-walk is skipped,
+over a Luau table copy of the sorted key array (one allocation per walk; the record array is a
+Luau userdata, so its bytes come from the VM's own pool and are collected with the walk — no
+engine arena is reachable from a binding, and `pool_alloc` is barred outside `vendor_glue/`). The iterator reads `t[key]` by `lua_rawget`, so a value set to `nil` mid-walk is skipped,
 never re-ordered. Same code in all three VMs.
 
 ### 10.3 Numbers and the `fx` binding contract
@@ -313,7 +323,7 @@ their width; counts use their declared range.
 | `fx.lerp(a, b, t) → a's row` | `lerp<A>(A, A, q_t)` | |
 | `fx.sat_add(a,b) fx.sat_sub(a,b)` | `sat_add/sat_sub` on i32 | quanta paths; plain `+` on quanta is a review rejection |
 | `fx.rng_below(carrier, draw, n) → [0,n)` / `fx.rng_q(carrier, draw) → q` | `rng_for(w->seed, w->tick, sys_id, carrier, draw)` then `rng_below`/`rng_q` | `sys_id` = the running trampoline's id (§10.6); outside a system → error. `carrier` is an integer (≤ 2^53) or an `Entity` (its bits); `draw` is the script's local per-carrier counter |
-| `fx.str(v, frac) → string` | `fmt_buf` decimal | `log` only; UI VM also has `fx.to_f64` — absent from the sim VM |
+| `fx.str(v, frac) → string` | integer decimal, local to `bind_fx.cpp` (**corrected 2026-08-26**: `fmt_buf` is still a `TL_FATAL("unimplemented")` stub blocked on `vendor/stb_sprintf`, `CONTAINERS.md` §8.6b; the conversion is integer-only and needs no formatter — sign, integer part, then nine fractional digits developed by repeated multiply-by-ten on the remainder, truncated, which is stated rather than discovered) | `log` only; UI VM also has `fx.to_f64` — absent from the sim VM |
 | `fx.imin fx.imax fx.iabs fx.iclamp` | integer | `math` is gone; these are checked integer ops |
 
 ### 10.4 Handles — tagged lightuserdata
@@ -552,7 +562,7 @@ manifest order (verifying each file's BLAKE2b first). The `netcode`/`ship` exes 
 bytecode as a generated TU (`const u8 TL_LUAC_<n>[]` + a `{ relpath, ptr, len }` table in
 manifest order). Dev: `loader.cpp` reads `script/sim/**` + `script/lib/**` at startup, sorts the
 same way, compiles with the identical `lua_CompileOptions` (the struct is one `constexpr` shared
-by `luauc` and `loader.cpp` through `src/core/script/compile_opts.h`), and computes the manifest
+by `luauc` and `loader.cpp` through `src/script/compile_opts.h`), and computes the manifest
 in memory; the dev log prints the would-be `build_id` contribution so a dev build and a netcode
 build of the same tree print the same value.
 
@@ -622,12 +632,23 @@ construction (same tree); `luau_load` still reports it as a load error.
    (lands with Alloy's edit buffer). 8. `reload.cpp` + reload tests. 9. `bind_ui.cpp`, `debug.cpp`
    (with the Scripts panel, `TOOLING.md` §1).
 
+**Blocking as of 2026-08-26 (`TODO.md` RR-18):** every §10.11 row that runs Luau SOURCE is
+skipped in `dev` and `netcode`. Luau's *Compiler* exposes no allocator hook and allocates with
+global `operator new` (measured: 32 calls per `luau_compile`; the *VM* makes zero — it is fully
+pooled), and `MEMORY.md` §2's alloc-shim tripwire makes that fatal in exactly those two tiers.
+`script_can_compile_in_process()` reports it and `script_run_source` refuses with
+`SCRIPT_ERR_NO_COMPILER` instead of trapping. The rows run and pass in `debug` and `ship`.
+This also blocks §10.9's dev on-load compile permanently, which is why it is a ruling and not
+a lane decision.
+
 **Done** when: every §10.11 test passes in `dev` and `netcode` (fatal-expected ones in child
 processes); the symbol audit shows `lua_*`/`luau_*` symbols only in `tl_script`; CI grep finds no
-Luau header outside `src/core/script/`; `TL_ASSERT_NO_TICK_ALLOC` holds for a tick with Luau
+Luau header outside `src/script/`; `TL_ASSERT_NO_TICK_ALLOC` holds for a tick with Luau
 systems running (pool allocations are inside the Luau pool, outside the registered set, and the
 guard watches registered arenas + scratch only — the pool counter is asserted separately to be
-flat across a steady-state tick after the GC step); the regen scene is bit-identical PC ↔ Pi.
+flat across a steady-state tick after the GC step); the regen scene is bit-identical across the `CANON.md`
+target matrix (the Pi left the program 2026-08-25; the four hosted CI legs carry the cross-ISA
+evidence).
 
 ---
 

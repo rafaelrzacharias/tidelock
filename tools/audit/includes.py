@@ -44,6 +44,11 @@ SYS_ALLOW_DIRS = {                        # additional system headers, by path p
     # so its public headers are spelled bare and reach gate 1 as system includes. The set is
     # closed: lua.h (the C API), lualib.h (luaopen_*/luaL_*), luacode.h (luau_compile).
     "src/script": {"lua.h", "lualib.h", "luacode.h"},
+    # vendor_glue is where a vendored library's heap plumbing lives (docs/MEMORY.md §8.6),
+    # and one vendored buffer - the one luau_compile returns - is malloc'd by upstream
+    # contract and must be free()d. The grant is scoped to THIS folder on purpose: it also
+    # admits malloc, and the folder whose job is allocators is the only one that may have it.
+    "src/vendor_glue": {"stdlib.h"},
 }
 BACKEND_FREE = ("src/platform/impl_sdl3", "src/platform/impl_headless")   # OS headers live here
 

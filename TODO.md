@@ -548,6 +548,81 @@ E-2 needs no W2 decision but blocks real game wiring later.
       enforced module prefixes; revisit only on a real collision.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **RR-18 (BLOCKING, w2-luau-vm, 2026-08-26): the alloc-shim tripwire and a vendored C++
+      library with no allocator hook cannot both exist.** `MEMORY.md` §2's premise is
+      "vendor libs are routed through `mem_pool` via their hook APIs (`lua_newstate(alloc_fn)`,
+      ...)". **Measured against the Luau 0.696 pin:** the Luau **VM** honours that exactly —
+      `luau_load` + `lua_pcall` make **zero** global `operator new` calls, every byte comes from
+      `tl_luau_alloc`. The Luau **Compiler** has no hook API at all and makes **32** global
+      `operator new` calls per `luau_compile` (a 24-character source; the count is the shape, not
+      the size). `alloc_shim.cpp`'s `operator new` is a `TL_FATAL` tripwire in `dev` and
+      `netcode`, so **any in-process compile dies**: `tl_tests --tag script` reports
+      `ERR src/foundation/alloc_shim.cpp:20: global operator new` and exits 2 on the first test
+      that runs a Luau string. This blocks every `LUAU-LAYER.md` §10.11 row that runs source
+      (sandbox, sortedpairs, fx literals, budget, memory exhaustion) in the two tiers §10.12's
+      done criterion names, and it blocks §10.9's dev on-load compile permanently.
+      `netcode`/`ship` are unaffected in production (they embed precompiled bytecode, §6) and
+      `debug`/`ship` have no tripwire at all, which is why nothing saw this until now.
+      **Options:**
+      **(a) RECOMMENDED — let a program replace the tripwire, and pool the compiler's heap.**
+      Three small pieces, all using mechanisms already in the tree: (1) move `alloc_shim.cpp`'s
+      six operators into their own TU so ordinary archive semantics let another definition win
+      without a duplicate-symbol error (today they share a member with `tl_alloc_shim_anchor`,
+      which is force-pulled by the guard); (2) add `src/vendor_glue/vendor_new.cpp` — a
+      pool-backed global `operator new/delete` over one `MemPool`, installed by `app/` (and by
+      the test fixture) for programs that link a vendored C++ library with no allocator hook;
+      (3) teach `tools/audit/symbols.py` the writable-static exemption for the ONE pointer that
+      needs — the same LIB+STEM shape RR-7 already uses for the tooling plane, with its own
+      negative fixtures. `PLATFORM.md` §9 **already sanctions** exactly this
+      ("`src/vendor_glue/` — the one folder allowed a static pool pointer"); only the gate
+      never learned it. Cost ~80 lines + fixtures. Value: the compiler's heap becomes budgeted
+      and measured, which is what `MEMORY.md` §1.5 wanted and cannot get any other way.
+      **(b) Replace the runtime tripwire with a static one.** Ban `_Znwm`/`_Znam`/`_ZdlPv` (and
+      the MSVC manglings) as undefined references from every registered `src/` lib in
+      `symbols.py`, and delete the runtime operators. Strictly stronger for `src/` (a path not
+      taken at runtime cannot hide), but it hands the vendored compiler the unbudgeted CRT heap
+      and loses the tripwire for `tests/`.
+      **(c) Forbid the in-process compile.** `tools/luauc` becomes the only compiler and `dev`
+      loads precompiled bytecode like `netcode`. Keeps every current rule intact and costs the
+      sub-second script iteration that is the whole reason `LUAU-LAYER.md` §6 exists.
+      Rejected here, recorded so it is not re-derived.
+      **Whichever wins amends `MEMORY.md` §1.5/§2** (the "every vendor lib has a hook"
+      premise is factually wrong and must say so) and is a ruling, so it needs Rafael's word.
+      **Parked meanwhile:** the lane ships everything that does not need an in-process compile;
+      the source-running §10.11 rows are written and land the moment this is answered.
+- [ ] **RR-19 (w2-luau-vm, 2026-08-26): Luau's `useratom` callback cannot reach the Interner.**
+      `LUAU-LAYER.md` §10.2 step 8 specifies `useratom(const char* s, size_t len) → int16_t`
+      returning the interner's `StrId`. Luau's callback signature carries **no context pointer
+      and no `lua_State*`** (`lua_Callbacks::useratom`, measured at the 0.696 pin), so reaching
+      the process `Interner` from it needs namespace-scope mutable state, which
+      `CPP-SUBSET.md` §1 bans and `tools/audit/symbols.py`'s `.data`/`.bss` check enforces
+      with no exemption mechanism outside RR-7's tooling plane. This is the SAME class as the
+      dropped CRT-malloc counter and as RR-18's static pool pointer — three instances now, which
+      is the argument for one general mechanism rather than three exceptions.
+      **Options: (a)** the RR-18(a) exemption, extended to one `script`-lib stem holding the
+      interner pointer (recommended if RR-18(a) is ruled in — one mechanism, three users);
+      **(b)** drop atoms: `lua_tostringatom` yields −1 and W3's proxy hashes every field name
+      per access, on the hottest script path, and §10.5's `"<Comp> has no field <key>"` error
+      loses the name it is supposed to print; **(c)** give the atom a meaning that needs no
+      interner (rejected: `StrId` is a dense counter the interner assigns, by `CANON.md`).
+      **Shipped meanwhile, loudly:** `cb->useratom` is NOT installed and
+      `script_useratom_installed()` returns `false` — a queryable fact, not a silent fallback.
+      Nothing in this lane depends on it; W3 luau-bindings does.
+- [ ] **RR-20 (w2-luau-vm, 2026-08-26, NOT blocking): Luau's CodeGen is not vendored, so the UI
+      VM has no NCG.** `LUAU-LAYER.md` §10.2 step 9 calls `luau_codegen_create` for the UI VM
+      when `luau_codegen_supported()`. CodeGen is 36 more TUs on top of the 53 vendored, against
+      a cold-build budget with no headroom: **measured on this container (4 cores,
+      `netcode-linux`, cold)** 9.04 s without Luau, 13.39 s with the VM+Ast+Compiler subset —
+      **+4.35 s, +48 %** — and the CI gate is 25 s on a leg whose last measurement was 12.1 s
+      (so the projected leg cost is ~17.9 s and the "2x margin" the workflow comment claims is
+      now ~1.4x). CodeGen would roughly double that delta for a VM whose first binding table
+      (`bind_ui.cpp`) is a W3 lane's and whose scripts do not exist. **Recommended:** leave it
+      unvendored until the W3 lane that writes `bind_ui.cpp` measures a UI-VM cost worth it, and
+      amend §10.2 step 9 to say the call is conditional on the library being present.
+      `script_codegen_available()` returns `false` and says why. **Also feeds the open
+      rebuild-budget re-baseline entry above:** that entry's headroom arithmetic predates 53 new
+      TUs and should be re-run on the merged tree, not on the W1 one.
+
 - [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**
       (budget-aware sequencing; two-tier reviews with the Fable full-re-read ship round —
       `ROADMAP.md` §2 amended at the pairing's home; steward economy; lane token discipline
