@@ -665,6 +665,29 @@ E-2 needs no W2 decision but blocks real game wiring later.
       Monocypher's own counts), `includes.py` 113 files/0 violations, `selftest.py` clean except
       the pre-existing local `targets.py` msvc-triple rows (env gap, CI-only), `docaudit.py` 0
       errors, `commit_docs.py --base origin/main` clean on every commit.
+- [x] **CI was red on all four `CANON.md` legs, all five commits (SDL3 through Monocypher) - fixed
+      in one follow-up commit, PR #12.** Three real bugs, none catchable from this session's
+      Linux container:
+      1. **Linux (both arches):** SDL3's own CMakeLists.txt hard-fails configure with neither X11
+         nor Wayland dev headers present - this repo's CI runners carry neither (this container
+         happened to already have libx11-dev, masking it locally). Fixed: `libx11-dev` added to
+         every Linux job's apt-get line in `.github/workflows/pr.yml` (`build-test`, `tier-parity`,
+         `fingerprint-stability`, `sanitizers`, `rebuild-budget` - `audits` never configures the
+         real cmake project, so it was never red).
+      2. **Windows (both arches):** `builds/windows/ftsystem.c` and `builds/windows/ftdebug.c`
+         (real Windows-specific FreeType source, referenced unconditionally by FreeType's own
+         CMakeLists.txt `if(WIN32)`) were deleted along with genuine IDE-project cruft when the
+         SDL_ttf commit pruned `builds/windows/` wholesale - invisible from Linux, since
+         `builds/unix/ftsystem.c` was untouched. Restored both files.
+      3. **Windows (both arches, found by reading ahead, not yet reached by CI when fixed):**
+         ENet's own CMakeLists.txt links `ws2_32`/`winmm` only `if (MINGW)`; `win32.c`'s
+         `WSAStartup`/`socket`/`timeGetTime` are exactly as undefined under clang-cl. Fixed with
+         an `if(WIN32 AND NOT MINGW)` link from `vendor/CMakeLists.txt`, not a hand-patch of
+         vendored code.
+      `.github/workflows/pr.yml` is outside this lane's stated file cone, but CI red on a PR this
+      lane opened is this lane's to root-cause per `WORKFLOW.md`'s drive-to-green rules - see
+      `LESSONS.md` for the full write-up (including why five green local builds proved nothing
+      about legs this container cannot be).
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**

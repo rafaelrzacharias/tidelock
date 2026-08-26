@@ -49,6 +49,12 @@ add_subdirectory(enet)
 # to a consumer outside that directory (unlike SDL3/SDL_ttf, which export modern PUBLIC/INTERFACE
 # target properties) - added here so enet_glue.cpp's #include <enet/enet.h> resolves.
 target_include_directories(enet PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/enet/include")
+# ENet's own CMakeLists.txt links ws2_32/winmm only `if (MINGW)` - win32.c's WSAStartup/socket/
+# timeGetTime calls are just as undefined on the clang-cl (MSVC-ABI) builds this tree uses
+# (docs/BUILD.md §1), so the same libs are added here for the non-MinGW WIN32 case.
+if(WIN32 AND NOT MINGW)
+  target_link_libraries(enet PUBLIC ws2_32 winmm)
+endif()
 
 add_subdirectory(monocypher)
 
