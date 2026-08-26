@@ -620,14 +620,18 @@ static u64 ar_valid_one_slot(u8* seg, u64 cap, u32 ticks, VMemArena* arena) {
 
 
 // Decodes `seg`; returns the ErrCode.
-static ErrCode ar_try_decode(const u8* seg, u64 n, u32 ticks, VMemArena* arena) {
+static ErrCode ar_try_decode_records(const u8* seg, u64 n, u32 ticks, u32 rec_cap, VMemArena* arena) {
     ArchiveSegmentHeader h = {};
     WireFrame* got = (WireFrame*)arena_push(arena, sizeof(WireFrame) * ticks * MAX_PEERS, 16u);
-    LogRecord recs[8] = {};
+    LogRecord recs[16] = {};
     u32 rc = 0;
     ByteReader r;
     br_init(&r, seg, n);
-    return archive_decode_segment(&r, &h, got, ticks, recs, 8u, &rc);
+    return archive_decode_segment(&r, &h, got, ticks, recs, rec_cap, &rc);
+}
+
+static ErrCode ar_try_decode(const u8* seg, u64 n, u32 ticks, VMemArena* arena) {
+    return ar_try_decode_records(seg, n, ticks, 8u, arena);
 }
 
 TL_TEST(archive_regression_escape_may_not_move_the_down_bit, "net,archive,regression,fast") {
@@ -996,12 +1000,13 @@ TL_TEST(archive_log_record_count_is_bounded_by_the_format, "net,archive,edge,fas
         recs[i].format_version = NET_FORMAT_VERSION;
         recs[i].kind = (u8)LR_DELAY;
         recs[i].slot = 0u;
-        // All at ONE tick, one origin, ascending seq: unique ids, correctly ordered, and inside
-        // the range for ANY tick_count >= 1. Spreading them over ticks made the effective_tick
-        // RANGE check fire when tick_count shrank, so the row passed without testing the bound.
+        // Spread at exactly the ruled per-tick maximum (2026-08-26: the per-tick bound is the
+        // FORMAT's now), one origin, ascending seq - 100 records over 13 ticks of the 16. The
+        // all-at-one-tick shape this row used before the ruling is now itself a per-tick
+        // refusal, exercised by archive_ruled_bounds_are_enforced below.
         recs[i].origin_slot = 0u;
         recs[i].seq = i;
-        recs[i].effective_tick = 1000u;
+        recs[i].effective_tick = 1000u + (u64)(i / MAX_LOG_RECORDS_PER_PACKET);
     }
     const u64 wcap = archive_segment_max_bytes(1u, wide, many);
     u8* wseg = (u8*)arena_push(&arena, wcap, 16u);
@@ -1026,6 +1031,81 @@ TL_TEST(archive_log_record_count_is_bounded_by_the_format, "net,archive,edge,fas
     br_init(&wr, wseg, wn);
     TL_EXPECT_EQ(archive_decode_segment(&wr, &wh, wgot, wide, wout, many, &wrc),
                  ERR_NET_MALFORMED);
+    api.release(api.ctx, arena.base, arena.reserved);
+}
+
+TL_TEST(archive_ruled_bounds_are_enforced, "net,archive,regression,fast") {
+    // The two 2026-08-26 rulings, each forged by hand and each verified to fail when its check
+    // is reverted: (a) at most MAX_LOG_RECORDS_PER_PACKET records per effective_tick (the
+    // per-tick bound is the format's, s20.2.9); (b) seq ascends strictly per origin_slot
+    // (s20.2.3 - a DESCENDING repeat at different ticks was accepted before this rule, since
+    // it is neither adjacent-disordered nor a duplicate id); (c) tick_count is capped at
+    // CHECKPOINT_HOT_TICKS (s20.2.9 - the decoder's cost is linear in it, and s20.2.5's
+    // BK_LOG_SEGMENT lets an untrusted peer choose it).
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, 0xA5C1Fu, 8u << 20, 0u, &api), ERR_OK);
+
+    const u32 ticks = 4u;
+    WireFrame* src = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * ticks, 16u);
+    for (u32 i = 0; i < ticks; ++i) { src[i] = nt_zero_frame(0u); }
+
+    // (a) nine records legally spread 8+1 over two ticks, then collapsed onto one by forgery.
+    const u32 nine = MAX_LOG_RECORDS_PER_PACKET + 1u;
+    LogRecord recs[MAX_LOG_RECORDS_PER_PACKET + 1u] = {};
+    for (u32 i = 0; i < nine; ++i) {
+        recs[i].format_version = NET_FORMAT_VERSION;
+        recs[i].kind = (u8)LR_DELAY;
+        recs[i].origin_slot = 0u;
+        recs[i].seq = i;
+        recs[i].effective_tick = (i < MAX_LOG_RECORDS_PER_PACKET) ? 1000u : 1001u;
+    }
+    const u64 cap = archive_segment_max_bytes(1u, ticks, nine);
+    u8* seg = (u8*)arena_push(&arena, cap, 16u);
+    const u64 n = ar_encode(seg, cap, src, 1u, ticks, recs, nine, 0u);
+    TL_ASSERT_EQ(ar_try_decode_records(seg, n, ticks, nine, &arena), ERR_OK);
+    const u64 rec_base = n - (u64)nine * 24u;
+    const u64 last = rec_base + (u64)(nine - 1u) * 24u;
+    const u8 saved_tick = seg[last + 16u];
+    seg[last + 16u] = (u8)(1000u & 0xFFu);            // tick 1001 -> 1000: nine at one tick
+    ar_repair_crcs(seg, n);
+    TL_EXPECT_EQ(ar_try_decode_records(seg, n, ticks, nine, &arena), ERR_NET_MALFORMED);
+    seg[last + 16u] = saved_tick;
+    ar_repair_crcs(seg, n);
+    TL_ASSERT_EQ(ar_try_decode_records(seg, n, ticks, nine, &arena), ERR_OK);
+
+    // (b) per-origin seq DESCENDS across ticks: seq 5 @ t0 then seq 3 @ t1 - unique ids,
+    // adjacent order still ascending by (tick, origin, seq), so only the per-origin rule can
+    // refuse it. Forged from a legal 5-then-6 pair.
+    LogRecord pair[2] = {};
+    for (u32 i = 0; i < 2u; ++i) {
+        pair[i].format_version = NET_FORMAT_VERSION;
+        pair[i].kind = (u8)LR_DELAY;
+        pair[i].origin_slot = 0u;
+        pair[i].seq = 5u + i;
+        pair[i].effective_tick = 1000u + i;
+    }
+    const u64 pcap = archive_segment_max_bytes(1u, ticks, 2u);
+    u8* pseg = (u8*)arena_push(&arena, pcap, 16u);
+    const u64 pn = ar_encode(pseg, pcap, src, 1u, ticks, pair, 2u, 0u);
+    TL_ASSERT_EQ(ar_try_decode(pseg, pn, ticks, &arena), ERR_OK);
+    const u64 prec1 = pn - 24u;
+    const u8 saved_seq = pseg[prec1 + 8u];
+    pseg[prec1 + 8u] = 3u;                            // seq 6 -> 3: descends per origin
+    ar_repair_crcs(pseg, pn);
+    TL_EXPECT_EQ(ar_try_decode(pseg, pn, ticks, &arena), ERR_NET_MALFORMED);
+    pseg[prec1 + 8u] = saved_seq;
+    ar_repair_crcs(pseg, pn);
+    TL_ASSERT_EQ(ar_try_decode(pseg, pn, ticks, &arena), ERR_OK);
+
+    // (c) tick_count over the format cap - refused from the header alone, before any
+    // tick_count-sized work. The payload is stale under the forged count, which is the point:
+    // the cap check must come first.
+    const u32 over = CHECKPOINT_HOT_TICKS + 1u;
+    for (u32 i = 0; i < 4u; ++i) { pseg[AR_T_TICKS_OFF + i] = (u8)((over >> (8u*i)) & 0xFFu); }
+    ar_repair_crcs(pseg, pn);
+    TL_EXPECT_EQ(ar_try_decode(pseg, pn, ticks, &arena), ERR_NET_MALFORMED);
+
     api.release(api.ctx, arena.base, arena.reserved);
 }
 
