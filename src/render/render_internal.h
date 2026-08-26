@@ -30,3 +30,8 @@ void render_sort_and_batch(RenderQueue* q, Scratch* scratch);
 // for it and the command's DRAWFLAG_NO_SNAP is clear) is applied to the quad's CENTRE only
 // (docs/RENDER2D.md §9.3.2), never per-corner, so a snapped sprite keeps its shape.
 void render_emit_geometry(RenderQueue* q);
+
+// docs/RENDER2D.md §9.4 steps 1-4 (+ publishing stats_draw_calls/stats_batches) - render_present
+// minus the final d.present(d.ctx) call and the step-7 reset, split out so a test can inspect the
+// headless draw-call log before present() clears it (backend_sdl.cpp's own comment explains why).
+void render_build_frame(World* w);

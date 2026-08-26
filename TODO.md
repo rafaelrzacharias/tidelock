@@ -3060,6 +3060,20 @@ right; it is the template the others now follow.
       lane's brief). `src/render/simview.h` forward-declares the five view structs opaque and
       `simview_update` is v0's stub (empty body) - Milestone 2 replaces the forward declarations
       with the real include once alloy-substrate lands; never invent the header here.
+- [x] **Doc self-contradiction found and fixed in the same commit (`docs/RENDER2D.md` §9.6
+      `present_descriptor`, CLAUDE.md rule 8): the row's prose ("`set_target` ×3, one `clear` per
+      layer") does not survive contact with §9.4's own step-4 pseudocode plus its "Targets"
+      paragraph ("UI/DEBUG draw to the window").** Built the row's own 3-layer example
+      (WORLD with an internal target, UI/DEBUG null) by hand against the literal algorithm:
+      `set_target` is called unconditionally on every layer transition (the step-4 top-level
+      window clear, WORLD's own target, the WORLD blit's own call back to window, then window
+      again for UI, then again for DEBUG - two consecutive window-target layers are two calls,
+      never merged) = 5, not 3; `clear` only fires where `target != null` (the top-level window
+      clear plus WORLD's own) = 2, not "one per layer" = 3. `draw_geometry` count == batch count
+      (3) holds for `stats_draw_calls`/`stats_batches` as designed - the blit's own
+      `draw_geometry` is a 4th call in the raw log, deliberately not part of that stat. Fixed the
+      row and the doc's reconciliation footer in the same commit as `backend_sdl.cpp` and its
+      `present_descriptor` test, which assert the corrected numbers.
 
 ## Alloy (`docs/ALLOY.md` — headless-first; its own build queue in "Gates & rulings ledger")
 - [ ] **W3 alloy-liquids-gases OPENING task — the liquid design pass (the RR-10 ruling,

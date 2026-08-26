@@ -452,7 +452,7 @@ in `render/extract.cpp`, `render/simview.cpp`, `editor/`, and `from_f32_quantize
 | `resolve_layout_table` | table of (win, internal, mode) → expected viewport/scale: 1280×720/320×180 LETTERBOX → s=4 centred; 1279×719 → s=3, viewport 960×540 at (159,89); 300×100 → s=1 oversize; ASPECT_FIT 1000×1000/320×180 → 1000×562 at (0,219); dpi 2.0 |
 | `world_screen_roundtrip` | 10k random points, zoom ∈ {0.5,1,4}, rot ∈ {0,0.125,0.5}: `screen_to_world(world_to_screen(p))` within 1e-3 m; the Y flip: world +Y maps to decreasing screen Y; picking through `target_to_window` inverse |
 | `simview_half_texel` | a synthetic chunk with an SDF edge at texel column 37 (`sdf < 0` for `tx ≥ 37`), ppu = 32, camera at the chunk origin: the first opaque staging pixel is column 37 and the chunk quad's left edge lands on target px `W/2 − 128·2·…` exactly; `simview_texel_to_world(cx, 37, 0).x == −4096 + 8cx + 37.5·TEXEL` |
-| `present_descriptor` | headless `DrawApi` records calls: a 3-layer queue yields `set_target` ×3 (world target, window, window), one `clear` per layer, `draw_geometry` count == batch count, one blit, one `present`; vertex counts = 4 per command |
+| `present_descriptor` | headless `DrawApi` records calls: a 3-layer queue (WORLD with its internal target, UI/DEBUG to the window, per §9.4's own "Targets" paragraph) yields `set_target` ×5 (the step-4 top-level window clear's own call, world target, the WORLD blit's own call back to window, then window again for UI and for DEBUG - each layer transition calls `set_target` unconditionally, so two consecutive window-target layers are two calls, not a merged one), `clear` ×2 (the top-level window clear plus WORLD's own - UI/DEBUG have a null target, so step 4's `if target != null` guards their clear out), `draw_geometry` ×4 in the raw call log (one per batch, three, plus the WORLD blit's own quad) while `stats_draw_calls == stats_batches` (three, the per-batch count the blit is deliberately not part of), one blit, one `present`; every `draw_geometry` call (batches and the blit alike) carries 4 vertices |
 | `extract_snap_and_arc` | snap bit forces `a = 1`; rotation 0.9 → 0.1 turns lerps through 1.0, not 0.5 |
 
 Pixel goldens (FLIP-compared, `--render=software`) are nightly, never PR-blocking (§8).
@@ -480,4 +480,9 @@ Pixel goldens (FLIP-compared, `--render=software`) are nightly, never PR-blockin
   The edge tint colour and width (0 or 1 texel) come from the Luau material palette LUT per
   material, so "soft" materials can still read as such without an AA path.
 
-*Rev 1 — 2026-08-22.*
+*Rev 1 — 2026-08-22, reconciled 2026-08-26 (w3-render2d): §9.6's `present_descriptor` row
+corrected to match §9.4's own step-4 pseudocode and "Targets" paragraph exactly (the row's
+"`set_target` ×3, one `clear` per layer" undercounted - the algorithm calls `set_target`
+unconditionally on every layer transition and clears only when the layer's own target is
+non-null; measured by building the actual sequence for the row's own 3-layer example, not
+guessed).*
