@@ -337,6 +337,12 @@ void script_tick_begin(ScriptVm* vm) {
 }
 
 void script_tick_end(ScriptVm* vm) {
+    // (void)vm OUTSIDE the #if: the whole body below is dev-only and TL_ASSERT compiles out in
+    // netcode/ship, so `vm` is an unused parameter there and -Werror rejects the TU on exactly
+    // the two tiers dev and debug cannot see (docs/LESSONS.md - the same class that turned 11 of
+    // 23 CI legs red once already). The function doing nothing in those tiers is correct: the
+    // leak heuristic is a dev tool and its cost is not paid where it cannot be read.
+    (void)vm;
     TL_ASSERT(vm != nullptr && vm->L != nullptr);
 #if TL_DEV
     // docs/LUAU-LAYER.md section 10.7 step 3: a full collect, then "did reachable bytes grow
