@@ -279,31 +279,43 @@ TL_TEST(registry_edges_tick0_empty_and_max_arenas, "foundation,mem,fast") {
     TL_EXPECT_TRUE(ring_find(&ring, 0u) == s0);   // tick 0 is findable (not a sentinel)
     TL_EXPECT_EQ(registry_restore(&w.reg, s0), ERR_OK);
 
-    // Empty registry: sealing and hashing zero arenas is legal, and two empty registries agree.
-    ArenaRegistry e1 = {}; registry_seal(&e1);
-    ArenaRegistry e2 = {}; registry_seal(&e2);
-    u64 pa[MAX_ARENAS];
-    const u64 he = registry_hash_all(&e1, pa);
-    TL_EXPECT_EQ(registry_hash_all(&e2, pa), he);
+    // At MAX_ARENAS = 4096 (E-2 ruling 2026-08-26) the full-house actors no longer fit a stack
+    // frame (VMemArena[4096] = 256 KB, each ArenaRegistry ~96 KB): they are pushed on the
+    // backing arena, and each arena carries ONE distinct byte so the snapshot blob stays under
+    // the slot cap (4096 B vs 64 KB) while the flip check below still proves the hash covers
+    // the last arena's payload.
+    ArenaRegistry* e1 = (ArenaRegistry*)arena_push(&w.backing, sizeof(ArenaRegistry), 64u);
+    ArenaRegistry* e2 = (ArenaRegistry*)arena_push(&w.backing, sizeof(ArenaRegistry), 64u);
+    *e1 = ArenaRegistry{}; registry_seal(e1);
+    *e2 = ArenaRegistry{}; registry_seal(e2);
+    u64* pa = (u64*)arena_push(&w.backing, sizeof(u64) * (u64)MAX_ARENAS, 64u);
+    const u64 he = registry_hash_all(e1, pa);
+    TL_EXPECT_EQ(registry_hash_all(e2, pa), he);
 
     // MAX_ARENAS registered: hash, snapshot, trash, restore - the full-house round trip.
-    VMemArena arr[MAX_ARENAS];
-    ArenaRegistry full = {};
+    VMemArena* arr = (VMemArena*)arena_push(&w.backing, sizeof(VMemArena) * (u64)MAX_ARENAS, 64u);
+    ArenaRegistry* full = (ArenaRegistry*)arena_push(&w.backing, sizeof(ArenaRegistry), 64u);
+    *full = ArenaRegistry{};
     for (u32 i = 0; i < MAX_ARENAS; ++i) {
         TL_ASSERT_EQ(vmem_arena_init(&arr[i], (NameHash)(0x5000u + i), 64u * 1024u,
                                      ARENA_ZERO_ON_PUSH, &w.api), ERR_OK);
-        registry_add(&full, (NameHash)(0x5000u + i), &arr[i], ARENA_HASHED | ARENA_SNAPSHOT);
+        registry_add(full, (NameHash)(0x5000u + i), &arr[i], ARENA_HASHED | ARENA_SNAPSHOT);
     }
-    registry_seal(&full);
-    TL_EXPECT_EQ(full.count, (u32)MAX_ARENAS);
-    for (u32 i = 0; i < MAX_ARENAS; ++i) { fill(&arr[i], (u64)(i * 7u + 1u), (u8)i); }
-    const u64 hf = registry_hash_all(&full, pa);
-    Snapshot* sf = ring_push(&ring, 3u);
-    TL_ASSERT_EQ(registry_snapshot(&full, sf, 3u), ERR_OK);
+    registry_seal(full);
+    TL_EXPECT_EQ(full->count, (u32)MAX_ARENAS);
+    for (u32 i = 0; i < MAX_ARENAS; ++i) { fill(&arr[i], 1u, (u8)i); }
+    const u64 hf = registry_hash_all(full, pa);
+    // registry_snapshot packs each snapshotted arena 64-byte aligned, so the full house needs
+    // MAX_ARENAS x 64 B of blob - its own ring with the derived cap (arena-backed: the ring
+    // struct itself is ~MAX_ARENAS/128 KB per slot now).
+    SnapshotRing* fr = (SnapshotRing*)arena_push(&w.backing, sizeof(SnapshotRing), 64u);
+    TL_ASSERT_EQ(ring_init(fr, (u64)MAX_ARENAS * 64u + 64u, &w.backing), ERR_OK);
+    Snapshot* sf = ring_push(fr, 3u);
+    TL_ASSERT_EQ(registry_snapshot(full, sf, 3u), ERR_OK);
     arr[MAX_ARENAS - 1u].base[0] = (u8)(arr[MAX_ARENAS - 1u].base[0] ^ 0xFFu);
-    TL_EXPECT_NE(registry_hash_all(&full, pa), hf);
-    TL_ASSERT_EQ(registry_restore(&full, sf), ERR_OK);
-    TL_EXPECT_EQ(registry_hash_all(&full, pa), hf);
+    TL_EXPECT_NE(registry_hash_all(full, pa), hf);
+    TL_ASSERT_EQ(registry_restore(full, sf), ERR_OK);
+    TL_EXPECT_EQ(registry_hash_all(full, pa), hf);
 
     for (u32 i = 0; i < MAX_ARENAS; ++i) { w.api.release(w.api.ctx, arr[i].base, arr[i].reserved); }
     world_release(&w);

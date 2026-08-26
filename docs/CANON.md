@@ -65,7 +65,7 @@
 | `MAX_ACTIONS` | 32 (compile-time; wire-format bump to change) | INPUT |
 | `sizeof(ActionState)` / `sizeof(InputFrame)` | 2 B / 76 B | INPUT |
 | `MAX_COMPONENT_TYPES` | 1024 | ECS |
-| `MAX_ARENAS` | 64 | MEMORY |
+| `MAX_ARENAS` | 4096 | MEMORY |
 | sparse-set page | 4096 entries (`u32` dense index) | ECS |
 | particle hot row | 32 B | ALLOY §1.4 |
 | particle spacing / kernel radius | 2 texels / 4 texels (= fine-tier cell) | ALLOY §3.5 |
