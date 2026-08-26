@@ -713,7 +713,16 @@ E-2 needs no W2 decision but blocks real game wiring later.
 
 ## w2-vendor — BLOCKING ruling request: commit identity (2026-08-26)
 
-- [ ] **RULING REQUEST: all 8 `w2-vendor` commits (`e0e9715`..`750a366`) are authored AND
+- [x] **RULED 2026-08-26 (Rafael, relayed by the steward): option (D) — the STEWARD ran the
+      rewrite**, an option the filing could not see (the lane's own harness blocked its
+      force-push; the steward session's did not). Executed same day: `git rebase 438c996 --exec
+      'git commit --amend --no-edit --reset-author'` under Rafael's identity, every commit
+      verified `rafaelrzacharias <rafaelrzacharias@gmail.com>` (author AND committer) before the
+      push, tree content verified identical to the reviewed-by-CI tip (`git diff` empty against
+      old `ad950a7`), then `push --force-with-lease` — sanctioned pre-review by `WORKFLOW.md` §5
+      R-4; review had not begun on PR #12. The lane hard-reset onto the rewritten branch before
+      continuing. Original filing:
+  **RULING REQUEST: all 8 `w2-vendor` commits (`e0e9715`..`750a366`) are authored AND
       committed as `Claude <noreply@anthropic.com>`, violating `CLAUDE.md`'s public-repo rule**
       (Rafael sole author, every commit, `rafaelrzacharias <rafaelrzacharias@gmail.com>`, no model
       identifiers pushed). Verified directly: `git log --format='%an %ae / %cn %ce' 438c996..HEAD`.
