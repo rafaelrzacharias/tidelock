@@ -102,4 +102,6 @@ void render_present(World* w) {
     q->verts.count = 0;
     q->idx.count = 0;
     q->data.count = 0;
+    q->clips.count = 1;   // slot 0 stays reserved for "no clip" (mirrors render_init, queue.cpp)
+    q->clips.depth = 0;   // review round 1 D4: an unpopped clip must not leak into the next frame
 }
