@@ -49,3 +49,5 @@ add_subdirectory(enet)
 # to a consumer outside that directory (unlike SDL3/SDL_ttf, which export modern PUBLIC/INTERFACE
 # target properties) - added here so enet_glue.cpp's #include <enet/enet.h> resolves.
 target_include_directories(enet PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/enet/include")
+
+add_subdirectory(monocypher)

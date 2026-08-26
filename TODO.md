@@ -620,6 +620,26 @@ E-2 needs no W2 decision but blocks real game wiring later.
       (an exhausted pool_enet budget is fatal, not recoverable). The test creates a real
       `ENetHost` (no bind address, no socket traffic) to prove peer/channel allocations round-trip
       through `pool_enet`.
+- [x] **Monocypher vendored** at `4.0.3` (`vendor/monocypher`, no upstream CMake build - a plain
+      makefile - so `vendor/monocypher/CMakeLists.txt` is ours, same shape as rapidhash's).
+      Vendors core (`monocypher.c`) plus the optional Ed25519 module - `docs/NETCODE.md` §8/§19.9
+      name it BY NAME (identity signing, handoffs), so this is the spec calling for it, not an
+      addition of this lane's own. Allocates nothing (`docs/PLATFORM.md` §9.5): no adaptor `.cpp`,
+      no pool. `tests/vendor_glue/monocypher.test.cpp` checks BLAKE2b-512("") against the RFC 7693
+      known-answer vector, `crypto_verify32`'s equal/differ cases, and a real Ed25519 sign/check
+      round-trip (plus a flipped-signature-byte rejection).
+      **Root-cause fix this exposed, not anticipated:** `project(tidelock LANGUAGES CXX)`
+      (`CMakeLists.txt`) had never actually enabled C - SDL3/ENet/FreeType's `.c` builds all
+      worked only because SDL3's own nested `project(... C)` call enabled it globally as a side
+      effect, first. Monocypher's CMakeLists.txt (no upstream project of its own) was the first to
+      need C with nothing upstream to accidentally grant it, and failed generate with
+      `CMAKE_C_COMPILE_OBJECT` unset. Fixed at the root: `LANGUAGES CXX C`, plus a C-compiler-is-
+      Clang check mirroring the existing CXX one (`docs/BUILD.md` §1). See `LESSONS.md`.
+      src/net/CMakeLists.txt's own comment ("ENet + Monocypher arrive with the W2 vendor lane and
+      are linked here then") is NOT actioned by this lane - `src/net/` is outside this lane's file
+      cone (disjoint from concurrent lanes, `ROADMAP.md` §2); both archives link clean via
+      `tl_vendor_glue` today, so linking them into `tl_net` is unblocked, real work for whichever
+      lane wires ENet/Monocypher into net/'s actual protocol code.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**
