@@ -1160,7 +1160,12 @@ E-2 needs no W2 decision but blocks real game wiring later.
       multiple" re-baseline (W2 luau-vm filing).
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
-- [ ] **RULING REQUEST (2026-08-26, w2-vendor round-2 review N2): bless "patch a vendored file
+- [x] **RULED 2026-08-26 (Rafael, via the steward relay) — option (a): the standing vendoring
+      policy is BLESSED as written in `docs/BUILD.md` §4** ("vendored verbatim by default; a
+      deviation is permitted only when the lib exposes no seam to reach the same result, and
+      only when declared by name and reason in `vendor/VERSIONS`"). §4's "not yet a ruling"
+      qualifier removed in the same commit as this record. The original request, kept as filed:
+      **(2026-08-26, w2-vendor round-2 review N2): bless "patch a vendored file
       when it exposes no seam" as standing vendoring policy, not just this one exception.**
       Round 1 offered two paths for FreeType's missing allocator seam — an `FT_MemoryRec`
       adaptor, or a filed exemption ruling. The lane took a third, on its own declaration with no
