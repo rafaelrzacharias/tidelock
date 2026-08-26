@@ -3,6 +3,13 @@
 > **Status:** design rev 1, 2026-08-22. **DECIDED** except §7. Carries D14 / C3-runtime; the data
 > path is new (Luau-authored tables → compiled POD); saves are the reflection encoder (PIVOT §6).
 > **Owns:** `src/core/assets.h`, `data_tables.h`, `save.h`; `tools/cook` later.
+> **Build (2026-08-26, w3-assets-data, header-first):** §8.2/§8.3/§8.4's pseudocode-level structs
+> got real construction signatures over the spec (the `slotmap_init`/`world_init` precedent -
+> registry init, loader function shapes not threaded through `World`, `data_compile`'s explicit
+> schema-list parameter, `SaveArenaDesc`/`SaveDesc`); the reconciliation is recorded in `TODO.md`'s
+> W3 assets+data lane notes, not restated here. `data_tables.cpp`'s compile body is blocked on
+> RR-21 (`TODO.md`): the compiler needs a C++-side Luau table reader `src/script/script.h` does
+> not yet expose.
 
 ---
 

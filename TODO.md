@@ -3207,6 +3207,56 @@ step 6), before the data-table compiler's `.cpp` was written.
       `ROADMAP.md` §0 rule 1 with a `TL_FATAL("unimplemented — RR-21")` compile body until this
       ruling resolves one way or the other.
 
+## W3 assets+data — header-first commit notes (2026-08-26, w3-assets-data)
+
+Signatures added over `ASSETS-AND-DATA.md` §8.2/§8.3/§8.4's pseudocode-level structs, same
+"signature added over spec, reconciled in the same commit" shape `slotmap_init`/`world_init`/
+`interner_init` already set (no ruling needed - none of these cross another lane's module or
+change a DECIDED design, `CLAUDE.md` rule 8).
+
+- **Loaders are not threaded through `World`.** §8.2's `asset_load_texture(World*, NameHash)`
+  pseudocode names `World*`, but `World` (`core/world.h`) carries no `AssetRegistry`/`PlatformApi`
+  member and this lane does not touch `world.h` (not its module, `ASSETS-AND-DATA.md` §8.1's file
+  list). The registry is not sim state (§1: "not a registered arena... the sim never touches" its
+  contents) and does not need `World` to reach it - shipped as
+  `asset_load_texture(AssetRegistry*, const PlatformApi*, VMemArena* scratch, NameHash)`, the
+  same "engine-side facility, passed explicitly" shape `ScriptVm*` callers already use.
+- **`AssetRec.kind_specific` is the platform DrawApi's own `TexHandle` bits, not this registry's.**
+  `docs/CANON.md` "the asset registry holds them, never a second [handle] id" reads as: don't
+  invent a THIRD C++ handle type for "an asset reference" - reuse the `TexHandle` SHAPE
+  (`Handle<TexTag,12,4>`) for both the registry's own `SlotMap`-minted handle (what callers hold)
+  and the platform's real device handle (what `kind_specific` carries so the registry can call
+  `draw.texture_destroy`/etc.) - two VALUES in one TYPE, never a second type.
+- **`data_compile` takes its schema list as an explicit parameter** (`Span<const TableSchema>`),
+  not a separate stateful pre-registration API on `DataTables` - `DataTables` does not exist
+  until `data_compile` returns it, so nothing could be registered onto it beforehand; the caller
+  already holds the ordered list (Alloy's C++ schemas + a game's Luau-declared ones) and handing
+  it straight to the one function that walks it needs no extra state.
+- **`DataHandle` (the CANON `Handle<_,12,4>` resource-handle shape for K_Data fields) and
+  `DataTable.by_name`'s dense id (a plain `u16`, `§8.3`'s own struct spelling) are two views of
+  one value**, not two mechanisms: `data_find_row`/`data_row` convert at the public boundary
+  (`handle_make<DataHandle>(dense_id, 1)` - generation is always 1, since a compiled table never
+  reuses a row slot independently; the whole table set replaces atomically on reload, so there is
+  no staleness concept `Handle`'s generation exists to catch here). `by_name` itself stays the
+  doc's literal `SortedMap<NameHash, u16>`.
+- **`save.h` adds `SaveArenaDesc`/`SaveDesc`** (arena id -> encoder kind + `ComponentInfo`/
+  `max_rows`/`ComponentId` mapping, plus the alias/migration tables, the `World*` needed for
+  `SAVE_ENC_ECS_COLUMN`'s load-side re-add, and the data-script name/hash pass-through) - the doc
+  gives the FILE format, not how a caller's registered arenas map onto it, and only the caller
+  (the app/game, or a future `tools/cook`) knows that mapping.
+- **Scope cut, recorded rather than built speculatively (`CLAUDE.md` "no speculative breadth"):**
+  `SAVE_ENC_RAW_POOL` and `SAVE_ENC_CHUNK_STORE` are declared (the byte layout names all four
+  kinds) but `TL_FATAL("not yet built")` in `save.cpp` - no Alloy pool or terrain chunk store
+  exists anywhere in the tree yet (`alloy-substrate` is still queued, `ROADMAP.md` §2) to write a
+  real encoder against; building one now would be guessing a layout with no consumer to test it
+  against. `SAVE_ENC_REFLECTED`/`SAVE_ENC_ECS_COLUMN` (the two kinds every registered arena in
+  the tree today actually needs) are the ones this lane implements and tests.
+- **RR-21 (TODO.md, filed at lane start): `data_tables.cpp`'s compile body is blocked** - the
+  data-table compiler needs a C++-side reader of a Luau table, and `script.h` (a different,
+  already-merged lane's module) exposes none. `data_tables.h`'s public header does not depend on
+  the resolution and ships complete; `data_compile`/`data_find_row`/`data_row` are `TL_FATAL`
+  stubs until it resolves.
+
 ## Reserved (design complete, build on first consumer — `docs/RESERVED-SEAMS.md`)
 Audio · game UI (Luau) · spatial index · tilemap · nav/AI · frame animation · replay UI/cinematics ·
 modding (Luau profiles) · game-logic substrate · streaming/cook · SDL_GPU path · editor shell.
