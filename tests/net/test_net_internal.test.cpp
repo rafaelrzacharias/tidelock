@@ -197,3 +197,32 @@ TL_TEST(net_log_store_ordered_read_feeds_the_archive_unchanged, "net,internal,fa
         TL_ASSERT_TRUE(ordered);
     }
 }
+
+TL_TEST(net_log_store_signals_truncation_rather_than_returning_a_short_count, "net,internal,edge,fast") {
+    // Round 2 finding B7: a count alone cannot say whether records were DROPPED. With
+    // MAX_LOG_RECORDS_PER_PACKET records at one tick and a smaller buffer, the caller must be
+    // able to tell that it is about to ship a short SeqSection.
+    LogStore s;
+    log_store_clear(&s);
+    for (u32 i = 0; i < 5u; ++i) {
+        LogRecord r = {};
+        r.format_version = NET_FORMAT_VERSION;
+        r.kind = (u8)LR_DELAY;
+        r.origin_slot = (u8)i;
+        r.seq = i;
+        r.effective_tick = 77u;
+        TL_ASSERT_EQ(log_store_add(&s, &r), ERR_OK);
+    }
+    LogRecord out[8] = {};
+    bool truncated = true;
+    TL_EXPECT_EQ(log_store_at_tick(&s, 77u, out, 8u, &truncated), 5u);
+    TL_EXPECT_FALSE(truncated);                      // room for all five
+
+    truncated = false;
+    TL_EXPECT_EQ(log_store_at_tick(&s, 77u, out, 3u, &truncated), 3u);
+    TL_EXPECT_TRUE(truncated);                       // two were dropped, and the caller knows
+
+    truncated = true;
+    TL_EXPECT_EQ(log_store_at_tick(&s, 9999u, out, 8u, &truncated), 0u);
+    TL_EXPECT_FALSE(truncated);                      // nothing at that tick is not truncation
+}

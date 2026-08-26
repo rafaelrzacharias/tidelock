@@ -1,10 +1,11 @@
 // T0 (docs/NETCODE.md §20.6): every §20.2 wire struct - sizeof/offsetof pins, little-endian
 // round-trip, pad-nonzero refusal, newer-version refusal, truncated-buffer refusal.
 //
-// Driven off each struct's own reflection table rather than 26 hand-written round-trips: a
+// Driven off each struct's own reflection table rather than 23 hand-written round-trips: a
 // hand-written one tests the struct the author remembered, and the failure mode this test exists
-// to catch is a struct nobody remembered. TL_NET_WIRE_STRUCTS below is the roll call, and the
-// count assert at the bottom fails when §20.2 grows a struct that was not added to it.
+// to catch is a struct nobody remembered. wire.h's TL_NET_WIRE_STRUCTS roll call DECLARES the
+// structs, so a struct absent from it does not compile and this file cannot silently stop
+// covering one; the count assert at the bottom makes growing §20.2 a deliberate edit here too.
 #include "runner/tl_test.h"
 #include "net/net_test_util.h"
 

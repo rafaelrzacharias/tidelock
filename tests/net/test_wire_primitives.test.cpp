@@ -122,9 +122,14 @@ TL_TEST(wire_uvarint_truncation_is_data_not_a_bug, "net,wire,edge,fast") {
     TL_EXPECT_EQ(s, 0);
 }
 
-TL_TEST(wire_version_policy_refuses_only_newer, "net,wire,fast") {
-    TL_EXPECT_EQ(wire_check_version(0u), ERR_OK);                       // older build's stream
+TL_TEST(wire_version_policy_accepts_exactly_the_versions_with_a_reader, "net,wire,fast") {
+    // Exactly one version exists, so exactly one value is accepted. This row previously pinned
+    // the OPPOSITE - it asserted wire_check_version(0) == ERR_OK, "an older build's stream" -
+    // which made 0 and 1 two spellings of every struct, and so of every archive segment whose
+    // bytes §20.2.8 hashes into the chain. A version is accepted because this build has a READER
+    // for it, never because the number is small.
     TL_EXPECT_EQ(wire_check_version(NET_FORMAT_VERSION), ERR_OK);
+    TL_EXPECT_EQ(wire_check_version(0u), ERR_NET_VERSION);              // never existed
     TL_EXPECT_EQ(wire_check_version(NET_FORMAT_VERSION + 1u), ERR_NET_VERSION);
     TL_EXPECT_EQ(wire_check_version(0xFFFFFFFFu), ERR_NET_VERSION);
 }

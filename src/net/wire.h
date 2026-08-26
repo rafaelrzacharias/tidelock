@@ -40,6 +40,7 @@ constexpr ErrCode ERR_NET_VERSION         = (ErrCode)0x0402;  // format_version 
 constexpr ErrCode ERR_NET_VARINT_OVERFLOW = (ErrCode)0x0403;  // a uvarint ran past the width of its target
 constexpr ErrCode ERR_NET_DUPLICATE_RECORD= (ErrCode)0x0404;  // (origin_slot, seq) already stored - R6 no-op
 constexpr ErrCode ERR_NET_STORE_FULL      = (ErrCode)0x0405;  // no room for a sequenced record: DATA LOSS
+constexpr ErrCode ERR_NET_CAPACITY        = (ErrCode)0x0406;  // the CALLER's buffer is too small - not the sender's fault
 
 // Log-side name for a net ErrCode; "ERR_?" outside the net range.
 constexpr const char* err_net_name(ErrCode e) {
@@ -54,6 +55,7 @@ constexpr const char* err_net_name(ErrCode e) {
          : e == ERR_NET_VARINT_OVERFLOW   ? "ERR_NET_VARINT_OVERFLOW"
          : e == ERR_NET_DUPLICATE_RECORD  ? "ERR_NET_DUPLICATE_RECORD"
          : e == ERR_NET_STORE_FULL        ? "ERR_NET_STORE_FULL"
+         : e == ERR_NET_CAPACITY          ? "ERR_NET_CAPACITY"
          : "ERR_?";
 }
 
@@ -210,11 +212,16 @@ inline ErrCode wire_get_svarint(ByteReader* r, i32* out) {
     return ERR_OK;
 }
 
-// The version policy every wire reader applies after the generated reader has decoded field 0:
-// a stream from an OLDER or equal build is accepted, a NEWER one is refused (docs/NETCODE.md
-// §20.2). Kept in one place so no struct's reader can quietly disagree.
+// The version policy every wire reader applies after the generated reader has decoded field 0.
+// EXACTLY ONE version exists, so exactly one value is accepted. Spelling this ">" (refuse only
+// NEWER, per docs/NETCODE.md §20.2's wording) accepted format_version 0 - a version that never
+// existed and for which there is no reader - which made every struct two-spelled: 0 and 1 decode
+// identically, so one segment had 2^(1 + log_record_count) encodings and §20.2.8's hash over
+// archive bytes forks the chain on a difference that carries no information.
+// When v2 lands this becomes the enumerated set of versions this build has a READER for, never
+// "<= current": a version is accepted because it can be decoded, not because it is old.
 constexpr ErrCode wire_check_version(u32 format_version) {
-    return format_version > NET_FORMAT_VERSION ? ERR_NET_VERSION : ERR_OK;
+    return format_version == NET_FORMAT_VERSION ? ERR_OK : ERR_NET_VERSION;
 }
 
 // Decoder arithmetic on the pointer channels is wrap_add on i32 (docs/NETCODE.md §20.2.2): the
@@ -739,7 +746,8 @@ static_assert(ARCHIVE_CH_POINTER_X == NET_FRAME_MAX_ACTIONS,
 
 // The three bits docs/INPUT.md §1 defines in ActionState.flags (down, pressed, released). The
 // wire's rec byte carries exactly these; a frame whose flags have any other bit set is not a
-// frame this format can represent, and the encoder treats it as a BUG (TL_ASSERT), not as data.
+// frame this format can represent, and the encoder treats it as a BUG (TL_CHECK, every tier -
+// off TL_DEV an assert would vanish and `flags & 7` would truncate silently), not as data.
 constexpr u8 WIRE_FLAG_BITS = 0x07u;
 
 // Bit 3 of the rec byte: an explicit value byte follows. Bits 4..7 must be zero - the decoder
@@ -797,10 +805,13 @@ u64 archive_encode_segment(ByteWriter* w, u64 base_tick, u32 tick_count,
 // MAX_PEERS * tick_count frames, indexed [slot * tick_count + i]; slots outside the segment's
 // slot_mask are filled with ZERO_FRAME (docs/NETCODE.md §20.2.9). `out_records` must hold at
 // least the segment's log_record_count, which *out_record_count reports.
-// Returns ERR_BYTES_TRUNCATED on a short segment, ERR_NET_VERSION on a newer format_version,
-// ERR_NET_MALFORMED on a failed crc32, an out-of-range channel or slot, a non-canonical stream,
-// or a tick_count/record count the caller's buffers cannot hold. On any error nothing decoded
-// should be acted on. Never runs inside a tick.
+// Each decoded frame's tick is SET to u32(base_tick + i), as decode_column does.
+// Returns ERR_BYTES_TRUNCATED on a short segment, ERR_NET_VERSION on a format_version this build
+// has no reader for, ERR_NET_MALFORMED on a failed crc32, an out-of-range channel or slot, a
+// non-canonical stream or log array, and ERR_NET_CAPACITY when the CALLER's buffers are too
+// small - a local condition, deliberately not conflated with a verdict about the sender's bytes,
+// since §20.2.5 makes those an untrusted peer's. On any error nothing decoded should be acted
+// on. Never runs inside a tick.
 ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
                                WireFrame* out_frames, u32 out_frame_capacity_per_slot,
                                LogRecord* out_records, u32 out_record_capacity,

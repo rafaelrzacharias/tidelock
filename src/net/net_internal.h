@@ -126,8 +126,15 @@ inline ErrCode log_store_add(LogStore* s, const LogRecord* rec) {
 // the order docs/NETCODE.md §20.2.2 requires of a SeqSection and §20.2.9 of a segment. Returns
 // the number written; writes at most `cap`. Selection-ordered rather than sorted in place so the
 // store's own order is never disturbed by a read.
-inline u32 log_store_at_tick(const LogStore* s, u64 tick, LogRecord* out, u32 cap) {
+//
+// `out_truncated` (optional) is set when the tick held MORE records than `cap`. A caller that
+// silently ships a short SeqSection drops a sequenced one-shot, and a count alone cannot say
+// whether that happened - "fail loudly and explicitly" (CLAUDE.md). Pass nullptr only when the
+// buffer is provably large enough.
+inline u32 log_store_at_tick(const LogStore* s, u64 tick, LogRecord* out, u32 cap,
+                             bool* out_truncated = nullptr) {
     TL_ASSERT(s != nullptr && (out != nullptr || cap == 0u));
+    if (out_truncated != nullptr) { *out_truncated = false; }
     u32 n = 0;
     for (;;) {
         // The smallest (origin_slot, seq) at this tick that is strictly greater than the last
@@ -148,7 +155,11 @@ inline u32 log_store_at_tick(const LogStore* s, u64 tick, LogRecord* out, u32 ca
                 best = c;
             }
         }
-        if (best == nullptr || n >= cap) { break; }
+        if (best == nullptr) { break; }
+        if (n >= cap) {
+            if (out_truncated != nullptr) { *out_truncated = true; }
+            break;
+        }
         out[n] = *best;
         ++n;
     }

@@ -33,7 +33,15 @@ enum : u32 {
     AR_PAYLOAD_CRC_OFF  = 100u,
     AR_HEADER_CRC_OFF   = 108u,
     AR_HEADER_CRC_SPAN  = 108u,                                 // crc32 over bytes [0,108)
+    AR_RECORD_COUNT_OFF = 24u,
+    AR_PAYLOAD_BYTES_OFF= 96u,
 };
+// The four offsets this file patches by hand, pinned to the struct the reflection table owns -
+// "one fact, one home" applies to a literal in a memcpy-free byte store just as much as to a doc.
+static_assert(offsetof(ArchiveSegmentHeader, record_count)  == AR_RECORD_COUNT_OFF, "");
+static_assert(offsetof(ArchiveSegmentHeader, payload_bytes) == AR_PAYLOAD_BYTES_OFF, "");
+static_assert(offsetof(ArchiveSegmentHeader, payload_crc32) == AR_PAYLOAD_CRC_OFF, "");
+static_assert(offsetof(ArchiveSegmentHeader, header_crc32)  == AR_HEADER_CRC_OFF, "");
 
 // The action channel's packed word: value in the high bits, the down bit in bit 0.
 static u32 ar_action_word(i8 value, u8 flags) {
@@ -236,16 +244,25 @@ u64 archive_encode_segment(ByteWriter* w, u64 base_tick, u32 tick_count,
         ar_check_frames_representable(inputs[s].frames, tick_count);
         slot_mask = (u8)(slot_mask | (u8)(1u << inputs[s].slot));
     }
-    // The caller's ordering contract for the log array (docs/NETCODE.md §20.2.9). Spelled
-    // inline: TL_ASSERT compiles to ((void)0) off TL_DEV, so a local used only by the assert is
-    // an unused variable under -Werror on the netcode and ship tiers.
+    // A segment covering no ticks carries no streams, so a slot named in the mask would be
+    // unverifiable on decode and every mask would mean the same thing. One spelling: none.
+    if (tick_count == 0u) { slot_mask = 0u; }
+    // The caller's ordering contract for the log array (docs/NETCODE.md §20.2.9). TL_CHECK for
+    // the same reason as the slot contracts above: off TL_DEV an assert vanishes, and records
+    // that arrived from an untrusted peer (§20.2.5's BK_LOG_SEGMENT) and were handed straight
+    // back here would then be re-encoded into a segment whose own decoder refuses it. The last
+    // clause is STRICT: (origin_slot, seq) is R6's stable id, so two records may not share one.
     for (u32 i = 1; i < log_record_count; ++i) {
-        TL_ASSERT((records[i - 1].effective_tick < records[i].effective_tick)
-               || (records[i - 1].effective_tick == records[i].effective_tick
-                   && records[i - 1].origin_slot < records[i].origin_slot)
-               || (records[i - 1].effective_tick == records[i].effective_tick
-                   && records[i - 1].origin_slot == records[i].origin_slot
-                   && records[i - 1].seq <= records[i].seq));
+        TL_CHECK((records[i - 1].effective_tick < records[i].effective_tick)
+              || (records[i - 1].effective_tick == records[i].effective_tick
+                  && records[i - 1].origin_slot < records[i].origin_slot)
+              || (records[i - 1].effective_tick == records[i].effective_tick
+                  && records[i - 1].origin_slot == records[i].origin_slot
+                  && records[i - 1].seq < records[i].seq));
+    }
+    for (u32 i = 0; i < log_record_count; ++i) {
+        TL_CHECK(records[i].slot < MAX_PEERS && records[i].origin_slot < MAX_PEERS);
+        TL_CHECK(records[i].kind >= (u8)LR_JOIN && records[i].kind <= (u8)LR_END);
     }
 
     // Header with both crc fields zeroed; patched below once the payload exists.
@@ -290,8 +307,8 @@ u64 archive_encode_segment(ByteWriter* w, u64 base_tick, u32 tick_count,
     const u32 payload_bytes = (u32)payload_len;
     const u32 payload_crc = crc32(hdr + AR_HDR_BYTES, payload_len);
     // record_count @24, payload_bytes @96, payload_crc32 @100 (docs/NETCODE.md §20.2.9).
-    for (u32 i = 0; i < 4u; ++i) { hdr[24u + i] = (u8)((total_records >> (8u * i)) & 0xFFu); }
-    for (u32 i = 0; i < 4u; ++i) { hdr[96u + i] = (u8)((payload_bytes >> (8u * i)) & 0xFFu); }
+    for (u32 i = 0; i < 4u; ++i) { hdr[AR_RECORD_COUNT_OFF + i] = (u8)((total_records >> (8u * i)) & 0xFFu); }
+    for (u32 i = 0; i < 4u; ++i) { hdr[AR_PAYLOAD_BYTES_OFF + i] = (u8)((payload_bytes >> (8u * i)) & 0xFFu); }
     for (u32 i = 0; i < 4u; ++i) { hdr[AR_PAYLOAD_CRC_OFF + i] = (u8)((payload_crc >> (8u * i)) & 0xFFu); }
 
     const u32 header_crc = crc32(hdr, AR_HEADER_CRC_SPAN);
@@ -326,8 +343,10 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
     if (out_header->max_actions != NET_FRAME_MAX_ACTIONS) { return ERR_NET_MALFORMED; }
 
     const u32 tick_count = out_header->tick_count;
-    if (tick_count > out_frame_capacity_per_slot) { return ERR_NET_MALFORMED; }
-    if (out_header->log_record_count > out_record_capacity) { return ERR_NET_MALFORMED; }
+    // The CALLER's buffers being too small is a local condition - the same bytes are fine on a
+    // peer with a bigger buffer - so it must not be reported as "the sender sent garbage".
+    if (tick_count > out_frame_capacity_per_slot) { return ERR_NET_CAPACITY; }
+    if (out_header->log_record_count > out_record_capacity) { return ERR_NET_CAPACITY; }
 
     // Now the payload's checksum, before decoding a single record out of it.
     if (out_header->payload_bytes > r->len - r->pos) { return ERR_BYTES_TRUNCATED; }
@@ -520,9 +539,25 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
     if (seen_records != out_header->record_count) { return ERR_NET_MALFORMED; }
     // A zero-tick segment carries no pointer streams (the encoder skips them - there is no
     // absolute position to state); at any other length both axes are mandatory per slot.
-    if (tick_count != 0u
-        && (ptr_x_seen != out_header->slot_mask || ptr_y_seen != out_header->slot_mask)) {
+    if (tick_count != 0u) {
+        if (ptr_x_seen != out_header->slot_mask || ptr_y_seen != out_header->slot_mask) {
+            return ERR_NET_MALFORMED;
+        }
+    } else if (out_header->slot_mask != 0u) {
+        // At zero ticks there are no streams to pin the mask to, so every mask would decode to
+        // the same (empty) content - 256 spellings of one segment. The encoder writes 0 there.
         return ERR_NET_MALFORMED;
+    }
+
+    // The tick is derived from the header, never stored per frame - the same rule decode_column
+    // follows (docs/NETCODE.md §20.2.2). Leaving it 0 made every archived frame disagree with
+    // the same frame off the wire, which every T2 row missed by comparing payloads only.
+    for (u32 s = 0; s < MAX_PEERS; ++s) {
+        if (((out_header->slot_mask >> s) & 1u) == 0u) { continue; }
+        WireFrame* frames = out_frames + (u64)s * tick_count;
+        for (u32 i = 0; i < tick_count; ++i) {
+            frames[i].tick = (u32)(out_header->base_tick + (u64)i);
+        }
     }
 
     // Slots whose streams carried no escapes still need their derived edges built.
@@ -539,11 +574,55 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
         }
     }
 
+    // The log array gets the same treatment as the streams: everything the format states about
+    // it is CHECKED, not assumed. Unvalidated, N! orderings of one log set were all valid
+    // segments with different hashes, a repeated R6 id was accepted, and records decoded here
+    // and handed back to the encoder tripped its contract - which is reachable from
+    // §20.2.5's BK_LOG_SEGMENT, i.e. from an untrusted peer.
     for (u32 i = 0; i < out_header->log_record_count; ++i) {
         const ErrCode e = wire_read_LogRecord(r, &out_records[i]);
         if (e != ERR_OK) { return e; }
         const ErrCode lv = wire_check_version(out_records[i].format_version);
         if (lv != ERR_OK) { return lv; }
+        const LogRecord* rec = &out_records[i];
+        // docs/NETCODE.md §20.2.3's kinds are 1..9; 0 is deliberately unused, so a zero-filled
+        // buffer never presents as a valid record.
+        if (rec->kind < (u8)LR_JOIN || rec->kind > (u8)LR_END) { return ERR_NET_MALFORMED; }
+        if (rec->slot >= (u8)MAX_PEERS || rec->origin_slot >= (u8)MAX_PEERS) {
+            return ERR_NET_MALFORMED;
+        }
+        // A record's effective_tick must fall inside the segment it travels in (§20.2.9: the
+        // segment carries the records effective over its own tick range).
+        if (tick_count != 0u) {
+            if (rec->effective_tick < out_header->base_tick
+                || rec->effective_tick >= out_header->base_tick + (u64)tick_count) {
+                return ERR_NET_MALFORMED;
+            }
+        }
+        if (i > 0u) {
+            const LogRecord* prev = &out_records[i - 1];
+            // Strictly ascending by (effective_tick, origin_slot, seq): the order §20.2.9
+            // requires, and the one that makes a log set have a single spelling. Strict on the
+            // last key because (origin_slot, seq) is R6's stable id - a repeat is not a
+            // different record, it is the same one twice.
+            const bool ascending =
+                (prev->effective_tick < rec->effective_tick)
+             || (prev->effective_tick == rec->effective_tick && prev->origin_slot < rec->origin_slot)
+             || (prev->effective_tick == rec->effective_tick && prev->origin_slot == rec->origin_slot
+                 && prev->seq < rec->seq);
+            if (!ascending) { return ERR_NET_MALFORMED; }
+        }
+        // R6's stable id is (origin_slot, seq): ONE id, one record. Two records sharing an id at
+        // DIFFERENT effective ticks are contradictory and are not adjacent under the ordering
+        // above, so the ascending check cannot see them - this scan is what catches them. It is
+        // O(n^2) in log_record_count, which the caller bounds with out_record_capacity (a
+        // segment's log is a working set, not a history - docs/NETCODE.md §13.5).
+        for (u32 j = 0; j < i; ++j) {
+            if (out_records[j].origin_slot == rec->origin_slot
+                && out_records[j].seq == rec->seq) {
+                return ERR_NET_MALFORMED;
+            }
+        }
     }
     *out_record_count = out_header->log_record_count;
 
