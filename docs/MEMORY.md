@@ -204,7 +204,9 @@ render interpolation is snapped. That is the only hook; nothing else may observe
   warning is the signal to raise the budget in `app/`. *(Mechanism split recorded by the W1 mem
   lane, 2026-08-24: the registry/snapshot TUs are in the audited det half, whose symbol
   allowlist is closed to io — `CPP-SUBSET.md` §4 — so `TL_LOG_WARN` cannot be called from
-  there; the error code is the det-legal spelling of the same ruling.)*
+  there; the error code is the det-legal spelling of the same ruling.)* **Ruled 2026-08-26:
+  this split IS the contract — the det half returns the named error; warn-once-and-grow is the
+  frame loop's job (non-det, W3), never det code's.**
 
 ## 8. Implementation specification
 

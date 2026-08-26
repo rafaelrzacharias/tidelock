@@ -87,7 +87,6 @@ RENDER_SIM_HEADER = "sim/views.h"
 # Named exceptions to the sim-TU type bans, both from the docs: tl_types.h must declare f32/f64
 # (docs/CPP-SUBSET.md §1) and fx_float.h is the render/editor/tools bridge (docs/FX-PALETTE.md §6).
 TYPE_EXEMPT_PATHS = {"src/foundation/tl_types.h", "src/foundation/fx_float.h"}
-THREAD_LOCAL_EXEMPT = {"src/foundation/jobs.cpp", "src/foundation/jobs.h"}   # the worker slot
 # The panic ABI (docs/CPP-SUBSET.md §9 R-3): tl_assert.h is the one non-det-STEM header a sim TU
 # may include. Its runtime (tl_assert.cpp, the crash writer) reaches io and stays in the non-det
 # half, but the header is three extern "C" declarations and three macros, and every TL_CHECK in
@@ -593,7 +592,7 @@ def check_file(root, path, nondet, tooling, errors):
         if is_mutable_static(tline) and not is_tooling_tu:
             errors.append("%s:%d: static mutable state (docs/CPP-SUBSET.md §1): %s"
                           % (rel, i, raw_lines[i - 1].strip()[:70]))
-        if TLS_SPELLINGS.search(tline) and rel not in THREAD_LOCAL_EXEMPT:
+        if TLS_SPELLINGS.search(tline):
             errors.append("%s:%d: thread-local storage outside the job system "
                           "(docs/CPP-SUBSET.md §1)" % (rel, i))
         for rx, why in GREP_BANS:

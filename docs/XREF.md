@@ -161,9 +161,10 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 ## JOBS.md
 - `DETERMINISM.md` -> §4
 - `MEMORY.md` -> §1
+- `PLATFORM.md` -> §6.1, §6.2
 - `RENDER2D.md` -> §4
 - `ROADMAP.md` -> §3, §6.4
-- `TOOLING.md` -> §1
+- `TOOLING.md` -> §0
 
 ## LUAU-LAYER.md
 - `ASSETS-AND-DATA.md` -> §1, §10
@@ -193,7 +194,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `PLATFORM.md` -> §1.1, §1.5, §3, §8.2
 - `ROADMAP.md` -> §8.8
 - `TESTING.md` -> §2
-- `TOOLING.md` -> §1.3, §5
+- `TOOLING.md` -> §5
 
 ## NETCODE.md
 - `ALLOY.md` -> §3, §7, §17

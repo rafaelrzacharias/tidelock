@@ -201,8 +201,10 @@ void tl_log_write(u8 level, const char* file, u32 line, const char* fmt, ...) __
 #  define TL_ASSERT(c)       ((void)0)
 #endif
 ```
-`Scratch` carries `u8 worker` (expected from `MEMORY.md` §1.3 / `JOBS.md` §1) so worker code
-names its buffer without `thread_local`. The probe/prof runtimes are `tl_*` symbols in the
+`Scratch` carries no worker field: jobs passes `Scratch*` explicitly (`JOBS.md` §0), and the
+per-worker prof/probe buffers that once motivated one are not built — if that consumer ever
+lands, IT files for the field (ruled 2026-08-26; pulled by a consumer, never pushed on spec).
+The probe/prof runtimes are `tl_*` symbols in the
 non-det `tl_foundation` lib — the symbol audit's "own `tl_*` symbols" allowance covers the sim
 lib's references to them in `dev`; in `netcode` the macros are empty and no symbol exists.
 
