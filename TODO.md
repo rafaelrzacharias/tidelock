@@ -699,6 +699,17 @@ E-2 needs no W2 decision but blocks real game wiring later.
       reaching FreeType's nested `add_subdirectory()` (inside SDL_ttf's own CMakeLists.txt) too
       since cache variables are visible to every subdirectory configured afterward. Not caught
       locally (this container's CMake 3.28 predates the removal); see `LESSONS.md`.
+- [x] **Fifth fix, same round: `libx11-dev` alone was not enough.** `vendor/sdl3/cmake/
+      sdlchecks.cmake` only sets `HAVE_X11` when it ALSO finds `X11/extensions/Xext.h`
+      (`libxext-dev`, a different package from `libx11-dev`'s `Xlib.h`) - so the fourth fix's
+      Linux leg was still going to hit the same X11-or-Wayland fatal. Added `libxext-dev`
+      alongside `libx11-dev` on all five Linux apt-get lines in `.github/workflows/pr.yml`. This
+      one WAS reproduced for real, not inferred from reading the vendored CMake: installed CMake
+      4.4.2 via `pip install 'cmake>=4'` (this container's system CMake, 3.28, is too old to see
+      any of the CMake-4-era failures in this round), removed `libxext-dev`, watched the exact
+      "could not find X11 or Wayland" fatal reproduce, reinstalled it, watched configure +
+      build + `tl_tests --tag smoke` (88/88) + `includes.py` + `docaudit.py` all pass clean under
+      the real CMake 4 binary. See `LESSONS.md`.
 
 ## w2-vendor — BLOCKING ruling request: commit identity (2026-08-26)
 
