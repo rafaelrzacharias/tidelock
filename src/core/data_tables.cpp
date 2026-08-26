@@ -13,10 +13,17 @@ Result<DataTables*> data_compile(Span<const TableSchema>, Span<const StrView>,
     TL_FATAL("unimplemented - RR-21, see TODO.md");
 }
 
-DataHandle data_find_row(const DataTable*, NameHash) {
-    TL_FATAL("unimplemented - RR-21, see TODO.md");
+// Pure lookups over an already-compiled DataTable - not blocked on RR-21 (data_compile is the
+// blocked half; a table built by a test fixture exercises these today).
+DataHandle data_find_row(const DataTable* t, NameHash name) {
+    u32 i = sorted_lower_bound<NameHash>(t->by_name.keys.data, t->by_name.keys.count, name);
+    if (i >= t->by_name.keys.count || t->by_name.keys.data[i] != name) { return DataHandle{}; }
+    return handle_make<DataHandle>((u32)t->by_name.vals.data[i], 1u);
 }
 
-const void* data_row(const DataTable*, DataHandle) {
-    TL_FATAL("unimplemented - RR-21, see TODO.md");
+const void* data_row(const DataTable* t, DataHandle id) {
+    if (handle_is_null(id)) { return nullptr; }
+    u32 idx = handle_index(id);
+    TL_CHECK(idx < t->count);
+    return t->rows + (u64)idx * t->schema->row->size;
 }

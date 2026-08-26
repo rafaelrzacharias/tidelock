@@ -362,6 +362,12 @@ INCLUDE_CASES = [
     ("vendor_glue's system-header allowlist does not become unbounded", "src/vendor_glue/z5.cpp",
      "#include <windows.h>\n",
      "system include <windows.h> is not on the allowlist"),
+    # W3 assets+data: SYS_ALLOW_DIRS["src/core"]'s stb_image.h grant (core/loaders/image.cpp) is
+    # scoped to src/core only, not the whole tree - a neighbouring module reaching for the same
+    # header must still be refused.
+    ("stb_image.h does not leak to a neighbouring module", "src/render/z6.cpp",
+     "#include <stb_image.h>\n",
+     "system include <stb_image.h> is not on the allowlist"),
     # vendor_glue's own DAG entry is scoped to foundation only, not the whole tree platform/core
     # reach - a copy-paste of core's tuple would have let it reach platform silently.
     ("vendor_glue may not include platform even though core/render/net can",

@@ -51,6 +51,13 @@ SYS_ALLOW_DIRS = {                        # additional system headers, by path p
     # the only one that may have it.
     "src/vendor_glue": {"SDL3/SDL.h", "imgui.h", "enet/enet.h", "stb_image.h", "stb_sprintf.h",
                         "stdarg.h", "stdlib.h"},
+    # core/loaders/image.cpp reaches stb_image.h declaration-only (docs/ASSETS-AND-DATA.md §8.2:
+    # "pixels = stbi_load_from_memory(...)"); the one real STB_IMAGE_IMPLEMENTATION TU is
+    # vendor/stb/stb_impl.c (STBI_MALLOC hooked to pool_vendor there), linked in via the `stb`
+    # CMake target - same declaration-only shape src/vendor_glue/stb_glue.cpp already uses.
+    # BACKEND_HEADERS' "stb_" token already named src/core as an allowed prefix; this completes
+    # the other half of the same grant (both gates check independently, LESSONS.md).
+    "src/core": {"stb_image.h"},
 }
 BACKEND_FREE = ("src/platform/impl_sdl3", "src/platform/impl_headless")   # OS headers live here
 

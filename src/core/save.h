@@ -36,6 +36,13 @@
 // blocked on RR-21 (data_compile has no working body yet, so there is nothing to recompile
 // against on load) - the header carries the field, save_write/save_read pass it through
 // unconditionally, and the recompile-and-check step is a TL_FATAL stub pending that ruling.
+// The NameTable (§8.4: "every interned name referenced by a StrId field") is written empty
+// (name_table_len 0) at this cut: no shipped component has a StrId field yet to exercise it
+// against, and the real mechanism needs a decode-side StrId REMAP (the writer's interner and the
+// reader's interner can assign the same string different ids), which is more than a table to
+// write - a half-built version (scan and write, no remap) would silently ship a save that reads
+// back the wrong string on a different process. save_write TL_FATALs if it ever meets a K_StrId
+// field, rather than encode one it cannot correctly decode.
 // ---------------------------------------------------------------------------------------------
 #include "core/encoder.h"
 #include "core/world.h"
@@ -56,7 +63,7 @@ constexpr ErrCode ERR_SAVE_ARENA_MISSING = (ErrCode)0x0354;  // a stored ArenaBl
 constexpr ErrCode ERR_SAVE_FIELD_KIND    = (ErrCode)0x0355;  // a stored field's kind/count changed with no migration fn registered (wraps ERR_ENC_FIELD_KIND)
 constexpr ErrCode ERR_SAVE_DATA_MISMATCH = (ErrCode)0x0356;  // recompiled data-table hash disagrees with the stored one
 constexpr ErrCode ERR_SAVE_IO            = (ErrCode)0x0357;  // wraps a platform FileApi failure (write_atomic/read_all)
-constexpr ErrCode ERR_SAVE_TOO_MANY_ARENAS = (ErrCode)0x0358; // registry has more SNAPSHOT arenas than the caller's arena_descs covers
+constexpr ErrCode ERR_SAVE_TOO_MANY_ARENAS = (ErrCode)0x0358; // more arena_descs entries than MAX_ARENAS
 
 // Log-side name for a save ErrCode; "ERR_?" outside this header's codes.
 constexpr const char* err_save_name(ErrCode e) {
@@ -73,7 +80,7 @@ constexpr const char* err_save_name(ErrCode e) {
 }
 
 constexpr u32 SAVE_FORMAT_VERSION = 1;
-constexpr u32 SAVE_MAGIC = 0x56534C54u;   // bytes 'T','L','S','V' low-byte-first on the wire
+constexpr u8 SAVE_MAGIC[4] = { 'T', 'L', 'S', 'V' };
 
 // docs/ASSETS-AND-DATA.md §8.4's four encoder kinds. RAW_POOL/CHUNK_STORE are declared (the byte
 // layout names them) but not yet implemented - see this header's top-of-file scope note.
@@ -172,6 +179,8 @@ struct SaveDesc {
     u64                           data_hash;
     u64                           seed;
     u64                           tick;
+    u8                            build_id[32];             // docs/BUILD.md §5; zeroed if the caller has none yet
+    u8                            session_fingerprint[32];   // docs/BUILD.md §5; zeroed if the caller has none yet
 };
 
 // Encodes header + name table + one ArenaBlock per SAVE-flagged registry entry `desc` covers,
@@ -179,8 +188,11 @@ struct SaveDesc {
 // fsync -> rename, docs/PLATFORM.md §9.3 - the target is either the old content or the new
 // content, never torn). `scratch` backs the in-memory encode (sized by the caller; TL_FATAL on
 // overflow, a caller bug, never a partial file - the write only happens once encoding fully
-// succeeds). ERR_SAVE_TOO_MANY_ARENAS if the registry has a SNAPSHOT entry `arena_descs` does
-// not cover; ERR_SAVE_IO wraps a write_atomic failure.
+// succeeds). One block per `arena_descs` ENTRY (not per underlying registered arena - an ECS
+// column is three registry entries, docs/ECS.md §10.3, but one `encoder_write_column` call and
+// one block; `arena_descs` is the save's actual membership list, not "everything SNAPSHOT-
+// flagged"). ERR_SAVE_TOO_MANY_ARENAS if `arena_descs.count > MAX_ARENAS`; ERR_SAVE_IO wraps a
+// write_atomic failure.
 ErrCode save_write(const SaveDesc* desc, const PlatformApi* platform, StrView path,
                    VMemArena* scratch);
 
@@ -191,8 +203,16 @@ ErrCode save_write(const SaveDesc* desc, const PlatformApi* platform, StrView pa
 // SaveComponentMigration (by component name hash + the FILE's format_version) if one matches,
 // else encoder_read_rows/encoder_read_column with the component's `aliases` entry (empty span if
 // none registered) - ERR_SAVE_FIELD_KIND wraps ERR_ENC_FIELD_KIND. ECS_COLUMN rows re-add through
-// world_add_raw (the barrier's own liveness/duplicate checks apply - a save decoded onto a
-// non-empty World is the caller's contract, not this function's). Writes the decoded seed/tick
+// world_add_raw, which TL_CHECKs the target entity live and the component absent (docs/ECS.md
+// §4) - v1's ECS_COLUMN restore therefore assumes the caller's entities already exist with the
+// right identity (an in-session save/reload: add the component, save, remove it, reload). Cross-
+// session entity identity (spawning fresh entities for rows whose original Entity no longer
+// exists) has no consumer yet and is not this version's job - a save whose row count does not
+// match live, component-absent entities is the caller's TL_CHECK to hit, not a silent skip.
+// `world_add_raw` only RECORDS the command (docs/ECS.md §4) - the caller must call
+// `world_flush(desc->world)` (or run a phase barrier) after `save_read` returns before the
+// restored rows are visible to `world_get`/`world_column`.
+// Writes the decoded seed/tick
 // into `out_seed`/`out_tick`. Nothing is applied to `desc->world` until every block has decoded
 // successfully - a truncated or malformed file is refused with the World untouched
 // (docs/ASSETS-AND-DATA.md §5 "no silent partial loads").

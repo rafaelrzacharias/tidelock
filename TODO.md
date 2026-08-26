@@ -3274,6 +3274,35 @@ change a DECIDED design, `CLAUDE.md` rule 8).
   the resolution and ships complete; `data_compile`/`data_find_row`/`data_row` are `TL_FATAL`
   stubs until it resolves.
 
+## W3 assets+data — save v1 + gate allowlist note (2026-08-26, w3-assets-data)
+
+- **`tools/audit/includes.py`'s `SYS_ALLOW_DIRS` gained `"src/core": {"stb_image.h"}`** (cone
+  discipline: "your OWN entries in the shared gate files... tools/audit allowlists"), completing
+  a grant `BACKEND_HEADERS`'s `"stb_"` token already named `src/core` for but `SYS_ALLOW_DIRS`
+  never matched (the two gates check independently - `LESSONS.md`'s "a vendored lib needs BOTH"
+  class, here half already wired and half not). `core/loaders/image.cpp` needs it for
+  `stbi_load_from_memory` (declaration-only; the one real implementation TU is
+  `vendor/stb/stb_impl.c`, linked via the `stb` CMake target). Paired negative fixture added to
+  `tools/audit/selftest.py` (`src/render` still refused); `tools/audit/selftest.py` and
+  `tools/audit/includes.py --root .` both green.
+- **`save.h`/`save.cpp`'s write loop iterates `SaveDesc::arena_descs` directly, not the
+  `ArenaRegistry`** (revised after building it once the wrong way): an ECS column is THREE
+  registered arenas (dense/entity/pages, `docs/ECS.md` §10.3) but exactly one
+  `encoder_write_column` call and one save block, so a registry-driven loop triple-encoded it
+  the first time. `arena_descs` is the save's actual membership list (pages arenas are derived,
+  never saved).
+- **The NameTable ships empty (`name_table_len` 0)** - `save_write` `TL_CHECK`s no stored
+  component has a `K_StrId` field rather than encode one it cannot correctly decode: no shipped
+  component has one yet, and the real mechanism needs a decode-side StrId REMAP (the writer's and
+  reader's interners can assign one string different ids), which a scan-and-write half-measure
+  would silently get wrong. Deferred with the same "no real consumer yet" reasoning as
+  `SAVE_ENC_RAW_POOL`/`SAVE_ENC_CHUNK_STORE`.
+- **v1's `SAVE_ENC_ECS_COLUMN` restore assumes the caller's entities already exist** (`world_add_raw`
+  TL_CHECKs the target live and the component absent, `docs/ECS.md` §4) - an in-session save/
+  reload (add, save, remove, reload), not cross-session entity identity remapping, which has no
+  consumer yet either. `world_add_raw` only RECORDS; the caller must `world_flush` after
+  `save_read` before the restored rows are visible.
+
 ## Reserved (design complete, build on first consumer — `docs/RESERVED-SEAMS.md`)
 Audio · game UI (Luau) · spatial index · tilemap · nav/AI · frame animation · replay UI/cinematics ·
 modding (Luau profiles) · game-logic substrate · streaming/cook · SDL_GPU path · editor shell.
