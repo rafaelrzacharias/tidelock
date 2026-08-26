@@ -43,3 +43,9 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(sdl_ttf)
 
 add_subdirectory(imgui)
+
+add_subdirectory(enet)
+# ENet's own CMakeLists.txt uses directory-scoped include_directories(), which does not propagate
+# to a consumer outside that directory (unlike SDL3/SDL_ttf, which export modern PUBLIC/INTERFACE
+# target properties) - added here so enet_glue.cpp's #include <enet/enet.h> resolves.
+target_include_directories(enet PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/enet/include")

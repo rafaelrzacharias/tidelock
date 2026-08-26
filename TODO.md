@@ -608,6 +608,18 @@ E-2 needs no W2 decision but blocks real game wiring later.
       cycle allocates and frees through the pool. `tools/audit/includes.py`'s `SYS_ALLOW_DIRS`
       gains `"imgui.h"` for `src/vendor_glue` (its `BACKEND_HEADERS` entry already listed
       `src/vendor_glue`, from the SDL3 commit's batch edit).
+- [x] **ENet vendored** at `v1.3.18` (`vendor/enet`). Its own `CMakeLists.txt` exports no usable
+      include path for an external consumer (directory-scoped `include_directories()`, not a
+      target property) — `vendor/CMakeLists.txt` adds the missing
+      `target_include_directories(enet PUBLIC ...)`; see `LESSONS.md`. `pool_enet` (16 MB,
+      `docs/PLATFORM.md` §9.5) is its own dedicated pool, separate from `pool_vendor` — "owned by
+      net/" in the doc's wording means net/ decides pool_enet's init/shutdown LIFETIME once it
+      wires ENet in (out of this lane's file cone), not that the `pool_*` calls live outside
+      `src/vendor_glue/`; they do, per `docs/MEMORY.md` §8.6's grep rule, same as `pool_vendor`.
+      `enet_glue.{h,cpp}` wires `enet_initialize_with_callbacks` with `no_memory` → `TL_FATAL`
+      (an exhausted pool_enet budget is fatal, not recoverable). The test creates a real
+      `ENetHost` (no bind address, no socket traffic) to prove peer/channel allocations round-trip
+      through `pool_enet`.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**
