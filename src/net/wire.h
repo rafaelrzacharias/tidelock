@@ -707,3 +707,37 @@ constexpr u8  ARCHIVE_CH_FLAG_ESCAPE = 34u;
 constexpr u32 ARCHIVE_CH_COUNT      = 36u;
 static_assert(ARCHIVE_CH_POINTER_X == NET_FRAME_MAX_ACTIONS,
               "the action channels are 0..MAX_ACTIONS-1, so pointer_x starts at MAX_ACTIONS");
+
+// --- the column codec (docs/NETCODE.md §20.2.2 layout, §20.3(a) algorithm) --------------------
+// Declared here rather than in net_internal.h because the column IS the wire format and because
+// §20.1 scopes net_internal.h to net/*.cpp, which would put the codec out of reach of its own
+// tests. The implementation is net/encode.cpp.
+
+// The three bits docs/INPUT.md §1 defines in ActionState.flags (down, pressed, released). The
+// wire's rec byte carries exactly these; a frame whose flags have any other bit set is not a
+// frame this format can represent, and the encoder treats it as a BUG (TL_ASSERT), not as data.
+constexpr u8 WIRE_FLAG_BITS = 0x07u;
+
+// Bit 3 of the rec byte: an explicit value byte follows. Bits 4..7 must be zero - the decoder
+// refuses a rec byte with any of them set (docs/NETCODE.md §20.3(a)).
+constexpr u8 WIRE_REC_VALUE_FOLLOWS = 0x08u;
+constexpr u8 WIRE_REC_RESERVED_MASK = 0xF0u;
+
+// The value a rec byte implies when no value byte follows: docs/NETCODE.md §20.2.2's
+// value_follows = (value != (i8)(flags & 1)), i.e. a digital action's value tracks its down bit.
+constexpr i8 wire_implied_value(u8 flags) { return (i8)(flags & 1u); }
+
+// Encodes `n` frames as ONE self-contained column (docs/NETCODE.md §20.2.2): frame 0 delta-coded
+// against ZERO_FRAME, frame i against frame i-1, pointers as second differences. Writes into w;
+// overflowing w is the caller's budget bug (bytes.h TL_CHECKs it), not a data condition.
+// `frames` must hold n entries and every ActionState.flags must be within WIRE_FLAG_BITS
+// (asserted). n may be 0 - a keepalive's column is empty. Never runs inside a tick.
+void encode_column(ByteWriter* w, const WireFrame* frames, u32 n);
+
+// Decodes `frame_count` frames from r into out[], mirroring encode_column. Each decoded frame's
+// tick is SET to u32(base_tick + i) - the tick is never transmitted (docs/NETCODE.md §20.2.2).
+// Returns ERR_BYTES_TRUNCATED on a short column, ERR_NET_MALFORMED on a rec byte with a reserved
+// bit set or a `changed` bit at or past MAX_ACTIONS, ERR_NET_VARINT_OVERFLOW on a bad varint.
+// On any error out[] holds only decoded-or-zero frames and must not be acted on. `out` must hold
+// frame_count entries; frame_count may be 0. Never runs inside a tick.
+ErrCode decode_column(ByteReader* r, WireFrame* out, u32 frame_count, u64 base_tick);
