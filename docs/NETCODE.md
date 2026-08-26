@@ -2074,8 +2074,21 @@ under `matches/<session_nonce_hex16>/` with only `hot/` and `log/`.
 
 #### 20.2.9 Archive segment
 
+An archive FILE is one `ArchiveFileHeader` followed by its segments. The build and session
+identity is stated once, in that header; each segment names its file with a 4-byte `file_id`.
+(Ruled 2026-08-26: repeating `build_id` + `session_fingerprint` in all 360 segments of a
+30-minute session cost 23 KB of identical bytes, and the fixed 8-byte stream header another
+54 KB — together 60 KB of the 124 KB an early implementation measured, against §20.8's 80 KB
+criterion. Shrinking both took the same session to 64 KB.)
+
 ```cpp
-struct ArchiveSegmentHeader {    // 112 B
+struct ArchiveFileHeader {       // 72 B, one per archive file
+    u32 format_version;          //  0
+    u32 file_id;                 //  4  every segment in this file carries it
+    u8  build_id[32];            //  8
+    u8  session_fingerprint[32]; // 40
+};
+struct ArchiveSegmentHeader {    // 56 B
     u32 format_version;          //  0
     u32 max_actions;             //  4  MAX_ACTIONS at write
     u64 base_tick;               //  8
@@ -2084,22 +2097,37 @@ struct ArchiveSegmentHeader {    // 112 B
     u8  _pad0[3];                // 21
     u32 record_count;            // 24  total transition records over all streams
     u32 log_record_count;        // 28
-    u8  build_id[32];            // 32
-    u8  session_fingerprint[32]; // 64
-    u32 payload_bytes;           // 96
-    u32 payload_crc32;           // 100
-    u32 segment_seq;             // 104 monotonic per world/session
-    u32 header_crc32;            // 108 over bytes [0,108)
+    u32 file_id;                 // 32  the ArchiveFileHeader this segment belongs to
+    u32 payload_bytes;           // 36
+    u32 payload_crc32;           // 40
+    u32 segment_seq;             // 44  monotonic per world/session
+    u32 header_crc32;            // 48  over bytes [0,48)
+    u8  _pad1[4];                // 52  the struct aligns to 8; outside the crc'd span
 };
-struct ArchiveStreamHeader {     // 8 B
-    u32 record_count;            //  0
-    u8  channel;                 //  4  0..31 action · 32 pointer_x · 33 pointer_y · 34 flag escape
-    u8  slot;                    //  5
-    u16 _pad0;                   //  6
-};
-static_assert(sizeof(ArchiveSegmentHeader) == 112 && offsetof(ArchiveSegmentHeader, build_id) == 32
-           && offsetof(ArchiveSegmentHeader, header_crc32) == 108 && sizeof(ArchiveStreamHeader) == 8);
-// Segment = header + for s ascending in slot_mask: for ch in 0..35: ArchiveStreamHeader + records
+static_assert(sizeof(ArchiveFileHeader) == 72 && offsetof(ArchiveFileHeader, build_id) == 8);
+static_assert(sizeof(ArchiveSegmentHeader) == 56 && offsetof(ArchiveSegmentHeader, file_id) == 32
+           && offsetof(ArchiveSegmentHeader, header_crc32) == 48);
+```
+
+A stream header is **two canonical uvarints**, not a fixed struct:
+
+```
+  uvarint record_count
+  uvarint key            key = slot * 35 + channel
+                         channel: 0..31 action · 32 pointer_x · 33 pointer_y · 34 flag escape
+```
+
+35 channels exist, so the key is slot-major over 35 and ascending key means ascending
+`(slot, channel)` — the order a segment's streams are already required to be in. (A single
+packed byte cannot carry it: slot needs 3 bits and channel 6.) A stream with
+`record_count == 0` is never written and is refused on read: **empty streams are OMITTED**, so a
+segment carries only the streams that have records, and the stream region is read to where the
+`LogRecord` array begins, which `payload_bytes` and `log_record_count` locate.
+
+```
+// File    = ArchiveFileHeader + ArchiveSegment[]
+// Segment = ArchiveSegmentHeader
+//         + for each NON-EMPTY stream, ascending by (slot, channel): stream header + records
 //         + LogRecord[log_record_count] sorted by (effective_tick, origin_slot, seq)
 ```
 

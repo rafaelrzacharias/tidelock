@@ -593,6 +593,12 @@ constexpr i32 wire_wrap_sub_i32(i32 a, i32 b) { return (i32)((u32)a - (u32)b); }
     XO(custody_pubkey, 120)
 
 // ArchiveSegmentHeader - docs/NETCODE.md §20.2.9: one archive segment's header
+// The world/session identity (build_id, session_fingerprint) is NOT here: it is stated once per
+// archive FILE in ArchiveFileHeader below, and a segment names its file with a 4-byte file_id.
+// Repeating 64 bytes in all 360 segments of a 30-minute session cost 23 KB of identical bytes
+// (RR ruling 2026-08-26, option A). The struct carries a u64, so it aligns to 8 and the four
+// bytes after header_crc32 are a named _pad1 rather than an implicit gap - they sit outside the
+// crc'd span [0,48) and are refused if nonzero, like every other pad here.
 #define TL_FIELDS_ArchiveSegmentHeader(X, XA, XH) \
     X(u32, max_actions) \
     X(u64, base_tick) \
@@ -601,12 +607,12 @@ constexpr i32 wire_wrap_sub_i32(i32 a, i32 b) { return (i32)((u32)a - (u32)b); }
     XA(u8, _pad0, 3) \
     X(u32, record_count) \
     X(u32, log_record_count) \
-    XA(u8, build_id, 32) \
-    XA(u8, session_fingerprint, 32) \
+    X(u32, file_id) \
     X(u32, payload_bytes) \
     X(u32, payload_crc32) \
     X(u32, segment_seq) \
-    X(u32, header_crc32)
+    X(u32, header_crc32) \
+    XA(u8, _pad1, 4)
 #define TL_OFFSETS_ArchiveSegmentHeader(XO) \
     XO(max_actions, 4) \
     XO(base_tick, 8) \
@@ -615,12 +621,24 @@ constexpr i32 wire_wrap_sub_i32(i32 a, i32 b) { return (i32)((u32)a - (u32)b); }
     XO(_pad0, 21) \
     XO(record_count, 24) \
     XO(log_record_count, 28) \
-    XO(build_id, 32) \
-    XO(session_fingerprint, 64) \
-    XO(payload_bytes, 96) \
-    XO(payload_crc32, 100) \
-    XO(segment_seq, 104) \
-    XO(header_crc32, 108)
+    XO(file_id, 32) \
+    XO(payload_bytes, 36) \
+    XO(payload_crc32, 40) \
+    XO(segment_seq, 44) \
+    XO(header_crc32, 48) \
+    XO(_pad1, 52)
+
+// ArchiveFileHeader - docs/NETCODE.md §20.2.9: one per archive file, ahead of its segments.
+// Carries the identity every segment used to repeat. file_id ties the segments to it so a
+// segment can never be read against the wrong file's identity.
+#define TL_FIELDS_ArchiveFileHeader(X, XA, XH) \
+    X(u32, file_id) \
+    XA(u8, build_id, 32) \
+    XA(u8, session_fingerprint, 32)
+#define TL_OFFSETS_ArchiveFileHeader(XO) \
+    XO(file_id, 4) \
+    XO(build_id, 8) \
+    XO(session_fingerprint, 40)
 
 // HashTraceHeader - docs/NETCODE.md §20.2.9: the RecordedInput file's hash-trace header
 #define TL_FIELDS_HashTraceHeader(X, XA, XH) \
@@ -663,7 +681,8 @@ constexpr i32 wire_wrap_sub_i32(i32 a, i32 b) { return (i32)((u32)a - (u32)b); }
     F(CheckpointHeader, 192) \
     F(ChainGenesis, 56) \
     F(ChainEntry, 152) \
-    F(ArchiveSegmentHeader, 112) \
+    F(ArchiveSegmentHeader, 56) \
+    F(ArchiveFileHeader, 72) \
     F(HashTraceHeader, 24)
 
 #define TL_NET_DECLARE_WIRE_STRUCT(Name, Size)                                                 \
@@ -692,17 +711,44 @@ struct ChainRecord {
 static_assert(sizeof(ChainRecord) == 184u, "docs/NETCODE.md §20.2.8");
 static_assert(offsetof(ChainRecord, hash) == 152u, "docs/NETCODE.md §20.2.8");
 
-// One archive stream's header: a (slot, channel) pair's record count (docs/NETCODE.md §20.2.9).
-// An element inside ArchiveSegmentHeader's payload, which carries the version and the crc32.
+// Archive stream channels (docs/NETCODE.md §20.2.9): 0..31 are the actions, then the three
+// non-action streams. 36 streams per slot, written in ascending channel order.
+constexpr u8  ARCHIVE_CH_POINTER_X  = 32u;
+constexpr u8  ARCHIVE_CH_POINTER_Y  = 33u;
+constexpr u8  ARCHIVE_CH_FLAG_ESCAPE = 34u;
+// docs/NETCODE.md §20.2.9's layout line says "for ch in 0..35" and "36 streams per slot", but it
+// defines 35 channels: 0..31 action, 32, 33, 34. ARCHIVE_CH_COUNT keeps the doc's figure because
+// the encoder's size budget is stated in it; ARCHIVE_CH_MAX is the real bound a decoder checks,
+// and channel 35 is refused rather than aliased onto the escape channel. Filed in TODO.md.
+constexpr u32 ARCHIVE_CH_COUNT      = 36u;
+constexpr u8  ARCHIVE_CH_MAX        = ARCHIVE_CH_FLAG_ESCAPE;
+static_assert(ARCHIVE_CH_POINTER_X == NET_FRAME_MAX_ACTIONS,
+              "the action channels are 0..MAX_ACTIONS-1, so pointer_x starts at MAX_ACTIONS");
+
+// One archive stream's header, in DECODED form. Its wire form is two canonical uvarints -
+//   uvarint(record_count), uvarint(slot * ARCHIVE_CH_REAL_COUNT + channel)
+// - typically 2 bytes against the 8 a fixed struct cost, which over 6,880 streams in a 30-minute
+// 3-peer session is 40 KB (RR ruling 2026-08-26, option A).
+//
+// The ruling spelled the key `u8 (slot << 5 | channel)`. That cannot be built: slot needs 3 bits
+// and channel 0..34 needs 6, which is 9 bits, so channels 32/33/34 have no encoding under it.
+// The multiply-and-add key holds the same intent (one small canonical number, slot-major so the
+// ascending-key rule still means ascending (slot, channel)) and does fit. Filed in TODO.md.
 struct ArchiveStreamHeader {
-    u32 record_count;   // 0
-    u8  channel;        // 4  0..31 action, 32 pointer_x, 33 pointer_y, 34 flag escape
-    u8  slot;           // 5
-    u16 _pad0;          // 6
+    u32 record_count;
+    u8  channel;        // 0..31 action, 32 pointer_x, 33 pointer_y, 34 flag escape
+    u8  slot;
+    u16 _pad0;
 };
-static_assert(sizeof(ArchiveStreamHeader) == 8u, "docs/NETCODE.md §20.2.9");
-static_assert(offsetof(ArchiveStreamHeader, channel) == 4u, "docs/NETCODE.md §20.2.9");
-static_assert(offsetof(ArchiveStreamHeader, slot) == 5u, "docs/NETCODE.md §20.2.9");
+
+// The number of real channels per slot: 0..ARCHIVE_CH_MAX inclusive. The stream key's radix.
+constexpr u32 ARCHIVE_CH_REAL_COUNT = (u32)ARCHIVE_CH_MAX + 1u;   // 35
+
+// The stream key is slot-major, so ascending key == ascending (slot, channel) - the ordering the
+// decoder already required, now carried by one number.
+constexpr u32 archive_stream_key(u8 slot, u8 channel) {
+    return (u32)slot * ARCHIVE_CH_REAL_COUNT + (u32)channel;
+}
 
 // --- the kind enums (docs/NETCODE.md §20.2's `kind` field comments) ---------------------------
 // Named so the encoder, the archive and the tests cannot disagree about a magic number. Values
@@ -725,19 +771,6 @@ enum BulkKind : u8 {
     BK_SNAPSHOT_CHUNK = 5, BK_LOG_SEGMENT = 6, BK_LOG_REQUEST = 7, BK_ACK = 8
 };
 
-// Archive stream channels (docs/NETCODE.md §20.2.9): 0..31 are the actions, then the three
-// non-action streams. 36 streams per slot, written in ascending channel order.
-constexpr u8  ARCHIVE_CH_POINTER_X  = 32u;
-constexpr u8  ARCHIVE_CH_POINTER_Y  = 33u;
-constexpr u8  ARCHIVE_CH_FLAG_ESCAPE = 34u;
-// docs/NETCODE.md §20.2.9's layout line says "for ch in 0..35" and "36 streams per slot", but it
-// defines 35 channels: 0..31 action, 32, 33, 34. ARCHIVE_CH_COUNT keeps the doc's figure because
-// the encoder's size budget is stated in it; ARCHIVE_CH_MAX is the real bound a decoder checks,
-// and channel 35 is refused rather than aliased onto the escape channel. Filed in TODO.md.
-constexpr u32 ARCHIVE_CH_COUNT      = 36u;
-constexpr u8  ARCHIVE_CH_MAX        = ARCHIVE_CH_FLAG_ESCAPE;
-static_assert(ARCHIVE_CH_POINTER_X == NET_FRAME_MAX_ACTIONS,
-              "the action channels are 0..MAX_ACTIONS-1, so pointer_x starts at MAX_ACTIONS");
 
 // --- the column codec (docs/NETCODE.md §20.2.2 layout, §20.3(a) algorithm) --------------------
 // Declared here rather than in net_internal.h because the column IS the wire format and because
@@ -799,7 +832,18 @@ u64 archive_segment_max_bytes(u32 slot_count, u32 tick_count, u32 log_record_cou
 u64 archive_encode_segment(ByteWriter* w, u64 base_tick, u32 tick_count,
                            const ArchiveInput* inputs, u32 slot_count,
                            const LogRecord* records, u32 log_record_count, u32 segment_seq,
-                           const u8 build_id[32], const u8 session_fingerprint[32]);
+                           u32 file_id);
+
+// Writes the archive FILE header that precedes a file's segments (docs/NETCODE.md §20.2.9): the
+// build and session identity, stated once, plus the file_id every segment in the file carries.
+// Returns the bytes written. Never runs inside a tick.
+u64 archive_write_file_header(ByteWriter* w, u32 file_id, const u8 build_id[32],
+                              const u8 session_fingerprint[32]);
+
+// Reads one back. ERR_NET_VERSION for a version with no reader, ERR_WIRE_PAD_NONZERO / the
+// sticky truncation code otherwise. A segment whose file_id differs from the file header's
+// belongs to another file and must not be read against this identity - the caller compares.
+ErrCode archive_read_file_header(ByteReader* r, ArchiveFileHeader* out);
 
 // Decodes one segment written by archive_encode_segment. `out_frames` must hold
 // MAX_PEERS * tick_count frames, indexed [slot * tick_count + i]; slots outside the segment's

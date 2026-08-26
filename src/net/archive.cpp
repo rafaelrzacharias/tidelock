@@ -29,12 +29,12 @@
 // The header is written with both zeroed, the payload is appended, and the two are then patched
 // in place - a crc cannot be computed over bytes that have not been written yet.
 enum : u32 {
-    AR_HDR_BYTES        = (u32)sizeof(ArchiveSegmentHeader),   // 112
-    AR_PAYLOAD_CRC_OFF  = 100u,
-    AR_HEADER_CRC_OFF   = 108u,
-    AR_HEADER_CRC_SPAN  = 108u,                                 // crc32 over bytes [0,108)
+    AR_HDR_BYTES        = (u32)sizeof(ArchiveSegmentHeader),   // 52 since the option-A ruling
+    AR_PAYLOAD_CRC_OFF  = 40u,
+    AR_HEADER_CRC_OFF   = 48u,
+    AR_HEADER_CRC_SPAN  = 48u,                                  // crc32 over bytes [0,48)
     AR_RECORD_COUNT_OFF = 24u,
-    AR_PAYLOAD_BYTES_OFF= 96u,
+    AR_PAYLOAD_BYTES_OFF= 36u,
 };
 // The four offsets this file patches by hand, pinned to the struct the reflection table owns -
 // "one fact, one home" applies to a literal in a memcpy-free byte store just as much as to a doc.
@@ -66,20 +66,23 @@ static u8 ar_derived_flags(u8 down, u8 down_prev) {
 // Writes an ArchiveStreamHeader field by field, low byte first (never a memcpy of the struct -
 // docs/CPP-SUBSET.md §9 R-2).
 static void ar_put_stream_header(ByteWriter* w, u32 record_count, u8 channel, u8 slot) {
-    bw_put_u32(w, record_count);
-    bw_put_u8(w, channel);
-    bw_put_u8(w, slot);
-    bw_put_u16(w, 0u);
+    wire_put_uvarint(w, record_count);
+    wire_put_uvarint(w, archive_stream_key(slot, channel));
 }
 
 // Reads one back; refuses a nonzero pad and an out-of-range channel or slot.
 static ErrCode ar_get_stream_header(ByteReader* r, ArchiveStreamHeader* h) {
-    h->record_count = br_get_u32(r);
-    h->channel      = br_get_u8(r);
-    h->slot         = br_get_u8(r);
-    h->_pad0        = br_get_u16(r);
-    if (!br_ok(r)) { return ERR_BYTES_TRUNCATED; }
-    if (h->_pad0 != 0u) { return ERR_WIRE_PAD_NONZERO; }
+    h->_pad0 = 0u;
+    ErrCode e = wire_get_uvarint(r, &h->record_count);
+    if (e != ERR_OK) { return e; }
+    u32 key = 0u;
+    e = wire_get_uvarint(r, &key);
+    if (e != ERR_OK) { return e; }
+    // The key is slot-major over ARCHIVE_CH_REAL_COUNT, so a key past the last slot's last
+    // channel names no stream and is refused before it is split.
+    if (key >= (u32)MAX_PEERS * ARCHIVE_CH_REAL_COUNT) { return ERR_NET_MALFORMED; }
+    h->slot    = (u8)(key / ARCHIVE_CH_REAL_COUNT);
+    h->channel = (u8)(key % ARCHIVE_CH_REAL_COUNT);
     // docs/NETCODE.md §20.2.9 defines 35 channels: 0..31 action, 32 pointer_x, 33 pointer_y,
     // 34 flag escape. Its layout line says "for ch in 0..35" and ARCHIVE_CH_COUNT follows it, so
     // a bound of >= ARCHIVE_CH_COUNT would leave 35 a VALID channel byte that the dispatch's
@@ -94,7 +97,8 @@ u64 archive_segment_max_bytes(u32 slot_count, u32 tick_count, u32 log_record_cou
     // Worst case per stream: a record at every tick, each spelled at full varint width
     // (5 bytes of delta_tick + 5 of value). The escape channel can carry MAX_ACTIONS records per
     // tick, so it is budgeted separately rather than folded into the per-channel figure.
-    const u64 hdr = (u64)sizeof(ArchiveStreamHeader);
+    // A stream header is two canonical uvarints: at most 5 bytes each.
+    const u64 hdr = 2ull * (u64)WIRE_UVARINT_MAX_BYTES;
     const u64 held = hdr + (u64)tick_count * 10ull;
     const u64 escape = hdr + (u64)tick_count * (u64)NET_FRAME_MAX_ACTIONS * 10ull;
     const u64 per_slot = (u64)(NET_FRAME_MAX_ACTIONS + 2u) * held + escape;
@@ -223,11 +227,10 @@ static void ar_check_frames_representable(const WireFrame* frames, u32 tick_coun
 u64 archive_encode_segment(ByteWriter* w, u64 base_tick, u32 tick_count,
                            const ArchiveInput* inputs, u32 slot_count,
                            const LogRecord* records, u32 log_record_count, u32 segment_seq,
-                           const u8 build_id[32], const u8 session_fingerprint[32]) {
+                           u32 file_id) {
     TL_ASSERT(w != nullptr);
     TL_ASSERT(inputs != nullptr || slot_count == 0u);
     TL_ASSERT(records != nullptr || log_record_count == 0u);
-    TL_ASSERT(build_id != nullptr && session_fingerprint != nullptr);
     TL_ASSERT(slot_count <= MAX_PEERS);
 
     const u64 start = w->len;
@@ -291,12 +294,15 @@ u64 archive_encode_segment(ByteWriter* w, u64 base_tick, u32 tick_count,
     h._pad0[0] = h._pad0[1] = h._pad0[2] = 0u;
     h.record_count        = 0u;          // filled after the streams are counted
     h.log_record_count    = log_record_count;
-    for (u32 i = 0; i < 32u; ++i) { h.build_id[i] = build_id[i]; }
-    for (u32 i = 0; i < 32u; ++i) { h.session_fingerprint[i] = session_fingerprint[i]; }
+    h.file_id             = file_id;
     h.payload_bytes       = 0u;
     h.payload_crc32       = 0u;
     h.segment_seq         = segment_seq;
     h.header_crc32        = 0u;
+    // Named padding is WRITTEN, so it must be set: an uninitialized _pad1 puts stack bytes on
+    // the wire, which the decoder then refuses as a nonzero pad - intermittently, because a
+    // zeroed stack hides it. Found by the archive mutation fuzz's re-encode comparison.
+    h._pad1[0] = h._pad1[1] = h._pad1[2] = h._pad1[3] = 0u;
     wire_write_ArchiveSegmentHeader(w, &h);
     TL_CHECK(w->len - start == (u64)AR_HDR_BYTES);
 
@@ -660,4 +666,24 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
         return ERR_NET_MALFORMED;
     }
     return ERR_OK;
+}
+
+u64 archive_write_file_header(ByteWriter* w, u32 file_id, const u8 build_id[32],
+                              const u8 session_fingerprint[32]) {
+    TL_ASSERT(w != nullptr && build_id != nullptr && session_fingerprint != nullptr);
+    const u64 start = w->len;
+    ArchiveFileHeader h;
+    h.format_version = NET_FORMAT_VERSION;
+    h.file_id = file_id;
+    for (u32 i = 0; i < 32u; ++i) { h.build_id[i] = build_id[i]; }
+    for (u32 i = 0; i < 32u; ++i) { h.session_fingerprint[i] = session_fingerprint[i]; }
+    wire_write_ArchiveFileHeader(w, &h);
+    return w->len - start;
+}
+
+ErrCode archive_read_file_header(ByteReader* r, ArchiveFileHeader* out) {
+    TL_ASSERT(r != nullptr && out != nullptr);
+    const ErrCode e = wire_read_ArchiveFileHeader(r, out);
+    if (e != ERR_OK) { return e; }
+    return wire_check_version(out->format_version);
 }

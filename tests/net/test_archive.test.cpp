@@ -21,6 +21,33 @@ enum : u32 {
     AR_SIZE_PEERS    = 3u,        // T2's "30-min synthetic 3-peer"
 };
 
+// One file id for every fixture in this file: segments name their file, they no longer repeat
+// the build and session identity (RR ruling 2026-08-26, option A).
+enum : u32 { AR_FILE_ID = 0xFEED0001u };
+
+// The segment header's geometry, named once rather than spelled as literals at a dozen call
+// sites - the option-A ruling moved every one of them and each literal was a separate edit.
+enum : u32 {
+    AR_T_HDR       = (u32)sizeof(ArchiveSegmentHeader),   // 56
+    AR_T_TICKS_OFF = 16u,
+    AR_T_MASK_OFF  = 20u,
+    AR_T_RECS_OFF  = 24u,
+    AR_T_LOGN_OFF  = 28u,
+    AR_T_PBYTES_OFF= 36u,
+    AR_T_PCRC_OFF  = 40u,
+    AR_T_HCRC_OFF  = 48u,
+    AR_T_HCRC_SPAN = 48u,
+};
+static_assert(AR_T_HDR == 56u, "the option-A ruling put the segment header at 56 bytes");
+
+// Repairs both checksums after a forger has edited the bytes.
+static void ar_repair_crcs(u8* seg, u64 n) {
+    const u32 pcrc = crc32(seg + AR_T_HDR, n - AR_T_HDR);
+    for (u32 i = 0; i < 4u; ++i) { seg[AR_T_PCRC_OFF + i] = (u8)((pcrc >> (8u * i)) & 0xFFu); }
+    const u32 hcrc = crc32(seg, AR_T_HCRC_SPAN);
+    for (u32 i = 0; i < 4u; ++i) { seg[AR_T_HCRC_OFF + i] = (u8)((hcrc >> (8u * i)) & 0xFFu); }
+}
+
 static void ar_ids(u8 build_id[32], u8 fingerprint[32]) {
     for (u32 i = 0; i < 32u; ++i) { build_id[i] = (u8)(i + 1u); fingerprint[i] = (u8)(0x40u + i); }
 }
@@ -28,8 +55,6 @@ static void ar_ids(u8 build_id[32], u8 fingerprint[32]) {
 // Encode `slot_count` slots' frames as one segment into `buf`; returns the byte count.
 static u64 ar_encode(u8* buf, u64 cap, const WireFrame* per_slot, u32 slot_count, u32 tick_count,
                      const LogRecord* records, u32 record_count, u32 segment_seq) {
-    u8 build_id[32], fingerprint[32];
-    ar_ids(build_id, fingerprint);
     ArchiveInput inputs[MAX_PEERS];
     for (u32 s = 0; s < slot_count; ++s) {
         inputs[s].frames = per_slot + (u64)s * tick_count;
@@ -39,7 +64,7 @@ static u64 ar_encode(u8* buf, u64 cap, const WireFrame* per_slot, u32 slot_count
     ByteWriter w;
     bw_init(&w, buf, cap);
     return archive_encode_segment(&w, 1000u, tick_count, inputs, slot_count,
-                                  records, record_count, segment_seq, build_id, fingerprint);
+                                  records, record_count, segment_seq, AR_FILE_ID);
 }
 
 // A synthetic peer's frame stream: mostly still, with occasional presses, an analog axis that
@@ -324,22 +349,19 @@ TL_TEST(archive_thirty_minute_three_peer_session_size, "net,archive,size,slow") 
         TL_ASSERT_EQ(archive_decode_segment(&r, &h, got, AR_SEG_TICKS, none, 1u, &rc), ERR_OK);
     }
 
-    // MEASURED, not asserted against a target this format cannot currently reach. The Phase 1
-    // criterion is < 80 KB (docs/NETCODE.md §20.8, §20.6 T2); this encoding lands at ~124 KB and
-    // the reason is structural, not fixture tuning: 75% of the bytes are framing (32% segment
-    // headers at the CHECKPOINT_HOT_TICKS cadence, 43% stream headers), and this fixture already
-    // produces FEWER transitions per peer than §13.3's own 5,000-8,000 model, so a more
-    // realistic peer makes it larger. Closing the gap needs a format ruling - filed in TODO.md.
-    //
-    // Until that ruling, this row pins the current number so a REGRESSION still fails, and the
-    // gap itself is carried by the ruling request rather than hidden by a loosened threshold.
-    const u64 measured_ceiling = 130u * 1024u;   // current 124.1 KB + headroom for fixture drift
-    TL_EXPECT_LT(total, measured_ceiling);
-    TL_EXPECT_GT(total, (u64)(60u * 1024u));     // a sudden drop means the fixture stopped working
+    // THE PHASE 1 GATE (docs/NETCODE.md §20.8, §20.6 T2): a 30-minute synthetic 3-peer archive
+    // under 80 KB. Asserted, not merely measured - the option-A framing ruling (2026-08-26) took
+    // this from 124.1 KB to 64.1 KB by shrinking the stream header to two uvarints and moving
+    // the build/session identity out of every segment into one file header.
+    TL_EXPECT_LT(total, (u64)(80u * 1024u));
+    // A floor as well as a ceiling: a sudden collapse means the fixture stopped producing input,
+    // not that the encoder got better. The 30-min 8-peer figure docs/NETCODE.md §13.4 targets is
+    // ~165 KB, so three peers landing near 60 KB is the shape the doc predicts.
+    TL_EXPECT_GT(total, (u64)(40u * 1024u));
     // The measurement itself, printed so the phase gate can copy it into LESSONS.md with the
     // build_id (docs/NETCODE.md §20.8). tests/ may use printf-class io (docs/TESTING.md §8 R-2).
-    fprintf(stderr, "archive: 30-min 3-peer = %llu bytes (%.1f KB) in %u segments; "
-                    "Phase 1 target is < 80 KB - see TODO.md RR on segment framing\n",
+    fprintf(stderr, "archive: 30-min 3-peer = %llu bytes (%.1f KB) in %u segments - "
+                    "Phase 1 gate is < 80 KB\n",
             (unsigned long long)total, (double)total / 1024.0, segments);
     api.release(api.ctx, arena.base, arena.reserved);
 }
@@ -354,11 +376,8 @@ TL_TEST(archive_thirty_minute_three_peer_session_size, "net,archive,size,slow") 
 // compared byte for byte with what was consumed.
 static u64 ar_reencode(u8* out, u64 cap, const ArchiveSegmentHeader* h, const WireFrame* frames,
                        const LogRecord* recs, u32 rec_count) {
-    // The identity fields come from the DECODED header, not from the fixture: they are decoded
-    // content like everything else, so canonicality means re-encoding reproduces what was read.
-    // (They are informational - a segment from another build must stay READABLE, since replaying
-    // an old archive is the point of keeping one. §15.1's build_id/fingerprint refusal is the
-    // handshake's job, not the archive reader's.)
+    // file_id comes from the DECODED header: it is decoded content like everything else, so
+    // canonicality means re-encoding reproduces what was read.
     ArchiveInput in[MAX_PEERS];
     u32 n = 0;
     for (u32 s = 0; s < MAX_PEERS; ++s) {
@@ -371,7 +390,7 @@ static u64 ar_reencode(u8* out, u64 cap, const ArchiveSegmentHeader* h, const Wi
     ByteWriter w;
     bw_init(&w, out, cap);
     return archive_encode_segment(&w, h->base_tick, h->tick_count, in, n, recs, rec_count,
-                                  h->segment_seq, h->build_id, h->session_fingerprint);
+                                  h->segment_seq, h->file_id);
 }
 
 // The body of the mutation property. `structural` adds whole-stream edits (delete, duplicate,
@@ -429,13 +448,10 @@ static void ar_fuzz_cases(TestCtx* t, u64 seed_base, u32 cases, bool structural)
                || (lr[i - 1].effective_tick == lr[i].effective_tick
                    && lr[i - 1].origin_slot < lr[i].origin_slot))) { lr_count = i; break; }
         }
-        u8 build_id[32], fingerprint[32];
-        ar_ids(build_id, fingerprint);
         ByteWriter w;
         bw_init(&w, buf, cap);
-        u64 n = archive_encode_segment(&w, 1000u, ticks, in, slots, lr, lr_count, c,
-                                       build_id, fingerprint);
-        TL_ASSERT_GE(n, (u64)112u);
+        u64 n = archive_encode_segment(&w, 1000u, ticks, in, slots, lr, lr_count, c, AR_FILE_ID);
+        TL_ASSERT_GE(n, (u64)AR_T_HDR);
 
         if (!structural || (seed & 1u) == 0u) {
             // One to three bit flips anywhere, header included.
@@ -448,21 +464,18 @@ static void ar_fuzz_cases(TestCtx* t, u64 seed_base, u32 cases, bool structural)
             // Structural: widen slot_mask, or truncate the stream region, or duplicate a chunk.
             const u32 pick = (u32)((seed >> 24) % 3u);
             if (pick == 0u) {
-                buf[20] = (u8)(buf[20] | (u8)(1u << ((seed >> 32) % MAX_PEERS)));
-            } else if (pick == 1u && n > 120u) {
-                n -= 1u + (nt_mix64(seed, 7u) % 8u) % (n - 113u);
-            } else if (n + 8u <= cap && n > 120u) {
-                for (u32 k = 0; k < 8u; ++k) { buf[n + k] = buf[112u + k]; }
+                buf[AR_T_MASK_OFF] = (u8)(buf[AR_T_MASK_OFF] | (u8)(1u << ((seed >> 32) % MAX_PEERS)));
+            } else if (pick == 1u && n > (u64)AR_T_HDR + 8u) {
+                n -= 1u + (nt_mix64(seed, 7u) % 8u) % (n - (u64)AR_T_HDR - 1u);
+            } else if (n + 8u <= cap && n > (u64)AR_T_HDR + 8u) {
+                for (u32 k = 0; k < 8u; ++k) { buf[n + k] = buf[AR_T_HDR + k]; }
                 n += 8u;
             }
         }
         // payload_bytes must agree with the length or the decoder rejects on that alone.
-        const u32 pb = (u32)(n - 112u);
-        for (u32 i = 0; i < 4u; ++i) { buf[96u + i] = (u8)((pb >> (8u * i)) & 0xFFu); }
-        const u32 pcrc = crc32(buf + 112u, n - 112u);
-        for (u32 i = 0; i < 4u; ++i) { buf[100u + i] = (u8)((pcrc >> (8u * i)) & 0xFFu); }
-        const u32 hcrc = crc32(buf, 108u);
-        for (u32 i = 0; i < 4u; ++i) { buf[108u + i] = (u8)((hcrc >> (8u * i)) & 0xFFu); }
+        const u32 pb = (u32)(n - AR_T_HDR);
+        for (u32 i = 0; i < 4u; ++i) { buf[AR_T_PBYTES_OFF + i] = (u8)((pb >> (8u*i)) & 0xFFu); }
+        ar_repair_crcs(buf, n);
 
         ArchiveSegmentHeader h = {};
         LogRecord out_lr[8] = {};
@@ -506,10 +519,11 @@ TL_TEST(archive_hand_written_segment_decodes_to_known_frames, "net,archive,golde
     const u32 ticks = 2u;
     u8 seg[512];
     for (u32 i = 0; i < sizeof(seg); ++i) { seg[i] = 0u; }
-    // --- header, field by field, little-endian (docs/NETCODE.md §20.2.9) ---
+    // --- header, field by field, little-endian (docs/NETCODE.md §20.2.9 as amended) ---
     u32 o = 0;
     auto put32 = [&](u32 v) { for (u32 i = 0; i < 4u; ++i) { seg[o + i] = (u8)((v >> (8u*i)) & 0xFFu); } o += 4u; };
     auto put64 = [&](u64 v) { for (u32 i = 0; i < 8u; ++i) { seg[o + i] = (u8)((v >> (8u*i)) & 0xFFu); } o += 8u; };
+    auto putvar = [&](u32 v) { while (v >= 0x80u) { seg[o++] = (u8)(v | 0x80u); v >>= 7; } seg[o++] = (u8)v; };
     put32(NET_FORMAT_VERSION);            //  0 format_version
     put32(NET_FRAME_MAX_ACTIONS);         //  4 max_actions
     put64(1000u);                         //  8 base_tick
@@ -517,39 +531,35 @@ TL_TEST(archive_hand_written_segment_decodes_to_known_frames, "net,archive,golde
     seg[20] = 0x01u; o = 24u;             // 20 slot_mask = slot 0; 21..23 _pad0
     put32(5u);                            // 24 record_count: 1 action + 2 ptr_x + 1 ptr_y + 1 escape
     put32(0u);                            // 28 log_record_count
-    for (u32 i = 0; i < 32u; ++i) { seg[32u + i] = (u8)(i + 1u); }      // 32 build_id
-    for (u32 i = 0; i < 32u; ++i) { seg[64u + i] = (u8)(0x40u + i); }   // 64 session_fingerprint
-    o = 96u;
-    put32(0u);                            // 96 payload_bytes  (patched below)
-    put32(0u);                            // 100 payload_crc32 (patched below)
-    put32(0u);                            // 104 segment_seq
-    put32(0u);                            // 108 header_crc32  (patched below)
-    o = 112u;
+    put32(AR_FILE_ID);                    // 32 file_id - the identity lives in the FILE header
+    put32(0u);                            // 36 payload_bytes  (patched below)
+    put32(0u);                            // 40 payload_crc32  (patched below)
+    put32(0u);                            // 44 segment_seq
+    put32(0u);                            // 48 header_crc32   (patched below)
+    o = AR_T_HDR;                         // 52..55 _pad1, already zero
     const u32 payload_start = o;
 
-    // --- stream: slot 0, channel 0 (action 0): one record, tick 0, word = value<<1|down ---
-    put32(1u); seg[o] = 0u; seg[o+1] = 0u; seg[o+2] = 0u; seg[o+3] = 0u; o += 4u;  // hdr
+    // Each stream header is two canonical uvarints: record_count, then slot*35 + channel.
+    // --- slot 0, channel 0 (action 0): one record, tick 0, word = value<<1|down ---
+    putvar(1u); putvar(archive_stream_key(0u, 0u));
     seg[o++] = 0x00u;                     // delta_tick 0
     seg[o++] = 0x03u;                     // uvarint(value 1 << 1 | down 1) = 3
-    // --- stream: slot 0, channel 32 (pointer_x): absolute 5, then velocity +2 at tick 1 ---
-    put32(2u); seg[o] = 32u; seg[o+1] = 0u; seg[o+2] = 0u; seg[o+3] = 0u; o += 4u;
+    // --- slot 0, channel 32 (pointer_x): absolute 5, then velocity +2 at tick 1 ---
+    putvar(2u); putvar(archive_stream_key(0u, ARCHIVE_CH_POINTER_X));
     seg[o++] = 0x00u; seg[o++] = 0x0Au;   // delta 0, svarint(5)  = zigzag 10
     seg[o++] = 0x01u; seg[o++] = 0x04u;   // delta 1, svarint(2)  = zigzag 4
-    // --- stream: slot 0, channel 33 (pointer_y): absolute -3, no velocity records ---
-    put32(1u); seg[o] = 33u; seg[o+1] = 0u; seg[o+2] = 0u; seg[o+3] = 0u; o += 4u;
+    // --- slot 0, channel 33 (pointer_y): absolute -3, no velocity records ---
+    putvar(1u); putvar(archive_stream_key(0u, ARCHIVE_CH_POINTER_Y));
     seg[o++] = 0x00u; seg[o++] = 0x05u;   // delta 0, svarint(-3) = zigzag 5
-    // --- stream: slot 0, channel 34 (escape): tick 0's derived flags are down|pressed, but the
-    //     frames say plain down, so one escape carries (action 0, flags 1) ---
-    put32(1u); seg[o] = 34u; seg[o+1] = 0u; seg[o+2] = 0u; seg[o+3] = 0u; o += 4u;
+    // --- slot 0, channel 34 (escape): tick 0's derived flags are down|pressed, but the frames
+    //     say plain down, so one escape carries (action 0, flags 1) ---
+    putvar(1u); putvar(archive_stream_key(0u, ARCHIVE_CH_FLAG_ESCAPE));
     seg[o++] = 0x00u;                     // delta_tick 0
     seg[o++] = 0x01u;                     // uvarint(action 0 << 3 | flags 1)
 
     const u32 payload_bytes = o - payload_start;
-    for (u32 i = 0; i < 4u; ++i) { seg[96u + i] = (u8)((payload_bytes >> (8u*i)) & 0xFFu); }
-    const u32 pcrc = crc32(seg + payload_start, payload_bytes);
-    for (u32 i = 0; i < 4u; ++i) { seg[100u + i] = (u8)((pcrc >> (8u*i)) & 0xFFu); }
-    const u32 hcrc = crc32(seg, 108u);
-    for (u32 i = 0; i < 4u; ++i) { seg[108u + i] = (u8)((hcrc >> (8u*i)) & 0xFFu); }
+    for (u32 i = 0; i < 4u; ++i) { seg[AR_T_PBYTES_OFF + i] = (u8)((payload_bytes >> (8u*i)) & 0xFFu); }
+    ar_repair_crcs(seg, o);
 
     ArchiveSegmentHeader h = {};
     WireFrame* got = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * ticks * MAX_PEERS, 16u);
@@ -596,13 +606,6 @@ static u64 ar_valid_one_slot(u8* seg, u64 cap, u32 ticks, VMemArena* arena) {
     return ar_encode(seg, cap, src, 1u, ticks, nullptr, 0u, 0u);
 }
 
-// Repairs both checksums after a forger has edited the bytes.
-static void ar_repair_crcs(u8* seg, u64 n) {
-    const u32 pcrc = crc32(seg + 112u, n - 112u);
-    for (u32 i = 0; i < 4u; ++i) { seg[100u + i] = (u8)((pcrc >> (8u * i)) & 0xFFu); }
-    const u32 hcrc = crc32(seg, 108u);
-    for (u32 i = 0; i < 4u; ++i) { seg[108u + i] = (u8)((hcrc >> (8u * i)) & 0xFFu); }
-}
 
 // Decodes `seg`; returns the ErrCode.
 static ErrCode ar_try_decode(const u8* seg, u64 n, u32 ticks, VMemArena* arena) {
@@ -646,12 +649,12 @@ TL_TEST(archive_regression_slot_in_mask_must_carry_both_pointer_streams, "net,ar
     TL_ASSERT_EQ(ar_try_decode(seg, n, 3u, &arena), ERR_OK);
 
     // Widen slot_mask (offset 20) to name slot 1 as well, without adding its streams.
-    seg[20] = (u8)(seg[20] | 0x02u);
+    seg[AR_T_MASK_OFF] = (u8)(seg[AR_T_MASK_OFF] | 0x02u);
     ar_repair_crcs(seg, n);
     TL_EXPECT_EQ(ar_try_decode(seg, n, 3u, &arena), ERR_NET_MALFORMED);
 
     // And a header claiming only slot 1, whose streams are all slot 0's, is refused too.
-    seg[20] = 0x02u;
+    seg[AR_T_MASK_OFF] = 0x02u;
     ar_repair_crcs(seg, n);
     TL_EXPECT_EQ(ar_try_decode(seg, n, 3u, &arena), ERR_NET_MALFORMED);
     api.release(api.ctx, arena.base, arena.reserved);
@@ -667,14 +670,14 @@ TL_TEST(archive_regression_channel_35_is_not_the_escape_channel, "net,archive,re
     const u64 n = ar_valid_one_slot(seg, sizeof(seg), 2u, &arena);
     TL_ASSERT_EQ(ar_try_decode(seg, n, 2u, &arena), ERR_OK);
 
-    // The escape stream's header is 6 bytes from the end: u32 count, u8 channel, u8 slot, u16 pad
-    // then its 2 record bytes. Locate the channel byte carrying 34 and raise it to 35.
-    u64 ch_off = 0;
-    for (u64 i = 112u; i + 1u < n; ++i) {
-        if (seg[i] == (u8)ARCHIVE_CH_FLAG_ESCAPE && seg[i + 1u] == 0u) { ch_off = i; }
+    // The escape stream is last; its header is uvarint(record_count) then uvarint(key), and for
+    // slot 0 both fit one byte. Raise the key from channel 34 to the non-existent channel 35.
+    u64 key_off = 0;
+    for (u64 i = AR_T_HDR; i + 1u < n; ++i) {
+        if (seg[i] == (u8)archive_stream_key(0u, ARCHIVE_CH_FLAG_ESCAPE)) { key_off = i; }
     }
-    TL_ASSERT_NE(ch_off, (u64)0);
-    seg[ch_off] = 35u;
+    TL_ASSERT_NE(key_off, (u64)0);
+    seg[key_off] = (u8)(archive_stream_key(0u, ARCHIVE_CH_FLAG_ESCAPE) + 1u);   // channel 35
     ar_repair_crcs(seg, n);
     TL_EXPECT_EQ(ar_try_decode(seg, n, 2u, &arena), ERR_NET_MALFORMED);
     TL_EXPECT_EQ((u32)ARCHIVE_CH_MAX, 34u);
@@ -687,21 +690,18 @@ TL_TEST(archive_regression_zero_tick_segment_round_trips, "net,archive,regressio
     VMemApi api = test_vmem_api();
     VMemArena arena = {};
     TL_ASSERT_EQ(vmem_arena_init(&arena, 0xA5C1Cu, 4u << 20, 0u, &api), ERR_OK);
-    u8 build_id[32], fingerprint[32];
-    ar_ids(build_id, fingerprint);
     for (u32 slots = 0; slots <= 3u; ++slots) {
         ArchiveInput in[MAX_PEERS];
         for (u32 s = 0; s < slots; ++s) { in[s].frames = nullptr; in[s].slot = s; in[s]._pad0 = 0u; }
         u8 seg[512];
         ByteWriter w;
         bw_init(&w, seg, sizeof(seg));
-        const u64 n = archive_encode_segment(&w, 900u, 0u, in, slots, nullptr, 0u, 0u,
-                                             build_id, fingerprint);
-        TL_ASSERT_EQ(n, (u64)112u);            // header only, whatever the slot count
-        TL_EXPECT_EQ(seg[20], (u8)0u);         // one spelling: slot_mask is empty at zero ticks
+        const u64 n = archive_encode_segment(&w, 900u, 0u, in, slots, nullptr, 0u, 0u, AR_FILE_ID);
+        TL_ASSERT_EQ(n, (u64)sizeof(ArchiveSegmentHeader));   // header only, whatever the slots
+        TL_EXPECT_EQ(seg[AR_T_MASK_OFF], (u8)0u);         // one spelling: slot_mask is empty at zero ticks
         TL_EXPECT_EQ(ar_try_decode(seg, n, 0u, &arena), ERR_OK);
         // A non-empty mask at zero ticks would be 256 spellings of one segment.
-        seg[20] = 0x01u;
+        seg[AR_T_MASK_OFF] = 0x01u;
         ar_repair_crcs(seg, n);
         TL_EXPECT_EQ(ar_try_decode(seg, n, 0u, &arena), ERR_NET_MALFORMED);
     }
@@ -867,18 +867,19 @@ TL_TEST(archive_regression_untested_stream_and_record_rules, "net,archive,regres
         u8 base[1024];
         const u64 bn = ar_encode(base, sizeof(base), z, 1u, ticks, nullptr, 0u, 0u);
         TL_ASSERT_EQ(ar_try_decode(base, bn, ticks, &arena), ERR_OK);
-        TL_ASSERT_EQ(base[112u + 4u], (u8)ARCHIVE_CH_POINTER_X);   // first stream is channel 32
+        // first stream's key: uvarint(record_count) then uvarint(key) - slot 0 channel 32 = 32
+        TL_ASSERT_EQ(base[AR_T_HDR + 1u], (u8)archive_stream_key(0u, ARCHIVE_CH_POINTER_X));
 
         u8 forged[1024];
-        for (u64 i = 0; i < 112u; ++i) { forged[i] = base[i]; }
-        u64 o = 112u;
+        for (u64 i = 0; i < AR_T_HDR; ++i) { forged[i] = base[i]; }
+        u64 o = AR_T_HDR;
         forged[o++] = 0u; forged[o++] = 0u; forged[o++] = 0u; forged[o++] = 0u;  // record_count 0
         forged[o++] = 0u;                                                        // channel 0
         forged[o++] = 0u;                                                        // slot 0
         forged[o++] = 0u; forged[o++] = 0u;                                      // _pad0
-        for (u64 i = 112u; i < bn; ++i) { forged[o++] = base[i]; }
-        const u32 pb = (u32)(o - 112u);
-        for (u32 i = 0; i < 4u; ++i) { forged[96u + i] = (u8)((pb >> (8u * i)) & 0xFFu); }
+        for (u64 i = AR_T_HDR; i < bn; ++i) { forged[o++] = base[i]; }
+        const u32 pb = (u32)(o - AR_T_HDR);
+        for (u32 i = 0; i < 4u; ++i) { forged[AR_T_PBYTES_OFF + i] = (u8)((pb >> (8u*i)) & 0xFFu); }
         ar_repair_crcs(forged, o);
         TL_EXPECT_EQ(ar_try_decode(forged, o, ticks, &arena), ERR_NET_MALFORMED);
     }
@@ -1003,11 +1004,48 @@ TL_TEST(archive_log_record_count_is_bounded_by_the_format, "net,archive,edge,fas
     // 100 records against a 12-tick segment exceeds 8 per tick; every record still falls inside
     // the shrunk range and the ids stay unique, so ONLY the format bound can refuse this.
     const u32 narrow = 12u;
-    for (u32 i = 0; i < 4u; ++i) { wseg[16u + i] = (u8)((narrow >> (8u * i)) & 0xFFu); }
+    for (u32 i = 0; i < 4u; ++i) { wseg[AR_T_TICKS_OFF + i] = (u8)((narrow >> (8u*i)) & 0xFFu); }
     ar_repair_crcs(wseg, wn);
     TL_EXPECT_GT((u64)many, (u64)MAX_LOG_RECORDS_PER_PACKET * (u64)narrow);
     br_init(&wr, wseg, wn);
     TL_EXPECT_EQ(archive_decode_segment(&wr, &wh, wgot, wide, wout, many, &wrc),
                  ERR_NET_MALFORMED);
     api.release(api.ctx, arena.base, arena.reserved);
+}
+
+TL_TEST(archive_file_header_carries_the_identity_once, "net,archive,fast") {
+    // The option-A ruling (2026-08-26) moved build_id and session_fingerprint out of every
+    // segment and into one file header; a segment names its file with file_id. This row proves
+    // the pair round-trips and that a segment's file_id is what ties it to that identity.
+    u8 build_id[32], fingerprint[32];
+    ar_ids(build_id, fingerprint);
+
+    u8 buf[256];
+    ByteWriter w;
+    bw_init(&w, buf, sizeof(buf));
+    const u64 n = archive_write_file_header(&w, AR_FILE_ID, build_id, fingerprint);
+    TL_ASSERT_EQ(n, (u64)sizeof(ArchiveFileHeader));
+    TL_EXPECT_EQ(n, (u64)72u);
+
+    ArchiveFileHeader h = {};
+    ByteReader r;
+    br_init(&r, buf, n);
+    TL_ASSERT_EQ(archive_read_file_header(&r, &h), ERR_OK);
+    TL_EXPECT_EQ(h.format_version, NET_FORMAT_VERSION);
+    TL_EXPECT_EQ(h.file_id, AR_FILE_ID);
+    for (u32 i = 0; i < 32u; ++i) {
+        TL_EXPECT_EQ(h.build_id[i], build_id[i]);
+        TL_EXPECT_EQ(h.session_fingerprint[i], fingerprint[i]);
+    }
+    TL_EXPECT_EQ(r.pos, r.len);
+
+    // A newer format_version is refused here as everywhere else.
+    const u32 newer = NET_FORMAT_VERSION + 1u;
+    for (u32 i = 0; i < 4u; ++i) { buf[i] = (u8)((newer >> (8u * i)) & 0xFFu); }
+    br_init(&r, buf, n);
+    TL_EXPECT_EQ(archive_read_file_header(&r, &h), ERR_NET_VERSION);
+
+    // The segment header no longer carries the identity at all - that is the whole saving.
+    TL_EXPECT_EQ(sizeof(ArchiveSegmentHeader), (u64)56u);
+    TL_EXPECT_LT(sizeof(ArchiveSegmentHeader), (u64)112u);
 }

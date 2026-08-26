@@ -595,46 +595,29 @@ E-2 needs no W2 decision but blocks real game wiring later.
         ruling request above carries the gap and the options.
       - Suite: 368 selected / 364 passed / 0 failed / 4 skipped on `dev-linux`; 31/31 net rows
         green under `sanitize-linux`.
-- [ ] **BLOCKS the net-p1 Phase 1 done criterion: the §20.2.9 segment framing cannot reach
-      §20.8's < 80 KB at the CHECKPOINT_HOT_TICKS cadence. Measured, not estimated.** Filed
-      2026-08-26 by `w2-net-p1`. The codec is built, green and canonical; the size gate is the
-      one criterion it cannot meet, and closing it needs a format change this lane must not make
-      on its own (`ROADMAP.md` §0 rule 1: a published layout is a cross-lane event).
-      **Measurement** (30 min = 108,000 ticks, 3 peers, 360 segments of `CHECKPOINT_HOT_TICKS`
-      = 300, `tests/net/test_archive.test.cpp`, tag `size`):
-      | component | bytes | share |
-      |---|---|---|
-      | segment headers (360 x 112 B) | 40,320 | 32% |
-      | stream headers (6,880 x 8 B) | 55,040 | 43% |
-      | transition records (12,618 @ 2.52 B) | 31,766 | 25% |
-      | **total** | **127,126 (124.1 KB)** | vs **80 KB** gate |
-      **Framing is 75% of the file.** The fixture is not the cause: it produces **4,206
-      transitions per peer per 30 min, BELOW `NETCODE.md` §13.3's own 5,000-8,000 model**, so a
-      more realistic peer makes the number worse. Nor is it the empty-stream bug already fixed in
-      this lane - §20.2.9's literal "for ch in 0..35: `ArchiveStreamHeader`" would have written
-      810 KB of stream headers alone for 8 peers against §13.4's 165 KB total, so empty streams
-      are now omitted (that alone took 374 KB -> 124 KB). **This is what remains after that fix.**
-      **Options (pick one):**
-      - **(A) RECOMMENDED - shrink the two headers; leave cadence alone.** `ArchiveStreamHeader`
-        is 8 B for a 9-bit payload: `(uvarint record_count, u8 (slot << 5 | channel))` is 2-3 B
-        and saves ~35 KB. `ArchiveSegmentHeader` repeats `build_id` + `session_fingerprint`
-        (64 B) identically in all 360 segments - 23 KB of the 40 KB; carrying them once per log
-        FILE and leaving a 4-byte file-scoped id in the segment saves ~21 KB. Together: ~124 KB
-        -> ~68 KB, under the gate with the cadence and the retention rules untouched.
-      - **(B) Lengthen segments.** Close every `CHECKPOINT_DURABLE_TICKS` (18,000) instead of
-        300: 6 segments instead of 360, framing collapses to ~5 KB, total ~37 KB. Cheapest in
-        edits, but it decouples a segment boundary from the hot checkpoint that a rejoin replays
-        from (§10.4), so it is a semantic change, not a size tweak. Needs its own thinking.
-      - **(C) Re-baseline the criterion** to the measured ~125 KB for 3 peers (~330 KB for 8),
-        and re-derive §13.4's table, which currently promises ~165 KB for EIGHT peers - a figure
-        the present framing cannot reach at any peer count.
-      - **(D) Do nothing now**: land Phase 1 with the size criterion explicitly unmet and
-        recorded, and let the W3 net-p2 lane carry it. The codec is otherwise complete.
-      **What the lane did meanwhile:** `test_archive.test.cpp`'s size row MEASURES and pins the
-      current number (fails on regression above 130 KB or a collapse below 60 KB) and names this
-      request, rather than asserting a threshold the format cannot meet or quietly loosening one.
-      **Phase 1 is therefore NOT complete**: every other criterion (T0-T2 green, 10-minute
-      ASan/UBSan fuzz) is met; this one is not, and the lane will not claim it is.
+- [x] **The §20.2.9 segment framing vs `NETCODE.md` §20.8's < 80 KB criterion. RULED 2026-08-26
+      (Rafael, relayed by the steward): option (A), as the lane recommended — shrink both
+      headers, leave the segment cadence alone.** The < 80 KB criterion STANDS.
+      *Provenance note for Rafael:* this ruling reached the lane through the steward relay and,
+      unlike the RR-17 un-park, had no corresponding commit on `main` at the time it was applied,
+      so the lane recorded it here itself. Worth a glance to confirm it says what you intended.
+      **Implemented** (`w2-net-p1`, same commit as this entry, `NETCODE.md` §20.2.9 amended):
+      - `ArchiveStreamHeader`'s 8-byte fixed struct becomes two canonical uvarints,
+        `uvarint(record_count), uvarint(slot * 35 + channel)` — 2 bytes in practice, and the key
+        is slot-major so ascending key still means ascending `(slot, channel)`.
+      - `build_id` + `session_fingerprint` move out of every segment into one `ArchiveFileHeader`
+        per archive file (72 B); a segment names its file with a 4-byte `file_id`. The segment
+        header goes 112 B -> 56 B.
+      **Measured: 127,126 B (124.1 KB) -> 65,686 B (64.1 KB)** for the 30-minute synthetic 3-peer
+      session — 48% smaller, 16,234 B under the gate. `test_archive.test.cpp`'s size row is
+      flipped from measure-and-pin back to ASSERTING < 80 KB, with a 40 KB floor so a fixture
+      that stops producing input fails instead of passing.
+      **One correction to the ruling as stated, needing a nod rather than a decision:** the
+      ruled key `u8 (slot << 5 | channel)` cannot be built. `slot` needs 3 bits and `channel`
+      0..34 needs 6 — 9 bits, and channels 32/33/34 (pointer_x, pointer_y, escape) have no
+      encoding under it. The multiply-and-add key above holds the same intent (one small
+      canonical number, slot-major) and fits. If a single byte was wanted for a reason beyond
+      size, say so and the channel numbering would have to move first.
 - [ ] **`NETCODE.md` §20.3(a)'s decoder refusal list is incomplete: the column format must be
       CANONICAL, and the doc names only three of the five refusals.** Filed 2026-08-26 by
       `w2-net-p1`; implemented, because canonicality is load-bearing rather than cosmetic and

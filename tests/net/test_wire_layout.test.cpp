@@ -227,6 +227,6 @@ TL_TEST(wire_kind_enums_match_the_spec_values, "net,wire,fast") {
 // struct absent from it does not compile. The count is still pinned, to make GROWING §20.2 a
 // deliberate edit here as well as there.
 #define WL_COUNT_ONE(Name, Size) + 1u
-static_assert((0u TL_NET_WIRE_STRUCTS(WL_COUNT_ONE)) == 23u,
+static_assert((0u TL_NET_WIRE_STRUCTS(WL_COUNT_ONE)) == 24u,
               "docs/NETCODE.md §20.2 grew or shrank: update this count with the roll call");
 #undef WL_COUNT_ONE
