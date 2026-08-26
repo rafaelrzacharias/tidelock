@@ -97,6 +97,7 @@ struct LogStore {
 inline void log_store_clear(LogStore* s) {
     TL_ASSERT(s != nullptr);
     s->count = 0u;
+    s->_pad0 = 0u;   // the same "named padding is zeroed" rule SlotRing's note above states
 }
 
 // True iff the store already holds a record with this (origin_slot, seq).

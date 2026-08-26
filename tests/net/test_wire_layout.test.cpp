@@ -155,7 +155,7 @@ TL_TEST(wire_structs_with_pads_refuse_a_nonzero_pad, "net,wire,layout,edge,fast"
 TL_TEST(wire_every_struct_refuses_a_newer_format_version, "net,wire,layout,edge,fast") {
     // The generated reader decodes field 0 and hands it back; wire_check_version is where the
     // policy lives. Both halves are exercised here: the value survives the decode, and the
-    // policy refuses it - an older or equal one is accepted.
+    // policy refuses it, and the current one is accepted (exactly one version has a reader).
     u8 src[256], dst[256], buf[256];
 #define WL_VER(Name, Size)                                                                    \
     do {                                                                                      \

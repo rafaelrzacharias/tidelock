@@ -250,10 +250,11 @@ TL_TEST(archive_crc32_detects_every_single_byte_corruption, "net,archive,edge,fa
         ByteReader r;
         br_init(&r, buf, n);
         const ErrCode e = archive_decode_segment(&r, &h, got, ticks, none, 1u, &rc);
-        TL_ASSERT_NE(e, ERR_OK);
-        ++refused;
+        if (e != ERR_OK) { ++refused; }
         buf[pos] = old;
     }
+    // Counted from the outcome, not incremented unconditionally after an assert - as written
+    // before, this comparison could not fail and only read as coverage.
     TL_EXPECT_EQ(refused, (u32)n);
     // Restored, it decodes again - the corruption was the only objection.
     ByteReader r;
@@ -390,7 +391,6 @@ static void ar_fuzz_cases(TestCtx* t, u64 seed_base, u32 cases, bool structural)
     u8* buf   = (u8*)arena_push(&arena, cap, 16u);
     u8* again = (u8*)arena_push(&arena, cap, 16u);
     WireFrame* got = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * max_ticks * MAX_PEERS, 16u);
-    LogRecord none[1] = {};
     u32 rc = 0;
 
     u32 accepted = 0, refused = 0;
@@ -409,11 +409,31 @@ static void ar_fuzz_cases(TestCtx* t, u64 seed_base, u32 cases, bool structural)
             in[sl].slot = sl;
             in[sl]._pad0 = 0u;
         }
+        // Log records are IN the corpus: round 3 found the whole array outside it, so none of
+        // its validation was fuzzed. Counts stay inside the format bound
+        // (MAX_LOG_RECORDS_PER_PACKET per tick) and ids stay unique and ascending.
+        LogRecord lr[4] = {};
+        u32 lr_count = ticks == 0u ? 0u : (u32)((seed >> 40) % 5u);
+        if ((u64)lr_count > (u64)MAX_LOG_RECORDS_PER_PACKET * (u64)ticks) { lr_count = 0u; }
+        for (u32 i = 0; i < lr_count; ++i) {
+            lr[i].format_version = NET_FORMAT_VERSION;
+            lr[i].kind = (u8)(LR_JOIN + (u8)(nt_mix64(seed, 300u + i) % 9u));
+            lr[i].slot = (u8)(nt_mix64(seed, 400u + i) % MAX_PEERS);
+            lr[i].origin_slot = (u8)(i % MAX_PEERS);
+            lr[i].seq = i;
+            lr[i].effective_tick = 1000u + (u64)(i % ticks);
+        }
+        // The array must be ascending by (effective_tick, origin_slot, seq) for the encoder.
+        for (u32 i = 1; i < lr_count; ++i) {
+            if (!(lr[i - 1].effective_tick < lr[i].effective_tick
+               || (lr[i - 1].effective_tick == lr[i].effective_tick
+                   && lr[i - 1].origin_slot < lr[i].origin_slot))) { lr_count = i; break; }
+        }
         u8 build_id[32], fingerprint[32];
         ar_ids(build_id, fingerprint);
         ByteWriter w;
         bw_init(&w, buf, cap);
-        u64 n = archive_encode_segment(&w, 1000u, ticks, in, slots, nullptr, 0u, c,
+        u64 n = archive_encode_segment(&w, 1000u, ticks, in, slots, lr, lr_count, c,
                                        build_id, fingerprint);
         TL_ASSERT_GE(n, (u64)112u);
 
@@ -445,14 +465,15 @@ static void ar_fuzz_cases(TestCtx* t, u64 seed_base, u32 cases, bool structural)
         for (u32 i = 0; i < 4u; ++i) { buf[108u + i] = (u8)((hcrc >> (8u * i)) & 0xFFu); }
 
         ArchiveSegmentHeader h = {};
+        LogRecord out_lr[8] = {};
         ByteReader r;
         br_init(&r, buf, n);
-        if (archive_decode_segment(&r, &h, got, max_ticks, none, 1u, &rc) != ERR_OK) {
+        if (archive_decode_segment(&r, &h, got, max_ticks, out_lr, 8u, &rc) != ERR_OK) {
             ++refused;
             continue;
         }
         ++accepted;
-        const u64 n2 = ar_reencode(again, cap, &h, got, nullptr, 0u);
+        const u64 n2 = ar_reencode(again, cap, &h, got, out_lr, rc);
         TL_ASSERT_EQ(n2, r.pos);
         TL_ASSERT_EQ(memcmp(buf, again, (usize)r.pos), 0);
     }
@@ -820,5 +841,173 @@ TL_TEST(archive_decode_sets_the_derived_tick, "net,archive,fast") {
     br_init(&r, seg, n);
     TL_ASSERT_EQ(archive_decode_segment(&r, &h, got, ticks, none, 1u, &rc), ERR_OK);
     for (u32 i = 0; i < ticks; ++i) { TL_EXPECT_EQ(got[i].tick, (u32)(h.base_tick + (u64)i)); }
+    api.release(api.ctx, arena.base, arena.reserved);
+}
+
+TL_TEST(archive_regression_untested_stream_and_record_rules, "net,archive,regression,fast") {
+    // Round 3 finding F4: six load-bearing refusals had no test at all - reverting each left the
+    // whole suite green. Each forgery below is refused today and re-opens a second spelling if
+    // its check is removed. Grouped because they share one valid segment as a base.
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, 0xA5C22u, 8u << 20, 0u, &api), ERR_OK);
+    const u32 ticks = 4u;
+    u8 seg[2048];
+    const u64 n = ar_valid_one_slot(seg, sizeof(seg), ticks, &arena);
+    TL_ASSERT_EQ(ar_try_decode(seg, n, ticks, &arena), ERR_OK);
+
+    // (1) An empty stream must never be ENCODED - omission is canonical, not optional. The base
+    // here is all-zero frames, so its only streams are the two pointer axes (32, 33); splicing a
+    // record_count-0 header for channel 0 in front keeps (slot, channel) ASCENDING, so the only
+    // rule that can refuse it is the empty-stream refusal itself. (Spliced out of order it was
+    // refused by the ascending-key check and the row proved nothing.)
+    {
+        WireFrame* z = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * ticks, 16u);
+        for (u32 i = 0; i < ticks; ++i) { z[i] = nt_zero_frame(0u); }
+        u8 base[1024];
+        const u64 bn = ar_encode(base, sizeof(base), z, 1u, ticks, nullptr, 0u, 0u);
+        TL_ASSERT_EQ(ar_try_decode(base, bn, ticks, &arena), ERR_OK);
+        TL_ASSERT_EQ(base[112u + 4u], (u8)ARCHIVE_CH_POINTER_X);   // first stream is channel 32
+
+        u8 forged[1024];
+        for (u64 i = 0; i < 112u; ++i) { forged[i] = base[i]; }
+        u64 o = 112u;
+        forged[o++] = 0u; forged[o++] = 0u; forged[o++] = 0u; forged[o++] = 0u;  // record_count 0
+        forged[o++] = 0u;                                                        // channel 0
+        forged[o++] = 0u;                                                        // slot 0
+        forged[o++] = 0u; forged[o++] = 0u;                                      // _pad0
+        for (u64 i = 112u; i < bn; ++i) { forged[o++] = base[i]; }
+        const u32 pb = (u32)(o - 112u);
+        for (u32 i = 0; i < 4u; ++i) { forged[96u + i] = (u8)((pb >> (8u * i)) & 0xFFu); }
+        ar_repair_crcs(forged, o);
+        TL_EXPECT_EQ(ar_try_decode(forged, o, ticks, &arena), ERR_NET_MALFORMED);
+    }
+
+    // (1b) An escape record that RESTATES the flags the derived edges already produce carries no
+    // information and is a second spelling. ar_valid_one_slot's escape says flags 1 where the
+    // derived value at tick 0 is 3 (down + pressed); rewriting it to 3 makes it a no-op.
+    {
+        u8 forged[2048];
+        for (u64 i = 0; i < n; ++i) { forged[i] = seg[i]; }
+        const u8 word = forged[n - 1u];
+        TL_ASSERT_EQ((u32)(word & 7u), 1u);
+        forged[n - 1u] = (u8)((word & (u8)~7u) | 3u);   // flags 3 == the derived edges
+        ar_repair_crcs(forged, n);
+        TL_EXPECT_EQ(ar_try_decode(forged, n, ticks, &arena), ERR_NET_MALFORMED);
+    }
+
+    // (2) A LogRecord whose slot / origin_slot is outside MAX_PEERS.
+    {
+        WireFrame* src = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * ticks, 16u);
+        for (u32 i = 0; i < ticks; ++i) { src[i] = nt_zero_frame(0u); }
+        LogRecord rec = {};
+        rec.format_version = NET_FORMAT_VERSION;
+        rec.kind = (u8)LR_DELAY;
+        rec.slot = 0u;
+        rec.origin_slot = 0u;
+        rec.seq = 0u;
+        rec.effective_tick = 1000u;
+        const u64 cap2 = archive_segment_max_bytes(1u, ticks, 1u);
+        u8* s2 = (u8*)arena_push(&arena, cap2, 16u);
+        const u64 n2 = ar_encode(s2, cap2, src, 1u, ticks, &rec, 1u, 0u);
+        TL_ASSERT_EQ(ar_try_decode(s2, n2, ticks, &arena), ERR_OK);
+        // slot is at offset 5 of the record; the array is the last 24 bytes.
+        s2[n2 - 24u + 5u] = (u8)MAX_PEERS;         // one past the last legal slot
+        ar_repair_crcs(s2, n2);
+        TL_EXPECT_EQ(ar_try_decode(s2, n2, ticks, &arena), ERR_NET_MALFORMED);
+        s2[n2 - 24u + 5u] = 0u;
+        s2[n2 - 24u + 6u] = (u8)MAX_PEERS;         // origin_slot, offset 6
+        ar_repair_crcs(s2, n2);
+        TL_EXPECT_EQ(ar_try_decode(s2, n2, ticks, &arena), ERR_NET_MALFORMED);
+    }
+
+    // (3) An escape record that restates the flags the derived edges already produced carries
+    // nothing, and (4) two escapes on one tick must ascend by action index.
+    {
+        // Two actions escaping on one tick gives a stream with two records to work with.
+        WireFrame* src = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * 2u, 16u);
+        for (u32 i = 0; i < 2u; ++i) { src[i] = wire_zero_frame(); }
+        nt_set_action(&src[0], 1u, (i8)0, 2u);     // pressed with no down bit - not derivable
+        nt_set_action(&src[0], 3u, (i8)0, 2u);
+        const u64 cap3 = archive_segment_max_bytes(1u, 2u, 0u);
+        u8* s3 = (u8*)arena_push(&arena, cap3, 16u);
+        const u64 n3 = ar_encode(s3, cap3, src, 1u, 2u, nullptr, 0u, 0u);
+        TL_ASSERT_EQ(ar_try_decode(s3, n3, 2u, &arena), ERR_OK);
+        // The escape stream's two records are the last four bytes: (0, w1) (0, w3).
+        const u8 w_first = s3[n3 - 3u];
+        const u8 w_second = s3[n3 - 1u];
+        TL_ASSERT_LT(w_first >> 3, w_second >> 3);        // ascending by action today
+        s3[n3 - 3u] = w_second;                            // swap -> descending within the tick
+        s3[n3 - 1u] = w_first;
+        ar_repair_crcs(s3, n3);
+        TL_EXPECT_EQ(ar_try_decode(s3, n3, 2u, &arena), ERR_NET_MALFORMED);
+    }
+    api.release(api.ctx, arena.base, arena.reserved);
+}
+
+TL_TEST(archive_log_record_count_is_bounded_by_the_format, "net,archive,edge,fast") {
+    // Round 3 finding F1: the duplicate scan is O(n^2) in log_record_count, which an untrusted
+    // peer supplies (§20.2.5's BK_LOG_SEGMENT). 200,000 records was 4.6 MB on the wire and
+    // 17.8 s to decode against 19 ms to encode. The bound is derived from tick_count, which the
+    // caller already bounds, so there is no attacker-controlled dimension left.
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, 0xA5C23u, 8u << 20, 0u, &api), ERR_OK);
+    const u32 ticks = 2u;
+    WireFrame* src = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * ticks, 16u);
+    for (u32 i = 0; i < ticks; ++i) { src[i] = nt_zero_frame(0u); }
+    const u64 cap = archive_segment_max_bytes(1u, ticks, 1u);
+    u8* seg = (u8*)arena_push(&arena, cap, 16u);
+    LogRecord rec = {};
+    rec.format_version = NET_FORMAT_VERSION;
+    rec.kind = (u8)LR_DELAY;
+    rec.effective_tick = 1000u;
+    const u64 n = ar_encode(seg, cap, src, 1u, ticks, &rec, 1u, 0u);
+    TL_ASSERT_EQ(ar_try_decode(seg, n, ticks, &arena), ERR_OK);
+
+    // A DECLARED count is already bounded by payload_bytes, so editing the header alone tests
+    // the wrong check. The segment must really carry the records. Build one with room for them
+    // (tick_count 16 allows 8*16 = 128), then shrink tick_count so the same bytes exceed the
+    // bound - all-zero frames keep every stream record at tick 0, so nothing else objects.
+    const u32 wide = 16u;
+    const u32 many = 100u;
+    WireFrame* wz = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * wide, 16u);
+    for (u32 i = 0; i < wide; ++i) { wz[i] = nt_zero_frame(0u); }
+    LogRecord* recs = (LogRecord*)arena_push(&arena, sizeof(LogRecord) * many, 16u);
+    for (u32 i = 0; i < many; ++i) {
+        recs[i] = LogRecord{};
+        recs[i].format_version = NET_FORMAT_VERSION;
+        recs[i].kind = (u8)LR_DELAY;
+        recs[i].slot = 0u;
+        // All at ONE tick, one origin, ascending seq: unique ids, correctly ordered, and inside
+        // the range for ANY tick_count >= 1. Spreading them over ticks made the effective_tick
+        // RANGE check fire when tick_count shrank, so the row passed without testing the bound.
+        recs[i].origin_slot = 0u;
+        recs[i].seq = i;
+        recs[i].effective_tick = 1000u;
+    }
+    const u64 wcap = archive_segment_max_bytes(1u, wide, many);
+    u8* wseg = (u8*)arena_push(&arena, wcap, 16u);
+    const u64 wn = ar_encode(wseg, wcap, wz, 1u, wide, recs, many, 0u);
+    // Decoded directly: ar_try_decode's buffer holds 8 records, and 100 would come back as
+    // ERR_NET_CAPACITY - a caller-side condition, not the format verdict this row is about.
+    ArchiveSegmentHeader wh = {};
+    WireFrame* wgot = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * wide * MAX_PEERS, 16u);
+    LogRecord* wout = (LogRecord*)arena_push(&arena, sizeof(LogRecord) * many, 16u);
+    u32 wrc = 0;
+    ByteReader wr;
+    br_init(&wr, wseg, wn);
+    TL_ASSERT_EQ(archive_decode_segment(&wr, &wh, wgot, wide, wout, many, &wrc), ERR_OK);
+    TL_ASSERT_EQ(wrc, many);
+
+    // 100 records against a 12-tick segment exceeds 8 per tick; every record still falls inside
+    // the shrunk range and the ids stay unique, so ONLY the format bound can refuse this.
+    const u32 narrow = 12u;
+    for (u32 i = 0; i < 4u; ++i) { wseg[16u + i] = (u8)((narrow >> (8u * i)) & 0xFFu); }
+    ar_repair_crcs(wseg, wn);
+    TL_EXPECT_GT((u64)many, (u64)MAX_LOG_RECORDS_PER_PACKET * (u64)narrow);
+    br_init(&wr, wseg, wn);
+    TL_EXPECT_EQ(archive_decode_segment(&wr, &wh, wgot, wide, wout, many, &wrc),
+                 ERR_NET_MALFORMED);
     api.release(api.ctx, arena.base, arena.reserved);
 }

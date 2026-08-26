@@ -260,9 +260,25 @@ u64 archive_encode_segment(ByteWriter* w, u64 base_tick, u32 tick_count,
                   && records[i - 1].origin_slot == records[i].origin_slot
                   && records[i - 1].seq < records[i].seq));
     }
+    // The encoder's per-record contract must be EXACTLY the decoder's rule set. Where it was a
+    // strict subset, a caller could hand over records the encoder accepted and this file's own
+    // decoder then refused - a segment written, hashed into ChainEntry.log_segment_hash, and
+    // permanently unreadable. `LogRecord r = {}` with the semantic fields filled is the live
+    // path: net_internal.h's store neither sets nor validates format_version.
+    TL_CHECK((u64)log_record_count <= (u64)MAX_LOG_RECORDS_PER_PACKET * (u64)tick_count);
     for (u32 i = 0; i < log_record_count; ++i) {
+        TL_CHECK(records[i].format_version == NET_FORMAT_VERSION);
+        TL_CHECK(records[i]._pad0 == 0u);
         TL_CHECK(records[i].slot < MAX_PEERS && records[i].origin_slot < MAX_PEERS);
         TL_CHECK(records[i].kind >= (u8)LR_JOIN && records[i].kind <= (u8)LR_END);
+        TL_CHECK(records[i].effective_tick >= base_tick
+              && records[i].effective_tick - base_tick < (u64)tick_count);
+        // Global (origin_slot, seq) uniqueness - R6's stable id. Adjacent ordering alone does
+        // not imply it: a repeat at a different effective_tick is not adjacent.
+        for (u32 j = 0; j < i; ++j) {
+            TL_CHECK(!(records[j].origin_slot == records[i].origin_slot
+                       && records[j].seq == records[i].seq));
+        }
     }
 
     // Header with both crc fields zeroed; patched below once the payload exists.
@@ -347,6 +363,18 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
     // peer with a bigger buffer - so it must not be reported as "the sender sent garbage".
     if (tick_count > out_frame_capacity_per_slot) { return ERR_NET_CAPACITY; }
     if (out_header->log_record_count > out_record_capacity) { return ERR_NET_CAPACITY; }
+    // FORMAT bound on the log array, checked before anything walks it. The sequencer announces
+    // at most MAX_LOG_RECORDS_PER_PACKET records per packet and one packet per tick, so a
+    // segment covering `tick_count` ticks cannot carry more than that many - and a segment
+    // covering no ticks carries none. Without this the duplicate scan below is quadratic in a
+    // number an untrusted peer picks (§20.2.5's BK_LOG_SEGMENT): 200,000 records is 4.6 MB on
+    // the wire and was 17.8 s to decode against 19 ms to encode. Deriving the bound from
+    // tick_count - which the caller already bounds with out_frame_capacity_per_slot - means no
+    // new constant and no attacker-controlled dimension.
+    if ((u64)out_header->log_record_count
+        > (u64)MAX_LOG_RECORDS_PER_PACKET * (u64)tick_count) {
+        return ERR_NET_MALFORMED;
+    }
 
     // Now the payload's checksum, before decoding a single record out of it.
     if (out_header->payload_bytes > r->len - r->pos) { return ERR_BYTES_TRUNCATED; }
@@ -593,11 +621,11 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
         }
         // A record's effective_tick must fall inside the segment it travels in (§20.2.9: the
         // segment carries the records effective over its own tick range).
-        if (tick_count != 0u) {
-            if (rec->effective_tick < out_header->base_tick
-                || rec->effective_tick >= out_header->base_tick + (u64)tick_count) {
-                return ERR_NET_MALFORMED;
-            }
+        // Spelled as a subtraction: base_tick + tick_count wraps u64 near the top of the range
+        // and would then refuse every record in a legitimate segment.
+        if (rec->effective_tick < out_header->base_tick
+            || rec->effective_tick - out_header->base_tick >= (u64)tick_count) {
+            return ERR_NET_MALFORMED;
         }
         if (i > 0u) {
             const LogRecord* prev = &out_records[i - 1];

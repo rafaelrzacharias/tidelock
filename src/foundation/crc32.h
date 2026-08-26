@@ -15,7 +15,7 @@
 // Variant: CRC-32/ISO-HDLC - the one PNG, zlib and Ethernet use. Reflected input and output,
 //   polynomial 0xEDB88320 (the bit-reversed 0x04C11DB7), init and final xor 0xFFFFFFFF. The doc
 //   requires "a table-driven crc32" without naming a variant; this is the universal default, and
-//   crc32_check_value() below pins it against the algorithm's own published check constant so a
+//   CRC32_CHECK_VALUE below pins it against the algorithm's own published check constant so a
 //   future edit cannot quietly change what the bytes on disk mean.
 // Determinism: pure integer functions over caller memory - no io, no alloc, no floats, no state.
 //   Identical on every target in the docs/CANON.md matrix; the table is const data computed at
