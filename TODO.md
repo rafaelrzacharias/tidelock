@@ -548,6 +548,13 @@ E-2 needs no W2 decision but blocks real game wiring later.
       enforced module prefixes; revisit only on a real collision.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**
+      (budget-aware sequencing; two-tier reviews with the Fable full-re-read ship round —
+      `ROADMAP.md` §2 amended at the pairing's home; steward economy; lane token discipline
+      in every brief). Exercised daily from today. **The concrete W2 application (R-8):**
+      launch **vendor** (Sonnet 5) and **luau-vm** (Opus 5 high) now; **alloy-substrate**
+      (Fable 5 high) launches at the weekly Fable budget reset (Tuesday) — its W3 consumer
+      (alloy-solver) also waits on the gate0 verdict, so the deferral blocks nothing.
 - [x] **The CI `rebuild-budget` gate flaked on a docs-only commit (main run #106 red).**
       Filed and RULED 2026-08-26 (Rafael), in two steps because the first ruling's method was
       refuted by measurement the same hour. The record:

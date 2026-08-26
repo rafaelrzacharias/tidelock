@@ -255,7 +255,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 ## ROADMAP.md
 - `BUILD.md` -> §0
 - `CONTAINERS.md` -> §0
-- `WORKFLOW.md` -> §2
+- `WORKFLOW.md` -> §1, §2
 
 ## TESTING.md
 - `BUILD.md` -> §5, §8, §9.1
@@ -284,5 +284,5 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `GATE0-BENCH.md` -> §4
 - `NETCODE.md` -> §4
 - `RENDER2D.md` -> §4
-- `ROADMAP.md` -> §1
+- `ROADMAP.md` -> §1, §6
 - `TESTING.md` -> §4

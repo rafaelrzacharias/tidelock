@@ -74,8 +74,11 @@ is slack and is scheduled to finish *before* its wave's ★ lane needs it.
 silent mistake is a desync found weeks later (integer/UB/ordering/hashing code). *Opus 5 high* for
 deep but well-specified systems. *Sonnet 5* for transcription-plus-tests lanes the specs fully
 pin down. **Never low effort on sim or netcode code.** Every lane's merge gets an adversarial
-review by a *different, higher-or-equal* model in a fresh context (`CLAUDE.md` rule 5): Sonnet
-lanes reviewed by Opus; Opus/Fable lanes reviewed by Fable. Before launching a lane, look up its
+review by a *different* session in a fresh context (`CLAUDE.md` rule 5), two-tier since the
+2026-08-26 token-budget ruling (round mechanics: `WORKFLOW.md` §6 R-9): Sonnet lanes are
+reviewed by Opus throughout; Opus/Fable lanes get *Opus 5 high* breadth and fix-check rounds,
+and their **ship-verdict round is always Fable 5 high with a full re-read** — the
+higher-or-equal gate holds at the round that decides. Before launching a lane, look up its
 model here — the launch prompt names it.
 **The steward (orchestrator) session is *Fable 5 high* (ruled 2026-08-26).** It is the
 adjudicator of last resort — closeout sweeps (`WORKFLOW.md` §1 R-7), lane-filing triage, and

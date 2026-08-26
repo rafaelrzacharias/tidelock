@@ -124,9 +124,51 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
 - **R-7 Lane closeout sweep (ruled 2026-08-26, Rafael):** a lane's report is its filed record,
   and every merge is followed by a steward triage of that lane's filings before the lane
   closes; a wave never closes over an untriaged filing (§1).
+- **R-8 Budget-aware wave sequencing (ruled 2026-08-26, Rafael):** the DAG decides what MAY
+  run, the weekly token budget decides WHEN — Fable lanes launch just after a reset, never
+  demoted to fit before one (§6).
+- **R-9 Two-tier reviews (ruled 2026-08-26, Rafael):** breadth rounds fresh-context, middle
+  rounds delta-scoped, the ship-verdict round a full re-read; the model per round is
+  `ROADMAP.md` §2's policy (§6).
+- **R-10 Steward economy (ruled 2026-08-26, Rafael):** the steward's tokens buy judgment,
+  never mechanical reads — targeted queries, python over saved dumps, cheap-model subagents
+  for harvesting, windows retired at phase boundaries (§6).
+- **R-11 Lane token discipline (ruled 2026-08-26, Rafael):** tag-scoped iteration, local
+  validation before every push, read-once specs, terse output, cheap subagents for search;
+  every lane brief cites it (§6).
+
+## 6. The token budget — scheduling and session economy (ruled 2026-08-26)
+
+Fable 5 usage is capped per week (reset: Tuesday); the program codes every week without
+stopping. Four rules, and quality is never the variable traded — the `ROADMAP.md` §2 model
+policy ("never low effort on sim or netcode code") outranks every line here.
+
+- **R-8 — sequencing.** Within a wave, Sonnet/Opus lanes launch first; a Fable lane is
+  scheduled against the reset (it starts just after one, not squeezed in before the cap).
+  `ROADMAP.md` §1's DAG bounds what may run in parallel; the budget only reorders inside
+  those bounds. Deferring a Fable lane a few days is always cheaper than demoting it — the
+  net-p1 review record (43 defects, five of them canonical-bytes classes feeding the §20.2.8
+  hash chain) is the standing evidence that model strength at the sim/netcode gate pays.
+- **R-9 — reviews.** Round 1 of any review is a fresh-context breadth pass; middle rounds
+  verify fixes delta-scoped — the fix diff against the finding, not a whole-PR re-read; the
+  ship-verdict round is always a full re-read. Which model runs which round is `ROADMAP.md`
+  §2's policy (its home). The strong gate holds where it decides; the breadth and fix-check
+  rounds stop billing the top tier.
+- **R-10 — the steward.** The steward (model: `ROADMAP.md` §2) spends tokens on judgment,
+  never on mechanical reads: CI queries are SHA-targeted with minimal page sizes; an
+  oversized tool result is parsed from its saved file with python, never re-fetched or read
+  raw; log and dump harvesting is delegated to a cheap-model subagent that returns
+  conclusions, not content; and a steward window retires at a phase boundary with a
+  committed-file handoff rather than growing — a long window re-bills its whole prefix every
+  turn, cache-discounted but never free.
+- **R-11 — inside a lane.** Iterate with tag-scoped test runs and run the full suite only
+  before a push; validate locally before every push, because a red CI round costs a lane fix
+  cycle PLUS a steward investigation; read a spec end-to-end once, then grep the working
+  copy; terse commits and no narrative recaps (§1 R-6 already forbids status stops); broad
+  searches go to cheap subagents. Every lane brief cites this rule.
 
 *Rev 1 — 2026-08-25; §1/§4 amended same day by the slice's own adversarial review (D4/D6: the
 PR-fallback actor named, absolute grading pinned to the PC rev-2 record until the Deck). This
 doc shipped as the first §1-governed PR — opened via the App grant, review verdict recorded on
 it. §1/§4/§5 amended 2026-08-26 by the morning ruling pass after the W2 autonomy pilot (R-2
-election, R-4, R-5).*
+election, R-4, R-5). §5/§6 amended 2026-08-26 evening: the token-budget rulings R-8..R-11.*
