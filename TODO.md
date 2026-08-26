@@ -547,6 +547,37 @@ E-2 needs no W2 decision but blocks real game wiring later.
       namespace convention: STATUS QUO recorded in `CPP-SUBSET.md` §0 — global namespace with
       enforced module prefixes; revisit only on a real collision.
 
+## W2 vendor — lane notes (2026-08-26, `w2-vendor`, in progress)
+
+- [x] **SDL3 vendored** at `release-3.2.30` (`vendor/sdl3`, `vendor/VERSIONS`): the full upstream
+      CMake project minus test/examples/docs/IDE-project dirs (unreachable with
+      SDL_TESTS/SDL_EXAMPLES/SDL_INSTALL_DOCS forced OFF). Builds clean under `dev-linux` (this
+      container's clang 18; `WORKFLOW.md` §6 R-11 env gap, CI is the authority on the pin).
+      `src/vendor_glue/` created (new module: `pool_vendor.{h,cpp}` — the shared 64 MB pool
+      `PLATFORM.md` §9.5 gives SDL3/SDL_ttf/ImGui/stb — plus `sdl3_glue.{h,cpp}` hooking
+      `SDL_SetMemoryFunctions`); `tl_vendor_glue` links into `tl_tests` (root `CMakeLists.txt`,
+      `tests/CMakeLists.txt`) and its 3 tests round-trip malloc/calloc/realloc/free through the
+      real pool (`tests/vendor_glue/`). Fixed the stale "SDL3 + stb arrive with the W1 platform
+      lane" comment (`vendor/CMakeLists.txt`) and the now-inaccurate sibling comment in
+      `src/platform/CMakeLists.txt` (per-ruling scope, 2026-08-26).
+      **Two gate additions this required, not anticipated by the lane brief itself:**
+      `tools/audit/includes.py` gains a `MODULE_DAG["vendor_glue"] = ("vendor_glue",
+      "foundation")` entry (no entry = every local include in the directory fails the DAG check,
+      not a missing-file error) and a whole-directory exemption from the mutable-static ban
+      (`PLATFORM.md` §9.5's "one folder allowed a static pool pointer"); `tools/audit/symbols.py`
+      gains `--vendor-glue-lib NAME`, a whole-LIB (not stem, unlike RR-7) writable-static
+      exemption, wired in `cmake/audit.cmake`. Both ship with selftest fixtures in the same
+      commit (`tools/audit/selftest.py`: `test_symbols_vendor_glue` + the `includes.py` DAG/
+      mutable-static/backend-header cases). See `LESSONS.md` for why one exemption alone would
+      have passed locally and failed the real link-level gate.
+      **Noted, not fixed (out of this lane's file cone):** `tests/foundation/mem_pool.test.cpp`'s
+      header comment attributes "the Luau-VM-under-the-pool lifecycle test" to "the W2 vendor
+      lane" — stale since the vendor/luau-vm split (`ROADMAP.md` §2); that test is Luau's, i.e.
+      `w2-luau-vm`'s. Flagging for whichever lane touches that file next.
+      Remaining in this lane: SDL_ttf, Dear ImGui (docking), ENet, Monocypher, stb — one commit
+      each, same shape (vendor tree + CMakeLists + VERSIONS row + glue adaptor + tests), reusing
+      `pool_vendor` for SDL_ttf/ImGui/stb and a new `pool_enet` for ENet (`PLATFORM.md` §9.5).
+
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**
       (budget-aware sequencing; two-tier reviews with the Fable full-re-read ship round —

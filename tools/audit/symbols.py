@@ -141,6 +141,13 @@ def main():
                          "half of src/foundation/). Both this and --root are required for any "
                          "exemption at all: a stem named log/prof/probe/crash in any OTHER lib is "
                          "an ordinary writable-static violation (docs/CPP-SUBSET.md §9 R-4).")
+    ap.add_argument("--vendor-glue-lib", default=None, metavar="NAME",
+                    help="the ONE --data-only lib docs/PLATFORM.md §9.5 allows a static pool "
+                         "pointer in (vendor_glue's per-lib mem_pool hookups). A WHOLE-LIB "
+                         "exemption, not stem-keyed like --tooling-lib: every TU vendor_glue ever "
+                         "holds is a per-lib allocator hookup that legitimately owns one, so there "
+                         "is no narrower stem to key on the way RR-7 keys on the non-det half of "
+                         "src/foundation/. A lib under any other name gets no exemption.")
     ap.add_argument("--sanitized", action="store_true",
                     help="declare that this build has sanitizers on; the audit then refuses to "
                          "run rather than reporting the sanitizer runtime's own globals")
@@ -191,9 +198,12 @@ def main():
         # lib may hold the tooling plane, so a `log.o` that turns up in core/, platform/ or
         # editor/ is reported exactly like any other writable static storage.
         exempt = tooling if name == a.tooling_lib else set()
+        # docs/PLATFORM.md §9.5: vendor_glue is exempt as a WHOLE LIB (never by stem - see the
+        # --vendor-glue-lib help text for why a stem list would be the wrong shape here).
+        exempt_whole_lib = (name == a.vendor_glue_lib)
         for member, section, size in data_bss_offenders(a.objdump, path):
-            if stem_of_member(member) in exempt:
-                continue   # RR-7: the tooling plane, named in TL_FOUNDATION_TOOLING, is exempt
+            if stem_of_member(member) in exempt or exempt_whole_lib:
+                continue   # RR-7 (tooling plane) or PLATFORM.md §9.5 (vendor_glue) exemption
             violations.append("%s: %s has %d bytes of %s - writable static storage in src/ "
                               "(docs/CPP-SUBSET.md §1)" % (name, member, size, section))
 

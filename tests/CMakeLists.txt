@@ -4,7 +4,7 @@ file(GLOB_RECURSE TL_TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}
 
 add_executable(tl_tests runner/main.cpp ${TL_TEST_SOURCES})
 target_link_libraries(tl_tests PRIVATE tl_flags_common
-  tl_foundation tl_core tl_net tl_sim tl_script tl_platform_headless)
+  tl_foundation tl_core tl_net tl_sim tl_script tl_platform_headless tl_vendor_glue)
 target_include_directories(tl_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 # tests/foundation/tl_assert.test.cpp relaunches this same binary (--filter) to prove the panic
 # ABI's real exit-2/marker contract in a child process, without a bespoke probe exe or the

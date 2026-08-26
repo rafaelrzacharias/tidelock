@@ -3,3 +3,4 @@
 #
 # name           pin                                                  note
 rapidhash        rapidhash_v3 (bc4b4baa48a15ff52ff4725e1ccdcda62815221c)   github.com/Nicoshev/rapidhash, MIT, vendored verbatim (RAPIDHASH_COMPACT + RAPIDHASH_FAST pinned in src/foundation/hash.cpp)
+sdl3             release-3.2.30 (f5e5f6588921eed3d7d048ce43d9eb1ff0da0ffc)   github.com/libsdl-org/SDL, zlib, vendored tree minus test/examples/docs/VisualC*/Xcode/android-project (all unreachable with SDL_TESTS/SDL_EXAMPLES/SDL_INSTALL_DOCS OFF, vendor/CMakeLists.txt)

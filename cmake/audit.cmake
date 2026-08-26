@@ -74,6 +74,7 @@ add_custom_target(tl_audit_symbols
           --nm "${TL_LLVM_NM}" --objdump "${TL_LLVM_OBJDUMP}"
           --allow "${CMAKE_SOURCE_DIR}/tools/audit/allow.txt"
           --root "${CMAKE_SOURCE_DIR}" --tooling-lib tl_foundation
+          --vendor-glue-lib tl_vendor_glue
           ${TL_SYMBOL_ARGS}
   DEPENDS ${TL_AUDITED} ${TL_MODULES}
   COMMENT "audit: symbol layering + writable static storage"

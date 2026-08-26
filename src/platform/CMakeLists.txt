@@ -36,4 +36,6 @@ if(MSVC)
   target_compile_definitions(tl_platform_sdl3 PRIVATE _CRT_SECURE_NO_WARNINGS=1)
 endif()
 
-# SDL3 is vendored by the W1 platform lane; vendor/CMakeLists.txt then links it here.
+# SDL3 is vendored by the W2 vendor lane (vendor/sdl3, vendor/CMakeLists.txt); tl_platform_sdl3
+# does not link it yet - impl_sdl3/sdl3.cpp is still the W1 platform lane's placeholder TU, and
+# that lane wires the real link + #include when it lands the implementation.

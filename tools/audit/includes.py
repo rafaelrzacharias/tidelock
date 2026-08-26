@@ -40,6 +40,9 @@ SYS_ALLOW_DIRS = {                        # additional system headers, by path p
     "src/editor": {"math.h"},
     "src/platform": {"math.h"},
     "src/foundation": {"rapidhash.h"},
+    # The vendor allocator hookups (docs/MEMORY.md §8.6) include their lib's own headers to reach
+    # its SetMemoryFunctions/SetAllocatorFunctions/STBI_MALLOC hook API.
+    "src/vendor_glue": {"SDL3/SDL.h"},
 }
 BACKEND_FREE = ("src/platform/impl_sdl3", "src/platform/impl_headless")   # OS headers live here
 
@@ -57,14 +60,17 @@ def is_backend_free(rel):
     return d == "src/platform" and base.startswith("os_") and base.endswith(".cpp")
 
 BACKEND_HEADERS = {                       # token in the include path -> allowed path prefixes
-    "SDL3": ("src/platform/impl_sdl3",),
-    "SDL_ttf": ("src/platform/impl_sdl3",),
-    "imgui": ("src/editor",),
-    "enet": ("src/net",),
+    "SDL3": ("src/platform/impl_sdl3", "src/vendor_glue"),
+    "SDL_ttf": ("src/platform/impl_sdl3", "src/vendor_glue"),
+    "imgui": ("src/editor", "src/vendor_glue"),
+    "enet": ("src/net", "src/vendor_glue"),
+    # luau/lua.h stay src/script-only here: vendor_glue/luau_* is the w2-luau-vm lane's file (this
+    # lane's cone excludes it, ROADMAP.md §2); it adds its own "src/vendor_glue" prefix when its
+    # glue lands, same shape as this commit's SDL3/enet/monocypher/stb_ prefixes.
     "luau": ("src/script",),
     "lua.h": ("src/script",),
-    "monocypher": ("src/net",),
-    "stb_": ("src/platform/impl_sdl3", "src/core"),
+    "monocypher": ("src/net", "src/vendor_glue"),
+    "stb_": ("src/platform/impl_sdl3", "src/core", "src/vendor_glue"),
     "rapidhash": ("src/foundation",),
 }
 
@@ -81,6 +87,10 @@ MODULE_DAG = {
     "editor": ("editor", "core", "render", "foundation", "platform"),
     "script": ("script", "core", "foundation", "platform"),
     "app": ("app", "editor", "net", "render", "script", "sim", "core", "platform", "foundation"),
+    # vendor_glue (docs/PLATFORM.md §9.5, docs/MEMORY.md §8.6): per-lib allocator hookups. Reaches
+    # only foundation/mem_pool.h - it never touches core/platform/render, and its vendor headers
+    # arrive via BACKEND_HEADERS-gated system includes, not this local-include DAG.
+    "vendor_glue": ("vendor_glue", "foundation"),
 }
 RENDER_SIM_HEADER = "sim/views.h"
 
@@ -589,7 +599,11 @@ def check_file(root, path, nondet, tooling, errors):
                                   "(docs/BUILD.md §4)" % (rel, i, token, prefixes))
 
         tline = token_lines[i - 1] if i - 1 < len(token_lines) else ""
-        if is_mutable_static(tline) and not is_tooling_tu:
+        # docs/PLATFORM.md §9.5: vendor_glue is "the one folder allowed a static pool pointer" -
+        # a whole-DIRECTORY exemption, not stem-keyed like RR-7, because every TU in it is a
+        # per-lib mem_pool hookup and legitimately owns one (symbols.py's --vendor-glue-lib is the
+        # matching link-level exemption for the same ruling).
+        if is_mutable_static(tline) and not is_tooling_tu and not rel.startswith("src/vendor_glue/"):
             errors.append("%s:%d: static mutable state (docs/CPP-SUBSET.md §1): %s"
                           % (rel, i, raw_lines[i - 1].strip()[:70]))
         if TLS_SPELLINGS.search(tline):
