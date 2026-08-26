@@ -548,6 +548,25 @@ E-2 needs no W2 decision but blocks real game wiring later.
       enforced module prefixes; revisit only on a real collision.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **The CI `rebuild-budget` full-build budget (25.00 s) has ~0 headroom and fired on a
+      docs-only commit.** Filed 2026-08-26 by the steward. Main run #106 (`8524a8c`, a commit
+      touching only `TODO.md` + `docs/WORKFLOW.md`) measured `netcode-win` full rebuild
+      25.27 s > 25.00 s and turned main red; run #108 minutes later (the PR #10 merge — a
+      strictly larger tree) passed the same check. A docs-only commit cannot change compile
+      time, so the overshoot is runner variance — but the margin is real: the 25/5 budget was
+      baselined at the W1 tree (the run-#33 commit) and the tree has since grown through the
+      ecs and net-p1 merges (~139 build steps vs ~100 then). `docs/TESTING.md` §6 rules a flake
+      P0, and a timing gate with no stated variance headroom is one by construction (the
+      entropy-σ precedent). **Options:** (A) **RECOMMENDED — re-baseline with stated headroom:**
+      measure N ≥ 5 clean full builds on the CI runner at the current tree, set the budget to
+      median × 1.15 (variance measured, not guessed), record baseline commit + method in
+      `pr.yml` next to the numbers, and re-baseline as a standing wave-boundary step (the
+      budget then tracks deliberate tree growth while still catching a compile-time regression
+      within a wave). (B) Bump 25.00 → 30.00 flat — cheap, but an unmeasured number replaces a
+      measured one and silently absorbs ~20 % compile-time growth. (C) Keep 25.00 as a hard
+      ceiling and treat the overshoot as a signal to spend compile-time work now — honest about
+      the budget's intent, but it fails docs-only commits on runner noise, which is a flake,
+      not a signal.
 - [x] **Should the archive carry a PER-TICK bound on log records, or only the aggregate one?**
       Filed 2026-08-26 by `w2-net-p1` (round 5 finding 1). `archive_encode_segment` TL_CHECKs an
       aggregate — `log_record_count <= MAX_LOG_RECORDS_PER_PACKET * tick_count` — and
@@ -570,7 +589,7 @@ E-2 needs no W2 decision but blocks real game wiring later.
       policy (what the code does now, pending this ruling).
       **RULED 2026-08-26 (Rafael, as recommended): (A) — the per-tick bound goes in the format**
       (§20.2.9), enforced in encoder AND decoder; the store's rule becomes the format's rule.
-      Implementation: the steward's `w2-net-close` valve slice (in flight).
+      Implementation: the steward's `w2-net-close` valve slice — merged 2026-08-26 (PR #10).
 - [x] **`NETCODE.md` §20.2.9 states no maximum `tick_count`, and the archive decoder's cost is
       quadratic in it.** Filed 2026-08-26 by `w2-net-p1` (round 4 finding F8; the code comment
       that claimed otherwise is corrected in the same commit). The earlier log-array ruling
@@ -597,7 +616,7 @@ E-2 needs no W2 decision but blocks real game wiring later.
       origin_slot" (the duplicate scan becomes 8 counters, O(n)); §20.2.9 gains
       `tick_count <= CHECKPOINT_HOT_TICKS` (segments close on it anyway; also bounds the
       decoder's frame buffer). Both restate what the sequencer/cadence already do.
-      Implementation: the same `w2-net-close` valve slice.
+      Implementation: the same `w2-net-close` valve slice — merged 2026-08-26 (PR #10).
 - [x] **RULED 2026-08-26 (Rafael, as recommended): RATIFIED** — §20.2.9 now says 35 channels,
       `ch in 0..34`, amended with the option-A framing work on `w2-net-p1`. Original filing:
       **`NETCODE.md` §20.2.9 has an off-by-one in its channel count, and the code had encoded it
@@ -1062,7 +1081,8 @@ E-2 needs no W2 decision but blocks real game wiring later.
       two format bounds (`tick_count` ≤ `CHECKPOINT_HOT_TICKS`, ≤ `MAX_LOG_RECORDS_PER_PACKET`
       records per tick), each with a hand-forged revert-catching test row; the pre-ruling
       100-at-one-tick fixture re-derived to the ruled spread. debug/dev-linux 386/386 green
-      locally. Review deferred to the sweep per the valve.
+      locally. Merged 2026-08-26 (PR #10, merge `b1b1f12`; four-leg CI green on the head and on
+      main's post-merge run #108). Review deferred to the sweep per the valve.
 - [ ] **Wave-boundary sweep entry (`WORKFLOW.md` §2 valve):** `w2-max-arenas` (steward,
       2026-08-26) implements the E-2 ruling verbatim — `MAX_ARENAS` 64 → 4096 in its four homes
       (`arena_registry.h`, `CANON.md`, docaudit's pin, `MEMORY.md`'s inline value) + the
