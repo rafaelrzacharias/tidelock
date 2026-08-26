@@ -768,6 +768,14 @@ E-2 needs no W2 decision but blocks real game wiring later.
       record the measurement in `pr.yml`'s comment. Re-check at each wave boundary alongside
       the §3 sweep (deliberate tree growth re-baselines; within a wave the tightened budget
       catches a compile-time regression).
+      **Exercised 2026-08-26 (`w2-vendor`, PR #12):** six vendored libraries is exactly the
+      "deliberate tree growth" case this entry names. `rebuild-budget` measured 25.28 s full /
+      0.18 s incremental against the pre-vendoring provisional 25.00 s / 5.00 s (pr.yml run
+      32976237517, commit `ab5b45c`) - over budget by 0.28 s, not a regression, the tree grew on
+      purpose. Re-baselined: full 25.00 -> 50 s (~2x the measurement, matching the original
+      provisional's own headroom multiple at the 2026-08-25 leg move); incremental unchanged
+      (5 s already has ~28x headroom over the 0.18 s measured). Still provisional - the standing
+      tighten-after-~10-runs instruction above applies to this new baseline too.
 - [x] **Should the archive carry a PER-TICK bound on log records, or only the aggregate one?**
       Filed 2026-08-26 by `w2-net-p1` (round 5 finding 1). `archive_encode_segment` TL_CHECKs an
       aggregate — `log_record_count <= MAX_LOG_RECORDS_PER_PACKET * tick_count` — and

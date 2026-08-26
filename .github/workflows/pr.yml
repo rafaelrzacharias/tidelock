@@ -228,13 +228,21 @@ jobs:
     # fleet spread; the 25.27 turned a docs-only push red), while the x64 ubuntu fleet measured
     # as uniform EPYC 7763 silicon in the perf election. A wall-clock gate needs the steady
     # fleet. Measurement record in TODO.md (the rebuild-budget ruling, 2026-08-26).
+    # Re-baselined 2026-08-26 (W2 vendor lane, deliberate tree growth per the standing TODO.md
+    # entry): six vendored libs (SDL3, SDL_ttf+FreeType, Dear ImGui, ENet, Monocypher, stb) pushed
+    # the measured full build on this leg to 25.28 s (pr.yml run 32976237517), just over the
+    # pre-vendoring provisional budget of 25.00 s (itself one measurement, 12.1 s, at the
+    # 2026-08-25 leg move). New provisional = ~2x that measurement (matching the original
+    # provisional's own headroom multiple), rounded to 50; incremental (0.18 s measured) keeps
+    # its existing 5 s headroom unchanged. Tightens later per the standing entry below, once
+    # ~10 runs of TSV data exist on this tree.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.13' }
       - run: sudo apt-get update && sudo apt-get install -y clang lld llvm ninja-build libx11-dev libxext-dev
-      - run: python tools/rebuild_budget.py --preset netcode-linux --strict-toolchain off --full-budget 25 --incremental-budget 5
+      - run: python tools/rebuild_budget.py --preset netcode-linux --strict-toolchain off --full-budget 50 --incremental-budget 5
         # The CI box's own budget, passed explicitly as the tool's contract requires (it must
         # never inherit the reference PC's docs/BUILD.md numbers). PROVISIONAL at the leg move
         # (2026-08-26): one measured ubuntu build of this tree took 12.1 s; 25/5 keeps a 2x
