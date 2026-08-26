@@ -33,9 +33,15 @@ static int16_t script_useratom(const char* s, size_t len) {
     // A lookup, never an insert: intern() would ADD the string. The interner's by_hash map is
     // the lookup, and the StrId it returns is < 32767 by the cap CANON.md sets, so the cast is
     // always non-negative and -1 stays unambiguous.
-    const NameHash h = sv_hash(StrView{ s, (u32)len });
+    const StrView probe = StrView{ s, (u32)len };
+    const NameHash h = sv_hash(probe);
     const StrId* existing = map_get(&in->by_hash, h);
     if (existing == nullptr) return -1;
+    // intern() TL_FATALs when two DIFFERENT strings share a NameHash; a LOOKUP that skipped the
+    // comparison would instead hand a runtime-built string the atom of the registered name it
+    // collided with, and a proxy would then read the wrong field with nothing to see. Same check,
+    // same contract - and here the answer is simply "not registered", because it is not.
+    if (!sv_eq(intern_name(in, *existing), probe)) return -1;
     TL_ASSERT(*existing < 32767u);
     return (int16_t)*existing;
 }

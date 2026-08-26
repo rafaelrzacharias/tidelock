@@ -46,7 +46,13 @@ i64 check_int(lua_State* L, int idx, i64 lo, i64 hi) {
     if (lua_type(L, idx) != LUA_TNUMBER) luaL_typeerror(L, idx, "number");
     const double x = lua_tonumber(L, idx);
     if (!(x >= (double)lo && x <= (double)hi)) {
-        luaL_argerror(L, idx, lua_pushfstring(L, "out of range [%d, %d]", (int)lo, (int)hi));
+        // lua_pushfstring's %d is an int, and the integer helpers' bounds are +-2^53 - printing
+        // them through it told the script a bound that was not the bound. Print the numbers only
+        // where they survive the cast; say so plainly where they do not.
+        if (lo >= (i64)INT32_MIN && hi <= (i64)INT32_MAX) {
+            luaL_argerror(L, idx, lua_pushfstring(L, "out of range [%d, %d]", (int)lo, (int)hi));
+        }
+        luaL_argerror(L, idx, "outside the exact-integer range (+-2^53)");
     }
     const i64 i = (i64)x;
     if ((double)i != x) luaL_argerror(L, idx, "not an integer");
