@@ -3011,6 +3011,29 @@ right; it is the template the others now follow.
       to the game design docs when a game repo exists (NAT is ruled: LAN/direct-IP v1, `NETCODE.md` §5.5).
 
 ## W3 render2d — lane notes (2026-08-26, `w3-render2d`)
+- [x] **v0 done-criterion verification (`docs/RENDER2D.md` §9.7 steps 1-4; `WORKFLOW.md` §6 R-11
+      local validation).** All measured, not assumed:
+      - Steps 1-4 green: `tests/render/{camera,queue,batch,backend_sdl,extract,sprite,
+        debugdraw}.test.cpp`, 20 tests, on BOTH a dev build and a `-DTL_TIER=netcode
+        -DTL_STRICT_TOOLCHAIN=OFF` build (the CI-red fix above made this mandatory going
+        forward, not just this once) - 0 failed on either tier.
+      - `stats_draw_calls == batches`: asserted directly in `present_descriptor` (3 == 3).
+      - Zero heap allocation per frame: `docs/MEMORY.md` §2's CRT-malloc counter was DROPPED by
+        a 2026-08-26 ruling recorded in `foundation/alloc_shim.h`'s own contract block - the
+        mechanism is tripwires (a `new`/`malloc` from `src/` TL_FATALs immediately) rather than a
+        counter to assert against, and `tests/runner/tl_test.h`'s `TL_ASSERT_NO_ALLOC` macro
+        still refuses to compile citing "VMemArena and alloc_shim.cpp have not landed" - stale
+        (both landed; W1 runner+driver's file, not this lane's to touch, ROADMAP.md §0 rule 2).
+        Every render test in this lane ran the real pipeline (`render_present`, `sys_extract`,
+        `sys_sprite_render`, `render_build_frame`) repeatedly with no tripwire fatal - the
+        mechanism that exists is satisfied; there is no live counter to assert a number against.
+      - `tidelock` (the real exe, `src/app/main.cpp`) links clean against `tl_render` on both
+        tiers - `app/wiring.cpp` (the "tidelock draws sprites" half of §9.7's criterion) is
+        `v0-integration`'s file (W4), not built by any merged lane yet; nothing in this lane's
+        scope can call `render_present` from a real window.
+      - `tl_audit_includes` (144 files) and `docaudit` (27 docs) clean; `tl_audit_selftest`'s 11
+        failures are the pre-existing windows-msvc-layout-dump class this lane's brief named
+        (confirmed by message text match, not just count) - not a regression.
 - [x] **Cross-lane landing: `core/transform.h` (Transform/TransformPrev).** Neither this lane's
       nor `w3-loop-input`'s `docs/ROADMAP.md` §2 "Builds" column names the file, but
       `docs/FRAME-LOOP.md` §8.2 step 4 and `docs/RENDER2D.md` §9.2's `extract.cpp` both need it,
