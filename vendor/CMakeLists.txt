@@ -4,4 +4,5 @@
 # Monocypher/imgui/SDL_ttf with the W2 luau-vm, net-p1 and vendor lanes.
 # vendor/VERSIONS records every pin and hashes into build_id.
 
+add_subdirectory(luau)
 add_subdirectory(rapidhash)
