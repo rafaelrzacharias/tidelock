@@ -27,13 +27,18 @@ static ExtractFixture* et_fixture() {
     return &f;
 }
 
-static void et_init(ExtractFixture* f) {
+// Returns the first failing call's ErrCode (the jobs_test_util.h/world_test_util.h idiom - TODO.md,
+// docs/LESSONS.md: TL_ASSERT wrapping a call expression directly compiles the call itself away at
+// TL_DEV=0, not just the check, since the macro argument never appears in that tier's expansion).
+static ErrCode et_init(ExtractFixture* f) {
     f->api = test_vmem_api();
     memset(&f->reg, 0, sizeof(f->reg));
-    TL_ASSERT(scratch_init(&f->scratch, "et.scratch"_id, 16u * 1024u * 1024u, &f->api) == ERR_OK);
+    ErrCode e = scratch_init(&f->scratch, "et.scratch"_id, 16u * 1024u * 1024u, &f->api);
+    if (e != ERR_OK) { return e; }
     WorldDesc d{};
     d.seed = 1;
-    TL_ASSERT(world_init(&f->w, &f->reg, &f->scratch, &f->api, &d) == ERR_OK);
+    e = world_init(&f->w, &f->reg, &f->scratch, &f->api, &d);
+    if (e != ERR_OK) { return e; }
     world_register_component(&f->w, &Transform_info);
     world_register_component(&f->w, &TransformPrev_info);
     world_register_component(&f->w, &Camera2D_info);
@@ -45,11 +50,12 @@ static void et_init(ExtractFixture* f) {
     f->rq.layout.internal_w = 320;
     f->rq.layout.internal_h = 180;
     f->w.render = &f->rq;
+    return ERR_OK;
 }
 
 TL_TEST(extract_snap_and_arc, "render") {
     ExtractFixture* f = et_fixture();
-    et_init(f);
+    TL_ASSERT_EQ(et_init(f), ERR_OK);
     World* w = &f->w;
 
     // snap bit forces a = 1: prev at 0, cur at 10, flags carries TRANSFORM_SNAP.

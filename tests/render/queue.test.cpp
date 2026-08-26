@@ -40,7 +40,7 @@ TL_TEST(key_pack_unpack, "render") {
 
 TL_TEST(clip_stack, "render") {
     static RenderTestFixture f;
-    render_test_init(&f, 0, 0);
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
     World* w = &f.world;
 
     TL_EXPECT_EQ(w->render->clips.depth, (u8)0);
@@ -71,7 +71,7 @@ TL_TEST(clip_stack, "render") {
 TL_TEST_EXPECT_FATAL(clip_stack_depth_overflow, "render,fatal") {
     (void)t;
     static RenderTestFixture f;
-    render_test_init(&f, 0, 0);
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
     World* w = &f.world;
     for (u32 i = 0; i < 32u; ++i) { render_clip_push(w, Rect_i32{ 0, 0, 10, 10 }); }
     render_clip_push(w, Rect_i32{ 0, 0, 10, 10 });   // depth 32 -> TL_FATAL
@@ -80,7 +80,7 @@ TL_TEST_EXPECT_FATAL(clip_stack_depth_overflow, "render,fatal") {
 
 TL_TEST(reject, "render") {
     static RenderTestFixture f;
-    render_test_init(&f, 0, 0);
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
     World* w = &f.world;
     w->render->view_world[0] = Rect_f32{ 0.0f, 0.0f, 100.0f, 100.0f };
 

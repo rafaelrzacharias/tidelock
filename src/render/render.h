@@ -63,6 +63,15 @@ struct RenderQueue {
     u8 layer_view[MAX_LAYERS];   // which view's matrix a world-space layer uses (UI/DEBUG: 0xFF = screen space)
     f32 alpha; u32 stats_submitted, stats_rejected, stats_draw_calls, stats_batches;
     const PlatformApi* platform;
+    // The persistent debug-draw ring (docs/RENDER2D.md §7, §9.3.8) - opaque here (an untyped
+    // pointer + two indices) because its element type (DbgPersist) is debugdraw.h's, and
+    // debugdraw.h includes render.h, not the other way around (render.h is the base public
+    // header - render/render.h's own contract block). debugdraw_init casts and owns it;
+    // null/0/0 (render_init's zero-fill) means "no debug ring" - debugdraw calls before
+    // debugdraw_init is a caller bug, TL_FATAL there, not here.
+    void* dbg_ring;
+    u32 dbg_ring_count;   // live entries pushed so far, capped at the ring's capacity
+    u32 dbg_ring_next;    // next write index (wraps)
 };
 
 // Which rect rect_visible(...) tests against (the SIGNATURE NOTE above).

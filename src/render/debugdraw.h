@@ -24,9 +24,15 @@ enum DbgKind : u8 { DBG_LINE = 0, DBG_RECT = 1, DBG_CIRCLE = 2 };
 enum : u32 { DBG_PERSIST_RING_CAP = 4096 };
 
 // 40 B (docs/RENDER2D.md §9.3.8): p[6] holds the shape's params by kind - LINE: ax,ay,bx,by,
-// width_px,_; RECT: x,y,w,h,_,_; CIRCLE: cx,cy,r_px,_,_,_.
+// width_px,_; RECT: x,y,w,h,line_width_px,_; CIRCLE: cx,cy,r_px,line_width_px,_,_.
 struct DbgPersist { u64 until_tick; u8 kind; u8 space; u16 _pad0; u32 rgba; f32 p[6]; };
 static_assert(sizeof(DbgPersist) == 40, "docs/RENDER2D.md section 9.3.8");
+
+// Allocates the DBG_PERSIST_RING_CAP-entry ring from `arena` and wires it onto w->render (the
+// RenderQueue.dbg_ring/dbg_ring_count/dbg_ring_next fields - render.h's own SIGNATURE NOTE: the
+// element type is debugdraw.h's, so render.h carries it opaque). Call once, after render_init.
+// The persistent dbg_*_persist calls TL_FATAL if this was never called (a null dbg_ring).
+void debugdraw_init(World* w, VMemArena* arena);
 
 // dbg_line(a, b, width_px, rgba, space): d = normalize(b - a) in target px; n = (-d.y, d.x)*
 // width/2; quad a+n, b+n, b-n, a-n (docs/RENDER2D.md §9.3.8).
@@ -39,7 +45,9 @@ void dbg_rect(World* w, f32 x, f32 y, f32 width, f32 height, f32 line_width_px, 
 void dbg_circle(World* w, f32 cx, f32 cy, f32 r_px, f32 line_width_px, u32 rgba, RectSpace space);
 
 // Persistent line (docs/RENDER2D.md §7): pushes a DbgPersist row (until_tick = current tick +
-// ticks) into the ring, TL_FATAL at DBG_PERSIST_RING_CAP, and draws it immediately for this frame.
+// ticks) into the ring - a true ring past DBG_PERSIST_RING_CAP entries, overwriting the OLDEST
+// live one (a debug-visualization overflow is expected capacity pressure, not a caller bug -
+// unlike Array's fixed-cap TL_FATAL, docs/CONTAINERS.md §1) - and draws it immediately this frame.
 void dbg_line_persist(World* w, f32 ax, f32 ay, f32 bx, f32 by, f32 width_px, u32 rgba, RectSpace space, u64 ticks);
 // Persistent rect - same ring/lifetime contract as dbg_line_persist.
 void dbg_rect_persist(World* w, f32 x, f32 y, f32 width, f32 height, f32 line_width_px, u32 rgba, RectSpace space, u64 ticks);

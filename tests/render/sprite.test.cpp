@@ -21,13 +21,18 @@ struct SpriteFixture {
 // A caller-owned static, never the stack (docs/LESSONS.md - the World-sized-fixture crash).
 static SpriteFixture* sp_fixture() { static SpriteFixture f; return &f; }
 
-static void sp_init(SpriteFixture* f) {
+// Returns the first failing call's ErrCode (the jobs_test_util.h/world_test_util.h idiom - TODO.md,
+// docs/LESSONS.md: TL_ASSERT wrapping a call expression directly compiles the call itself away at
+// TL_DEV=0, not just the check, since the macro argument never appears in that tier's expansion).
+static ErrCode sp_init(SpriteFixture* f) {
     f->api = test_vmem_api();
     memset(&f->reg, 0, sizeof(f->reg));
-    TL_ASSERT(scratch_init(&f->scratch, "sp.scratch"_id, 16u * 1024u * 1024u, &f->api) == ERR_OK);
+    ErrCode e = scratch_init(&f->scratch, "sp.scratch"_id, 16u * 1024u * 1024u, &f->api);
+    if (e != ERR_OK) { return e; }
     WorldDesc d{};
     d.seed = 1;
-    TL_ASSERT(world_init(&f->w, &f->reg, &f->scratch, &f->api, &d) == ERR_OK);
+    e = world_init(&f->w, &f->reg, &f->scratch, &f->api, &d);
+    if (e != ERR_OK) { return e; }
     world_register_component(&f->w, &Transform_info);
     world_register_component(&f->w, &TransformPrev_info);
     world_register_component(&f->w, &Camera2D_info);   // sys_extract touches this column unconditionally
@@ -36,7 +41,8 @@ static void sp_init(SpriteFixture* f) {
     world_register_component(&f->w, &Sprite_info);
     world_build_schedule(&f->w);
 
-    TL_ASSERT(vmem_arena_init(&f->render_arena, "sp.render_arena"_id, 4u * 1024u * 1024u, 0, &f->api) == ERR_OK);
+    e = vmem_arena_init(&f->render_arena, "sp.render_arena"_id, 4u * 1024u * 1024u, 0, &f->api);
+    if (e != ERR_OK) { return e; }
     memset(&f->rq, 0, sizeof(f->rq));
     const u32 cap = 64u;
     array_init_fixed(&f->rq.keys, &f->render_arena, cap);
@@ -59,11 +65,12 @@ static void sp_init(SpriteFixture* f) {
     f->rq.view_world[0] = Rect_f32{ -1000.0f, -1000.0f, 2000.0f, 2000.0f };   // huge: nothing here gets rejected
     f->rq.layout.internal_w = 320; f->rq.layout.internal_h = 180;
     f->w.render = &f->rq;
+    return ERR_OK;
 }
 
 TL_TEST(sprite_render_submits_visible_sprites, "render") {
     SpriteFixture* f = sp_fixture();
-    sp_init(f);
+    TL_ASSERT_EQ(sp_init(f), ERR_OK);
     World* w = &f->w;
 
     Transform tr{}; tr.x = fx::fx_int<pos_t>(5); tr.y = fx::fx_int<pos_t>(0); tr.rot = fx::fx_int<angle_t>(0); tr.flags = 0;

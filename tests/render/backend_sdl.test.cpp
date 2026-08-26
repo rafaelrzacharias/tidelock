@@ -7,7 +7,7 @@
 
 TL_TEST(present_descriptor, "render") {
     static RenderTestFixture f;
-    render_test_init(&f, 64, 64);   // WORLD gets an internal target; UI/DEBUG draw to the window
+    TL_ASSERT_EQ(render_test_init(&f, 64, 64), ERR_OK);   // WORLD gets an internal target; UI/DEBUG draw to the window
     World* w = &f.world;
 
     const Rect_u16 uv{ 0, 0, 16, 16 };
