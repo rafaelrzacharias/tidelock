@@ -700,6 +700,31 @@ E-2 needs no W2 decision but blocks real game wiring later.
       since cache variables are visible to every subdirectory configured afterward. Not caught
       locally (this container's CMake 3.28 predates the removal); see `LESSONS.md`.
 
+## w2-vendor — BLOCKING ruling request: commit identity (2026-08-26)
+
+- [ ] **RULING REQUEST: all 8 `w2-vendor` commits (`e0e9715`..`750a366`) are authored AND
+      committed as `Claude <noreply@anthropic.com>`, violating `CLAUDE.md`'s public-repo rule**
+      (Rafael sole author, every commit, `rafaelrzacharias <rafaelrzacharias@gmail.com>`, no model
+      identifiers pushed). Verified directly: `git log --format='%an %ae / %cn %ce' 438c996..HEAD`.
+      This session never set a local git identity before its first commit; the harness's default
+      (`Claude <noreply@anthropic.com>`) went through eight times before this was caught.
+      **The fix is a pre-review history rewrite + force-push** (`docs/WORKFLOW.md` §5 R-4
+      sanctions exactly this: "a lane may rewrite its own branch before its first review round" -
+      no human review has started on PR #12, only CI): `git config --local user.{name,email}`
+      to Rafael's identity (already done, this commit), then `git rebase 438c996 --exec 'git
+      commit --amend --no-edit --reset-author'`, verify every row is Rafael, force-push.
+      **Blocked, not done:** the harness's own safety classifier refused the rebase/force-push as
+      a destructive action needing explicit human sign-off, independent of what `WORKFLOW.md`
+      sanctions - this session will not attempt to route around that block. **Options for Rafael:**
+      (A, recommended) run the rewrite locally: set git identity, run the rebase --exec above from
+      `438c996`, verify with the git log command above, `git push --force-with-lease origin
+      w2-vendor`. (B) grant this session explicit permission to run the rewrite + force-push
+      itself. (C) leave the wrong identity on these 8 commits and accept it as a one-time
+      exception (contradicts the CLAUDE.md rule as written - not recommended). Every commit
+      pushed after a fix lands will carry the correct identity regardless of which option is
+      chosen. **Not blocking:** all vendoring/code work in this lane is complete and CI-validated;
+      only the identity rewrite is parked.
+
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**
       (budget-aware sequencing; two-tier reviews with the Fable full-re-read ship round —
