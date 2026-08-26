@@ -710,6 +710,14 @@ E-2 needs no W2 decision but blocks real game wiring later.
       "could not find X11 or Wayland" fatal reproduce, reinstalled it, watched configure +
       build + `tl_tests --tag smoke` (88/88) + `includes.py` + `docaudit.py` all pass clean under
       the real CMake 4 binary. See `LESSONS.md`.
+- [x] **SHIP GATE MET (2026-08-26): all 23 `pr.yml` jobs green on head `9b5608b`** (run
+      32977804981) - the four `CANON.md` build-test legs × four tiers (16), `sanitizers`
+      (2 arches), `tier-parity`, `fingerprint-stability`, `rebuild-budget`,
+      `build-id-cross-target`, `audits`. The six-library brief (SDL3, SDL_ttf+FreeType, Dear
+      ImGui, ENet, Monocypher, stb) is complete, tested, and CI-green on every leg. PR #12 body
+      updated to match; "ready for review" posted there. Every commit on `w2-vendor` carries
+      Rafael's identity (the rewrite above). Remaining, not blocking: the standing
+      tighten-rebuild-budget-after-~10-runs entry (this round only exercised the re-baseline).
 
 ## w2-vendor — BLOCKING ruling request: commit identity (2026-08-26)
 
