@@ -5,7 +5,7 @@
 > implemented by w3-loop-input, 2026-08-26/27** — declarations for the interpolation ping-pong
 > live in `loop.h` (no separate `interp.h`; `interp.cpp` is a pure implementation split, matching
 > this doc's own §8.1 file list, which never named one). Three filed, non-blocking ruling
-> requests from that lane are in `TODO.md` (`RR-21`..`RR-23`): the generic (not `Transform`-
+> requests from that lane are in `TODO.md` (`RR-24`..`RR-26`): the generic (not `Transform`-
 > named) interpolation registration API, the LAST-phase recorder as a direct call rather than a
 > registered system (`SystemFn` has no path to `Engine`-level state), and the same gap for §0's
 > render-side `alpha`.

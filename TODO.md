@@ -3174,7 +3174,7 @@ airlock + action map, Live/Script/Replay producers, the recorder — built on br
 blocking (each has a working, documented interim resolution recorded in the touched headers'
 contract blocks):
 
-- [ ] **RR-21 (w3-loop-input): `MAX_PEERS`'s doc-home (`CANON.md`: "owned by NETCODE") and its
+- [ ] **RR-24 (w3-loop-input): `MAX_PEERS`'s doc-home (`CANON.md`: "owned by NETCODE") and its
       C++ symbol-home collide with the module DAG.** `net/wire.h` already defines
       `constexpr u32 MAX_PEERS = 8u;` (net-p1, merged); `core/input.h` needs the same constant at
       compile time (`ScriptProducer`'s per-slot state, `PeerSlots`), and
@@ -3187,7 +3187,7 @@ contract blocks):
       one definition, legal precisely because net already depends on core. Not this lane's file
       to edit (`net/`, cone discipline, `WORKFLOW.md`).
 
-- [ ] **RR-22 (w3-loop-input): `SystemFn`'s `void(*)(World*)` shape has no path to Engine-level
+- [ ] **RR-25 (w3-loop-input): `SystemFn`'s `void(*)(World*)` shape has no path to Engine-level
       context — hit twice in this slice, plus a third half still open.** (a) `FRAME-LOOP.md` §4's
       interpolation ping-pong needs a registered "which columns are interpolated" table; the
       concrete columns (`Transform`/`TransformPrev`/`Camera2D`) are render2d's (not landed —
@@ -3207,7 +3207,7 @@ contract blocks):
       standing answer. Filed for whoever lands render2d's PRE_RENDER extraction system next,
       since they hit the alpha half immediately.
 
-- [ ] **RR-23 (w3-loop-input): `core/interp.cpp`'s ping-pong is generic by construction, not the
+- [ ] **RR-26 (w3-loop-input): `core/interp.cpp`'s ping-pong is generic by construction, not the
       concrete `Transform`/`TransformPrev` `CPP-SUBSET.md` §8's own reference template names.**
       That template is worked pseudocode (`TL_FIELDS_Transform(...) /* bit 0 = snap
       (FRAME-LOOP.md §4) */`); no lane has landed the real component (render2d's, by

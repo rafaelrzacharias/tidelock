@@ -6,8 +6,8 @@
 > recorder.h/.cpp) — `input_set_producer` lives on `Engine` (`core/loop.h`), not `World*` as §4
 > literally spells it (the producer is never registered/hashed/snapshotted; see `core/input.h`'s
 > contract block). `MAX_PEERS`'s C++ symbol is defined in `core/input.h` rather than `net/`
-> (module-DAG reason and the handoff this leaves for `net/wire.h`: `TODO.md` RR-21).
-> Three non-blocking ruling requests filed: `TODO.md` `RR-21`..`RR-23`.
+> (module-DAG reason and the handoff this leaves for `net/wire.h`: `TODO.md` RR-24).
+> Three non-blocking ruling requests filed: `TODO.md` `RR-24`..`RR-26`.
 > **Owns:** `src/core/input.h`, `action_map.h`, `producers/{live,script,replay}.h`
 > (`network` lives in `src/net/`).
 
