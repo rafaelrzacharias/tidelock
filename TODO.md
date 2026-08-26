@@ -539,6 +539,49 @@ E-2 needs no W2 decision but blocks real game wiring later.
       ("checkpoint writer, chain" are Phases 6–7) fixed same commit. The lane is un-parked.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **`NETCODE.md` §20.2.9 has an off-by-one in its channel count, and the code had encoded it
+      as an exploitable alias.** Filed 2026-08-26 by `w2-net-p1` (found by the lane's adversarial
+      review). §20.2.9 says "36 streams per slot" and "for ch in 0..35", but it DEFINES 35
+      channels: 0..31 action, 32 `pointer_x`, 33 `pointer_y`, 34 flag escape. `net/wire.h`'s
+      `ARCHIVE_CH_COUNT` followed the doc's 36, so a decoder bound of `>= ARCHIVE_CH_COUNT` left
+      **channel 35 a valid channel byte**, which the dispatch treated as the escape channel - a
+      second byte spelling of one segment, in a format whose bytes are hashed into the chain
+      (§20.2.8). Fixed in code (`ARCHIVE_CH_MAX` = 34 is the decoder's bound; 35 is refused).
+      **Recommendation: amend §20.2.9** to "35 channels per slot, `ch in 0..34`" in both the
+      prose and the layout line. No code change follows; the code already refuses 35.
+- [ ] **`NETCODE.md` §20.2.9's segment layout omits empty streams in `net/archive.cpp`, and that
+      divergence needs its own amendment rather than a mention inside the size request.** Filed
+      2026-08-26 by `w2-net-p1` (raised by its adversarial review as a CLAUDE.md rule 8 point).
+      The doc's layout line is literally `for s ascending in slot_mask: for ch in 0..35:
+      ArchiveStreamHeader + records`. The code writes a stream only when it has records, because
+      the literal form costs 810 KB of stream headers alone at 8 peers over 30 minutes against
+      §13.4's ~165 KB TOTAL. It is a WIRE-FORMAT change: a segment written by a literal-§20.2.9
+      implementation will not decode here, and vice versa. Streams are self-describing (each
+      header names its slot and channel) and the region ends where the `LogRecord` array begins,
+      which `payload_bytes` and `log_record_count` already locate, so no format field was added.
+      **Recommendation: amend §20.2.9's layout line** to "for each NON-EMPTY stream, ascending by
+      (slot, channel): `ArchiveStreamHeader` + records", and state that a stream with
+      `record_count == 0` is refused (the code refuses it, so the omission is canonical rather
+      than optional).
+- [ ] **`LOG_STORE_CAPACITY` (256) has no home.** Filed 2026-08-26 by `w2-net-p1`. `net_internal.h`
+      needs a bound on the sequenced one-shots held in memory; `CANON.md` does not carry one and
+      §20's constant list does not name it. "Silence in the spec is not permission" - it is
+      currently a number this lane chose. **Recommendation: `CANON.md`'s netcode tunables**, sized
+      from the records that can be in flight across a segment plus a confirmation horizon, or a
+      statement in §20 that the store is bounded by `MAX_LOG_RECORDS_PER_PACKET` x the horizon.
+      Either way it should stop being a lane's choice.
+- [ ] **No `net` namespace, and `CPP-SUBSET.md` §6 asks for one.** Filed 2026-08-26 by
+      `w2-net-p1`. §6 says "Namespaces: one per module (`fx`, `mem`, `ecs`, `alloy`, `net`, ...)".
+      `net/wire.h` puts `MAX_PEERS`, `Leave`, `Suspicion`, `HashDigest`, `Handshake`, `ChainEntry`,
+      `encode_column` and the rest at global scope in a header linked into `tl_tests` beside every
+      other module - `Leave` and `Suspicion` in particular are collision bait. This is very likely
+      a PROJECT-WIDE gap rather than this lane's: `core/` has no namespace either, and
+      `TL_WIRE_STRUCT` generates `wire_write_<Name>` free functions that a namespace would move.
+      Not fixed unilaterally, because wrapping `net` alone while `core` stays global is the kind
+      of half-applied rule that reads as a decision later. **Recommendation: one ruling covering
+      every module** - either adopt namespaces tree-wide (and say what happens to the generated
+      symbol names, which `tools/audit/symbols.py` matches on) or amend §6 to record that the
+      `tl_`/module prefix convention replaced them.
 - [x] **W2 net-p1 Phase 1 measurements (recorded per `NETCODE.md` §20.8: "a phase ends on the
       full green gate plus the measurement recorded in `LESSONS.md` with the `build_id`").**
       Recorded 2026-08-26 on branch `w2-net-p1`. Toolchain: clang 18.1.3, x86-64 Linux,

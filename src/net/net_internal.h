@@ -30,9 +30,14 @@ struct SlotRing {
     WireFrame frames[SLOT_RING_TICKS];
     u64       ticks[SLOT_RING_TICKS];   // the absolute tick each slot holds
     u8        occupied[SLOT_RING_TICKS];
-    u32       _pad0;
-    u32       _pad1;
 };
+// occupied[] ends 8-aligned, so there is no trailing gap to name. Two u32s sat here calling
+// themselves _pad0/_pad1: they were eight REAL bytes that slot_ring_clear never zeroed, which
+// made this header's "every gap is a named _padN" claim false for exactly those bytes.
+static_assert(sizeof(SlotRing) == sizeof(WireFrame) * SLOT_RING_TICKS
+                                + sizeof(u64) * SLOT_RING_TICKS
+                                + SLOT_RING_TICKS,
+              "SlotRing carries no implicit padding");
 
 // Clears every entry. Cheap enough to call at session start; never called per tick.
 inline void slot_ring_clear(SlotRing* r) {
@@ -103,17 +108,18 @@ inline bool log_store_has(const LogStore* s, u8 origin_slot, u32 seq) {
     return false;
 }
 
-// Adds `rec` unless its (origin_slot, seq) is already present. Returns true when it was added,
-// false when it was a duplicate - a no-op, per R6, never an error. Returns false when the store
-// is full: at that point the caller has more in flight than the window allows and must not
-// silently drop, so the full case is reported, not asserted away.
-inline bool log_store_add(LogStore* s, const LogRecord* rec) {
+// Adds `rec`. ERR_OK when it was stored; ERR_NET_DUPLICATE_RECORD when its (origin_slot, seq)
+// was already present - a no-op per R6, expected rather than exceptional, since a record is
+// announced in `pending` and then arrives again in its tick's SeqSection; ERR_NET_STORE_FULL
+// when there is no room, which is DATA LOSS and a different thing entirely. A bool conflated
+// the two and left the caller unable to fail loudly (CLAUDE.md: fail loudly and explicitly).
+inline ErrCode log_store_add(LogStore* s, const LogRecord* rec) {
     TL_ASSERT(s != nullptr && rec != nullptr);
-    if (log_store_has(s, rec->origin_slot, rec->seq)) { return false; }
-    if (s->count >= LOG_STORE_CAPACITY) { return false; }
+    if (log_store_has(s, rec->origin_slot, rec->seq)) { return ERR_NET_DUPLICATE_RECORD; }
+    if (s->count >= LOG_STORE_CAPACITY) { return ERR_NET_STORE_FULL; }
     s->records[s->count] = *rec;
     ++s->count;
-    return true;
+    return ERR_OK;
 }
 
 // Copies the records effective at exactly `tick` into out[], ascending by (origin_slot, seq) -

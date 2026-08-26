@@ -44,9 +44,13 @@ void encode_column(ByteWriter* w, const WireFrame* frames, u32 n) {
             if (((changed >> a) & 1u) == 0u) { continue; }
             const i8 value = f->actions[a].value;
             const u8 flags = f->actions[a].flags;
-            // Only the three docs/INPUT.md §1 bits exist on the wire. A producer handing over a
-            // frame with any other bit set has a bug: the rec byte would silently drop them.
-            TL_ASSERT((flags & (u8)~WIRE_FLAG_BITS) == 0u);
+            // Only the three docs/INPUT.md §1 bits exist on the wire. TL_CHECK, not TL_ASSERT:
+            // off TL_DEV the assert is ((void)0), and `flags & 7` below would then silently drop
+            // a higher bit - the sender applies its own frame and every receiver applies the
+            // truncated one, which is a silent desync and breaks §12.2's promise that "what a
+            // peer sends is exactly what every peer - including itself - applies". One branch
+            // per CHANGED action, not per action.
+            TL_CHECK((flags & (u8)~WIRE_FLAG_BITS) == 0u);
             const bool value_follows = (value != wire_implied_value(flags));
             const u8 rec = (u8)((flags & WIRE_FLAG_BITS)
                               | (value_follows ? WIRE_REC_VALUE_FOLLOWS : 0u));

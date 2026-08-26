@@ -8,32 +8,8 @@
 #include "runner/tl_test.h"
 #include "net/net_test_util.h"
 
-// Every TL_WIRE_STRUCT of docs/NETCODE.md §20.2 (+ §15.1's Handshake, reused verbatim by
-// §20.2.6), with the size its static_assert pins.
-#define TL_NET_WIRE_STRUCTS(F)      \
-    F(PacketHeader,          40)    \
-    F(LogRecord,             24)    \
-    F(ControlHeader,         24)    \
-    F(Suspicion,             16)    \
-    F(EpochClaim,            24)    \
-    F(EpochAck,              24)    \
-    F(HashDigest,            24)    \
-    F(MeasurementVector,     48)    \
-    F(CustodyHandoff,       184)    \
-    F(Leave,                 16)    \
-    F(LobbyProbe,            32)    \
-    F(BulkHeader,            32)    \
-    F(LogRequest,            24)    \
-    F(BulkAck,               24)    \
-    F(Handshake,            120)    \
-    F(JoinChallenge,         40)    \
-    F(JoinRequest,          144)    \
-    F(JoinReply,             48)    \
-    F(CheckpointHeader,     192)    \
-    F(ChainGenesis,          56)    \
-    F(ChainEntry,           152)    \
-    F(ArchiveSegmentHeader, 112)    \
-    F(HashTraceHeader,       24)
+// The roll call lives in net/wire.h and DECLARES the structs, so a struct missing from it does
+// not exist and this file cannot silently stop covering one.
 
 // Fills every NON-pad field with bytes derived from (seed, field index, element) and sets
 // format_version to the current one. Pads stay zero: a filled pad is what the refusal row below
@@ -246,10 +222,10 @@ TL_TEST(wire_kind_enums_match_the_spec_values, "net,wire,fast") {
     TL_EXPECT_EQ(ARCHIVE_CH_COUNT, 36u);
 }
 
-// The roll call above must cover §20.2. If a struct is added to wire.h and not to
-// TL_NET_WIRE_STRUCTS, every row of this file silently stops covering it - so the count is
-// pinned here and moves only with a deliberate edit.
+// wire.h's roll call declares the structs, so coverage is structural rather than asserted: a
+// struct absent from it does not compile. The count is still pinned, to make GROWING §20.2 a
+// deliberate edit here as well as there.
 #define WL_COUNT_ONE(Name, Size) + 1u
 static_assert((0u TL_NET_WIRE_STRUCTS(WL_COUNT_ONE)) == 23u,
-              "TL_NET_WIRE_STRUCTS must list every TL_WIRE_STRUCT of docs/NETCODE.md §20.2");
+              "docs/NETCODE.md §20.2 grew or shrank: update this count with the roll call");
 #undef WL_COUNT_ONE

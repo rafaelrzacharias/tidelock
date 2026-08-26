@@ -72,7 +72,12 @@ static ErrCode ar_get_stream_header(ByteReader* r, ArchiveStreamHeader* h) {
     h->_pad0        = br_get_u16(r);
     if (!br_ok(r)) { return ERR_BYTES_TRUNCATED; }
     if (h->_pad0 != 0u) { return ERR_WIRE_PAD_NONZERO; }
-    if (h->channel >= (u8)ARCHIVE_CH_COUNT || h->slot >= (u8)MAX_PEERS) { return ERR_NET_MALFORMED; }
+    // docs/NETCODE.md §20.2.9 defines 35 channels: 0..31 action, 32 pointer_x, 33 pointer_y,
+    // 34 flag escape. Its layout line says "for ch in 0..35" and ARCHIVE_CH_COUNT follows it, so
+    // a bound of >= ARCHIVE_CH_COUNT would leave 35 a VALID channel byte that the dispatch's
+    // else-branch would then treat as the escape channel - a second spelling of one segment.
+    // Bounded by the highest real channel instead. Doc off-by-one filed in TODO.md.
+    if (h->channel > ARCHIVE_CH_MAX || h->slot >= (u8)MAX_PEERS) { return ERR_NET_MALFORMED; }
     return ERR_OK;
 }
 
@@ -126,7 +131,11 @@ static u32 ar_encode_action(ByteWriter* w, const WireFrame* frames, u32 tick_cou
 // mandatory; later records are velocities.
 static u32 ar_encode_pointer(ByteWriter* w, const WireFrame* frames, u32 tick_count, bool is_x,
                              u8 slot) {
-    const i32 p0 = tick_count > 0u ? (is_x ? frames[0].pointer_x : frames[0].pointer_y) : 0;
+    // A segment covering no ticks has no absolute position to state, and the decoder refuses a
+    // pointer stream when tick_count == 0. Emitting one here made a zero-tick segment encodable
+    // but not decodable.
+    if (tick_count == 0u) { return 0u; }
+    const i32 p0 = is_x ? frames[0].pointer_x : frames[0].pointer_y;
 
     // Count first: one mandatory absolute, then a record wherever the velocity changes.
     u32 count = 1u;
@@ -190,6 +199,19 @@ static u32 ar_encode_escape(ByteWriter* w, const WireFrame* frames, u32 tick_cou
     return count;
 }
 
+// Every ActionState.flags a segment stores must fit docs/INPUT.md §1's three bits: the action
+// channel carries the down bit and the escape channel carries three, so a higher bit is dropped
+// on the way out and the segment decodes to something the caller never handed in - or, worse,
+// fails to decode at all after its bytes are already hashed into the chain. TL_CHECK, not
+// TL_ASSERT: this must hold on netcode and ship too, where TL_ASSERT is ((void)0).
+static void ar_check_frames_representable(const WireFrame* frames, u32 tick_count) {
+    for (u32 i = 0; i < tick_count; ++i) {
+        for (u32 a = 0; a < NET_FRAME_MAX_ACTIONS; ++a) {
+            TL_CHECK((frames[i].actions[a].flags & (u8)~WIRE_FLAG_BITS) == 0u);
+        }
+    }
+}
+
 u64 archive_encode_segment(ByteWriter* w, u64 base_tick, u32 tick_count,
                            const ArchiveInput* inputs, u32 slot_count,
                            const LogRecord* records, u32 log_record_count, u32 segment_seq,
@@ -204,10 +226,14 @@ u64 archive_encode_segment(ByteWriter* w, u64 base_tick, u32 tick_count,
 
     u8 slot_mask = 0u;
     for (u32 s = 0; s < slot_count; ++s) {
-        TL_ASSERT(inputs[s].slot < MAX_PEERS);
-        // Ascending, no duplicates - the decoder relies on the order and the mask on uniqueness.
-        TL_ASSERT(s == 0u || inputs[s].slot > inputs[s - 1].slot);
-        TL_ASSERT(inputs[s].frames != nullptr || tick_count == 0u);
+        // TL_CHECK, not TL_ASSERT: off TL_DEV these vanish, and a duplicate or descending slot
+        // then writes streams that violate the ascending-(slot, channel) rule. The decoder
+        // refuses them, so the failure surfaces as a permanently unreadable segment AFTER its
+        // bytes are hashed into the chain. `1u << slot` is also UB once the bound vanishes.
+        TL_CHECK(inputs[s].slot < MAX_PEERS);
+        TL_CHECK(s == 0u || inputs[s].slot > inputs[s - 1].slot);
+        TL_CHECK(inputs[s].frames != nullptr || tick_count == 0u);
+        ar_check_frames_representable(inputs[s].frames, tick_count);
         slot_mask = (u8)(slot_mask | (u8)(1u << inputs[s].slot));
     }
     // The caller's ordering contract for the log array (docs/NETCODE.md §20.2.9). Spelled
@@ -281,6 +307,7 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
                                LogRecord* out_records, u32 out_record_capacity,
                                u32* out_record_count) {
     TL_ASSERT(r != nullptr && out_header != nullptr && out_record_count != nullptr);
+    TL_ASSERT(out_frames != nullptr);
     *out_record_count = 0u;
 
     const u64 header_start = r->pos;
@@ -327,6 +354,12 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
     bool have_last = false;
     u8 flags_rebuilt = 0u;   // bit s: slot s's derived edge flags have been rebuilt
     u32 seen_records = 0u;
+    // docs/NETCODE.md §20.2.9 makes a pointer stream's record 0 mandatory, so the encoder always
+    // writes both axes for every slot in slot_mask. Without requiring them back, a slot could be
+    // named in the mask and carry no streams at all, decoding to ZERO - the same frames a
+    // segment that omitted the slot produces, i.e. two spellings of one segment.
+    u8 ptr_x_seen = 0u;
+    u8 ptr_y_seen = 0u;
 
     while (r->pos < streams_end) {
         ArchiveStreamHeader sh;
@@ -346,6 +379,7 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
             const u32 a = sh.channel;
             if (sh.record_count > tick_count) { return ERR_NET_MALFORMED; }
             u32 cursor = 0;
+            u32 run_start = 0;
             bool first = true;
             u32 prev_word = 0u;
             for (u32 rec = 0; rec < sh.record_count; ++rec) {
@@ -359,19 +393,37 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
                 if (tick < cursor || tick >= tick_count) { return ERR_NET_MALFORMED; }
                 if (word == prev_word) { return ERR_NET_MALFORMED; }
                 if (word > 0x1FFu) { return ERR_NET_MALFORMED; }
-                i8 value; u8 down;
-                ar_action_unword(word, &value, &down);
-                for (u32 i = tick; i < tick_count; ++i) {
-                    frames[i].actions[a].value = value;
-                    frames[i].actions[a].flags = down;   // edges rebuilt below
+                // Close the PREVIOUS record's run at this record's tick rather than re-filling
+                // the whole tail each time: the tail form is O(tick_count^2) per channel, which
+                // is invisible at CHECKPOINT_HOT_TICKS = 300 and 4.5 s per segment at 60,000
+                // ticks - and §20.2.5's BK_LOG_SEGMENT means an untrusted peer chooses the size.
+                if (!first) {
+                    i8 pv; u8 pd;
+                    ar_action_unword(prev_word, &pv, &pd);
+                    for (u32 i = run_start; i < tick; ++i) {
+                        frames[i].actions[a].value = pv;
+                        frames[i].actions[a].flags = pd;
+                    }
                 }
+                run_start = tick;
                 cursor = tick;
                 prev_word = word;
                 first = false;
             }
+            // The last record runs to the end of the segment.
+            if (sh.record_count != 0u) {
+                i8 pv; u8 pd;
+                ar_action_unword(prev_word, &pv, &pd);
+                for (u32 i = run_start; i < tick_count; ++i) {
+                    frames[i].actions[a].value = pv;
+                    frames[i].actions[a].flags = pd;   // edges rebuilt below
+                }
+            }
         } else if (sh.channel == (u8)ARCHIVE_CH_POINTER_X
                 || sh.channel == (u8)ARCHIVE_CH_POINTER_Y) {
             const bool is_x = (sh.channel == (u8)ARCHIVE_CH_POINTER_X);
+            if (is_x) { ptr_x_seen = (u8)(ptr_x_seen | (u8)(1u << sh.slot)); }
+            else      { ptr_y_seen = (u8)(ptr_y_seen | (u8)(1u << sh.slot)); }
             if (tick_count == 0u) { return ERR_NET_MALFORMED; }
             if (sh.record_count > tick_count) { return ERR_NET_MALFORMED; }
             u32 delta = 0;
@@ -449,6 +501,14 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
                 if (action >= NET_FRAME_MAX_ACTIONS) { return ERR_NET_MALFORMED; }
                 if (!first && tick == cursor && action <= last_action) { return ERR_NET_MALFORMED; }
                 if (frames[tick].actions[action].flags == flags) { return ERR_NET_MALFORMED; }
+                // The DOWN bit belongs to the action channel; the escape channel carries only
+                // the edge bits. Letting an escape change bit 0 lets the same frame set be
+                // spelled two ways - state the down bit in the action stream, or omit that
+                // stream and assert it here - which forks the chain, since §20.2.8 hashes these
+                // bytes. The encoder never emits a disagreeing pair; the decoder now refuses one.
+                if ((flags & 1u) != (frames[tick].actions[action].flags & 1u)) {
+                    return ERR_NET_MALFORMED;
+                }
                 frames[tick].actions[action].flags = flags;
                 cursor = tick;
                 last_action = action;
@@ -458,6 +518,12 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
     }
     if (r->pos != streams_end) { return ERR_NET_MALFORMED; }
     if (seen_records != out_header->record_count) { return ERR_NET_MALFORMED; }
+    // A zero-tick segment carries no pointer streams (the encoder skips them - there is no
+    // absolute position to state); at any other length both axes are mandatory per slot.
+    if (tick_count != 0u
+        && (ptr_x_seen != out_header->slot_mask || ptr_y_seen != out_header->slot_mask)) {
+        return ERR_NET_MALFORMED;
+    }
 
     // Slots whose streams carried no escapes still need their derived edges built.
     for (u32 s = 0; s < MAX_PEERS; ++s) {

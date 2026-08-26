@@ -79,14 +79,14 @@ TL_TEST(net_log_store_suppresses_duplicate_ids, "net,internal,fast") {
     a.payload = 5u;
     a.effective_tick = 400u;
 
-    TL_EXPECT_TRUE(log_store_add(&s, &a));
+    TL_EXPECT_EQ(log_store_add(&s, &a), ERR_OK);
     TL_EXPECT_EQ(s.count, 1u);
     TL_EXPECT_TRUE(log_store_has(&s, 2u, 9u));
     // The same id again - even with a different payload - is a no-op, not a second entry.
     LogRecord dup = a;
     dup.payload = 99u;
     dup.effective_tick = 999u;
-    TL_EXPECT_FALSE(log_store_add(&s, &dup));
+    TL_EXPECT_EQ(log_store_add(&s, &dup), ERR_NET_DUPLICATE_RECORD);
     TL_EXPECT_EQ(s.count, 1u);
     TL_EXPECT_EQ(s.records[0].payload, 5u);          // the first one stands
 
@@ -94,12 +94,27 @@ TL_TEST(net_log_store_suppresses_duplicate_ids, "net,internal,fast") {
     // distinct records - the id is the PAIR.
     LogRecord b = a; b.seq = 10u;
     LogRecord c = a; c.origin_slot = 3u;
-    TL_EXPECT_TRUE(log_store_add(&s, &b));
-    TL_EXPECT_TRUE(log_store_add(&s, &c));
+    TL_EXPECT_EQ(log_store_add(&s, &b), ERR_OK);
+    TL_EXPECT_EQ(log_store_add(&s, &c), ERR_OK);
     TL_EXPECT_EQ(s.count, 3u);
 }
 
-TL_TEST(net_log_store_reports_full_rather_than_dropping_silently, "net,internal,edge,fast") {
+TL_TEST(net_log_store_distinguishes_duplicate_from_full, "net,internal,edge,fast") {
+    // The two failures are different things and must not share a return value: a duplicate is an
+    // expected R6 no-op, a full store is DATA LOSS. A bool conflated them.
+    {
+        LogStore d;
+        log_store_clear(&d);
+        LogRecord r = {};
+        r.format_version = NET_FORMAT_VERSION;
+        r.kind = (u8)LR_JOIN;
+        r.origin_slot = 4u;
+        r.seq = 1u;
+        r.effective_tick = 2u;
+        TL_ASSERT_EQ(log_store_add(&d, &r), ERR_OK);
+        TL_EXPECT_EQ(log_store_add(&d, &r), ERR_NET_DUPLICATE_RECORD);
+        TL_EXPECT_NE(log_store_add(&d, &r), ERR_NET_STORE_FULL);
+    }
     LogStore s;
     log_store_clear(&s);
     LogRecord r = {};
@@ -109,11 +124,11 @@ TL_TEST(net_log_store_reports_full_rather_than_dropping_silently, "net,internal,
     r.effective_tick = 1u;
     for (u32 i = 0; i < LOG_STORE_CAPACITY; ++i) {
         r.seq = i;
-        TL_ASSERT_TRUE(log_store_add(&s, &r));
+        TL_ASSERT_EQ(log_store_add(&s, &r), ERR_OK);
     }
     TL_EXPECT_EQ(s.count, LOG_STORE_CAPACITY);
     r.seq = LOG_STORE_CAPACITY;
-    TL_EXPECT_FALSE(log_store_add(&s, &r));          // reported, not asserted away
+    TL_EXPECT_EQ(log_store_add(&s, &r), ERR_NET_STORE_FULL);   // data loss, named as such
     TL_EXPECT_EQ(s.count, LOG_STORE_CAPACITY);
 }
 
@@ -134,7 +149,7 @@ TL_TEST(net_log_store_reads_a_tick_in_origin_then_seq_order, "net,internal,fast"
         r.origin_slot = adds[i].origin;
         r.seq = adds[i].seq;
         r.effective_tick = adds[i].tick;
-        TL_ASSERT_TRUE(log_store_add(&s, &r));
+        TL_ASSERT_EQ(log_store_add(&s, &r), ERR_OK);
     }
 
     LogRecord out[8] = {};
@@ -170,7 +185,7 @@ TL_TEST(net_log_store_ordered_read_feeds_the_archive_unchanged, "net,internal,fa
         r.seq = i;
         r.payload = i;
         r.effective_tick = 800u;
-        TL_ASSERT_TRUE(log_store_add(&s, &r));
+        TL_ASSERT_EQ(log_store_add(&s, &r), ERR_OK);
     }
     LogRecord out[8] = {};
     const u32 n = log_store_at_tick(&s, 800u, out, 8u);

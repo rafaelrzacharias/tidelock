@@ -11,6 +11,7 @@
 #include "runner/tl_test.h"
 #include "net/net_test_util.h"
 #include "foundation/vmem_arena.h"
+#include "foundation/crc32.h"
 #include <stdio.h>
 #include "foundation/vmem_test_api.h"
 
@@ -339,5 +340,164 @@ TL_TEST(archive_thirty_minute_three_peer_session_size, "net,archive,size,slow") 
     fprintf(stderr, "archive: 30-min 3-peer = %llu bytes (%.1f KB) in %u segments; "
                     "Phase 1 target is < 80 KB - see TODO.md RR on segment framing\n",
             (unsigned long long)total, (double)total / 1024.0, segments);
+    api.release(api.ctx, arena.base, arena.reserved);
+}
+
+// --- the rows finding 5 of the 2026-08-26 adversarial review said were missing ----------------
+// Every archive byte above is produced by the encoder and fed straight back to the decoder, so
+// nothing above can see a format with TWO spellings of one segment. That is how four
+// canonicality holes survived T2. These two rows close the gap: a mutation fuzz with a re-encode
+// comparison (the shape LESSONS.md already prescribes) and one hand-transcribed segment.
+
+// Re-encodes the frames a decode produced, for the slots the header named, so the result can be
+// compared byte for byte with what was consumed.
+static u64 ar_reencode(u8* out, u64 cap, const ArchiveSegmentHeader* h, const WireFrame* frames,
+                       const LogRecord* recs, u32 rec_count) {
+    u8 build_id[32], fingerprint[32];
+    ar_ids(build_id, fingerprint);
+    ArchiveInput in[MAX_PEERS];
+    u32 n = 0;
+    for (u32 s = 0; s < MAX_PEERS; ++s) {
+        if (((h->slot_mask >> s) & 1u) == 0u) { continue; }
+        in[n].frames = frames + (u64)s * h->tick_count;
+        in[n].slot = s;
+        in[n]._pad0 = 0u;
+        ++n;
+    }
+    ByteWriter w;
+    bw_init(&w, out, cap);
+    return archive_encode_segment(&w, h->base_tick, h->tick_count, in, n, recs, rec_count,
+                                  h->segment_seq, build_id, fingerprint);
+}
+
+TL_TEST(archive_mutated_segments_are_refused_or_canonical, "net,archive,fuzz,fast") {
+    // The archive analogue of T1f. A single-bit payload mutation with BOTH crc32s repaired -
+    // otherwise the checksums refuse everything and the row proves nothing about the codec.
+    // Whatever still decodes must re-encode to exactly the bytes it consumed.
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, 0xA5C17u, 32u << 20, 0u, &api), ERR_OK);
+
+    const u32 ticks = 12u;
+    const u32 slots = 2u;
+    WireFrame* src = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * ticks * slots, 16u);
+    const u64 cap = archive_segment_max_bytes(slots, ticks, 0u);
+    u8* buf = (u8*)arena_push(&arena, cap, 16u);
+    u8* again = (u8*)arena_push(&arena, cap, 16u);
+    WireFrame* got = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * ticks * MAX_PEERS, 16u);
+    LogRecord none[1] = {};
+    u32 rc = 0;
+
+    u32 accepted = 0, refused = 0;
+    for (u32 c = 0; c < 3000u; ++c) {
+        const u64 seed = nt_mix64(0xA12C11u, c);
+        for (u32 s = 0; s < slots; ++s) { ar_synth_frames(src + (u64)s * ticks, ticks, s, seed); }
+        const u64 n = ar_encode(buf, cap, src, slots, ticks, nullptr, 0u, c);
+        TL_ASSERT_GT(n, (u64)112u);
+
+        // Mutate one payload byte, then repair the two checksums the way a real corruption
+        // upstream of them would not - this row is about the CODEC, not the crc.
+        const u64 off = 112u + (nt_mix64(seed, 1u) % (n - 112u));
+        buf[off] = (u8)(buf[off] ^ (u8)(1u << (nt_mix64(seed, 2u) & 7u)));
+        const u32 pcrc = crc32(buf + 112u, n - 112u);
+        for (u32 i = 0; i < 4u; ++i) { buf[100u + i] = (u8)((pcrc >> (8u * i)) & 0xFFu); }
+        const u32 hcrc = crc32(buf, 108u);
+        for (u32 i = 0; i < 4u; ++i) { buf[108u + i] = (u8)((hcrc >> (8u * i)) & 0xFFu); }
+
+        ArchiveSegmentHeader h = {};
+        ByteReader r;
+        br_init(&r, buf, n);
+        if (archive_decode_segment(&r, &h, got, ticks, none, 1u, &rc) != ERR_OK) { ++refused; continue; }
+        ++accepted;
+        const u64 n2 = ar_reencode(again, cap, &h, got, nullptr, 0u);
+        TL_ASSERT_EQ(n2, r.pos);
+        TL_ASSERT_EQ(memcmp(buf, again, (usize)r.pos), 0);
+    }
+    // Both outcomes must occur or the row proves nothing.
+    TL_EXPECT_GT(refused, 0u);
+    TL_EXPECT_GT(accepted, 0u);
+    api.release(api.ctx, arena.base, arena.reserved);
+}
+
+TL_TEST(archive_hand_written_segment_decodes_to_known_frames, "net,archive,golden,fast") {
+    // One segment transcribed by hand from docs/NETCODE.md §20.2.9, so the layout is pinned by
+    // something other than the encoder that produced it. Slot 0, two ticks: action 0 down for
+    // both, pointer (5, -3) then (7, -3).
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, 0xA5C18u, 4u << 20, 0u, &api), ERR_OK);
+
+    const u32 ticks = 2u;
+    u8 seg[512];
+    for (u32 i = 0; i < sizeof(seg); ++i) { seg[i] = 0u; }
+    // --- header, field by field, little-endian (docs/NETCODE.md §20.2.9) ---
+    u32 o = 0;
+    auto put32 = [&](u32 v) { for (u32 i = 0; i < 4u; ++i) { seg[o + i] = (u8)((v >> (8u*i)) & 0xFFu); } o += 4u; };
+    auto put64 = [&](u64 v) { for (u32 i = 0; i < 8u; ++i) { seg[o + i] = (u8)((v >> (8u*i)) & 0xFFu); } o += 8u; };
+    put32(NET_FORMAT_VERSION);            //  0 format_version
+    put32(NET_FRAME_MAX_ACTIONS);         //  4 max_actions
+    put64(1000u);                         //  8 base_tick
+    put32(ticks);                         // 16 tick_count
+    seg[20] = 0x01u; o = 24u;             // 20 slot_mask = slot 0; 21..23 _pad0
+    put32(5u);                            // 24 record_count: 1 action + 2 ptr_x + 1 ptr_y + 1 escape
+    put32(0u);                            // 28 log_record_count
+    for (u32 i = 0; i < 32u; ++i) { seg[32u + i] = (u8)(i + 1u); }      // 32 build_id
+    for (u32 i = 0; i < 32u; ++i) { seg[64u + i] = (u8)(0x40u + i); }   // 64 session_fingerprint
+    o = 96u;
+    put32(0u);                            // 96 payload_bytes  (patched below)
+    put32(0u);                            // 100 payload_crc32 (patched below)
+    put32(0u);                            // 104 segment_seq
+    put32(0u);                            // 108 header_crc32  (patched below)
+    o = 112u;
+    const u32 payload_start = o;
+
+    // --- stream: slot 0, channel 0 (action 0): one record, tick 0, word = value<<1|down ---
+    put32(1u); seg[o] = 0u; seg[o+1] = 0u; seg[o+2] = 0u; seg[o+3] = 0u; o += 4u;  // hdr
+    seg[o++] = 0x00u;                     // delta_tick 0
+    seg[o++] = 0x03u;                     // uvarint(value 1 << 1 | down 1) = 3
+    // --- stream: slot 0, channel 32 (pointer_x): absolute 5, then velocity +2 at tick 1 ---
+    put32(2u); seg[o] = 32u; seg[o+1] = 0u; seg[o+2] = 0u; seg[o+3] = 0u; o += 4u;
+    seg[o++] = 0x00u; seg[o++] = 0x0Au;   // delta 0, svarint(5)  = zigzag 10
+    seg[o++] = 0x01u; seg[o++] = 0x04u;   // delta 1, svarint(2)  = zigzag 4
+    // --- stream: slot 0, channel 33 (pointer_y): absolute -3, no velocity records ---
+    put32(1u); seg[o] = 33u; seg[o+1] = 0u; seg[o+2] = 0u; seg[o+3] = 0u; o += 4u;
+    seg[o++] = 0x00u; seg[o++] = 0x05u;   // delta 0, svarint(-3) = zigzag 5
+    // --- stream: slot 0, channel 34 (escape): tick 0's derived flags are down|pressed, but the
+    //     frames say plain down, so one escape carries (action 0, flags 1) ---
+    put32(1u); seg[o] = 34u; seg[o+1] = 0u; seg[o+2] = 0u; seg[o+3] = 0u; o += 4u;
+    seg[o++] = 0x00u;                     // delta_tick 0
+    seg[o++] = 0x01u;                     // uvarint(action 0 << 3 | flags 1)
+
+    const u32 payload_bytes = o - payload_start;
+    for (u32 i = 0; i < 4u; ++i) { seg[96u + i] = (u8)((payload_bytes >> (8u*i)) & 0xFFu); }
+    const u32 pcrc = crc32(seg + payload_start, payload_bytes);
+    for (u32 i = 0; i < 4u; ++i) { seg[100u + i] = (u8)((pcrc >> (8u*i)) & 0xFFu); }
+    const u32 hcrc = crc32(seg, 108u);
+    for (u32 i = 0; i < 4u; ++i) { seg[108u + i] = (u8)((hcrc >> (8u*i)) & 0xFFu); }
+
+    ArchiveSegmentHeader h = {};
+    WireFrame* got = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * ticks * MAX_PEERS, 16u);
+    LogRecord none[1] = {};
+    u32 rc = 0;
+    ByteReader r;
+    br_init(&r, seg, o);
+    TL_ASSERT_EQ(archive_decode_segment(&r, &h, got, ticks, none, 1u, &rc), ERR_OK);
+    TL_EXPECT_EQ(h.tick_count, ticks);
+    TL_EXPECT_EQ(h.slot_mask, (u8)0x01u);
+    TL_EXPECT_EQ(got[0].actions[0].value, (i8)1);
+    TL_EXPECT_EQ(got[0].actions[0].flags, (u8)1u);   // the escape overrode the derived press
+    TL_EXPECT_EQ(got[1].actions[0].value, (i8)1);
+    TL_EXPECT_EQ(got[1].actions[0].flags, (u8)1u);   // still down, no edge
+    TL_EXPECT_EQ(got[0].pointer_x, 5);
+    TL_EXPECT_EQ(got[1].pointer_x, 7);
+    TL_EXPECT_EQ(got[0].pointer_y, -3);
+    TL_EXPECT_EQ(got[1].pointer_y, -3);
+
+    // And the encoder agrees with the hand-written bytes: this is the round trip closing on a
+    // stream the code under test did not author.
+    u8 again[512];
+    const u64 n2 = ar_reencode(again, sizeof(again), &h, got, nullptr, 0u);
+    TL_EXPECT_EQ(n2, (u64)o);
+    TL_EXPECT_EQ(memcmp(seg, again, (usize)o), 0);
     api.release(api.ctx, arena.base, arena.reserved);
 }
