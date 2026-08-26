@@ -167,23 +167,34 @@ ErrCode load_chunk(ScriptVm* vm, const char* chunkname, StrView source) {
     const MemPoolStats* cst = pool_stats(cpool);
     const u64 want = SCRIPT_COMPILE_HEADROOM_MIN +
                      (u64)source.len * SCRIPT_COMPILE_BYTES_PER_SRC_BYTE;
-    const u64 have = cpool->budget_bytes > cst->live_bytes
-                   ? cpool->budget_bytes - cst->live_bytes : 0;
+    // Against CARVED bytes, not live ones - that is what pool_alloc enforces
+    // (`carved_bytes + bytes > budget_bytes`), and pool_free returns a small-class block to its
+    // per-class freelist WITHOUT decrementing carved_bytes. Freelists never split across classes,
+    // so carved-but-free bytes in one class cannot serve a request in another: `budget - live`
+    // overstates the room a compile can take, without bound, as a shared pool ages. Review round
+    // 2 reproduced the original TL_FATAL with this check reporting 33.6 MB of headroom against
+    // 40 KB of real carve room. Ignoring freelist reuse is conservative, which is the correct
+    // direction for a refusal gate: it can refuse a compile that might have fit, never admit one
+    // that cannot.
+    const u64 have = cpool->budget_bytes > cpool->carved_bytes
+                   ? cpool->budget_bytes - cpool->carved_bytes : 0;
     if (have < want) {
         return script_set_error(vm, ERR_SCRIPT_COMPILE,
                                 "the shared vendor pool has too little headroom to compile this "
                                 "source (docs/MEMORY.md section 1.5)");
     }
     const u64 live_before = cst->live_bytes;
-    const u64 peak_before = cst->peak_bytes;
     vendor_heap_install(cpool);
     char* bc = luau_compile(source.ptr, (size_t)source.len, &opts, &bc_size);
     vendor_heap_install(nullptr);
     // What the window itself cost, for the test that guards RR-18's headline mechanism. Measured
     // HERE and not across script_run_source because that call also loads and runs, and both of
     // those go through tl_luau_alloc - review round 1 (D1) showed the confound is larger than the
-    // signal, so a floor measured against the whole call cannot discriminate.
-    vm->last_compile_bytes = pool_stats(cpool)->peak_bytes - peak_before;
+    // signal, so a floor measured against the whole call cannot discriminate. And taken from the
+    // WINDOW's own high-water counter rather than the pool's peak_bytes, which is a LIFETIME mark
+    // a returning window can never raise twice: review round 2 measured 32,992 / 0 / 0 across
+    // three compiles on one pool, which on a long-lived pool_vendor is 0 essentially always.
+    vm->last_compile_bytes = vendor_heap_window_peak();
     TL_ASSERT(pool_stats(cpool)->live_bytes == live_before);
     (void)live_before;
     if (bc == nullptr) {

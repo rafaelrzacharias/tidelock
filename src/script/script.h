@@ -166,11 +166,18 @@ bool script_codegen_available(void);
 // created with no interner.
 i32 script_atom_of(ScriptVm* vm, StrView s);
 
-// What the last compile drew from the shared vendor pool - the compile WINDOW's own peak delta,
-// not the enclosing call's. This is the number that discriminates "the compiler allocated from
-// the pool" from "the CRT served it": script_run_source also loads and runs, and both of those
-// allocate through the VM's own hook, so a figure measured across the whole call is dominated by
-// bytes that have nothing to do with RR-18. Zero before the first compile.
+// The high-water mark of bytes live inside the LAST compile window - a true per-window figure,
+// reported for every compile and not only the first.
+//
+// It discriminates "the compiler allocated from the shared pool" from "the CRT served it":
+// script_run_source also loads and runs, and both of those allocate through the VM's own hook, so
+// a figure measured across the whole call is dominated by bytes that have nothing to do with
+// RR-18. It is maintained by the interceptors in vendor_glue/vendor_new.cpp rather than derived
+// from the pool's `peak_bytes`, because that is a LIFETIME high-water mark and a window which
+// returns every byte it took can never raise it again: a peak-delta read 32,992 for the first
+// compile and 0 for every one after it (review round 2), which on a long-lived pool_vendor is 0
+// essentially always. Zero before the first compile; the same source compiled twice reports the
+// same figure.
 u64 script_last_compile_bytes(const ScriptVm* vm);
 
 // Whether the string-atom callback of docs/LUAU-LAYER.md §10.2 step 8 is installed - true once

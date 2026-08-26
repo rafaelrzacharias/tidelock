@@ -113,9 +113,9 @@ by the steward** — recorded here with that provenance, per `CLAUDE.md`'s doc-i
       from §10.9's on-load compile path fed by files on disk. It also made the trip point depend
       on runtime heap occupancy rather than on the source. **Ruling:** the window draws from
       `PLATFORM.md` §9.5's `pool_vendor`, so the VM budget stays a bound on VM state, plus a cheap
-      pre-window headroom check that refuses with `SCRIPT_ERR_COMPILE` instead of ever reaching
+      pre-window headroom check that refuses with `ERR_SCRIPT_COMPILE` instead of ever reaching
       the fatal. **Shipped:** `ScriptVmDesc.compile_pool` (required — a null one is
-      `SCRIPT_ERR_BAD_ARG`, never a fall back), headroom constants DERIVED from measurement
+      `ERR_SCRIPT_BAD_ARG`, never a fall back), headroom constants DERIVED from measurement
       (90.66x the source size at 1 KB, 49.83x at 64 KB, ~88 KB floor → 256 KB + 128 B/byte, ~3x
       and ~1.4x margin), and `compile_headroom_is_refused_not_fatal`. `MEMORY.md` §1.5,
       `PLATFORM.md` §9.5, `LUAU-LAYER.md` §10.12 and the RR-18 record above amended.

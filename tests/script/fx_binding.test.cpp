@@ -31,7 +31,8 @@ i64 eval(ScriptVm* vm, const char* expr, bool* ok) {
 // zero-vector case among them - passed on the fallback while the binding was broken. Review round
 // 1 (D10) found `ok` written fourteen times and read once. Returns true only if the evaluation
 // SUCCEEDED and matched, so the caller's counter counts comparisons rather than iterations.
-bool eval_eq(TestCtx* t, ScriptVm* vm, const char* expr, i64 want, u32* checked) {
+bool eval_eq(TestCtx* t, ScriptVm* vm, const char* expr, i64 want, u32* checked, u32* attempted) {
+    *attempted += 1u;
     bool ok = false;
     const i64 got = eval(vm, expr, &ok);
     ++t->checks;
@@ -104,6 +105,7 @@ TL_TEST(fx_ops_match_cpp, "script") {
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
     char expr[192];
     u32 checked = 0;
+    u32 attempted = 0;
 
     // A seeded sweep, generated INSIDE each helper's contract (docs/LESSONS.md: a full-range
     // property test leaves the contract and traps in dev, and then it is a trap where it is not
@@ -120,12 +122,12 @@ TL_TEST(fx_ops_match_cpp, "script") {
         // fx.mul_q(q, a) is mul<A>(q_t, A) for every row A: the shift is always 30.
         (void)snprintf(expr, sizeof(expr), "fx.mul_q(%d, %d)", (int)qv, (int)a);
         (void)eval_eq(t, f.vm, expr,
-                      (i64)fx::mul<pos_t>(fx::fx_raw<q_t>(qv), fx::fx_raw<pos_t>(a)).v, &checked);
+                      (i64)fx::mul<pos_t>(fx::fx_raw<q_t>(qv), fx::fx_raw<pos_t>(a)).v, &checked, &attempted);
 
         // fx.mul_scalar(s, a) is mul<A>(scalar_t, A): the shift is always 16.
         (void)snprintf(expr, sizeof(expr), "fx.mul_scalar(%d, %d)", (int)sv_, (int)a);
         (void)eval_eq(t, f.vm, expr,
-                      (i64)fx::mul<vel_t>(fx::fx_raw<scalar_t>(sv_), fx::fx_raw<vel_t>(a)).v, &checked);
+                      (i64)fx::mul<vel_t>(fx::fx_raw<scalar_t>(sv_), fx::fx_raw<vel_t>(a)).v, &checked, &attempted);
 
         // fx.div_q(a, b) is div<q_t>(A, A), same row both sides. div<q_t> ASSERTS when the
         // quotient leaves q_t's range, so the oracle cannot be called to discover whether it is in
@@ -136,38 +138,38 @@ TL_TEST(fx_ops_match_cpp, "script") {
             if (raw_q >= (i64)INT32_MIN && raw_q <= (i64)INT32_MAX) {
                 (void)snprintf(expr, sizeof(expr), "fx.div_q(%d, %d)", (int)a, (int)b);
                 (void)eval_eq(t, f.vm, expr,
-                              (i64)fx::div<q_t>(fx::fx_raw<pos_t>(a), fx::fx_raw<pos_t>(b)).v, &checked);
+                              (i64)fx::div<q_t>(fx::fx_raw<pos_t>(a), fx::fx_raw<pos_t>(b)).v, &checked, &attempted);
             }
         }
 
         // fx.mul_pos_vel_dt(x, v) is the integrate step x + mul<pos_t>(v, H).
         (void)snprintf(expr, sizeof(expr), "fx.mul_pos_vel_dt(%d, %d)", (int)a, (int)b);
         (void)eval_eq(t, f.vm, expr,
-                      (i64)(fx::fx_raw<pos_t>(a) + fx::mul<pos_t>(fx::fx_raw<vel_t>(b), fx::H)).v, &checked);
+                      (i64)(fx::fx_raw<pos_t>(a) + fx::mul<pos_t>(fx::fx_raw<vel_t>(b), fx::H)).v, &checked, &attempted);
 
         // fx.vel_from_delta(dx) is mul_int<vel_t>(pos_t, INV_H) - exact, a two-bit widening.
         const i32 small = a / 512;                       // inside the |dx| * 1920 < 2^31 contract
         (void)snprintf(expr, sizeof(expr), "fx.vel_from_delta(%d)", (int)small);
         (void)eval_eq(t, f.vm, expr,
-                      (i64)fx::mul_int<vel_t>(fx::fx_raw<pos_t>(small), fx::INV_H).v, &checked);
+                      (i64)fx::mul_int<vel_t>(fx::fx_raw<pos_t>(small), fx::INV_H).v, &checked, &attempted);
 
         // fx.lerp(a, b, t) is lerp<A>(A, A, q_t), one RNE.
         (void)snprintf(expr, sizeof(expr), "fx.lerp(%d, %d, %d)", (int)a, (int)b, (int)qv);
         (void)eval_eq(t, f.vm, expr,
                       (i64)fx::lerp<pos_t>(fx::fx_raw<pos_t>(a), fx::fx_raw<pos_t>(b),
-                                           fx::fx_raw<q_t>(qv)).v, &checked);
+                                           fx::fx_raw<q_t>(qv)).v, &checked, &attempted);
 
         // fx.dist / fx.normalize: the pos x pos path, inside the broadphase-sized contract.
         const i32 dx = a / 64, dy = b / 64;
         const fx::vec2<pos_t> d = { fx::fx_raw<pos_t>(dx), fx::fx_raw<pos_t>(dy) };
         (void)snprintf(expr, sizeof(expr), "fx.dist(0, 0, %d, %d)", (int)dx, (int)dy);
-        (void)eval_eq(t, f.vm, expr, (i64)fx::len(d).v, &checked);
+        (void)eval_eq(t, f.vm, expr, (i64)fx::len(d).v, &checked, &attempted);
         if (dx != 0 || dy != 0) {
             const fx::vec2<q_t> u = fx::normalize(d);
             (void)snprintf(expr, sizeof(expr), "select(1, fx.normalize(%d, %d))", (int)dx, (int)dy);
-            (void)eval_eq(t, f.vm, expr, (i64)u.x.v, &checked);
+            (void)eval_eq(t, f.vm, expr, (i64)u.x.v, &checked, &attempted);
             (void)snprintf(expr, sizeof(expr), "select(2, fx.normalize(%d, %d))", (int)dx, (int)dy);
-            (void)eval_eq(t, f.vm, expr, (i64)u.y.v, &checked);
+            (void)eval_eq(t, f.vm, expr, (i64)u.y.v, &checked, &attempted);
         }
 
         // fx.sincos / fx.atan2 against det_math, bit for bit (never "close enough": the kernels
@@ -176,26 +178,34 @@ TL_TEST(fx_ops_match_cpp, "script") {
         q_t sn = fx::fx_raw<q_t>(0), cs = fx::fx_raw<q_t>(0);
         fx::sincos(fx::fx_raw<angle_t>(ang), &sn, &cs);
         (void)snprintf(expr, sizeof(expr), "select(1, fx.sincos(%d))", (int)ang);
-        (void)eval_eq(t, f.vm, expr, (i64)sn.v, &checked);
+        (void)eval_eq(t, f.vm, expr, (i64)sn.v, &checked, &attempted);
         (void)snprintf(expr, sizeof(expr), "select(2, fx.sincos(%d))", (int)ang);
-        (void)eval_eq(t, f.vm, expr, (i64)cs.v, &checked);
+        (void)eval_eq(t, f.vm, expr, (i64)cs.v, &checked, &attempted);
         if (dx != 0 || dy != 0) {
             (void)snprintf(expr, sizeof(expr), "fx.atan2(%d, %d)", (int)dy, (int)dx);
             (void)eval_eq(t, f.vm, expr,
-                          (i64)fx::atan2(fx::fx_raw<pos_t>(dy), fx::fx_raw<pos_t>(dx)).v, &checked);
+                          (i64)fx::atan2(fx::fx_raw<pos_t>(dy), fx::fx_raw<pos_t>(dx)).v, &checked, &attempted);
         }
 
         // The saturating quanta ops, over the full i32 range - saturation is the point.
         const i32 big_a = (i32)(u32)(r >> 3), big_b = (i32)(u32)(r >> 19);
         (void)snprintf(expr, sizeof(expr), "fx.sat_add(%d, %d)", (int)big_a, (int)big_b);
-        (void)eval_eq(t, f.vm, expr, (i64)fx::sat_add(big_a, big_b), &checked);
+        (void)eval_eq(t, f.vm, expr, (i64)fx::sat_add(big_a, big_b), &checked, &attempted);
         (void)snprintf(expr, sizeof(expr), "fx.sat_sub(%d, %d)", (int)big_a, (int)big_b);
-        (void)eval_eq(t, f.vm, expr, (i64)fx::sat_sub(big_a, big_b), &checked);
+        (void)eval_eq(t, f.vm, expr, (i64)fx::sat_sub(big_a, big_b), &checked, &attempted);
     }
-    // COMPARISONS, not iterations (review round 1, D10): the old counter incremented once per
-    // loop pass and would have read 256 with every comparison inside it broken. The floor is the
-    // unconditional rows only - 11 per pass - so a conditional row dropping out cannot mask it.
-    TL_EXPECT_GE(checked, 256u * 11u);
+    // EXACT, not a floor (review round 2). The round-1 fix counted comparisons rather than
+    // iterations, which was the right move, but its floor's stated property was wrong: there are
+    // TEN unconditional eval_eq calls per pass, not eleven - div_q, both normalize legs and
+    // atan2 are all conditional. Measured 3,521 against a floor of 2,816, so 705 comparisons of
+    // slack; with fx.mul_q broken it still read 3,265 and cleared the floor. An entire op's 256
+    // comparisons could vanish untripped, which is precisely what the floor was added to catch.
+    //
+    // `attempted` is incremented by eval_eq itself, so it counts every call the sweep made
+    // whatever the guards did. checked == attempted is exact and needs no arithmetic about which
+    // rows are conditional; the >= keeps a floor under a sweep that generated nothing at all.
+    TL_EXPECT_EQ(checked, attempted);
+    TL_EXPECT_GE(attempted, 256u * 10u);
     script_fixture_down(&f);
 }
 

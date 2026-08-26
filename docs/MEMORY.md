@@ -142,7 +142,7 @@ nowhere narrower, so the only way to budget such a heap is to replace it program
   an ordinary large source: short headroom is an `ErrCode` the caller reports. Its constants are
   derived, not guessed — the Luau compiler's pool peak measured **90.66x** the source size for a
   1 KB source, falling to **49.83x** at 64 KB, with an ~88 KB floor for even a tiny one (0.696,
-  x86-64); `LUAU-LAYER.md` §10.2 carries the two constants and their margins.
+  x86-64); `LUAU-LAYER.md` §10.12 carries the two constants and their margins.
 - §2's tripwire operators moved into their own TU (`alloc_shim_ops.cpp`) so ordinary archive
   semantics let the replacement win without a duplicate-symbol error. They previously shared a
   member with `tl_alloc_shim_anchor`, which the guard force-pulls.

@@ -224,14 +224,39 @@ TL_TEST(compile_allocations_go_through_the_vendor_pool, "script") {
                "for i = 1, 200 do s = f(s, t[i], i) end\n"
                "return s\n")), ERR_OK);
 
-    // The window's own cost, measured on this fixture and source: 32,992 bytes. 24 KB is the
-    // discriminating floor the reviewer named - comfortably under the real figure and far above
-    // anything an unrelated allocation could contribute, because nothing unrelated is inside the
-    // window at all.
-    TL_EXPECT_GT(script_last_compile_bytes(f.vm), (u64)(24u * 1024u));
+    // The window's own cost, RE-MEASURED after round 2 moved the meter from the pool's lifetime
+    // peak to a per-window high-water counter: 18,389 bytes for this source, 15,929 for the
+    // smallest one this suite compiles. The two are different QUANTITIES - the old one was the
+    // pool's carve growth in 64 KB pages, this one is the peak of concurrent live bytes - so the
+    // floor had to be re-derived rather than carried over.
+    //
+    // 12 KB: about a third under the smallest real figure, and infinitely above the 0 the CRT
+    // path produces. The discriminating property is that a compile served by the CRT contributes
+    // nothing at all here; the magnitude is what stops one incidental block from satisfying it.
+    TL_EXPECT_GT(script_last_compile_bytes(f.vm), (u64)(12u * 1024u));
 
-    // ...and the window gave every byte back: the compiler's heap is transient by construction.
-    TL_EXPECT_EQ(script_pool_stats(f.vm)->live_bytes, script_pool_stats(f.vm)->live_bytes);
+    // ...and the window gave every byte back, checked against the COMPILE pool with a real
+    // baseline. This line used to read TL_EXPECT_EQ(x, x) - three ways wrong at once: a tautology,
+    // in the row whose whole subject is that a test must be able to fail; commented as if it
+    // checked something; and reading the VM's pool while the window draws from the compile pool.
+    // (load_chunk's TL_ASSERT holds the same property but compiles out in netcode/ship.)
+    TL_EXPECT_EQ(pool_stats(&f.compile_pool)->live_bytes, (u64)0);
+
+    // Review round 2, D1: the meter must report the LAST window, not the pool's lifetime peak.
+    // Three compiles on one pool measured 32,992 / 0 / 0 before the fix, because peak_bytes is a
+    // lifetime high-water mark a returning window can never raise twice - and pool_vendor is
+    // long-lived, so in the shipped program the old figure read 0 essentially always.
+    const u64 first = script_last_compile_bytes(f.vm);
+    TL_ASSERT_EQ(script_run_source(f.vm, "again", sv_lit("local q = 1 + 2 return q")), ERR_OK);
+    const u64 second = script_last_compile_bytes(f.vm);
+    TL_ASSERT_EQ(script_run_source(f.vm, "third", sv_lit("local q = 1 + 2 return q")), ERR_OK);
+    const u64 third = script_last_compile_bytes(f.vm);
+    TL_EXPECT_GT(second, (u64)0);
+    TL_EXPECT_GT(third, (u64)0);
+    // ...and it is per-WINDOW, so two compiles of the same source report the same figure - which
+    // a lifetime-peak delta cannot do, and a monotonically growing counter would not either.
+    TL_EXPECT_EQ(second, third);
+    TL_EXPECT_GT(first, second);   // the sized source above really is the larger one
     script_fixture_down(&f);
 }
 
@@ -272,5 +297,65 @@ TL_TEST(compile_headroom_is_refused_not_fatal, "script") {
     // The same source compiles fine against a pool that has the headroom - so the row above is
     // refusing for the stated reason and not because the source is malformed.
     TL_EXPECT_EQ(script_run_source(f.vm, "big", StrView{ big, n }), ERR_OK);
+    script_fixture_down(&f);
+}
+
+TL_TEST(compile_headroom_survives_an_aged_pool, "script") {
+    // Review round 2, D2: the headroom check must measure what pool_alloc ENFORCES. It compared
+    // `budget - live`, while the pool refuses on `carved_bytes + bytes > budget_bytes` and
+    // pool_free returns a small-class block to its per-class freelist WITHOUT decrementing
+    // carved_bytes. Freelists never split across classes, so carved-but-free bytes in one class
+    // cannot serve a request in another - and `budget - live` overstates the room without bound
+    // as a shared pool ages, which is exactly what a long-lived pool_vendor shared with
+    // SDL/ImGui/stb does.
+    ScriptFixture f;
+    TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
+
+    static char src[8000];
+    u32 n = 0;
+    while (n + 32u < (u32)sizeof(src) - 1u) {
+        src[n] = '-'; src[n + 1u] = '-'; src[n + 2u] = ' ';
+        for (u32 k = 3; k < 31u; ++k) src[n + k] = 'x';
+        src[n + 31u] = '\n';
+        n += 32u;
+    }
+    src[n] = 0;
+    const u64 want = SCRIPT_COMPILE_HEADROOM_MIN + (u64)n * SCRIPT_COMPILE_BYTES_PER_SRC_BYTE;
+
+    // Age the pool until its real CARVE room is below what this source needs, then free every
+    // block. The loop runs TO THE CONDITION rather than a fixed count: a first version carved 300
+    // blocks, left 12 MB of room, and the compile succeeded - so the row passed under both the
+    // fixed and the broken check, which is the very "cannot fail on its subject" shape this round
+    // is about. The cap stops a pool that refuses early from spinning.
+    enum : u32 { AGE_CAP = 4096u };
+    static void* held[AGE_CAP];
+    u32 held_n = 0;
+    while (held_n < AGE_CAP) {
+        const u64 room = f.compile_pool.budget_bytes > f.compile_pool.carved_bytes
+                       ? f.compile_pool.budget_bytes - f.compile_pool.carved_bytes : 0;
+        if (room < want) break;
+        void* q = pool_alloc(&f.compile_pool, 64u * 1024u);
+        if (q == nullptr) break;
+        held[held_n++] = q;
+    }
+    for (u32 i = 0; i < held_n; ++i) pool_free(&f.compile_pool, held[i]);
+
+    // The state the finding is about: nothing live, and the budget nonetheless spent.
+    const MemPoolStats* st = pool_stats(&f.compile_pool);
+    TL_ASSERT_GT(held_n, 0u);                                   // the ageing actually happened
+    TL_EXPECT_EQ(st->live_bytes, (u64)0);
+    TL_EXPECT_GT(f.compile_pool.carved_bytes, (u64)0);
+    const u64 real_room = f.compile_pool.budget_bytes > f.compile_pool.carved_bytes
+                        ? f.compile_pool.budget_bytes - f.compile_pool.carved_bytes : 0;
+    TL_ASSERT_LT(real_room, want);                              // ...and too little left to compile
+    // The gap the broken check saw: budget minus LIVE is still the whole budget.
+    TL_EXPECT_GE(f.compile_pool.budget_bytes - st->live_bytes, want);
+
+    // So the compile must be REFUSED, unconditionally. Under the live-based check this passed the
+    // gate and died in vendor_alloc - the same TL_FATAL as round 1, from the same line.
+    TL_EXPECT_EQ(script_run_source(f.vm, "aged", StrView{ src, n }), ERR_SCRIPT_COMPILE);
+    TL_EXPECT_NE(script_last_error(f.vm)[0], '\0');
+    // The process is alive and the VM still works, which is the property the row exists for.
+    TL_EXPECT_EQ(script_run_source(f.vm, "after", sv_lit("local x = 1 + 1")), ERR_OK);
     script_fixture_down(&f);
 }

@@ -206,7 +206,7 @@ tests/script/     §10.11
 ### 10.2 VM construction sequence
 
 One function per VM kind; all three call the common core in this order. A step that fails
-returns `Result<ScriptVm*>` with `SCRIPT_*` codes; no partial VM survives.
+returns `Result<ScriptVm*>` with `ERR_SCRIPT_*` codes; no partial VM survives.
 
 1. **Pool.** `mem_pool` over its own `VMemArena` reserve from the `app/` reserve table
    (sim/UI 64 MB each, `MEMORY.md` §6; data VM: its own entry, decommitted after compile). The
@@ -233,7 +233,7 @@ returns `Result<ScriptVm*>` with `SCRIPT_*` codes; no partial VM survives.
    had drifted from it), `string.rep`, `table.foreach`, `table.foreachi` (they call `next`).
    The "asserted absent afterwards" check runs in `script_sandbox_open` itself, not only in the
    test: a removal that silently did nothing is a hole in the sandbox, and a hole found by a test
-   nobody ran is not a gate (`LESSONS.md`). VM creation fails with `SCRIPT_ERR_SANDBOX`. `_G.require` is installed
+   nobody ran is not a gate (`LESSONS.md`). VM creation fails with `ERR_SCRIPT_SANDBOX`. `_G.require` is installed
    in step 7 and removed at the end of init (§10.9). Data VM removes `os`, `io`, `loadstring`,
    `getfenv`, `setfenv`. UI VM removes nothing.
 5. **Replacements (sim VM):** `tostring` → C function returning the type name for tables,
@@ -511,7 +511,7 @@ Nothing in this sequence can change state; it exists for cost control and leak d
 `script.reload` (console; sealed, tick-stamped, recorded in the replay log with the new
 manifest's BLAKE2b so a replay can refuse a mismatch). Applied at the end-of-tick barrier:
 
-1. **Refuse** when a lockstep session is active (`net_session_active(w)`) → `SCRIPT_ERR_LOCKSTEP`
+1. **Refuse** when a lockstep session is active (`net_session_active(w)`) → `ERR_SCRIPT_LOCKSTEP`
    (the fingerprint would change mid-session). Refuse during the init phase.
 2. **Compile** every file in the sim manifest with the on-load compiler (§10.9). Any compile
    error → log all of them, abort; the running VM is untouched.
@@ -573,7 +573,7 @@ build of the same tree print the same value.
 
 **Loading:** `luau_load(L, chunkname, data, size, 0)` with `chunkname = "=" + relpath`
 (`=script/sim/systems/regen.luau` — the `=` makes Luau print it verbatim in tracebacks). Non-zero
-return → the error string is on the stack → `SCRIPT_ERR_LOAD` with it. The main closure is kept:
+return → the error string is on the stack → `ERR_SCRIPT_LOAD` with it. The main closure is kept:
 `vm->chunks: Map<NameHash(relpath), int ref>` (for §10.10 breakpoints). `require(relpath)`
 (init only): looks the path up in the manifest table (unknown path → error, never a filesystem
 read at runtime), loads once, `lua_pcall`s it, caches the returned value in `vm->modules`, returns
@@ -620,7 +620,7 @@ construction (same tree); `luau_load` still reports it as a load error.
 | `memory_exhaustion` | a 1 MB pool + `table.create(1e6)` → `"not enough memory"` on the same error path; the pool counter returns to baseline after `lua_close` |
 | `reload_same_layout` | edit a system's body, `script.reload`: column data intact, new behaviour next tick, `session_fingerprint` unchanged |
 | `reload_layout_change` | add a field: plain reload refused with the component name; `--migrate`: data restored by name, new field at default, backup save exists |
-| `reload_in_lockstep_refused` | with a fake active session → `SCRIPT_ERR_LOCKSTEP` |
+| `reload_in_lockstep_refused` | with a fake active session → `ERR_SCRIPT_LOCKSTEP` |
 | `bytecode_identity` | `luauc` output for the fixture tree `MEM_EQ` the dev on-load compile, file by file; manifest hashes match |
 | `events_roundtrip` | `events.emit` in tick N visible to `events.read` in N+1 only, cleared in N+2 |
 | `input_proxy` | Script producer presses `jump` at tick 10: `input.pressed` true at 10, `down` true at 11, `released` at the release tick |
@@ -645,10 +645,10 @@ duration of one compile and nothing else in the process is inside that window. �
 compile is unblocked.
 
 `ScriptVmDesc.compile_pool` is that pool, and it is **required** — a null one is
-`SCRIPT_ERR_BAD_ARG` at creation, never a fall back to the VM's own pool (the binding the D2
+`ERR_SCRIPT_BAD_ARG` at creation, never a fall back to the VM's own pool (the binding the D2
 ruling removed, 2026-08-26). Before the window opens, `load_chunk` requires
 `SCRIPT_COMPILE_HEADROOM_MIN` (256 KB) `+ 128 B per source byte` of headroom and refuses with
-`SCRIPT_ERR_COMPILE` otherwise; both constants are derived from the measured cost (90.66x the
+`ERR_SCRIPT_COMPILE` otherwise; both constants are derived from the measured cost (90.66x the
 source size at 1 KB, 49.83x at 64 KB, ~88 KB floor) with ~3x margin on the floor and ~1.4x on the
 worst ratio. The refusal exists so the `TL_FATAL` in `vendor_new.cpp` stays what it is meant to be
 — a genuine bug — instead of the only outcome available for an ordinary large source.

@@ -13,8 +13,13 @@
 #include <stddef.h>   // size_t - operator new's parameter type is not ours to choose
 
 // The exempted pointer. Deliberately the only one in the file, and the file is deliberately the
-// only thing in its archive member.
+// only thing in its archive member. The two window counters below share its exemption row (the
+// allowlist is keyed by lib + directory + STEM, so it is this file that is named, not this
+// variable) and share its justification: `operator new` takes no context, so a figure derived
+// from what it does has nowhere else to live.
 static MemPool* g_vendor_heap = nullptr;
+static u64 g_window_live = 0;      // bytes live inside the current window
+static u64 g_window_peak = 0;      // max(g_window_live) since the last install
 
 void vendor_heap_install(MemPool* pool) {
     if (pool != nullptr && g_vendor_heap != nullptr && g_vendor_heap != pool) {
@@ -22,7 +27,15 @@ void vendor_heap_install(MemPool* pool) {
                  "program-wide allocator hook (docs/MEMORY.md section 1.5)");
     }
     g_vendor_heap = pool;
+    // Every install starts a new window. Reset on install rather than on uninstall so the figure
+    // survives for the caller to read after the window has closed - which is when it is wanted.
+    if (pool != nullptr) {
+        g_window_live = 0;
+        g_window_peak = 0;
+    }
 }
+
+u64 vendor_heap_window_peak(void) { return g_window_peak; }
 
 MemPool* vendor_heap_current(void) { return g_vendor_heap; }
 
@@ -57,6 +70,8 @@ void* vendor_alloc(size_t n) {
     VendorBlockHeader* h = (VendorBlockHeader*)raw;
     h->size = (u64)n;
     h->_pad = 0;
+    g_window_live += total;
+    if (g_window_live > g_window_peak) g_window_peak = g_window_live;
     return (void*)((u8*)raw + sizeof(VendorBlockHeader));
 }
 
@@ -70,7 +85,10 @@ void vendor_free(void* q) {
         TL_FATAL("global operator delete with no vendor heap installed - a vendored allocation "
                  "outlived its install window (docs/MEMORY.md section 1.5)");
     }
-    pool_free(p, (void*)((u8*)q - sizeof(VendorBlockHeader)));
+    VendorBlockHeader* h = (VendorBlockHeader*)((u8*)q - sizeof(VendorBlockHeader));
+    const u64 total = h->size + (u64)sizeof(VendorBlockHeader);
+    g_window_live = g_window_live > total ? g_window_live - total : 0;
+    pool_free(p, (void*)h);
 }
 
 }  // namespace

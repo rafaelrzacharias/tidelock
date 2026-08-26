@@ -46,3 +46,12 @@ void vendor_heap_install(MemPool* pool);
 // The pool currently serving global operator new, or null when none is installed. Read by the
 // tests and by the profiler; never by an allocation path.
 MemPool* vendor_heap_current(void);
+
+// The high-water mark of bytes live INSIDE the most recent install window, reset by every
+// install. This exists because the pool's own `peak_bytes` cannot answer the question: it is a
+// LIFETIME high-water mark, and a window that returns every byte it took can never raise it
+// again - so on a long-lived shared pool (which `pool_vendor` is) a peak-delta reads 32,992 for
+// the first window and 0 for every window after it. Review round 2 measured exactly that. This
+// counter is maintained by the interceptors below, so it is a true per-window figure whatever
+// the pool has done before.
+u64 vendor_heap_window_peak(void);

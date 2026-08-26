@@ -174,7 +174,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ECS.md` -> §3, §4, §10.6
 - `FX-PALETTE.md` -> §3
 - `INPUT.md` -> §6
-- `MEMORY.md` -> §2, §5, §10.2
+- `MEMORY.md` -> §2, §5, §10.12
 - `ROADMAP.md` -> §10.12
 
 ## MEMORY.md
