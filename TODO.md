@@ -1107,6 +1107,12 @@ E-2 needs no W2 decision but blocks real game wiring later.
       full-house registry test re-derived (actors arena-backed, 1-byte fills, a dedicated ring
       at the 64-B-per-arena packed cap). debug/dev-linux green locally; the other legs are the
       PR's CI. Review deferred to the sweep per the valve.
+- [ ] **Ship-tier link-footprint check (filed 2026-08-26, steward, from Rafael's dev-only-
+      stripping question):** after RR-18 the in-process Luau compile works in every tier — verify
+      the `ship` link line does NOT carry the Luau Compiler/Ast libraries (bytecode-only ship
+      needs the VM alone; `luauc` owns the compiler offline). If it does, add the tier-gated
+      link split and a size row proving it; measure the ship binary's size delta either way.
+      Owner: the W2 wave-boundary sweep, or the W3 luau-bindings lane if the sweep lands first.
 - [ ] **Wave-boundary sweep entry (`WORKFLOW.md` §2 valve):** the `w3-merge-autonomy` lane
       (WORKFLOW §1 autonomous-merge clause + §5 R-3) merged under the valve — it implements
       Rafael's 2026-08-25 ruling verbatim ("my role through the phone: only rulings, important
