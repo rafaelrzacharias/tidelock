@@ -688,6 +688,17 @@ E-2 needs no W2 decision but blocks real game wiring later.
       lane opened is this lane's to root-cause per `WORKFLOW.md`'s drive-to-green rules - see
       `LESSONS.md` for the full write-up (including why five green local builds proved nothing
       about legs this container cannot be).
+- [x] **Preemptive fourth fix, same round:** a steward poke flagged that GitHub's hosted runners
+      now default to CMake >= 4.0, which hard-errors any `cmake_minimum_required()` floor below
+      3.5. Independently verified (not taken on trust - the poke's own log access is
+      proxy-blocked): `grep -rn cmake_minimum_required vendor/*/CMakeLists.txt
+      vendor/sdl_ttf/external/freetype/CMakeLists.txt` found ENet's floor at `2.8.12` and
+      FreeType's at `3.0`, both below the cutoff (SDL3 `3.16`, SDL_ttf `3.16...3.28` are fine).
+      Fixed with `CMAKE_POLICY_VERSION_MINIMUM 3.5` as a CACHE variable set once before any
+      `add_subdirectory()` in `vendor/CMakeLists.txt` - CMake's own sanctioned migration knob,
+      reaching FreeType's nested `add_subdirectory()` (inside SDL_ttf's own CMakeLists.txt) too
+      since cache variables are visible to every subdirectory configured afterward. Not caught
+      locally (this container's CMake 3.28 predates the removal); see `LESSONS.md`.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**

@@ -4,6 +4,16 @@
 # Monocypher and stb are vendored by the W2 vendor lane; Luau by the W2 luau-vm lane.
 # vendor/VERSIONS records every pin and hashes into build_id.
 
+# CMake >= 4.0 hard-errors configuring any tree whose cmake_minimum_required() floor is below
+# 3.5 (compatibility with older policies was removed outright, not just deprecated). ENet's is
+# `2.8.12...3.20` and FreeType's (vendor/sdl_ttf/external/freetype) is `3.0...3.10` - both below
+# the cutoff, invisible on this container's older local CMake. Set once, globally, before any
+# add_subdirectory() below (a CACHE variable, so it also reaches FreeType's nested
+# add_subdirectory() inside SDL_ttf's own CMakeLists.txt): CMake's own documented migration knob
+# for exactly this case, so the vendored cmake_minimum_required() lines stay untouched
+# (docs/BUILD.md §4 "vendored verbatim") rather than hand-patched.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+
 add_subdirectory(rapidhash)
 
 # SDL3 ships its own full CMake project (options + platform backend detection); we vendor the
