@@ -537,9 +537,20 @@ E-2 needs no W2 decision but blocks real game wiring later.
       test-local frame fixtures; the `RecordedInput`-replay half of the done criterion moves to
       Phase 2's gate (W3, where the Replay producer exists). `ROADMAP.md` §2 net-p1 row drift
       ("checkpoint writer, chain" are Phases 6–7) fixed same commit. The lane is un-parked.
+- [x] **net-p1 follow-on rulings (2026-08-26, Rafael, all as recommended; the lane lands the
+      NETCODE.md amendments in-cone):** (1) §20.2's "All are `TL_WIRE_STRUCT`" gains the
+      exemption clause — interior records (`CheckpointArenaEntry`, `ChainRecord`,
+      `ArchiveStreamHeader`) are versioned by their CONTAINER's `format_version`, never
+      per-record. (2) The four forced-reading fixes are RATIFIED: §20.3(a)'s two-plus-one added
+      refusals, §20.2.9's channel off-by-one, the empty-stream omission recorded as a
+      wire-format amendment, and `LOG_STORE_CAPACITY` homed in `CANON.md`. (3) Tree-wide
+      namespace convention: STATUS QUO recorded in `CPP-SUBSET.md` §0 — global namespace with
+      enforced module prefixes; revisit only on a real collision.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
-- [ ] **`NETCODE.md` §20.2.9 has an off-by-one in its channel count, and the code had encoded it
+- [x] **RULED 2026-08-26 (Rafael, as recommended): RATIFIED** — §20.2.9 now says 35 channels,
+      `ch in 0..34`, amended with the option-A framing work on `w2-net-p1`. Original filing:
+      **`NETCODE.md` §20.2.9 has an off-by-one in its channel count, and the code had encoded it
       as an exploitable alias.** Filed 2026-08-26 by `w2-net-p1` (found by the lane's adversarial
       review). §20.2.9 says "36 streams per slot" and "for ch in 0..35", but it DEFINES 35
       channels: 0..31 action, 32 `pointer_x`, 33 `pointer_y`, 34 flag escape. `net/wire.h`'s
@@ -549,7 +560,10 @@ E-2 needs no W2 decision but blocks real game wiring later.
       (§20.2.8). Fixed in code (`ARCHIVE_CH_MAX` = 34 is the decoder's bound; 35 is refused).
       **Recommendation: amend §20.2.9** to "35 channels per slot, `ch in 0..34`" in both the
       prose and the layout line. No code change follows; the code already refuses 35.
-- [ ] **`NETCODE.md` §20.2.9's segment layout omits empty streams in `net/archive.cpp`, and that
+- [x] **RULED 2026-08-26 (Rafael, as recommended): RATIFIED as a wire-format amendment in its own
+      right** — §20.2.9's layout line now reads "for each NON-EMPTY stream, ascending by
+      (slot, channel)" and states that `record_count == 0` is refused. Original filing:
+      **`NETCODE.md` §20.2.9's segment layout omits empty streams in `net/archive.cpp`, and that
       divergence needs its own amendment rather than a mention inside the size request.** Filed
       2026-08-26 by `w2-net-p1` (raised by its adversarial review as a CLAUDE.md rule 8 point).
       The doc's layout line is literally `for s ascending in slot_mask: for ch in 0..35:
@@ -563,14 +577,19 @@ E-2 needs no W2 decision but blocks real game wiring later.
       (slot, channel): `ArchiveStreamHeader` + records", and state that a stream with
       `record_count == 0` is refused (the code refuses it, so the omission is canonical rather
       than optional).
-- [ ] **`LOG_STORE_CAPACITY` (256) has no home.** Filed 2026-08-26 by `w2-net-p1`. `net_internal.h`
+- [x] **RULED 2026-08-26 (Rafael, as recommended): homed in `CANON.md`'s netcode tunables** with
+      wire.h's value; `net_internal.h` now cites CANON as the home rather than owning the number.
+      Original filing: **`LOG_STORE_CAPACITY` (256) has no home.** Filed 2026-08-26 by `w2-net-p1`. `net_internal.h`
       needs a bound on the sequenced one-shots held in memory; `CANON.md` does not carry one and
       §20's constant list does not name it. "Silence in the spec is not permission" - it is
       currently a number this lane chose. **Recommendation: `CANON.md`'s netcode tunables**, sized
       from the records that can be in flight across a segment plus a confirmation horizon, or a
       statement in §20 that the store is bounded by `MAX_LOG_RECORDS_PER_PACKET` x the horizon.
       Either way it should stop being a lane's choice.
-- [ ] **No `net` namespace, and `CPP-SUBSET.md` §6 asks for one.** Filed 2026-08-26 by
+- [x] **RULED 2026-08-26 (Rafael, as recommended): STATUS QUO** — the global namespace with
+      enforced module prefixes is the convention, now recorded in `CPP-SUBSET.md` §0. No action
+      for this lane; the half-applied alternative the filing warned about is off the table.
+      Original filing: **No `net` namespace, and `CPP-SUBSET.md` §6 asks for one.** Filed 2026-08-26 by
       `w2-net-p1`. §6 says "Namespaces: one per module (`fx`, `mem`, `ecs`, `alloy`, `net`, ...)".
       `net/wire.h` puts `MAX_PEERS`, `Leave`, `Suspicion`, `HashDigest`, `Handshake`, `ChainEntry`,
       `encode_column` and the rest at global scope in a header linked into `tl_tests` beside every
@@ -618,7 +637,10 @@ E-2 needs no W2 decision but blocks real game wiring later.
       encoding under it. The multiply-and-add key above holds the same intent (one small
       canonical number, slot-major) and fits. If a single byte was wanted for a reason beyond
       size, say so and the channel numbering would have to move first.
-- [ ] **`NETCODE.md` §20.3(a)'s decoder refusal list is incomplete: the column format must be
+- [x] **RULED 2026-08-26 (Rafael, as recommended): RATIFIED.** §20.2.2 now states that the column
+      format is canonical, with the reason (§20.2.8 hashes archive bytes into the chain) and all
+      three added refusals — landed on `w2-net-p1`. Original filing:
+      **`NETCODE.md` §20.3(a)'s decoder refusal list is incomplete: the column format must be
       CANONICAL, and the doc names only three of the five refusals.** Filed 2026-08-26 by
       `w2-net-p1`; implemented, because canonicality is load-bearing rather than cosmetic and
       two of the three additions are the doc's own words read strictly.
@@ -645,7 +667,10 @@ E-2 needs no W2 decision but blocks real game wiring later.
       Alternative if that is not wanted: drop the canonical clause from §20.6 T1f and accept that
       two peers may encode one frame set differently - which would need a ruling of its own about
       what `log_segment_hash` then means.
-- [ ] **`NETCODE.md` §20.2's opening sentence contradicts three of its own struct definitions.**
+- [x] **RULED 2026-08-26 (Rafael, as recommended): the exemption clause is stamped.** §20.2 now
+      states that interior records are versioned by their CONTAINER's `format_version`, never per
+      record — landed on `w2-net-p1` with the option-A work. Original filing:
+      **`NETCODE.md` §20.2's opening sentence contradicts three of its own struct definitions.**
       Filed 2026-08-26 by `w2-net-p1` (doc bug, not a blocker - the concrete definitions win and
       the lane built to them). §20.2 opens "All are `TL_WIRE_STRUCT` (`CPP-SUBSET.md` §9 R-2):
       concrete, non-template, explicitly padded, leading `u32 format_version`", but
@@ -667,12 +692,14 @@ E-2 needs no W2 decision but blocks real game wiring later.
       Blockers 1 and 4 cleared by the ecs merge (`core/reflect.h`, `foundation/bytes.h`);
       2 and 3 cleared by the `NETCODE.md` §20.8 Phase 1 / §20.6 T2 amendment. Lane un-parked.
 - [ ] **RR-6 A tighter sine?** Measured (`FX-PALETTE.md` §4.4): the ported `SinPoly4` gives
+- [x] **RR-6 A tighter sine?** Measured (`FX-PALETTE.md` §4.4): the ported `SinPoly4` gives
       max 9.06 ulp of `q_t` (its documented 27.13 bits), not the 2 ulp §10.5 had guessed; the
       reference ships nothing better (its 64-bit `Sin` uses the same polynomial). At 1 m lever
       arm that is 8 nm - 1/450 of a `pos_t` quantum - so it is below anything Gate 0 can see.
       Options if a consumer ever needs more: a degree-5/6 minimax fit (bespoke - would need its
       own oracle run, which `tools/fxcheck` now provides), or a 2^k-entry table + linear
       interpolation. Not before a consumer names the need.
+      **RULED 2026-08-26 (Rafael, as recommended): PARK CONFIRMED.** Stays at the measured 9.06 ulp bound; a consumer needing tighter files to reopen.**
 - [x] **RR-5 Tagged palette rows?** `fx<Rep,FRAC>` keys a row by format, so `pos_t`/`invmass_t`,
       `q_t`/`stiff_t`/`angle_t`/`dt_t`, `vel_t`/`omega_t` and `scalar_t`/`lambda_t` are one C++
       type each: `pos_t + invmass_t` compiles, and the §3.1 op table collapses to format triples
@@ -1436,7 +1463,7 @@ right; it is the template the others now follow.
   has to move with it. Recorded so it is a decision, not a discovery.
   **AFFIRMED 2026-08-24 (Rafael) as the standing rule, no code**: none of Span/StrView/Interner
   enters a hashed arena without the explicit-padding revision and the CANON row moving with it.
-- [ ] **Ruling request (filed by the 2026-08-25 wave-boundary review sweep): `SlotMap` stores
+- [x] **Ruling request (filed by the 2026-08-25 wave-boundary review sweep): `SlotMap` stores
       generations in a `u16` column but `handle.h` admits `GEN_BITS` up to 31, and nothing
       rejects the mismatch.** `slotmap.h`'s `Array<u16> gen` is compared against
       `(u16)handle_gen(h)` in `slotmap_get`/`slotmap_remove`/`slotmap_alive` (the alive query
@@ -1447,6 +1474,7 @@ right; it is the template the others now follow.
       `CANON.md`), so this is a landmine, not a live bug. Proposal: `static_assert(H::GEN_BITS
       <= 16)` in `slotmap_init` beside the trivially-copyable one; alternative: widen the column
       to u32 and re-derive the memory budget (`CONTAINERS.md` §8.2 owns the decision).
+      **RULED 2026-08-26 (Rafael, as recommended): the static_assert.** Landed: `slotmap_init` asserts `GEN_MAX <= 0xFFFF`; `CONTAINERS.md` §8.2 records the bound. Widen only with a real > 16-bit consumer. *(this commit)***
 - [ ] **Note (filed by the 2026-08-25 sweep, no action urged): `vmem_arena_init`'s granule
       rounding wraps for a reserve request within 64 KB of 2^64.** `align_up_u64(reserve_bytes,
       COMMIT_GRANULE)` is defined unsigned wrap to a small value (0 for exactly `2^64 - k`,
@@ -1457,13 +1485,14 @@ right; it is the template the others now follow.
       `reserve_bytes > 2^63` at the argument check, where the other bad-arg refusals live.
 
 ## W1 mem - notes and ruling requests (2026-08-24, w1-mem lane)
-- [ ] **Ruling request: `VMemApi`'s definition needs one foundation-visible home.**
+- [x] **Ruling request: `VMemApi`'s definition needs one foundation-visible home.**
       `PLATFORM.md` §9.1/§9.2 define it in `platform/platform.h`, but foundation is a leaf
       (`ARCHITECTURE.md` §1 rule 1) and `vmem_arena.cpp` must call through the table, so it
       cannot include platform.h. Transcribed verbatim to **`foundation/vmem_api.h`** (the
       `foundation/atomic.h` precedent - owned by `JOBS.md`, lives in foundation). The platform
       lane should `#include "foundation/vmem_api.h"` from platform.h, not redefine the struct,
       and `PLATFORM.md` §9.1 needs the one-line doc fix (its owner's edit, not this lane's).
+      **RULED 2026-08-26 (Rafael, as recommended): pattern blessed, doc fixed.** `PLATFORM.md`'s include list and §9.2 now state the foundation home. *(this commit)***
 - [x] **`registry_hash_all` waited on w1-rng-hash** (`ROADMAP.md` §2 lists mem's dependency as
       "skeleton" only, but `MEMORY.md` §8.3 calls `tl_hash64` - the doc's dependency row was
       incomplete; note for the ROADMAP owner). Resolved 2026-08-24: w1-rng-hash's header commit
@@ -1471,12 +1500,13 @@ right; it is the template the others now follow.
       (hash-region integrity, two-worlds-in-one-process equality over divergent dirt histories,
       mid-run restore reproducing the hash trace). No hash VALUES are pinned in mem tests
       (relative properties only).
-- [ ] **Ruling request: §7 R-2's dev-tier `TL_LOG_WARN` cannot live in the det half** (the audit
+- [x] **Ruling request: §7 R-2's dev-tier `TL_LOG_WARN` cannot live in the det half** (the audit
       allowlist is closed to io - `CPP-SUBSET.md` §4/§9 R-3; `tl_log.h` also does not exist until
       tooling-rt lands). Implemented as: blob-cap overflow returns `ERR_MEM_RING_OVERFLOW` in dev
       tiers (TL_FATAL in netcode/ship per §8.3); the CALLER (the loop, non-det, W3) warns once and
       grows at the next barrier. `MEMORY.md` §7 R-2 should either bless this split or name the
       non-det home for the warn+grow.
+      **RULED 2026-08-26 (Rafael, as recommended): the split is blessed** — §7 R-2 stamped; warn-once-and-grow is the frame loop's (W3). *(this commit)***
 - [ ] **Signatures added over the rev-1 spec are folded into `MEMORY.md` §8 in the same commit**
       (its lane's own doc): `ring_init`, `registry_set_fingerprint`, two-arg barrier guards,
       `alloc_shim.h`, `vmem_api.h`, mem `ErrCode`s, arena_guard's non-det placement - announce
@@ -1486,7 +1516,7 @@ right; it is the template the others now follow.
       operator stays with w1-rng-hash's hash.h) - both are one-line owner edits.
 - [ ] The `pool_alloc` CI grep (`MEMORY.md` §1.5/§8.6) is not built yet; when it lands it must
       exempt `mem_pool.h`'s own declarations alongside `mem_pool.cpp` and `vendor_glue/`.
-- [ ] **Ruling request: the CRT-malloc COUNTER (`MEMORY.md` §2/§8.4) cannot exist under the
+- [x] **Ruling request: the CRT-malloc COUNTER (`MEMORY.md` §2/§8.4) cannot exist under the
       writable-static gate.** One cumulative counter is one word of `.data`/`.bss`, and
       `CPP-SUBSET.md` §1's link gate bans writable static storage in EVERY `src/` lib
       (`tools/audit/symbols.py` checks `tl_foundation` too, `--data-only`) with no exemption
@@ -1499,6 +1529,7 @@ right; it is the template the others now follow.
       pointer (same gate problem). (a) is the recommendation; also note the dev tier links the
       RELEASE CRT (`/MD`), so `_CrtSetAllocHook` is unavailable regardless - Windows counting
       needs a different interposition even after the ruling.
+      **RULED 2026-08-26 (Rafael, as recommended): (b) — DROP the counter.** The mechanism is the TL_FATAL tripwires + the symbol audit + vendor pool hooks; no writable-static exemption is carved. `MEMORY.md` §2/§8.4 and the dead counter seam (`tl_crt_alloc_count`, the guard's delta fields) are removed in the follow-up commit.**
 
 ## W1 mem - the adversarial review (2026-08-24)
 - [x] **Adversarial review of W1 mem (d69aadb..53e73ac + both merges) - DONE 2026-08-24
@@ -2144,7 +2175,7 @@ right; it is the template the others now follow.
       command/event merge; shuffle mode; 1/2/8/16 gate in CI.
 
 ## W1 jobs - notes and ruling requests (2026-08-24, w1-jobs lane)
-- [ ] **Ruling request (granted in-lane; the doc fix is still owed): `ThreadApi` needs one
+- [x] **Ruling request (granted in-lane; the doc fix is still owed): `ThreadApi` needs one
       foundation-visible home.** `PLATFORM.md` §9.1/§9.2 define `ThreadHandle`/`SemHandle`/
       `MutexHandle`/`ThreadFn`/`ThreadApi` in `platform/platform.h`, but foundation is a leaf
       (`ARCHITECTURE.md` §1 rule 1, enforced by `tools/audit/includes.py`'s `MODULE_DAG`) and
@@ -2162,27 +2193,31 @@ right; it is the template the others now follow.
       DEPENDS on it (a woken worker must see the epoch published before the post) and a contract
       the code depends on that no doc states is exactly the silence-is-not-permission class. The
       sentence is already in `foundation/thread_api.h`'s contract block, marked as filed here.
-- [ ] **Ruling request: `PLATFORM.md` §9.2 restates `foundation/atomic.h`'s API** on top of its
+      **RULED 2026-08-26 (Rafael, as recommended): granted, owner edits landed** — the include-list sentence names `thread_api.h`, §9.2 carries the defined-in note AND the sem_post→sem_wait happens-before contract. *(this commit)***
+- [x] **Ruling request: `PLATFORM.md` §9.2 restates `foundation/atomic.h`'s API** on top of its
       real home (`JOBS.md` §6.1), in a different and incompatible spelling - rev 1 had
       `tl_atomic_load/store/fetch_add/cas` in `JOBS.md` and `atomic_load32/64`/`atomic_add32/64`/
       `atomic_cas32/64`/`atomic_fence_*` in `PLATFORM.md`. One header, two names: the drift class
       the doc protocol exists to stop. `JOBS.md` §6.1 now carries the full API (the §9.2 spelling
       won - it states widths and orders); `PLATFORM.md` §9.2 should cite `JOBS.md` §6.1 and name
       no verbs, the way `CPP-SUBSET.md` §9 R-4 cites `TL_FOUNDATION_TOOLING` and names no stems.
-- [ ] **Ruling request: `TOOLING.md` §9.1 claims `Scratch` carries `u8 worker`** ("so worker code
+      **RULED 2026-08-26 (Rafael, as recommended): §9.2 cites `JOBS.md` §6.1 and names no verbs.** *(this commit)***
+- [x] **Ruling request: `TOOLING.md` §9.1 claims `Scratch` carries `u8 worker`** ("so worker code
       names its buffer without `thread_local`"), and the shipped `foundation/scratch.h` has no
       such field. Nothing needs it yet - jobs passes `Scratch*` explicitly and never hands a
       worker index to a chunk fn (`JOBS.md` §0), and the prof/probe per-worker buffers the claim
       exists for do not. Either mem's header gains the field when that consumer lands, or
       `TOOLING.md` §9.1 drops the claim. Not built on spec (pulled by a real consumer, never
       pushed).
-- [ ] **`tools/audit/includes.py`'s `THREAD_LOCAL_EXEMPT` (jobs.h/jobs.cpp) is unusable and should
+      **RULED 2026-08-26 (Rafael, as recommended): drop the claim** — `TOOLING.md` §9.1 now states Scratch carries no worker field; a future per-worker consumer files for it. *(this commit)***
+- [x] **`tools/audit/includes.py`'s `THREAD_LOCAL_EXEMPT` (jobs.h/jobs.cpp) is unusable and should
       probably be deleted.** `symbols.py`'s `writable_static` fails any `.tbss`/`.tdata`/`.tls$`
       section in every `src/` lib and `tl_foundation` is registered for that check - so a
       `thread_local` in jobs passes the grep and fails the link gate. That is the correct outcome
       (`JOBS.md` §1, `PLATFORM.md` §6 and `MEMORY.md` §1.3 all say the worker index and scratch are
       passed explicitly, which is what shipped), but an exemption no code can use reads as
       permission that is not there. One line in another lane's tool, so: a request, not a patch.
+      **RULED 2026-08-26 (Rafael, as recommended): delete it.** `THREAD_LOCAL_EXEMPT` removed from `includes.py`; jobs has no TLS and the link gate stays the single authority. *(this commit)***
 - [ ] **Gate hole, reported not fixed: `allow.txt`'s `__aarch64_*` line is a Pi-only tripwire.**
       It names outline atomics as the detector for "concurrency inside det code", but on x86-64 a
       32-bit fetch-add inlines to `lock xadd` and emits no undefined symbol at all, and the symbol

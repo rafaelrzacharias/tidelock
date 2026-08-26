@@ -12,6 +12,11 @@
 The reasons Ore existed survive as rules: no hidden control flow, no hidden allocation, no hidden
 cost, fast compiles, and state that a memcpy can snapshot. C++ gives all of those *if* you refuse
 most of it. The subset is "C with namespaces, a handful of flat templates, and `static_assert`".
+Module code lives in the GLOBAL namespace with enforced module prefixes — no `tl::` or
+per-module namespace wrapper (ruled 2026-08-26: the symbol audit polices names as spelled, the
+subset bans the ADL-heavy idioms namespaces exist to serve, and a tree-wide wrap is churn
+without a driving defect; revisit only on a real collision). Small utility namespaces a header
+already owns (`fx::`, `mem::`) stay as they are.
 
 ---
 
@@ -234,7 +239,7 @@ anywhere. Rules:
 | `TL_PROBE_*` | `foundation/tl_probe.h` | active | compiled out |
 | `TL_CVAR(type, name, default, flags, help)` | `core/cvar.h` | registered + console | `SIM` cvars registered (fingerprinted); others constant-folded |
 | `TL_TEST(name, tags)`, `TL_EXPECT_*`, `TL_ASSERT_*` | `tests/runner/tl_test.h` | tests only | — |
-| `TL_SCRATCH_SCOPE(s)` | `foundation/scratch.h` | mark/reset pair (explicit begin/end macros, no RAII) | same |
+| `TL_SCRATCH_SCOPE_BEGIN(s)` / `TL_SCRATCH_SCOPE_END(s)` | `foundation/scratch.h` | mark/reset pair, no RAII (the shipped spelling — the single-macro `TL_SCRATCH_SCOPE(s)` was rev-1's guess) | same |
 | `"lit"_id` | `foundation/hash.h` | constexpr FNV-1a | same |
 
 No other macros are introduced without a row here.

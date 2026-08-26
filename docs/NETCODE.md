@@ -1755,7 +1755,15 @@ reachable only from `net/session.cpp`, `net/checkpoint.cpp` (custody signing) an
 
 All are `TL_WIRE_STRUCT` (`CPP-SUBSET.md` §9 R-2): concrete, non-template, explicitly padded,
 leading `u32 format_version` (`= NET_FORMAT_VERSION`), `static_assert` on `sizeof` and every
-`offsetof`, written/read through the little-endian byte pair, never `memcpy`. Readers refuse a
+`offsetof`, written/read through the little-endian byte pair, never `memcpy`.
+
+**Exemption — interior records (ruled 2026-08-26).** Three of the structs below carry no
+`format_version` of their own: `CheckpointArenaEntry` (§20.2.8), `ChainRecord` (§20.2.8) and
+`ArchiveStreamHeader` (§20.2.9). Each is a repeated element *inside* a container that has
+already stated the version once in its own header, so they are versioned by their **container's**
+`format_version`, never per record — a per-element copy would be redundant bytes on every row,
+and their pinned sizes only close without one. They carry the same `sizeof`/`offsetof` pins and
+the same little-endian discipline; only the version field is absent. Readers refuse a
 newer `format_version`, assert every `_padN` is zero, and reject any message whose declared
 `payload_bytes` disagrees with the datagram length (`ERR_NET_MALFORMED`; the whole packet is
 dropped, nothing partially applied). Offsets are natural-alignment offsets; every struct is
@@ -1819,7 +1827,17 @@ decoded frame `i-1`:
 ```
 
 `uvarint` = LEB128, 7 bits per byte, `0x80` continuation, ≤ 5 bytes for a `u32`; `svarint(v)` =
-`uvarint(zigzag32(v))`, `zigzag32(v) = (u32(v) << 1) ^ u32(v >> 31)`. Decoder arithmetic is
+`uvarint(zigzag32(v))`, `zigzag32(v) = (u32(v) << 1) ^ u32(v >> 31)`.
+
+**The column format is CANONICAL: one frame set has exactly one byte encoding** (ruled
+2026-08-26). This is load-bearing, not tidiness — §20.2.8 hashes the archive's bytes into
+`ChainEntry.log_segment_hash`, so two peers that encode the same confirmed input must produce the
+same bytes or the chain forks with no divergence behind it. Decoders therefore refuse, beyond a
+truncated column: a **non-minimal `uvarint`** (a multi-byte varint whose final byte is 0); a
+**value byte carrying the value the flags already imply** (§20.2.2 states `value_follows` as a
+biconditional); and a **`changed` bit whose decoded `ActionState` equals the previous frame's**
+(§20.2.2 states that rule as `⇔`). Every one only tightens — no stream a conforming encoder
+produces is refused. Decoder arithmetic is
 `wrap_add` on `i32`. Steady state: `1 + 1 + 1 = 3 B`; an idle peer's column of 9 frames is 27 B;
 frame 0's absolute pointer costs ≤ 10 B per column per packet. A decoded frame's `tick` field is
 set to `u32(base_tick + i)` by the decoder, never transmitted.

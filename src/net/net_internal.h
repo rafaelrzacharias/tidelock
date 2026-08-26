@@ -79,9 +79,10 @@ inline const WireFrame* slot_ring_get(const SlotRing* r, u64 tick) {
     return &r->frames[i];
 }
 
-// How many LogRecords the store holds. Sized for the records that can be in flight or newly
-// confirmed across the window a segment covers; the durable history lives in the archive, not
-// here (docs/NETCODE.md §13.5), so this is a working set and not a log.
+// How many LogRecords the store holds - net's in-memory sequenced-record working set. The
+// durable history lives in the archive, not here (docs/NETCODE.md §13.5). The VALUE's home is
+// docs/CANON.md's netcode tunables (homed there by the 2026-08-26 ruling, which is what stopped
+// it being a number this lane had picked); this line is the code's copy of it.
 constexpr u32 LOG_STORE_CAPACITY = 256u;
 
 // The sequenced one-shots, kept in the order they were added. R6's stable id is

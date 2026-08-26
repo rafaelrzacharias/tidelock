@@ -12,7 +12,7 @@
 # Stems are the .cpp FILENAME (this list is matched against, per source file, below) - docs/
 # TOOLING.md §9.1's file table names the implementations log.cpp/prof.cpp/probe.cpp, not
 # tl_log.cpp/tl_prof.cpp/tl_probe.cpp; only the HEADERS carry the tl_ prefix.
-# arena_guard is non-det on purpose: guard_tick_end reads tl_crt_alloc_count from alloc_shim,
+# arena_guard is non-det on purpose: it calls tl_alloc_shim_anchor from alloc_shim,
 # an upward symbol the det audit forbids; the guard is dev-only engine-side tooling, never
 # sim-called (docs/MEMORY.md §8.4, TODO.md W1 mem notes).
 # `rect` has no .cpp (header-only), so this entry moves nothing between libs; it exists only so

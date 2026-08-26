@@ -125,10 +125,12 @@ SDL share one; ENet its own (net buffers are sized by the protocol anyway).
   `GROWS_AT_BARRIER` (ECS columns, Alloy pools during pass 5) may grow. A growth outside the window
   is `TL_FATAL` in debug. This is the Layr zero-alloc guard, made structural.
 - **Global allocator shim:** in `dev` and `netcode` tiers, `operator new`/`malloc` from `src/`
-  code is a link error (the symbol audit) for sim libs and a `TL_FATAL` counting shim for the rest;
-  vendor libs are routed through `mem_pool` via their hook APIs (`lua_newstate(alloc_fn)`,
+  code is a link error (the symbol audit) for sim libs and a `TL_FATAL` tripwire shim for the
+  rest; vendor libs are routed through `mem_pool` via their hook APIs (`lua_newstate(alloc_fn)`,
   `ImGui::SetAllocatorFunctions`, `SDL_SetMemoryFunctions`, `enet_initialize_with_callbacks`,
-  `STBI_MALLOC`). A nonzero per-frame CRT-malloc count in steady state is a test failure.
+  `STBI_MALLOC`). **The per-frame CRT-malloc COUNTER is dropped (ruled 2026-08-26):** it needed
+  writable static storage the §1 link gate bans, and the tripwires + the symbol audit + the
+  per-pool budgets already fail loudly on every path the counter watched.
 - **Hash-region integrity test per pool** (`DETERMINISM.md` §4).
 
 ---
@@ -204,7 +206,9 @@ render interpolation is snapped. That is the only hook; nothing else may observe
   warning is the signal to raise the budget in `app/`. *(Mechanism split recorded by the W1 mem
   lane, 2026-08-24: the registry/snapshot TUs are in the audited det half, whose symbol
   allowlist is closed to io — `CPP-SUBSET.md` §4 — so `TL_LOG_WARN` cannot be called from
-  there; the error code is the det-legal spelling of the same ruling.)*
+  there; the error code is the det-legal spelling of the same ruling.)* **Ruled 2026-08-26:
+  this split IS the contract — the det half returns the named error; warn-once-and-grow is the
+  frame loop's job (non-det, W3), never det code's.**
 
 ## 8. Implementation specification
 
@@ -215,12 +219,12 @@ render interpolation is snapped. That is the only hook; nothing else may observe
 | `vmem_api.h` | `struct VMemApi`, transcribed verbatim from `PLATFORM.md` §9.2 (its owner): foundation is a leaf (`ARCHITECTURE.md` §1) and cannot include platform.h, so the table's definition lives here and platform.h includes it — the `foundation/atomic.h` precedent (ruling request with the platform lane, `TODO.md`) |
 | `vmem_arena.h/.cpp` | `VMemArena`, push/mark/reset/decommit; takes a `const VMemApi*` at init; the mem `ErrCode` range `0x0101..0x0105` |
 | `arena_registry.h/.cpp` | `ArenaRegistry`, `registry_add/seal/set_fingerprint/hash_all/snapshot/restore`; `ArenaGuard` declarations |
-| `arena_guard.cpp` | the guard implementations — in the NON-det half: `guard_tick_end` reads the CRT counter from `alloc_shim`, an upward symbol the det audit forbids; the guard is dev-only engine-side tooling, never sim-called |
+| `arena_guard.cpp` | the guard implementations — in the NON-det half: it calls `tl_alloc_shim_anchor` from `alloc_shim` (the link pull that arms the tripwires), an upward symbol the det audit forbids; the guard is dev-only engine-side tooling, never sim-called |
 | `snapshot.h/.cpp` | `Snapshot`, `SnapshotRing`, `ring_init/push/find` |
 | `scratch.h` | `Scratch` (a `VMemArena` + a `SCRATCH_MAX_SCOPES = 16` marker stack), `scratch_init/push/scope_begin/scope_end/reset`, `TL_SCRATCH_SCOPE_BEGIN/_END` (the explicit pair of `CPP-SUBSET.md` §7b) |
 | `handle.h` | `Handle<Tag,IDX,GEN>`, `handle_make/index/gen/is_null` |
 | `mem_pool.h/.cpp` | the vendor-heap pool (§1.5); the per-lib adaptor functions live in `vendor_glue/` (the W2 vendor lane) |
-| `alloc_shim.h/.cpp` | `dev`/`netcode` tiers: global `operator new/delete` → `TL_FATAL`; `malloc` hook counters via the CRT debug hook (Windows) / `__malloc_hook`-free approach: a link-time wrapper (`-Wl,--wrap=malloc` on Linux, detours in the CRT debug heap on Windows) that counts calls per frame. The header declares `tl_alloc_shim_install()` (returns `ERR_MEM_UNSUPPORTED` where counting cannot work) and the cumulative `tl_crt_alloc_count()` the guard reads |
+| `alloc_shim.h/.cpp` | `dev`/`netcode` tiers: global `operator new/delete` → `TL_FATAL` tripwires, stateless. The header declares `tl_alloc_shim_anchor()`, the no-op the guard calls so every guard user links the tripwire object (counting dropped by ruling 2026-08-26 — §2) |
 
 ### 8.2 `VMemArena`
 
@@ -291,8 +295,8 @@ Snapshot* ring_push(SnapshotRing*, u64 tick);  const Snapshot* ring_find(const S
 ### 8.4 The guards
 
 ```cpp
-struct ArenaGuard { u64 used_at_start[MAX_ARENAS]; u64 crt_allocs_at_start; u8 in_barrier; u8 _pad[7]; };
-void guard_tick_begin(ArenaGuard*, const ArenaRegistry*);       // baselines used[] and the CRT counter
+struct ArenaGuard { u64 used_at_start[MAX_ARENAS]; u8 in_barrier; u8 _pad[7]; };
+void guard_tick_begin(ArenaGuard*, const ArenaRegistry*);       // baselines used[]; calls the alloc_shim anchor
 void guard_barrier_begin/end(ArenaGuard*, const ArenaRegistry*); // the GROWS_AT_BARRIER window: begin TL_FATALs if a barrier-flagged arena already grew this tick (growth is legal only INSIDE the window — §2, which the one-arg spelling could not enforce); end re-baselines barrier-flagged arenas
 void guard_tick_end(ArenaGuard*, const ArenaRegistry*);   // for each arena: if used != used_at_start and !(flags & GROWS_AT_BARRIER) → TL_FATAL(name)
 ```

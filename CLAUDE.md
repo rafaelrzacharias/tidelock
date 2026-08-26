@@ -88,6 +88,11 @@ narrow slice at a time. Two rules, one tool:
   request a sub-task breakdown.
 - **Concise by default.** As much as the answer strictly needs. Completeness wins in trade-off
   matrices and root-cause analysis.
+- **Report times in Rafael's LOCAL time, never bare UTC (ruled 2026-08-26).** Cloud containers
+  and CI run on UTC; every time quoted TO Rafael is converted to his local clock (UTC+1 as of
+  2026-08 — re-confirm at a DST boundary or if a stated time reads an hour off). Timestamps
+  INSIDE the repo (commits, CI logs, doc entries) stay UTC as tools write them; only the
+  conversation converts. Offset only in this file — no zone or place name (public repo).
 
 # tidelock
 

@@ -126,7 +126,9 @@ surface — still the sdl3 impl, not headless.
 
 Scope: the contract header, two implementations, vendor wiring, tests. `f32`/`f64`, `<math.h>`,
 OS and SDL headers are legal inside `impl_*`/`os_*` TUs only (`CPP-SUBSET.md` §1); `platform.h`
-includes nothing but `foundation/{tl_types,handle,strview,ring,rect,span,vmem_api}.h`. `VMemApi`
+includes nothing but `foundation/{tl_types,handle,strview,ring,rect,span,vmem_api,thread_api}.h`
+(ruled 2026-08-26: `thread_api.h` joined the list — the `VMemApi` case verbatim, `JOBS.md` §6.2's
+`Jobs` holds `ThreadHandle`s and cannot include `platform.h`). `VMemApi`
 is defined once, in `foundation/vmem_api.h` — foundation is a leaf (`ARCHITECTURE.md` §1 rule 1)
 and `vmem_arena.cpp` calls through the table without including `platform.h`, so that is the
 struct's one foundation-visible home (`MEMORY.md` §8.2); `platform.h` includes it rather than
@@ -251,6 +253,12 @@ struct VMemApi  { void* ctx; void* (*reserve)(void* ctx, u64 bytes); ErrCode (*c
                   // ^ defined in foundation/vmem_api.h (this struct, verbatim); platform.h includes it, does not redefine it (§9)
 struct EntropyApi { void* ctx; void (*fill)(void* ctx, void* buf, u32 n); };   // defined in entropy.h; platform.h: `struct EntropyApi;`
 typedef void (*ThreadFn)(void* ctx);
+// ThreadHandle/SemHandle/MutexHandle/ThreadFn/ThreadApi are defined in foundation/thread_api.h
+// (this struct, verbatim); platform.h includes it, does not redefine it — the VMemApi pattern
+// (ruled 2026-08-26). CONTRACT the jobs wake path depends on: a sem_post observed by sem_wait on
+// the same semaphore establishes happens-before (release on post, acquire on wait) — every OS
+// primitive provides it; stated here because a woken worker must see the epoch published before
+// the post (the silence-is-not-permission class, filed by the W1 mem review).
 struct ThreadApi { void* ctx;
     Result<ThreadHandle> (*create)(void* ctx, ThreadFn, void* tctx, StrView name, u32 stack_bytes /*0 → 1 MB*/);
     void (*join)(void* ctx, ThreadHandle);
@@ -269,12 +277,9 @@ struct PlatformDevApi { void* ctx; void (*imgui_init)(void* ctx, void* imgui_con
                         void (*imgui_render)(void* ctx); void (*imgui_shutdown)(void* ctx); };
 const PlatformDevApi* platform_sdl3_dev_api(const PlatformApi*);   // null on headless
 ```
-`foundation/atomic.h` (owned by `JOBS.md`, listed here because threads are this seam):
-`atomic_load32/64(const T*)`, `atomic_store32/64`, `atomic_add32/64 → old`, `atomic_sub32/64 → old`,
-`atomic_cas32/64(T*, T expect, T desire) → u8`, `atomic_exchange32/64`, `atomic_fence_acquire/release/seq_cst`
-— each a `static inline` over `__atomic_*_n` / `__atomic_compare_exchange_n` / `__atomic_thread_fence`
-with `__ATOMIC_ACQUIRE` for loads, `__ATOMIC_RELEASE` for stores, `__ATOMIC_ACQ_REL` for RMW. No
-`<atomic>`, no `volatile`.
+`foundation/atomic.h` is owned by `JOBS.md` §6.1, which carries the full API (verbs, widths,
+orders) — this doc names no verbs (ruled 2026-08-26: one header had grown two incompatible
+spellings across the two docs). No `<atomic>`, no `volatile`.
 
 ### 9.3 Per-API behaviour
 

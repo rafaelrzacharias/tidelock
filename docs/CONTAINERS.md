@@ -58,6 +58,9 @@ H    slotmap_insert(SlotMap*, T value);        // reuses the most recently freed
 T*   slotmap_get(SlotMap*, H h);               // null if gen mismatch; TL_ASSERT in debug
 bool slotmap_remove(SlotMap*, H h);            // bumps gen; gen wrap → slot quarantined (MEMORY.md §3)
 ```
+The gen column is `u16`, so a domain's `GEN_BITS` must be ≤ 16 — enforced by a `static_assert`
+in `slotmap_init` (ruled 2026-08-26: a wider domain would alias generations mod 2^16 and a stale
+handle could read as live; widen the column only when a real > 16-bit consumer exists).
 
 - **Deterministic slot order:** the free list is LIFO and insertion is a pure function of the
   call sequence, which is itself deterministic (system order). **Iterate `0..slot_cap()`, skipping

@@ -96,7 +96,6 @@ ErrCode registry_restore(ArenaRegistry* r, const Snapshot* s);
 
 struct ArenaGuard {
     u64 used_at_start[MAX_ARENAS];
-    u64 crt_allocs_at_start;   // tl_crt_alloc_count() at tick begin; delta checked at tick end
     u8  in_barrier;
     u8  _pad[7];
 };

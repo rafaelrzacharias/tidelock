@@ -55,9 +55,12 @@ struct SlotMap {
 // all four are part of the pool's authoritative state and must each be hashed/snapshotted
 // independently (docs/MEMORY.md §1.2).
 template <typename T, typename H>
+// GEN_BITS <= 16: the gen column is u16; a wider domain would alias generations mod 2^16 and a
+// stale handle could read as live (ruled 2026-08-26; widen the column only with a real consumer).
 ErrCode slotmap_init(SlotMap<T, H>* sm, NameHash id_slots, NameHash id_gen, NameHash id_free,
                       NameHash id_live, const VMemApi* os) {
     static_assert(__is_trivially_copyable(T), "SlotMap<T,H> requires trivially-copyable T (docs/CONTAINERS.md section 0)");
+    static_assert(H::GEN_MAX <= 0xFFFFu, "SlotMap gen column is u16; GEN_BITS over 16 would alias generations (docs/CONTAINERS.md section 8.2, ruled 2026-08-26)");
     u64 cap = (u64)H::IDX_MASK + 1u;
     // No reserve floor here: vmem_arena_init rounds every reserve UP to COMMIT_GRANULE (ruled
     // 2026-08-24, docs/MEMORY.md section 8.2), so a small-cap domain's columns are already

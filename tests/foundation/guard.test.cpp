@@ -10,14 +10,14 @@
 #include "foundation/scratch.h"
 #include "vmem_test_api.h"
 
-TL_TEST(alloc_shim_vacuity_is_visible, "foundation,mem,smoke,fast") {
-    // W1 mem review 3: the guard's CRT-delta check (guard_tick_end) is VACUOUS until the
-    // writable-static ruling lands (TODO.md, W1 mem notes) - install refuses and the counter
-    // reads 0 forever, so a zero delta proves nothing. Pinned here so the vacuity is visible in
-    // the test list, and so implementing the ruling MUST flip this test: install returning
-    // ERR_OK is the signal that the CRT check went live and needs its own positive test.
-    TL_EXPECT_EQ(tl_alloc_shim_install(), ERR_MEM_UNSUPPORTED);
-    TL_EXPECT_EQ(tl_crt_alloc_count(), (u64)0);
+TL_TEST(alloc_shim_anchor_links_the_tripwires, "foundation,mem,smoke,fast") {
+    // Ruled 2026-08-26: the CRT-malloc counter is DROPPED (docs/MEMORY.md §2) - the mechanism
+    // is the new/delete TL_FATAL tripwires + the symbol audit + vendor pool hooks. This row
+    // pins the link contract that remains: calling the anchor pulls alloc_shim's object (and
+    // with it the tripwire operators) into every guard-using binary. The tripwires themselves
+    // are fatal-expected rows (TESTING.md §9.1) the day TL_TEST_EXPECT_FATAL covers them.
+    tl_alloc_shim_anchor();
+    TL_EXPECT_TRUE(true);   // the check is that this TU links; the call above is the contract
 }
 
 TL_TEST(guard_sanctioned_windows_pass, "foundation,mem,smoke,fast") {
