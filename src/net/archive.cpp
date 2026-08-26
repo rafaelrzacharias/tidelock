@@ -210,15 +210,16 @@ u64 archive_encode_segment(ByteWriter* w, u64 base_tick, u32 tick_count,
         TL_ASSERT(inputs[s].frames != nullptr || tick_count == 0u);
         slot_mask = (u8)(slot_mask | (u8)(1u << inputs[s].slot));
     }
-    // The caller's ordering contract for the log array (docs/NETCODE.md §20.2.9).
+    // The caller's ordering contract for the log array (docs/NETCODE.md §20.2.9). Spelled
+    // inline: TL_ASSERT compiles to ((void)0) off TL_DEV, so a local used only by the assert is
+    // an unused variable under -Werror on the netcode and ship tiers.
     for (u32 i = 1; i < log_record_count; ++i) {
-        const LogRecord* a = &records[i - 1];
-        const LogRecord* b = &records[i];
-        const bool ordered = (a->effective_tick < b->effective_tick)
-                          || (a->effective_tick == b->effective_tick && a->origin_slot < b->origin_slot)
-                          || (a->effective_tick == b->effective_tick && a->origin_slot == b->origin_slot
-                              && a->seq <= b->seq);
-        TL_ASSERT(ordered);
+        TL_ASSERT((records[i - 1].effective_tick < records[i].effective_tick)
+               || (records[i - 1].effective_tick == records[i].effective_tick
+                   && records[i - 1].origin_slot < records[i].origin_slot)
+               || (records[i - 1].effective_tick == records[i].effective_tick
+                   && records[i - 1].origin_slot == records[i].origin_slot
+                   && records[i - 1].seq <= records[i].seq));
     }
 
     // Header with both crc fields zeroed; patched below once the payload exists.
