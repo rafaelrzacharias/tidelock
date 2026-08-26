@@ -3165,3 +3165,69 @@ modding (Luau profiles) · game-logic substrate · streaming/cook · SDL_GPU pat
       foundry repo) and retire `FOUNDRY-ORE-GATE.md`.
 - [ ] After Gate 0: `FX-PALETTE.md` rev 2; after Hovel A: `NETCODE.md` §0 "assumptions carried"
       gets its first measured numbers.
+
+## W3 loop+input — lane notes and ruling requests (2026-08-26/27, w3-loop-input)
+`FRAME-LOOP.md`/`INPUT.md` done criteria (§8.4/§9.6): loop/time/phases/interp, the InputFrame
+airlock + action map, Live/Script/Replay producers, the recorder — built on branch
+`w3-loop-input`. Header-first, then the full implementation; tests under
+`tests/core/{loop.test.cpp,action_map.test.cpp,input/}`. Three filed ruling requests, none
+blocking (each has a working, documented interim resolution recorded in the touched headers'
+contract blocks):
+
+- [ ] **RR-21 (w3-loop-input): `MAX_PEERS`'s doc-home (`CANON.md`: "owned by NETCODE") and its
+      C++ symbol-home collide with the module DAG.** `net/wire.h` already defines
+      `constexpr u32 MAX_PEERS = 8u;` (net-p1, merged); `core/input.h` needs the same constant at
+      compile time (`ScriptProducer`'s per-slot state, `PeerSlots`), and
+      `tools/audit/includes.py`'s `MODULE_DAG` has `net: (net, core, ...)` — net depends on core,
+      never the reverse — so core cannot reach net's copy. Interim: `core/input.h` defines its
+      own `constexpr u32 MAX_PEERS = 8u;`, cited from `CANON.md`, same value — a real, temporary
+      duplicate, harmless today because `net/wire.h` does not yet include `core/input.h`.
+      Resolution: at the same commit that lands the RR-17 `WireFrame`->`InputFrame` handoff
+      `net/wire.h` already documents, delete `net/wire.h`'s own `MAX_PEERS` — core's becomes the
+      one definition, legal precisely because net already depends on core. Not this lane's file
+      to edit (`net/`, cone discipline, `WORKFLOW.md`).
+
+- [ ] **RR-22 (w3-loop-input): `SystemFn`'s `void(*)(World*)` shape has no path to Engine-level
+      context — hit twice in this slice, plus a third half still open.** (a) `FRAME-LOOP.md` §4's
+      interpolation ping-pong needs a registered "which columns are interpolated" table; the
+      concrete columns (`Transform`/`TransformPrev`/`Camera2D`) are render2d's (not landed —
+      checked at slice-brief time, no consumer defines them anywhere in the tree) and a
+      registered system reading them could not reach a table living on `Engine` (only
+      `core/loop.h` owns `Engine`; a system only ever gets `World*`). (b) `INPUT.md` §9.5's
+      recorder is specified as "the LAST-phase recorder SYSTEM", but it needs `Engine`-owned
+      state (the per-tick `InputFrame[MAX_PEERS]` and this lane's `Recorder`) a `World*`-only
+      system cannot reach either. Interim (both, same root cause): `core/loop.h`'s `Engine`
+      exposes `interp_register_pair`/`interp_pingpong`/`interp_snap_entity` and
+      `recorder_attach`/`recorder_tick` as ordinary functions `engine_tick_once` calls DIRECTLY
+      (never as registered systems) right after the LAST phase runs. (c), still open:
+      `FRAME-LOOP.md` §0's render-side `alpha` — `engine_frame` computes and returns it, but
+      there is no path yet for a future PRE_RENDER extraction system to read it, same limitation.
+      Ruling requested: either widen `SystemFn` to carry an opaque `void* engine_ctx` (additive,
+      `core/schedule.h` — not this lane's file), or bless the direct-call pattern above as the
+      standing answer. Filed for whoever lands render2d's PRE_RENDER extraction system next,
+      since they hit the alpha half immediately.
+
+- [ ] **RR-23 (w3-loop-input): `core/interp.cpp`'s ping-pong is generic by construction, not the
+      concrete `Transform`/`TransformPrev` `CPP-SUBSET.md` §8's own reference template names.**
+      That template is worked pseudocode (`TL_FIELDS_Transform(...) /* bit 0 = snap
+      (FRAME-LOOP.md §4) */`); no lane has landed the real component (render2d's, by
+      `FRAME-LOOP.md` §8.2 step 4's "engine components" grouping — Transform/TransformPrev/
+      Sprite/Camera2D together). Built instead: `interp_register_pair(Engine*, ComponentId
+      current, ComponentId prev)` plus a generic byte-copy ping-pong/snap over any two
+      same-stride columns; render2d registers its own pair once Transform/TransformPrev exist.
+      NOT built: `FRAME-LOOP.md` §4's "the engine auto-snaps newly realized entities" (spawn
+      detection needs a commands.cpp/ecs hook this lane does not own). Not blocking this lane's
+      own done criterion (`FRAME-LOOP.md` §8.4's test list is satisfied by the generic mechanism
+      plus a synthetic test component); flagged for whoever finishes wiring Transform.
+
+Recorded simplifications (implementation choices within this lane's own files, not ruling
+requests — revisit if a real consumer needs more): the RecordedInput header's exact byte offsets
+(`core/recorder.h`'s `TL_OFFSETS_RecordedInputHeader`) are this lane's own, since
+`DETERMINISM.md` §9.2 states the field list and the 128 B total but not a layout; the flag
+`RECORDED_INPUT_FLAG_HAS_ARENA_HASHES` is never set (only the combined `registry_hash_all`
+result is recorded — the dev-only per-arena desync breakdown is future work); the Live
+producer's `DEV_MOUSE_AXIS`/`DEV_PAD_AXIS` bindings reuse `Binding.code_pos`/`code_neg` as
+axis/pad selectors (the doc's `Binding` struct has no dedicated field for either); `DZ_RADIAL`
+is applied per-axis (true 2D-joint radial deadzone needs a paired-axis concept not built); the
+pointer is an identity passthrough (window px as world-space units) until render2d's camera
+exists.

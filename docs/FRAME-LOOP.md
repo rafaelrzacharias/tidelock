@@ -1,8 +1,15 @@
 # Frame loop, time, phases, interpolation (tidelock, rev 1)
 
 > **Status:** design rev 1, 2026-08-22. **DECIDED** except §7. Carries foundry CORE §3, D7, D10,
-> D11's knobs, FOUNDRY-API §2 into C++ + fixed point.
-> **Owns:** `src/core/loop.h`, `time.h`, `phase.h`, `interp.h`; `app/main.cpp` instantiates it.
+> D11's knobs, FOUNDRY-API §2 into C++ + fixed point. **§8 (loop.h/.cpp, time.h, interp.cpp)
+> implemented by w3-loop-input, 2026-08-26/27** — declarations for the interpolation ping-pong
+> live in `loop.h` (no separate `interp.h`; `interp.cpp` is a pure implementation split, matching
+> this doc's own §8.1 file list, which never named one). Three filed, non-blocking ruling
+> requests from that lane are in `TODO.md` (`RR-21`..`RR-23`): the generic (not `Transform`-
+> named) interpolation registration API, the LAST-phase recorder as a direct call rather than a
+> registered system (`SystemFn` has no path to `Engine`-level state), and the same gap for §0's
+> render-side `alpha`.
+> **Owns:** `src/core/loop.h`, `time.h`, `phase.h`; `app/main.cpp` instantiates it.
 
 ---
 
