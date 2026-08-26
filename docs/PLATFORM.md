@@ -313,24 +313,28 @@ spellings across the two docs). No `<atomic>`, no `volatile`.
 
 ### 9.5 Vendor hook wiring and init order
 
-Pools (`MEMORY.md` §1.5): `pool_vendor` (SDL + ImGui + stb — and, since the D2 ruling of
-2026-08-26, the Luau **compiler's** allocations for the duration of one `luau_compile`, which
+Pools (`MEMORY.md` §1.5): `pool_vendor` (SDL + ImGui + stb + FreeType — and, since the D2 ruling
+of 2026-08-26, the Luau **compiler's** allocations for the duration of one `luau_compile`, which
 have no hook API of their own; 64 MB reserve), `pool_luau_sim`,
 `pool_luau_ui` (64 MB each, owned by `LUAU-LAYER`), `pool_enet` (16 MB, owned by `net/`). All
-`pool_*` calls live in `src/vendor_glue/` (the one folder allowed a static pool pointer, for the
-`STBI_MALLOC` compile-time macro and — since RR-18, ruled 2026-08-26 — for the program-wide
-`operator new` replacement of `MEMORY.md` §1.5). That sentence had no gate behind it until then;
-the pointer is now exempted by name in `tools/audit/static_allow.txt`, with planted violations for
-the same directory at a different stem and the same stem in a different directory.
+`pool_*` calls live in `src/vendor_glue/` (the one folder allowed writable static state: the
+per-lib pool pointers — forced by `STBI_MALLOC`-class compile-time macros, context-free hook
+callbacks, and, since RR-18 (ruled 2026-08-26), the program-wide `operator new` replacement of
+`MEMORY.md` §1.5 — and adaptor-side instrumentation such as the FreeType call counter. The
+whole-lib exemption covers the Luau glue's TUs too; `tools/audit/symbols.py --vendor-glue-lib`
+is the gate's spelling, and `tools/audit/static_allow.txt` stays the (lib, directory, stem)
+record for exemptions *outside* this folder — RR-19's `atom` in `src/script/`; RR-18's
+`vendor_new` row predates the whole-lib spelling and stands as that ruling's record).
 
 | Lib | Hook | Pool |
 |---|---|---|
-| SDL3 | `SDL_SetMemoryFunctions(glue_malloc, glue_calloc, glue_realloc, glue_free)` — **before** `SDL_Init` | `pool_vendor` |
-| Dear ImGui | `ImGui::SetAllocatorFunctions(glue_imgui_alloc, glue_imgui_free, &pool_vendor)` — before `CreateContext` | `pool_vendor` |
-| stb_image / stb_sprintf | `#define STBI_MALLOC/REALLOC/FREE` → `glue_stb_*` (stb_sprintf allocates nothing) | `pool_vendor` |
-| Luau | `lua_newstate(glue_luau_alloc, &pool_luau_x)` per VM | per VM |
-| ENet | `enet_initialize_with_callbacks(ENET_VERSION, &{glue_enet_malloc, glue_enet_free, glue_enet_no_memory → TL_FATAL})` | `pool_enet` |
-| SDL_ttf | inherits SDL's functions (it calls `SDL_malloc`) | `pool_vendor` |
+| SDL3 | `SDL_SetMemoryFunctions(tl_sdl_malloc, tl_sdl_calloc, tl_sdl_realloc, tl_sdl_free)` — **before** `SDL_Init`. Known residue: the X11 `xsettings` client (`src/video/x11/xsettings-client.c`, 9 sites) calls raw `malloc`/`free` outside this hook — latent until X11 video init; the platform lane owns the call (`TODO.md`) | `pool_vendor` |
+| Dear ImGui | `ImGui::SetAllocatorFunctions(tl_imgui_alloc, tl_imgui_free)` — before `CreateContext` (no `user_data`; the adaptor closes over `pool_vendor()` directly) | `pool_vendor` |
+| stb_image / stb_sprintf | `#define STBI_MALLOC/REALLOC/FREE` → `tl_stbi_*` (stb_sprintf allocates nothing) | `pool_vendor` |
+| Luau | `lua_newstate(tl_luau_alloc, &pool_luau_x)` per VM | per VM |
+| ENet | `enet_initialize_with_callbacks(ENET_VERSION, &{tl_enet_malloc, tl_enet_free, tl_enet_no_memory → TL_FATAL})` | `pool_enet` |
+| SDL_ttf | its own `SDL_malloc`/`SDL_free` call sites inherit SDL3's hook; has no adaptor `.cpp` of its own | `pool_vendor` |
+| FreeType | no runtime allocator-registration API SDL_ttf's `TTF_Init()` exposes — hooked at FreeType's own platform-customization seam instead: `builds/<platform>/ftsystem.c`'s `ft_alloc`/`ft_realloc`/`ft_free`/`FT_New_Memory` call `tl_freetype_alloc`/`realloc`/`free` (`src/vendor_glue/freetype_glue.cpp`), a declared verbatim deviation (`vendor/VERSIONS`' freetype row) | `pool_vendor` |
 | Monocypher, rapidhash | allocate nothing | — |
 
 `platform_sdl3_init(config)` order: (1) build `vmem` (no state needed) → allocate the platform

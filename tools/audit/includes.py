@@ -44,11 +44,13 @@ SYS_ALLOW_DIRS = {                        # additional system headers, by path p
     # so its public headers are spelled bare and reach gate 1 as system includes. The set is
     # closed: lua.h (the C API), lualib.h (luaopen_*/luaL_*), luacode.h (luau_compile).
     "src/script": {"lua.h", "lualib.h", "luacode.h"},
-    # vendor_glue is where a vendored library's heap plumbing lives (docs/MEMORY.md §8.6),
-    # and one vendored buffer - the one luau_compile returns - is malloc'd by upstream
-    # contract and must be free()d. The grant is scoped to THIS folder on purpose: it also
-    # admits malloc, and the folder whose job is allocators is the only one that may have it.
-    "src/vendor_glue": {"stdlib.h"},
+    # The vendor allocator hookups (docs/MEMORY.md §8.6) include their lib's own headers to reach
+    # its SetMemoryFunctions/SetAllocatorFunctions/STBI_MALLOC hook API. stdlib.h is here because
+    # one vendored buffer - the one luau_compile returns - is malloc'd by upstream contract and
+    # must be free()d; the grant also admits malloc, and the folder whose job is allocators is
+    # the only one that may have it.
+    "src/vendor_glue": {"SDL3/SDL.h", "imgui.h", "enet/enet.h", "stb_image.h", "stb_sprintf.h",
+                        "stdarg.h", "stdlib.h"},
 }
 BACKEND_FREE = ("src/platform/impl_sdl3", "src/platform/impl_headless")   # OS headers live here
 
@@ -66,11 +68,13 @@ def is_backend_free(rel):
     return d == "src/platform" and base.startswith("os_") and base.endswith(".cpp")
 
 BACKEND_HEADERS = {                       # token in the include path -> allowed path prefixes
-    "SDL3": ("src/platform/impl_sdl3",),
-    "SDL_ttf": ("src/platform/impl_sdl3",),
-    "imgui": ("src/editor",),
-    "enet": ("src/net",),
-    # The vendored tree spells its public headers bare (<lua.h>, <lualib.h>, <luacode.h>)
+    # The vendor allocator hookups (docs/MEMORY.md §8.6) include their lib's own headers to
+    # reach its hook API, so src/vendor_glue joins each wrap module's prefix.
+    "SDL3": ("src/platform/impl_sdl3", "src/vendor_glue"),
+    "SDL_ttf": ("src/platform/impl_sdl3", "src/vendor_glue"),
+    "imgui": ("src/editor", "src/vendor_glue"),
+    "enet": ("src/net", "src/vendor_glue"),
+    # The vendored Luau tree spells its public headers bare (<lua.h>, <lualib.h>, <luacode.h>)
     # and its internal ones under Luau/. The pre-vendoring token here was a bare "luau",
     # which matched no upstream spelling at all AND matched our own
     # #include "vendor_glue/luau_alloc.h" - a gate that fires on the wrong file and never
@@ -80,7 +84,7 @@ BACKEND_HEADERS = {                       # token in the include path -> allowed
     "luacode.h": ("src/script",),
     "Luau/": ("src/script",),
     "monocypher": ("src/net",),
-    "stb_": ("src/platform/impl_sdl3", "src/core"),
+    "stb_": ("src/platform/impl_sdl3", "src/core", "src/vendor_glue"),
     "rapidhash": ("src/foundation",),
 }
 
@@ -89,17 +93,22 @@ BACKEND_HEADERS = {                       # token in the include path -> allowed
 # only sim/views.h.
 MODULE_DAG = {
     "foundation": ("foundation",),
-    # vendor_glue/ holds the per-library allocator adaptors (docs/MEMORY.md §8.6). It sits
-    # directly above foundation and below every wrap module: a vendored lib's hook API is
-    # routed through it, so it may never reach a module that would let a vendor heap see
-    # engine state.
+    # vendor_glue (docs/PLATFORM.md §9.5, docs/MEMORY.md §8.6): per-lib allocator hookups. It
+    # sits directly above foundation and below every wrap module - it never touches
+    # core/platform/render, and its vendor headers arrive via BACKEND_HEADERS-gated system
+    # includes, not this local-include DAG.
     "vendor_glue": ("vendor_glue", "foundation"),
-    "platform": ("platform", "foundation"),
+    # platform/net/editor carry a DOWNWARD-only entry to vendor_glue (review round 1, D3):
+    # sdl3_glue.h names the impl_sdl3 platform lane as `vendor_glue_sdl3_install()`'s caller,
+    # enet_glue.h names net/, imgui_glue.h names src/editor. script's entry is the luau glue's
+    # (vendor_glue/luau_alloc.h). sim/foundation are deliberately left out: neither has any
+    # vendored-lib install to make, and sim especially must never reach a vendor allocator.
+    "platform": ("platform", "foundation", "vendor_glue"),
     "sim": ("sim", "foundation"),
     "core": ("core", "foundation", "platform"),
     "render": ("render", "core", "foundation", "platform"),
-    "net": ("net", "core", "foundation", "platform"),
-    "editor": ("editor", "core", "render", "foundation", "platform"),
+    "net": ("net", "core", "foundation", "platform", "vendor_glue"),
+    "editor": ("editor", "core", "render", "foundation", "platform", "vendor_glue"),
     "script": ("script", "core", "foundation", "platform", "vendor_glue"),
     "app": ("app", "editor", "net", "render", "script", "sim", "core", "platform",
             "vendor_glue", "foundation"),
@@ -648,10 +657,15 @@ def check_file(root, path, nondet, tooling, static_allow, errors):
                                   "(docs/BUILD.md §4)" % (rel, i, token, prefixes))
 
         tline = token_lines[i - 1] if i - 1 < len(token_lines) else ""
-        # The exemption is (directory, stem), never the stem alone and never the directory
-        # alone: a same-named file in another directory, or another file in the same directory,
-        # is an ordinary violation.
-        static_exempt = (os.path.dirname(rel), stem) in static_allow
+        # docs/PLATFORM.md §9.5: vendor_glue is "the one folder allowed writable static state" -
+        # a whole-DIRECTORY exemption, not stem-keyed, because every TU in it is a per-lib
+        # mem_pool hookup and legitimately owns one (symbols.py's --vendor-glue-lib is the
+        # matching link-level exemption for the same ruling). Everywhere else the exemption is
+        # (directory, stem) via tools/audit/static_allow.txt - never the stem alone and never
+        # the directory alone: a same-named file in another directory, or another file in the
+        # same directory, is an ordinary violation.
+        static_exempt = ((os.path.dirname(rel), stem) in static_allow
+                         or rel.startswith("src/vendor_glue/"))
         if is_mutable_static(tline) and not is_tooling_tu and not static_exempt:
             errors.append("%s:%d: static mutable state (docs/CPP-SUBSET.md §1): %s"
                           % (rel, i, raw_lines[i - 1].strip()[:70]))

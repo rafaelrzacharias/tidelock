@@ -336,6 +336,44 @@ INCLUDE_CASES = [
      "src/platform/os_nom_commented.cpp",
      "/*\n#define NOMINMAX\n*/\n#include <windows.h>\nvoid os_nom_commented(void) {}\n",
      "no `#define NOMINMAX`"),
+    # docs/BUILD.md §4 / docs/PLATFORM.md §9.5 (W2 vendor lane): a vendored backend header is
+    # still confined to its wrap module even though src/vendor_glue is now one of the allowed
+    # prefixes - src/core is not, so this must fail exactly like any other module would.
+    ("a backend header outside its wrap module is still banned for SDL3", "src/core/z1.cpp",
+     "#include <SDL3/SDL.h>\n",
+     "backend header SDL3 outside its wrap module"),
+    # The vendor_glue MODULE_DAG entry is DOWNWARD only (foundation) - it grants vendor_glue
+    # nothing else, and it grants nothing TO other modules. Without this fixture a DAG entry that
+    # accidentally let every module reach "vendor_glue" would report 0 violations.
+    ("core/ may not include vendor_glue - the DAG entry is not bidirectional", "src/core/z2.cpp",
+     '#include "vendor_glue/pool_vendor.h"\n',
+     "violates the module DAG"),
+    # review round 1, D3: platform/net/editor's new downward-only vendor_glue entry must not leak
+    # to sim or foundation - neither has any vendored-lib install to make, and sim especially must
+    # never reach a vendor allocator (docs/CPP-SUBSET.md: no vendor heap on a sim path).
+    ("sim/ may not include vendor_glue even after D3 widens platform/net/editor",
+     "src/sim/z2b.cpp", '#include "vendor_glue/pool_vendor.h"\n',
+     "violates the module DAG"),
+    ("foundation/ may not include vendor_glue even after D3 widens platform/net/editor",
+     "src/foundation/z2c.cpp", '#include "vendor_glue/pool_vendor.h"\n',
+     "violates the module DAG"),
+    # review round 1, D8: SYS_ALLOW_DIRS["src/vendor_glue"] had no negative fixture - confirmed
+    # working by hand in the review (an arbitrary system header still refused), never pinned.
+    ("vendor_glue's system-header allowlist does not become unbounded", "src/vendor_glue/z5.cpp",
+     "#include <windows.h>\n",
+     "system include <windows.h> is not on the allowlist"),
+    # vendor_glue's own DAG entry is scoped to foundation only, not the whole tree platform/core
+    # reach - a copy-paste of core's tuple would have let it reach platform silently.
+    ("vendor_glue may not include platform even though core/render/net can",
+     "src/vendor_glue/z3.cpp",
+     '#include "platform/entropy.h"\n',
+     "violates the module DAG"),
+    # docs/PLATFORM.md §9.5: vendor_glue is "the one folder allowed a static pool pointer" - a
+    # whole-DIRECTORY exemption, so it must not leak to a neighbouring module.
+    ("the vendor_glue exemption does not leak to a neighbouring module (platform)",
+     "src/platform/z4.cpp",
+     "static int g_leaked = 0;\nint use(void) { return g_leaked; }\n",
+     "static mutable state"),
     # W2 luau-vm: the vendored Luau tree's gate entries and mem_pool's grep. Every one of these
     # passed before the entry existed. LESSONS.md: a vendored lib needs BOTH SYS_ALLOW_DIRS and
     # BACKEND_HEADERS, which check independently - so both halves get their own fixture.
@@ -364,10 +402,11 @@ INCLUDE_CASES = [
     # plumbing); it also admits malloc, so it must not leak to the wrap module next door.
     # RR-18/RR-19's writable-static allowlist is (lib, DIRECTORY, STEM). Neither half alone is
     # the exemption - RR-7's own lesson, where a stem-only grant covered `log.o` in every
-    # non-audited lib in the tree. One fixture per half, per exempted row.
-    ("static state in the exempted DIRECTORY but a different stem", "src/vendor_glue/other.cpp",
-     '#include "foundation/tl_types.h"\nstatic unsigned g_state = 0u;\nunsigned bump(void) { g_state += 1u; return g_state; }\n',
-     "static mutable state"),
+    # non-audited lib in the tree. One fixture per half, per exempted row - except RR-18's
+    # DIRECTORY half, which the W2-vendor whole-directory exemption for src/vendor_glue
+    # (docs/PLATFORM.md §9.5) subsumes: its own does-not-leak fixture is z4.cpp above, so the
+    # planted src/vendor_glue/other.cpp violation retired with the W2 lane merge. The STEM half
+    # keeps its fixture.
     ("static state with the exempted STEM but in a different directory", "src/core/vendor_new.cpp",
      '#include "foundation/tl_types.h"\nstatic unsigned g_state = 0u;\nunsigned bump(void) { g_state += 1u; return g_state; }\n',
      "static mutable state"),
@@ -481,6 +520,27 @@ INCLUDE_CLEAN = [
     ("an os_*.cpp in src/platform/ may include a real OS header", "src/platform/os_entropy.cpp",
      "#define WIN32_LEAN_AND_MEAN\n#define NOMINMAX\n#include <windows.h>\n"
      "void os_entropy_probe(void) {}\n"),
+    # docs/BUILD.md §4 / docs/PLATFORM.md §9.5 (W2 vendor lane): vendor_glue's three shapes -
+    # its backend header is a legal system include here, it may reach foundation/mem_pool.h, and
+    # its one static pool instance is not a violation (the whole-lib exemption above).
+    ("vendor_glue may include a vendored lib's own backend header", "src/vendor_glue/ok10.cpp",
+     "#include <SDL3/SDL.h>\n"),
+    ("vendor_glue may include foundation/mem_pool.h", "src/vendor_glue/ok11.cpp",
+     '#include "foundation/mem_pool.h"\n'),
+    ("vendor_glue's static pool instance is exempt from the mutable-static ban",
+     "src/vendor_glue/ok12.cpp",
+     '#include "foundation/mem_pool.h"\nstatic MemPool g_pool_vendor;\n'
+     "MemPool* use(void) { return &g_pool_vendor; }\n"),
+    # review round 1, D3: platform/net/editor gained a downward-only vendor_glue MODULE_DAG entry
+    # so sdl3_glue.h/enet_glue.h/imgui_glue.h's named callers (impl_sdl3, net/, src/editor) have a
+    # legal include path to the install functions they name. Positive fixtures for all three.
+    ("platform/ may now include vendor_glue (review round 1, D3)",
+     "src/platform/impl_sdl3/ok13.cpp",
+     '#include "vendor_glue/sdl3_glue.h"\nvoid ok13(void) { vendor_glue_sdl3_install(); }\n'),
+    ("net/ may now include vendor_glue (review round 1, D3)", "src/net/ok14.cpp",
+     '#include "vendor_glue/enet_glue.h"\nbool ok14(void) { return vendor_glue_enet_install(); }\n'),
+    ("editor/ may now include vendor_glue (review round 1, D3)", "src/editor/ok15.cpp",
+     '#include "vendor_glue/imgui_glue.h"\nvoid ok15(void) { vendor_glue_imgui_install(); }\n'),
     # Gate 7's positive half in src/ and in tests/. The src/ one is the fixture above (it carries
     # the #define now, and would fail this whole clean run without it); these two pin the
     # remaining shapes: the define does not have to be adjacent to the include, and a file with no
@@ -777,6 +837,41 @@ def test_symbols_tooling(tmp, nm, objdump, ar, cxx):
 
     rc, out = run(base + layer + ["--root", fixture, "--data-only", "tool=" + tool_lib])
     record("symbols: --root without --tooling-lib grants no exemption",
+           rc == 1 and (".bss" in out or ".data" in out), out.strip()[:200])
+
+
+# --- docs/PLATFORM.md §9.5: vendor_glue's whole-lib writable-static exemption ------------------
+def test_symbols_vendor_glue(tmp, nm, objdump, ar, cxx):
+    root = os.path.join(tmp, "sym_vg")
+    os.makedirs(root, exist_ok=True)
+    allow = os.path.join(AUDIT, "allow.txt")
+    base = [sys.executable, os.path.join(AUDIT, "symbols.py"), "--nm", nm, "--objdump", objdump,
+            "--allow", allow]
+
+    # Unlike RR-7 this exemption needs no --root/stem list: it is keyed on the LIB NAME alone
+    # (docs/PLATFORM.md §9.5 - "the one folder", not one stem among several sharing a lib).
+    vg_lib, err = build_lib_named(cxx, ar, root, "vg", "sdl3_glue.cpp", MUTABLE_CPP)
+    other_lib, err2 = build_lib_named(cxx, ar, root, "other", "sdl3_glue.cpp", MUTABLE_CPP)
+    clean_lib, err3 = build_lib(cxx, ar, root, "clean", [LOWER_CPP])   # --layer is mandatory
+    if not vg_lib or not other_lib or not clean_lib:
+        record("symbols: vendor-glue fixtures compile", False, (err or err2 or err3)[:200])
+        return
+    layer = ["--layer", "clean=" + clean_lib]
+
+    rc, out = run(base + layer + ["--vendor-glue-lib", "tl_vendor_glue",
+                                  "--data-only", "tl_vendor_glue=" + vg_lib])
+    record("symbols: --vendor-glue-lib exempts the named lib's static pool pointer whole-lib",
+           rc == 0, out.strip()[:200])
+
+    # The exemption is a LIB NAME match, never a stem: the identical object under any other lib
+    # name is an ordinary violation, exactly like RR-7's "not the same log.o in another lib".
+    rc, out = run(base + layer + ["--vendor-glue-lib", "tl_vendor_glue",
+                                  "--data-only", "other=" + other_lib])
+    record("symbols: the vendor-glue exemption does not leak to another lib name",
+           rc == 1 and (".bss" in out or ".data" in out), out.strip()[:200])
+
+    rc, out = run(base + layer + ["--data-only", "tl_vendor_glue=" + vg_lib])   # no flag at all
+    record("symbols: the vendor-glue exemption is opt-in - no flag means no exemption",
            rc == 1 and (".bss" in out or ".data" in out), out.strip()[:200])
 
 
@@ -1134,6 +1229,7 @@ def main():
         test_includes(tmp)
         test_symbols(tmp, a.nm, a.objdump, a.ar, a.cxx)
         test_symbols_tooling(tmp, a.nm, a.objdump, a.ar, a.cxx)
+        test_symbols_vendor_glue(tmp, a.nm, a.objdump, a.ar, a.cxx)
         test_targets(tmp, a.cxx)
         test_sim_tu_error(tmp, a.cxx)
         test_reflect_padding(tmp, a.cxx)

@@ -237,6 +237,13 @@ def main():
                          "half of src/foundation/). Both this and --root are required for any "
                          "exemption at all: a stem named log/prof/probe/crash in any OTHER lib is "
                          "an ordinary writable-static violation (docs/CPP-SUBSET.md §9 R-4).")
+    ap.add_argument("--vendor-glue-lib", default=None, metavar="NAME",
+                    help="the ONE --data-only lib docs/PLATFORM.md §9.5 allows a static pool "
+                         "pointer in (vendor_glue's per-lib mem_pool hookups). A WHOLE-LIB "
+                         "exemption, not stem-keyed like --tooling-lib: vendor_glue TUs hold per-lib "
+                         "pool pointers and adaptor-side instrumentation (e.g. call counters), so there "
+                         "is no narrower stem to key on the way RR-7 keys on the non-det half of "
+                         "src/foundation/. A lib under any other name gets no exemption.")
     ap.add_argument("--wrap-lib", action="append", default=[], metavar="NAME",
                     help="a lib that MAY reference the vendored Luau C API (docs/LUAU-LAYER.md "
                          "section 10.12: lua_*/luau_* symbols only in tl_script). Every other "
@@ -296,9 +303,14 @@ def main():
         # lib may hold the tooling plane, so a `log.o` that turns up in core/, platform/ or
         # editor/ is reported exactly like any other writable static storage.
         exempt = tooling if name == a.tooling_lib else set()
+        # docs/PLATFORM.md §9.5: vendor_glue is exempt as a WHOLE LIB (never by stem - see the
+        # --vendor-glue-lib help text for why a stem list would be the wrong shape here).
+        exempt_whole_lib = (name == a.vendor_glue_lib)
         for member, section, size in data_bss_offenders(a.objdump, path):
             if stem_of_member(member) in exempt:
                 continue   # RR-7: the tooling plane, named in TL_FOUNDATION_TOOLING, is exempt
+            if exempt_whole_lib:
+                continue   # PLATFORM.md §9.5: vendor_glue, whole-lib (see --vendor-glue-lib help)
             if (name, stem_of_member(member)) in static_allow:
                 continue   # tools/audit/static_allow.txt: a named ruling, lib + stem
             violations.append("%s: %s has %d bytes of %s - writable static storage in src/ "

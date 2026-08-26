@@ -98,6 +98,14 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       (the steward session dispatches it after the push; the aarch64 evidence rides the CI arm64
       legs — the Pi left the program 2026-08-25).
 
+- [ ] **For the platform lane (impl_sdl3): SDL3's X11 `xsettings` client allocates outside
+      `SDL_SetMemoryFunctions`** (filed 2026-08-26 by the w2-vendor SHIP round, S3). Nine raw
+      `malloc`/`free` sites in `vendor/sdl3/src/video/x11/xsettings-client.c` are pulled into the
+      binary and are unreachable until X11 video init - latent, upstream code, so patching it is
+      a NEW verbatim deviation needing its own `vendor/VERSIONS` declaration and Rafael's word.
+      `PLATFORM.md` §9.5's SDL3 row now carries the qualifier. Decide at impl_sdl3: patch (with
+      declaration), accept-and-document, or upstream-report.
+
 ## W2 luau-vm — ship round (2026-08-26, fresh context, full re-read; verdict FIX FIRST)
 
 Three findings on head `6944d9dd`; full comment on PR #11, whose "checked and cleared" list is the
@@ -702,7 +710,439 @@ E-2 needs no W2 decision but blocks real game wiring later.
       namespace convention: STATUS QUO recorded in `CPP-SUBSET.md` §0 — global namespace with
       enforced module prefixes; revisit only on a real collision.
 
+## W2 vendor — lane notes (2026-08-26, `w2-vendor`, in progress)
+
+- [x] **SDL3 vendored** at `release-3.2.30` (`vendor/sdl3`, `vendor/VERSIONS`): the full upstream
+      CMake project minus test/examples/docs/IDE-project dirs (unreachable with
+      SDL_TESTS/SDL_EXAMPLES/SDL_INSTALL_DOCS forced OFF). Builds clean under `dev-linux` (this
+      container's clang 18; `WORKFLOW.md` §6 R-11 env gap, CI is the authority on the pin).
+      `src/vendor_glue/` created (new module: `pool_vendor.{h,cpp}` — the shared 64 MB pool
+      `PLATFORM.md` §9.5 gives SDL3/SDL_ttf/ImGui/stb — plus `sdl3_glue.{h,cpp}` hooking
+      `SDL_SetMemoryFunctions`); `tl_vendor_glue` links into `tl_tests` (root `CMakeLists.txt`,
+      `tests/CMakeLists.txt`) and its 3 tests round-trip malloc/calloc/realloc/free through the
+      real pool (`tests/vendor_glue/`). Fixed the stale "SDL3 + stb arrive with the W1 platform
+      lane" comment (`vendor/CMakeLists.txt`) and the now-inaccurate sibling comment in
+      `src/platform/CMakeLists.txt` (per-ruling scope, 2026-08-26).
+      **Two gate additions this required, not anticipated by the lane brief itself:**
+      `tools/audit/includes.py` gains a `MODULE_DAG["vendor_glue"] = ("vendor_glue",
+      "foundation")` entry (no entry = every local include in the directory fails the DAG check,
+      not a missing-file error) and a whole-directory exemption from the mutable-static ban
+      (`PLATFORM.md` §9.5's "one folder allowed a static pool pointer"); `tools/audit/symbols.py`
+      gains `--vendor-glue-lib NAME`, a whole-LIB (not stem, unlike RR-7) writable-static
+      exemption, wired in `cmake/audit.cmake`. Both ship with selftest fixtures in the same
+      commit (`tools/audit/selftest.py`: `test_symbols_vendor_glue` + the `includes.py` DAG/
+      mutable-static/backend-header cases). See `LESSONS.md` for why one exemption alone would
+      have passed locally and failed the real link-level gate.
+      **Noted, not fixed (out of this lane's file cone):** `tests/foundation/mem_pool.test.cpp`'s
+      header comment attributes "the Luau-VM-under-the-pool lifecycle test" to "the W2 vendor
+      lane" — stale since the vendor/luau-vm split (`ROADMAP.md` §2); that test is Luau's, i.e.
+      `w2-luau-vm`'s. Flagging for whichever lane touches that file next.
+      Remaining in this lane: SDL_ttf, Dear ImGui (docking), ENet, Monocypher, stb — one commit
+      each, same shape (vendor tree + CMakeLists + VERSIONS row + glue adaptor + tests), reusing
+      `pool_vendor` for SDL_ttf/ImGui/stb and a new `pool_enet` for ENet (`PLATFORM.md` §9.5).
+- [x] **SDL_ttf vendored** at `release-3.2.2` (`vendor/sdl_ttf`) plus its one mandatory
+      dependency, **FreeType** (`VER-2-13-2-SDL` fork branch, `vendor/sdl_ttf/external/freetype` —
+      upstream's own submodule layout; not in `BUILD.md` §4's original vendored-set list, added
+      there this commit). **Design call, not a spec requirement:** SDL_ttf's optional HarfBuzz
+      (text shaping) and plutosvg/plutovg (colour-emoji glyphs) backends are OFF, and so are
+      FreeType's own optional zlib/bzip2/PNG/brotli font codecs — no consumer needs shaped or
+      colour-emoji text yet, and vendoring 3 more trees (plus FreeType's codec deps) for zero
+      current consumers is the speculative breadth `CLAUDE.md`'s design rules ask to challenge. A
+      future text-rendering lane can file a ruling and flip `SDLTTF_HARFBUZZ`/`SDLTTF_PLUTOSVG`
+      back on (`vendor/CMakeLists.txt`) when a real consumer exists. No adaptor `.cpp`: SDL_ttf
+      calls `SDL_malloc`/`SDL_free` internally, so it inherits `sdl3_glue`'s hookup with no
+      separate hook (`PLATFORM.md` §9.5) — `tl_vendor_glue` just links `SDL3_ttf::SDL3_ttf`
+      PUBLIC, and `tests/vendor_glue/sdl_ttf_glue.test.cpp` proves `TTF_Init`/`TTF_Quit` round-trip
+      real FreeType allocations through `pool_vendor`. See `LESSONS.md` for the `SDL3_DIR`
+      in-tree-`find_package` trick this needed and the "the consumer add_subdirectory()s its own
+      transitive dep" gotcha.
+- [x] **Dear ImGui vendored** at the `docking` branch's pinned commit `fd13a1e8` (`vendor/imgui`,
+      no upstream CMakeLists.txt to inherit - imgui ships as loose sources by design, so
+      `vendor/imgui/CMakeLists.txt` is ours). Builds only the 4 core TUs (`imgui.cpp`,
+      `imgui_draw.cpp`, `imgui_tables.cpp`, `imgui_widgets.cpp`) into a static lib named `imgui`;
+      `imgui_demo.cpp` and every `backends/imgui_impl_*.cpp` are vendored but NOT compiled - no
+      caller yet (the demo window, and each platform/renderer backend, are the future editor/
+      platform lanes' calls to make, not this one's to pre-build). `ImGuiColorTextEdit`
+      (`BUILD.md` §4's other parenthetical) is explicitly NOT vendored here: it is not named in
+      this lane's brief (SDL3/SDL_ttf/imgui/ENet/Monocypher/stb only) and nothing consumes it -
+      whichever lane builds the script/text-viewing editor panel vendors it then.
+      `src/vendor_glue/imgui_glue.{h,cpp}` hooks `ImGui::SetAllocatorFunctions` to `pool_vendor`;
+      `tests/vendor_glue/imgui_glue.test.cpp` proves a real `CreateContext`/`DestroyContext`
+      cycle allocates and frees through the pool. `tools/audit/includes.py`'s `SYS_ALLOW_DIRS`
+      gains `"imgui.h"` for `src/vendor_glue` (its `BACKEND_HEADERS` entry already listed
+      `src/vendor_glue`, from the SDL3 commit's batch edit).
+- [x] **ENet vendored** at `v1.3.18` (`vendor/enet`). Its own `CMakeLists.txt` exports no usable
+      include path for an external consumer (directory-scoped `include_directories()`, not a
+      target property) — `vendor/CMakeLists.txt` adds the missing
+      `target_include_directories(enet PUBLIC ...)`; see `LESSONS.md`. `pool_enet` (16 MB,
+      `docs/PLATFORM.md` §9.5) is its own dedicated pool, separate from `pool_vendor` — "owned by
+      net/" in the doc's wording means net/ decides pool_enet's init/shutdown LIFETIME once it
+      wires ENet in (out of this lane's file cone), not that the `pool_*` calls live outside
+      `src/vendor_glue/`; they do, per `docs/MEMORY.md` §8.6's grep rule, same as `pool_vendor`.
+      `enet_glue.{h,cpp}` wires `enet_initialize_with_callbacks` with `no_memory` → `TL_FATAL`
+      (an exhausted pool_enet budget is fatal, not recoverable). The test creates a real
+      `ENetHost` (no bind address, no socket traffic) to prove peer/channel allocations round-trip
+      through `pool_enet`.
+- [x] **Monocypher vendored** at `4.0.3` (`vendor/monocypher`, no upstream CMake build - a plain
+      makefile - so `vendor/monocypher/CMakeLists.txt` is ours, same shape as rapidhash's).
+      Vendors core (`monocypher.c`) plus the optional Ed25519 module - `docs/NETCODE.md` §8/§19.9
+      name it BY NAME (identity signing, handoffs), so this is the spec calling for it, not an
+      addition of this lane's own. Allocates nothing (`docs/PLATFORM.md` §9.5): no adaptor `.cpp`,
+      no pool. `tests/vendor_glue/monocypher.test.cpp` checks BLAKE2b-512("") against the RFC 7693
+      known-answer vector, `crypto_verify32`'s equal/differ cases, and a real Ed25519 sign/check
+      round-trip (plus a flipped-signature-byte rejection).
+      **Root-cause fix this exposed, not anticipated:** `project(tidelock LANGUAGES CXX)`
+      (`CMakeLists.txt`) had never actually enabled C - SDL3/ENet/FreeType's `.c` builds all
+      worked only because SDL3's own nested `project(... C)` call enabled it globally as a side
+      effect, first. Monocypher's CMakeLists.txt (no upstream project of its own) was the first to
+      need C with nothing upstream to accidentally grant it, and failed generate with
+      `CMAKE_C_COMPILE_OBJECT` unset. Fixed at the root: `LANGUAGES CXX C`, plus a C-compiler-is-
+      Clang check mirroring the existing CXX one (`docs/BUILD.md` §1). See `LESSONS.md`.
+      src/net/CMakeLists.txt's own comment ("ENet + Monocypher arrive with the W2 vendor lane and
+      are linked here then") is NOT actioned by this lane - `src/net/` is outside this lane's file
+      cone (disjoint from concurrent lanes, `ROADMAP.md` §2); both archives link clean via
+      `tl_vendor_glue` today, so linking them into `tl_net` is unblocked, real work for whichever
+      lane wires ENet/Monocypher into net/'s actual protocol code.
+- [x] **stb vendored** (`vendor/stb`): only `stb_image.h` + `stb_sprintf.h` of the upstream
+      repo's ~20 headers - the two `docs/BUILD.md` §4 names - pinned at a bare commit (stb tags
+      nothing). **Root-cause redesign this exposed:** the naive plan (instantiate
+      `STB_IMAGE_IMPLEMENTATION`/`STB_SPRINTF_IMPLEMENTATION` inside
+      `src/vendor_glue/stb_glue.cpp`, matching every other adaptor's shape) does not compile -
+      the header bodies trip `-Wsign-conversion -Werror` under `tl_flags_common` in ~20 places.
+      Fixed by moving the `IMPLEMENTATION` instantiation into `vendor/stb/stb_impl.c` (ours, no
+      upstream `.c` exists) compiled by `vendor/stb/CMakeLists.txt` with vendor's own (relaxed)
+      flags; only two `extern` C-linkage hook declarations (`tl_stbi_malloc/realloc/free`) cross
+      into `src/vendor_glue/stb_glue.cpp`, which defines them over `pool_vendor` and re-exports
+      `vendor_glue_stbi_load_from_memory`/`vendor_glue_stbsp_snprintf` via DECLARATION-ONLY
+      includes of the same headers (prototypes only, compiles clean under strict flags). See
+      `LESSONS.md`. Tests: a hand-built 1×1 BMP decodes through `pool_vendor` with the expected
+      RGBA bytes; `stbsp_snprintf` is checked against expected output AND its truncation contract
+      (returns the FULL length needed, NUL-terminates a too-small buffer).
+      **`CONTAINERS.md` §8.6b's `fmt_buf` stub is updated, not replaced** - see that TODO entry
+      above (W1 containers lane notes) for why the wiring needs a fn-ptr seam, not a plain
+      include, and is left for whichever lane replaces the stub.
+      **This closes the six-library brief (SDL3, SDL_ttf, Dear ImGui, ENet, Monocypher, stb).**
+      All four `CANON.md` target legs are CI's job to prove green (PR #12); local proof on this
+      container (clang 18 vs the pin of 22, `WORKFLOW.md` §6 R-11): `tl_tests --tag smoke` 88/88
+      pass (14 of them the new `vendor_glue.*` cases, one 3-test group per lib except SDL_ttf/
+      Monocypher's own counts), `includes.py` 113 files/0 violations, `selftest.py` clean except
+      the pre-existing local `targets.py` msvc-triple rows (env gap, CI-only), `docaudit.py` 0
+      errors, `commit_docs.py --base origin/main` clean on every commit.
+- [x] **CI was red on all four `CANON.md` legs, all five commits (SDL3 through Monocypher) - fixed
+      in one follow-up commit, PR #12.** Three real bugs, none catchable from this session's
+      Linux container:
+      1. **Linux (both arches):** SDL3's own CMakeLists.txt hard-fails configure with neither X11
+         nor Wayland dev headers present - this repo's CI runners carry neither (this container
+         happened to already have libx11-dev, masking it locally). Fixed: `libx11-dev` added to
+         every Linux job's apt-get line in `.github/workflows/pr.yml` (`build-test`, `tier-parity`,
+         `fingerprint-stability`, `sanitizers`, `rebuild-budget` - `audits` never configures the
+         real cmake project, so it was never red).
+      2. **Windows (both arches):** `builds/windows/ftsystem.c` and `builds/windows/ftdebug.c`
+         (real Windows-specific FreeType source, referenced unconditionally by FreeType's own
+         CMakeLists.txt `if(WIN32)`) were deleted along with genuine IDE-project cruft when the
+         SDL_ttf commit pruned `builds/windows/` wholesale - invisible from Linux, since
+         `builds/unix/ftsystem.c` was untouched. Restored both files.
+      3. **Windows (both arches, found by reading ahead, not yet reached by CI when fixed):**
+         ENet's own CMakeLists.txt links `ws2_32`/`winmm` only `if (MINGW)`; `win32.c`'s
+         `WSAStartup`/`socket`/`timeGetTime` are exactly as undefined under clang-cl. Fixed with
+         an `if(WIN32 AND NOT MINGW)` link from `vendor/CMakeLists.txt`, not a hand-patch of
+         vendored code.
+      `.github/workflows/pr.yml` is outside this lane's stated file cone, but CI red on a PR this
+      lane opened is this lane's to root-cause per `WORKFLOW.md`'s drive-to-green rules - see
+      `LESSONS.md` for the full write-up (including why five green local builds proved nothing
+      about legs this container cannot be).
+- [x] **Preemptive fourth fix, same round:** a steward poke flagged that GitHub's hosted runners
+      now default to CMake >= 4.0, which hard-errors any `cmake_minimum_required()` floor below
+      3.5. Independently verified (not taken on trust - the poke's own log access is
+      proxy-blocked): `grep -rn cmake_minimum_required vendor/*/CMakeLists.txt
+      vendor/sdl_ttf/external/freetype/CMakeLists.txt` found ENet's floor at `2.8.12` and
+      FreeType's at `3.0`, both below the cutoff (SDL3 `3.16`, SDL_ttf `3.16...3.28` are fine).
+      Fixed with `CMAKE_POLICY_VERSION_MINIMUM 3.5` as a CACHE variable set once before any
+      `add_subdirectory()` in `vendor/CMakeLists.txt` - CMake's own sanctioned migration knob,
+      reaching FreeType's nested `add_subdirectory()` (inside SDL_ttf's own CMakeLists.txt) too
+      since cache variables are visible to every subdirectory configured afterward. Not caught
+      locally (this container's CMake 3.28 predates the removal); see `LESSONS.md`.
+- [x] **Fifth fix, same round: `libx11-dev` alone was not enough.** `vendor/sdl3/cmake/
+      sdlchecks.cmake` only sets `HAVE_X11` when it ALSO finds `X11/extensions/Xext.h`
+      (`libxext-dev`, a different package from `libx11-dev`'s `Xlib.h`) - so the fourth fix's
+      Linux leg was still going to hit the same X11-or-Wayland fatal. Added `libxext-dev`
+      alongside `libx11-dev` on all five Linux apt-get lines in `.github/workflows/pr.yml`. This
+      one WAS reproduced for real, not inferred from reading the vendored CMake: installed CMake
+      4.4.2 via `pip install 'cmake>=4'` (this container's system CMake, 3.28, is too old to see
+      any of the CMake-4-era failures in this round), removed `libxext-dev`, watched the exact
+      "could not find X11 or Wayland" fatal reproduce, reinstalled it, watched configure +
+      build + `tl_tests --tag smoke` (88/88) + `includes.py` + `docaudit.py` all pass clean under
+      the real CMake 4 binary. See `LESSONS.md`.
+- [x] **SHIP GATE MET (2026-08-26): all 23 `pr.yml` jobs green on head `9b5608b`** (run
+      32977804981) - the four `CANON.md` build-test legs × four tiers (16), `sanitizers`
+      (2 arches), `tier-parity`, `fingerprint-stability`, `rebuild-budget`,
+      `build-id-cross-target`, `audits`. The six-library brief (SDL3, SDL_ttf+FreeType, Dear
+      ImGui, ENet, Monocypher, stb) is complete, tested, and CI-green on every leg. PR #12 body
+      updated to match; "ready for review" posted there. Every commit on `w2-vendor` carries
+      Rafael's identity (the rewrite above). Remaining, not blocking: the standing
+      tighten-rebuild-budget-after-~10-runs entry (this round only exercised the re-baseline).
+
+## w2-vendor — round-3 (delta-scoped) review, verdict "fix again", narrow (2026-08-26, PR #12 comment 5429151012)
+
+- [x] **Round 2's entire remainder verified closed** (D2 revert-tested red under `--isolate`; N1
+      revert-tested failing under GNU `ld` without the declaration, and confirmed load-bearing —
+      this container's CMake 3.28 ignores `CMAKE_LINKER_TYPE`, so its default GNU `ld` link *is*
+      the non-LLD proof; N2 `docaudit`-clean; D4's two nits closed; adjacency clean — exactly 5
+      lane files touched in `5af03cd`, everything else in the range is `main`'s own merged
+      commits). **One new blocking finding (N3) plus two comment-accuracy nits — all fixed:**
+- [x] **N3 (blocking) — `sdl_ttf_init_quit_through_pool_vendor` was a witness only under
+      `--isolate`.** `pr.yml`'s `sanitize-linux` job runs the suite in-process
+      (`tl_tests --tag '!slow'`, no `--isolate`); there, `SDL_SetMemoryFunctions` is process-wide
+      and permanent, so once any earlier `sdl3_glue_*` row installs it, SDL_ttf's own
+      `SDL_malloc` sites move `pool_vendor` too and the round-2 fix's `live_bytes` assertion is
+      satisfied by that alone — round 2's OR, reintroduced through run order rather than an
+      in-test call. Third appearance of one defect class in one row (round 1: couldn't fail at
+      all; round 2: couldn't fail for the hook it names; round 3: couldn't fail in a shared
+      process) — `CLAUDE.md`'s "the third special case = patching symptoms" named directly.
+      **Fix:** added `tl_freetype_call_count()` (new `src/vendor_glue/freetype_glue.h`, a
+      monotonic counter incremented in `tl_freetype_alloc/realloc/free`) — attributable to
+      FreeType's seam alone in any invocation mode, since it cannot be moved by SDL3's allocator
+      state. The test now asserts on this counter's delta as its primary witness, keeping the
+      `pool_vendor` `live_bytes` delta as a secondary check that the allocation actually landed
+      in the shared pool. Revert-tested in **both** modes the review named, matching its own bar:
+      with `ft_alloc` reverted to `malloc`, `tl_tests --tag vendor_glue` (in-process, `sdl3_glue_*`
+      rows running first — the exact scenario N3 measured passing vacuously before) now crashes
+      (`TL_FATAL ... mem_pool.cpp:142: h->live > 0u`) rather than passing, in-process AND under
+      `--isolate` AND with the row run alone. Restored; reconfirmed 11/11 clean in every mode.
+- [x] **N1's comment nit — fixed.** The `$<BUILD_INTERFACE:...>` rationale claimed
+      `SDL3_ttf-static`'s `install(EXPORT ...)` would demand `tl_vendor_glue` be exported too —
+      false in this tree, since `vendor/CMakeLists.txt` forces `SDLTTF_INSTALL` OFF (verified: a
+      plain `PRIVATE` link configures clean). Corrected to state the generator expression is
+      defensive, not load-bearing, and named the `SDL3_ttf-static` name's own coupling to
+      `BUILD_SHARED_LIBS OFF` while at it (also flagged, not previously stated).
+- [x] **N2's attribution nit — fixed.** `docs/BUILD.md` §4's new clause was stamped
+      "(ruled 2026-08-26, review round 2 N2, ...)" while the matching `TODO.md` ruling request
+      sits open, awaiting Rafael — two homes disagreeing about whether this is ruled. Reworded to
+      "stated ... per review round 2 N2" plus an explicit "not yet a ruling" sentence pointing at
+      the open request as the thing that actually converts it.
+
+## w2-vendor — round-2 (delta-scoped) review, verdict "fix again" (2026-08-26, PR #12 comment 5428219933)
+
+- [x] **6 of 8 round-1 findings verified closed on re-check** (D1 by measurement — `LD_PRELOAD`
+      malloc counter, +0 hooked / +30 reverted; D3 by planting both directions against
+      `includes.py`; D5/D6/D7/D8 by re-reading the tree against the claims). **D2 and D4 each had
+      one row left; two new findings (N1, N2).** All fixed this round:
+- [x] **D2, `sdl_ttf_init_quit_through_pool_vendor` incomplete — fixed.** The row called
+      `vendor_glue_sdl3_install()` before `TTF_Init()`, so its `live_bytes > baseline` assertion
+      was an OR over two independent contributors (SDL_ttf's own 4 `SDL_malloc` sites AND
+      FreeType's ~30) — hooking either satisfied it, so it pinned neither; reverting the FreeType
+      hook alone left the row green. Fixed: dropped the `vendor_glue_sdl3_install()` call, so with
+      SDL3 left unhooked, only FreeType's seam can move `pool_vendor`'s `live_bytes`. Revert-tested
+      it myself (not just re-trusted the review): rebuilt with `ft_alloc` reverted to `malloc`,
+      the row now crashes (`TL_FATAL ... mem_pool.cpp:142: h->live > 0u`) instead of passing.
+      Restored and reconfirmed 11/11 `vendor_glue` tests green.
+- [x] **N1, backwards undeclared archive dependency — fixed.** `libSDL3_ttf.a(ftsystem.c.o)`'s
+      `U tl_freetype_alloc/_realloc/_free` is resolvable only from `libtl_vendor_glue.a`, which
+      CMake places earlier on the link line since nothing declared the reverse need — invisible
+      on this branch's own CI (the `linux`/`win` presets pin `CMAKE_LINKER_TYPE: LLD`, order-
+      tolerant) but real under any non-order-tolerant linker, and the `deck` preset inherits
+      `base`, not `linux` (no LLD pin, no CI job builds it). Reproduced for real, not inferred:
+      reconfigured a scratch `out/n1-check` tree with `-DCMAKE_LINKER_TYPE=BFD` (this container's
+      CMake is 4.4.2, which — unlike the review's own CMake 3.28 container — actually honors that
+      variable, so this needed a forced override rather than just an old CMake) and hit the exact
+      4 undefined references. **First fix attempt (`target_link_libraries(freetype PRIVATE ...)`)
+      had zero effect** — verified by re-linking and diffing the link line — because
+      `vendor/sdl_ttf/CMakeLists.txt`'s static-build branch pulls FreeType in via
+      `$<TARGET_OBJECTS:Freetype::Freetype>` straight into the `SDL3_ttf-static` archive itself
+      (no separate `libfreetype.a` ever appears on the link line, confirmed), so the "freetype"
+      target's own `target_link_libraries` never reaches final link. **Real fix:**
+      `target_link_libraries(SDL3_ttf-static PRIVATE $<BUILD_INTERFACE:tl_vendor_glue>)` from
+      `src/vendor_glue/CMakeLists.txt` (`$<BUILD_INTERFACE:...>` because `SDL3_ttf-static` has its
+      own `install(EXPORT ...)` that would otherwise demand `tl_vendor_glue` be exported too,
+      which this tree never does). Re-ran the same `ld.bfd` build: links clean, 11/11 pass, and
+      the FreeType-hook revert-test above still bites. This is a genuine two-STATIC-library CMake
+      cycle (`tl_vendor_glue` → `SDL3_ttf::SDL3_ttf` → back to `tl_vendor_glue`), which CMake's
+      own docs say it resolves by repeating archives on the link line — verified, not just quoted.
+- [x] **N2, `docs/BUILD.md` §4 cited for a rule it didn't state — fixed, plus a ruling filed.**
+      Five sites cited "§4's declared verbatim deviation"; the word "verbatim" appeared nowhere in
+      `BUILD.md`. Amended §4 in this commit with the rule those sites already assumed ("vendored
+      verbatim by default; a deviation is permitted only when the lib exposes no seam to reach the
+      same result, and only when declared in `vendor/VERSIONS`"). Per the review's own framing —
+      the FreeType patch is "defensible and probably correct" engineering but "a standing change
+      to how this repo vendors, and that is your call to record" — filed a non-blocking ruling
+      request (`## Ruling requests` below) rather than self-declaring the policy silently.
+- [x] **D4's two residual nits — fixed.** `PLATFORM.md` §9.5's Luau row still read
+      `glue_luau_alloc` (line 326) against `MEMORY.md` §8.6's `tl_luau_alloc` — corrected.
+      `src/vendor_glue/CMakeLists.txt:9-10`'s comment still claimed SDL_ttf's font memory has "no
+      separate hook" — corrected to name `freetype_glue.cpp` (this was also touched by the N1 fix
+      to the same file, so it landed in the same edit).
+- [ ] **Not yet done this round:** local full validation (`tl_tests` full suite, `includes.py`,
+      `selftest.py`, `docaudit.py`, `commit_docs.py`), commit, push, CI, remainder→commit comment,
+      steward completion poke.
+
+## w2-vendor — round-1 findings pushed, CI re-confirmed green (2026-08-26)
+
+- [x] **All D1-D8 pushed (`83f1d77`, `6f67660`) and CI re-confirmed 23/23 green on head
+      `6f67660`** (run 32986528223) — full local suite also green (425 tests, 416 passed/9
+      skipped/0 failed). Finding→commit summary posted to PR #12 (comment 5427793346); PR body
+      updated to match. Watching for the round-2 delta-scoped review.
+      **Process note**: the `pull_request` synchronize webhook did not appear to fire for either
+      push — no check-runs registered against the PR for ~15 minutes after each, despite the
+      commits landing correctly on GitHub. Ruled out a runner-capacity problem by manually firing
+      `workflow_dispatch` on the branch, which picked up runners within seconds and ran clean.
+      Looks like a one-off webhook delivery gap, not a CI or infra issue — noted on the PR in case
+      it recurs. (Separately, a main-branch push around the same window — 8e77e813c, unrelated
+      settings.json housekeeping — showed all 23 jobs stuck `queued` before the run auto-failed;
+      that one really may have been a transient runner-availability blip, but it self-resolved:
+      the `workflow_dispatch` run six minutes later got real runners immediately.)
+
+## w2-vendor — round-1 adversarial review (2026-08-26, PR #12 comment 5427150513)
+
+- [x] **Verdict: FIX FIRST. D1+D2 (High) fixed this commit; D4's doc/naming-drift piece fixed
+      alongside per the review's "same commit" instruction; D3/D5/D6/D7/D8 filed as follow-up
+      commits below (history is frozen post-review, `WORKFLOW.md` §1 R-4 — each is a new commit).**
+- [x] **D1 (High) — FreeType (vendored transitively under SDL_ttf) allocated via plain libc
+      `malloc`/`realloc`/`free`, entirely bypassing `pool_vendor`.** `SDL_ttf.c`'s `TTF_Init()`
+      calls `FT_Init_FreeType()` with no custom `FT_Memory` injection point — verified directly
+      (`grep`'d both `SDL_ttf.c` and the vendored `ftsystem.c`) before accepting the review's
+      claim. **Fix:** FreeType's own platform-customization seam — `builds/unix/ftsystem.c` and
+      `builds/windows/ftsystem.c` (the reason that memory backend lives split out from the
+      platform-agnostic `src/` at all) — patched so `ft_alloc`/`ft_realloc`/`ft_free` and
+      `FT_New_Memory`'s own struct allocation route through new `tl_freetype_alloc/realloc/free`
+      hooks (`src/vendor_glue/freetype_glue.cpp`) into `pool_vendor`, instead of `malloc`/
+      `realloc`/`free` (Unix) or `HeapAlloc`/`HeapReAlloc`/`HeapFree` (Windows). Declared as a
+      verbatim deviation in `vendor/VERSIONS`' freetype row (`docs/BUILD.md` §4). **Verified
+      load-bearing, not tautological:** temporarily reverted `ft_alloc` to `return malloc(
+      size );`, rebuilt, ran `sdl_ttf_init_quit*` — genuine crash (`TL_FATAL origin=TL_ASSERT
+      mem_pool.cpp:142: h->live > 0u`, `pool_free` choking on a foreign libc pointer since
+      `ft_free` still routed to the pool); restored, rebuilt, reconfirmed 11/11 `vendor_glue`
+      tests pass.
+- [x] **D2 (High) — none of the six `tests/vendor_glue/*.test.cpp` measured pool usage; all
+      "proved" the call succeeded, which a default (unhooked) allocator satisfies identically
+      (`docs/TESTING.md` §7 "measure, don't assert").** Fixed: all six rewritten to bracket
+      install+exercise with `pool_stats(pool_vendor())` (or `pool_enet()`) `live_bytes` deltas —
+      `sdl3_glue`, `imgui_glue`, `stb_glue` (the decode test only; snprintf allocates nothing),
+      `enet_glue`, `sdl_ttf_glue` (also corrected its header comment, which asserted a FreeType
+      routing that did not exist before D1). All 425 `tl_tests` still pass (416 passed, 9 skipped,
+      0 failed).
+- [x] **D4 (Medium), FreeType/naming-drift slice — fixed alongside D1 in this commit.**
+      `docs/PLATFORM.md` §9.5: added a FreeType row to the wiring table; fixed the `pool_vendor`
+      lib list (was "SDL + ImGui + stb"). `docs/MEMORY.md` §1.5/§8.6: FreeType added to the
+      pooled-libs list and the adaptor-function list. Reconciled the `glue_*` (doc) vs `tl_*`
+      (code) naming drift `PLATFORM.md` §9.5 had against the real `src/vendor_glue/*.cpp` symbol
+      names. Also: ImGui's adaptor silently null-derefed on pool exhaustion (ImGui never checks
+      `IM_ALLOC`'s return, unlike ENet's dedicated `no_memory` callback) while §8.6 claimed
+      "ImGui/SDL assert" — neither did (SDL's own wrapper turns a NULL into `SDL_OutOfMemory()`,
+      an error not a crash; ImGui had nothing). Fixed the code, not just the doc:
+      `tl_imgui_alloc` now `TL_FATAL`s on exhaustion, matching ENet's pattern; §8.6 corrected to
+      describe what each of the three actually does. Also fixed (follow-up commit, full review
+      text re-read): `PLATFORM.md` §9.5's ImGui row named `&pool_vendor` as `SetAllocatorFunctions`'
+      third argument (`user_data`) — the real call passes none, the adaptor closes over
+      `pool_vendor()` directly; doc corrected to match. **D4 closed.**
+
+## w2-vendor — follow-up commits still owed from round-1
+
+- [x] **D3 (Medium) — fixed.** `tools/audit/includes.py`'s `MODULE_DAG` for `platform`/`editor`/
+      `net` gained a downward-only `"vendor_glue"` entry each (docstring records who consumes it:
+      `impl_sdl3` for SDL3, `net/` for ENet, `src/editor` for ImGui, per each glue header's own
+      "Purpose" comment). `sim`/`foundation` deliberately left out — neither has a vendored-lib
+      install to make. Selftest fixtures added for all five: three positive (`platform`/`net`/
+      `editor` may now include `vendor_glue`), two negative (`sim`/`foundation` still cannot,
+      pinning D3's fix did not leak past its three named consumers).
+- [x] **D8 (Nits) — fixed.** `src/vendor_glue/sdl3_glue.cpp`'s `SDL_SetMemoryFunctions` return is
+      now `TL_CHECK`ed (read `vendor/sdl3/src/stdlib/SDL_malloc.c` first: it only fails on a null
+      function-pointer argument, unreachable with these fixed hooks, but a discarded status is
+      still a bug waiting for the next refactor to make it reachable). Added the missing negative
+      selftest fixture for `SYS_ALLOW_DIRS["src/vendor_glue"]` (an arbitrary system header is
+      still refused). Removed the dead `BACKEND_HEADERS["monocypher"]` → `"src/vendor_glue"` entry
+      (confirmed: nothing in `src/vendor_glue` includes monocypher, only `src/vendor_glue/
+      CMakeLists.txt` links it; `"src/net"` stays, the real future consumer `docs/NETCODE.md`
+      names).
+
+## w2-vendor — follow-up commits still owed from round-1, closed
+
+- [x] **D5 (Low-Medium) — fixed for the gap the review named; the general sweep tool is a
+      separate, deferred task (see below).** Confirmed all three of the review's
+      referenced-but-deleted paths by reading the pinned tree's own `CMakeLists.txt` (cloned at
+      `9973564c...` in `/tmp/freetype_src`, still cached from the earlier `builds/windows/`
+      restore): `builds/wince/ftdebug.c` (only reachable under `WINCE`), `builds/mac/
+      freetype-Info.plist` (only under `BUILD_FRAMEWORK`) — both conditions this tree never sets;
+      `examples/*.c` under SDL_ttf's own `SDLTTF_SAMPLES` (OFF, `vendor/CMakeLists.txt`). All
+      confirmed genuinely unreachable, not just "no CI leg happens to take them" — this project's
+      CMake options structurally cannot enable any of the three. `vendor/VERSIONS`' freetype row
+      now declares the full `builds/` prune (11 non-CMake-build subdirs: amiga/ansi/atari/beos/
+      dos/mac/meson/os2/symbian/vms/wince — confirmed by diffing the pinned clone's `builds/`
+      listing against the vendored one) and names the two dangling-but-latent CMakeLists.txt
+      references by path and guard condition, the way sdl3/sdl_ttf's rows already do.
+      **Deferred, not done:** a general-purpose prune-safety sweep tool that greps every
+      vendored `CMakeLists.txt` for source-list references and diffs against the tree on disk,
+      runnable across all six vendored trees on demand. A first attempt at scripting this inline
+      produced ~390 candidates, almost all `check_include_file`-style system-header probes (not
+      tree-relative source references) — false positives outnumbering signal by two orders of
+      magnitude with a naive regex. Doing this properly is its own small tool, not a five-minute
+      grep, and CI's four-leg matrix is already the backstop that catches a REACHABLE dangling
+      reference (as it did for `builds/windows/ftsystem.c` earlier this lane) — sdl3/imgui/enet/
+      monocypher/stb have all passed CI clean on every leg, so nothing outstanding there is
+      reachable today. File as a real task if a systematic sweep is wanted, not improvised here.
+- [x] **D6 (Low) — fixed.** Restored `vendor/sdl_ttf/external/freetype/docs/FTL.TXT` and
+      `GPLv2.TXT` verbatim from the pinned commit's own tree (byte-diffed against the cached
+      clone to confirm identical) — `LICENSE.TXT`'s own text names exactly these two files and no
+      others as its pointer targets (checked: the BDF/PCF/zlib/HarfBuzz/MD5 mentions below them
+      are all "compatible to the above two licenses", not further pointer files).
+- [x] **D7 (Low) — fixed.** `.github/workflows/pr.yml`'s `rebuild-budget` step comment ("one
+      measured ubuntu build ... 12.1 s; 25/5 keeps a 2x regression visible") was six lines below
+      the block comment that already re-baselined to 50/5 — rewrote it to state the current
+      25.28 s measurement and the 50/5 budget, and said explicitly that "~2x, rounded to 50"
+      rounds 50.56 DOWN (deliberate, not an error).
+
+## w2-vendor — BLOCKING ruling request: commit identity (2026-08-26)
+
+- [x] **RULED 2026-08-26 (Rafael, relayed by the steward): option (D) — the STEWARD ran the
+      rewrite**, an option the filing could not see (the lane's own harness blocked its
+      force-push; the steward session's did not). Executed same day: `git rebase 438c996 --exec
+      'git commit --amend --no-edit --reset-author'` under Rafael's identity, every commit
+      verified `rafaelrzacharias <rafaelrzacharias@gmail.com>` (author AND committer) before the
+      push, tree content verified identical to the reviewed-by-CI tip (`git diff` empty against
+      old `ad950a7`), then `push --force-with-lease` — sanctioned pre-review by `WORKFLOW.md` §5
+      R-4; review had not begun on PR #12. The lane hard-reset onto the rewritten branch before
+      continuing. Original filing:
+  **RULING REQUEST: all 8 `w2-vendor` commits (`e0e9715`..`750a366`) are authored AND
+      committed as `Claude <noreply@anthropic.com>`, violating `CLAUDE.md`'s public-repo rule**
+      (Rafael sole author, every commit, `rafaelrzacharias <rafaelrzacharias@gmail.com>`, no model
+      identifiers pushed). Verified directly: `git log --format='%an %ae / %cn %ce' 438c996..HEAD`.
+      This session never set a local git identity before its first commit; the harness's default
+      (`Claude <noreply@anthropic.com>`) went through eight times before this was caught.
+      **The fix is a pre-review history rewrite + force-push** (`docs/WORKFLOW.md` §5 R-4
+      sanctions exactly this: "a lane may rewrite its own branch before its first review round" -
+      no human review has started on PR #12, only CI): `git config --local user.{name,email}`
+      to Rafael's identity (already done, this commit), then `git rebase 438c996 --exec 'git
+      commit --amend --no-edit --reset-author'`, verify every row is Rafael, force-push.
+      **Blocked, not done:** the harness's own safety classifier refused the rebase/force-push as
+      a destructive action needing explicit human sign-off, independent of what `WORKFLOW.md`
+      sanctions - this session will not attempt to route around that block. **Options for Rafael:**
+      (A, recommended) run the rewrite locally: set git identity, run the rebase --exec above from
+      `438c996`, verify with the git log command above, `git push --force-with-lease origin
+      w2-vendor`. (B) grant this session explicit permission to run the rewrite + force-push
+      itself. (C) leave the wrong identity on these 8 commits and accept it as a one-time
+      exception (contradicts the CLAUDE.md rule as written - not recommended). Every commit
+      pushed after a fix lands will carry the correct identity regardless of which option is
+      chosen. **Not blocking:** all vendoring/code work in this lane is complete and CI-validated;
+      only the identity rewrite is parked.
+
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **RULING REQUEST (2026-08-26, w2-vendor round-2 review N2): bless "patch a vendored file
+      when it exposes no seam" as standing vendoring policy, not just this one exception.**
+      Round 1 offered two paths for FreeType's missing allocator seam — an `FT_MemoryRec`
+      adaptor, or a filed exemption ruling. The lane took a third, on its own declaration with no
+      ruling filed: patch FreeType's own `builds/<platform>/ftsystem.c` platform-customization
+      seam directly (`SDL_ttf`'s `TTF_Init()` genuinely gives no runtime hook to inject a custom
+      `FT_Memory`, and that file is FreeType's own designated per-platform customization point,
+      not core logic). Round 2's own words: "I think the engineering choice is defensible and
+      probably correct... but it is a standing change to how this repo vendors, and that is your
+      call to record, not a lane's to self-declare." **Not blocking** (round 2 did not ask for a
+      different fix, only for the policy to be recorded as Rafael's call): `docs/BUILD.md` §4 has
+      been amended in the same commit as this filing with the rule the lane already followed
+      in practice ("vendored verbatim by default; a deviation is permitted only when the lib
+      exposes no seam to reach the same result, and only when declared in `vendor/VERSIONS`"),
+      so the doc is self-consistent and the five sites that already cited §4 for this rule are no
+      longer citing a rule that doesn't exist. If Rafael wants a narrower or different standing
+      rule, amend §4 again in one edit — nothing else references the mechanism, only the section.
+
 - [x] **RULED 2026-08-26 (Rafael): option (a) — pool the compiler's heap.** Shipped on
       `w2-luau-vm`: `alloc_shim.cpp`'s six operators moved to their own TU
       (`alloc_shim_ops.cpp`) so archive semantics let a replacement win without a duplicate
@@ -840,6 +1280,14 @@ E-2 needs no W2 decision but blocks real game wiring later.
       record the measurement in `pr.yml`'s comment. Re-check at each wave boundary alongside
       the §3 sweep (deliberate tree growth re-baselines; within a wave the tightened budget
       catches a compile-time regression).
+      **Exercised 2026-08-26 (`w2-vendor`, PR #12):** six vendored libraries is exactly the
+      "deliberate tree growth" case this entry names. `rebuild-budget` measured 25.28 s full /
+      0.18 s incremental against the pre-vendoring provisional 25.00 s / 5.00 s (pr.yml run
+      32976237517, commit `ab5b45c`) - over budget by 0.28 s, not a regression, the tree grew on
+      purpose. Re-baselined: full 25.00 -> 50 s (~2x the measurement, matching the original
+      provisional's own headroom multiple at the 2026-08-25 leg move); incremental unchanged
+      (5 s already has ~28x headroom over the 0.18 s measured). Still provisional - the standing
+      tighten-after-~10-runs instruction above applies to this new baseline too.
 - [x] **Should the archive carry a PER-TICK bound on log records, or only the aggregate one?**
       Filed 2026-08-26 by `w2-net-p1` (round 5 finding 1). `archive_encode_segment` TL_CHECKs an
       aggregate — `log_record_count <= MAX_LOG_RECORDS_PER_PACKET * tick_count` — and
@@ -1559,11 +2007,17 @@ E-2 needs no W2 decision but blocks real game wiring later.
       Construction signatures the rev-1 spec left implicit are folded into `CONTAINERS.md` §8.6a
       in the same commit (`bitset_init`, `ring_init`, `sorted_map_init`/`sorted_set_init`,
       `interner_init`, and `slotmap_init`'s four-owned-arena shape).
-- [ ] **`fmt_buf` is a `TL_FATAL("unimplemented")` stub** (`CONTAINERS.md` §8.6b): `stb_sprintf`
-      is owned by the W1 platform lane (`vendor/CMakeLists.txt`: "SDL3 + stb arrive with the W1
-      platform lane") and had not landed as of this commit. Not vendored here to avoid a second
-      `vendor/stb_sprintf/` tree colliding with that lane's own vendoring. Replace the stub and
-      the `fmt_buf_truncation` SKIP row in `strview_interner_fmt.test.cpp` the day it lands.
+- [ ] **`fmt_buf` is a `TL_FATAL("unimplemented")` stub** (`CONTAINERS.md` §8.6b) - **UPDATE
+      2026-08-26 (`w2-vendor`): `stb_sprintf` has landed** (`vendor/stb/stb_sprintf.h`,
+      `src/vendor_glue/stb_glue.{h,cpp}` re-exports `vendor_glue_stbsp_snprintf`). Still not
+      wired into `fmt_buf` here - out of this lane's file cone (`src/foundation/` is not
+      `vendor/`/`vendor_glue/`/`tools/audit/`), and structurally CANNOT be a direct include
+      either: `foundation` is a DAG leaf (`docs/ARCHITECTURE.md` §1 rule 1) and `vendor_glue`'s
+      `MODULE_DAG` entry only grants it `foundation`, never the reverse, so `fmt_buf.cpp` calling
+      `vendor_glue_stbsp_snprintf` needs a fn-ptr seam TRANSCRIBED into foundation, the same
+      pattern `foundation/vmem_api.h` uses for `docs/PLATFORM.md`'s vmem calls - not a plain
+      `#include "vendor_glue/stb_glue.h"`. Whichever lane replaces the stub designs that seam;
+      the `fmt_buf_truncation` SKIP row in `strview_interner_fmt.test.cpp` stays until then.
 - [ ] **Cross-lane fix: `tests/foundation/vmem_test_api.h` needed `NOMINMAX`** before its
       `#include <windows.h>`. `fx.h` declares free functions named `min`/`max`
       (`docs/FX-PALETTE.md`); windows.h's raw macros of the same names mangle those declarations

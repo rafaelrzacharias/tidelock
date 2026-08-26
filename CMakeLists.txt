@@ -2,10 +2,19 @@
 # One static lib per module folder; tools/ is a separate project (docs/BUILD.md §2).
 cmake_minimum_required(VERSION 3.25)
 
-project(tidelock LANGUAGES CXX)
+# C is enabled for the vendored libs that are plain C projects (SDL3, SDL_ttf, FreeType, ENet,
+# Monocypher, docs/BUILD.md §4) - src/, tests/ and tools/ are all C++. Every vendor CMakeLists.txt
+# that compiles a .c file therefore needs no enable_language(C) of its own; only Monocypher's
+# (the one vendored lib with no upstream CMake project) surfaced the gap, because SDL3's own
+# nested project() call happened to enable C globally first every time it configured before it -
+# an accidental, load-order-dependent enablement, not this file granting it (docs/LESSONS.md).
+project(tidelock LANGUAGES CXX C)
 
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   message(FATAL_ERROR "tidelock builds with clang only (docs/BUILD.md §1); got ${CMAKE_CXX_COMPILER_ID}")
+endif()
+if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+  message(FATAL_ERROR "tidelock builds with clang only (docs/BUILD.md §1); got ${CMAKE_C_COMPILER_ID}")
 endif()
 
 set(TL_TIER "dev" CACHE STRING "build tier: debug | dev | netcode | ship (docs/BUILD.md §3)")
