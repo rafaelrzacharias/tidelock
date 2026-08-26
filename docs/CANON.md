@@ -154,7 +154,8 @@ as Hovel's network-soak hardware (`NETCODE.md` §19.4). The Pi 4 left the progra
 
 Tiers `debug` (`-O0 -g`), `dev` (`-O1 -g`, `TL_DEV=1`), `netcode` (`-O2 -g1`), `ship`. Libs
 `tl_foundation`, `tl_foundation_det` (audited), `tl_core`, `tl_sim` (audited), `tl_net`,
-`tl_render`, `tl_platform_sdl3`, `tl_platform_headless`, `tl_editor` (dev only), `tl_script`. Exes
+`tl_render`, `tl_platform_sdl3`, `tl_platform_headless`, `tl_editor` (dev only), `tl_script`,
+`tl_vendor_glue` (the per-library allocator adaptors, `MEMORY.md` §8.6). Exes
 `tidelock`, `tl_tests`, `tl_driver`, `tl_gate0`, `tl_hovel`. Tools `fingerprint`, `luauc`, `audit`,
 `fxcheck`, `sysroot`, `deploy`. Toolchain: clang (clang-cl on Windows), C++20, pinned in
 `toolchain/VERSIONS`. Budgets: full rebuild < 10 s, incremental < 2 s, cold.
