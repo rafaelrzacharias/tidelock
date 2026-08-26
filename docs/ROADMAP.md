@@ -38,7 +38,7 @@ W1   +-* fx
 W2   +-* gate0            (fx, mem)
      +-- ecs              (mem, containers, rng/hash)
      +-- luau-vm          (fx, mem)                      sandbox, fx bindings, data VM
-     +-- net-p1           (containers, rng/hash, WIRE)   encoder, archive, checkpoint, chain
+     +-- net-p1           (containers, rng/hash, WIRE)   encoder, archive
      +-- alloy-substrate  (fx, mem, containers, rng)     pools, broadphase, sdf, cavity, topology,
      |                                                   bond-graph heat flux - everything EXCEPT pass 3
      +-- vendor           (mem, platform)                SDL_ttf, imgui, enet, monocypher + pool hooks
@@ -92,7 +92,7 @@ model here — the launch prompt names it.
 | W2 | ★ **gate0** | Fable 5 high | `tests/gate0` solver + scenarios + shadow; run PC (arm64 legs via CI since 2026-08-25); rev-2 palette | fx, mem | `GATE0-BENCH.md` §8.5 |
 | W2 | **ecs** | Fable 5 high | reflect, columns, schedule, commands, events, encoder, diff | mem, containers, rng/hash | `ECS.md` §10.8 |
 | W2 | **luau-vm** | Opus 5 high | Luau vendored, three VMs, sandbox, `fx.*`, data VM | fx, mem | `LUAU-LAYER.md` §10.12 (VM half) |
-| W2 | **net-p1** | Opus 5 high | `wire.h`, encoder, archive, checkpoint writer, chain | containers, rng/hash, `TL_WIRE_STRUCT` | `NETCODE.md` §20.8 Phase 1 |
+| W2 | **net-p1** | Opus 5 high | `wire.h`, encoder, archive (checkpoint/chain are §20.8 Phases 6–7 — row drift fixed by RR-17, 2026-08-26) | containers, rng/hash, `TL_WIRE_STRUCT` | `NETCODE.md` §20.8 Phase 1 |
 | W2 | **alloy-substrate** | Fable 5 high | pools, broadphase, sdf + carve + redistance, cavity flood, topology/union-find, bond-graph heat flux (the first exact-conservation slice), edit intake | fx, mem, containers, rng/hash | `ALLOY.md` §14.7 steps 1, 3, 4 |
 | W2 | **vendor** | Sonnet 5 | SDL_ttf, imgui, enet, monocypher builds; pool hooks; adaptors | mem, platform | links clean on the `CANON.md` matrix (4 legs) |
 | W3 | ★ **alloy-solver** | Fable 5 high | pass 3 (from gate0), contacts, colouring, velocity pass | gate0 verdict, alloy-substrate | `ALLOY.md` §14.7 step 5 (solver) |

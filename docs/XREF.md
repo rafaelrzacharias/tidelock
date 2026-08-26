@@ -153,7 +153,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `DETERMINISM.md` -> §4
 - `FRAME-LOOP.md` -> §1
 - `LUAU-LAYER.md` -> §2
-- `NETCODE.md` -> §4, §8
+- `NETCODE.md` -> §4, §8, §9.1, §9.4
 - `PLATFORM.md` -> §2, §4
 - `ROADMAP.md` -> §9.6
 - `TOOLING.md` -> §4, §5

@@ -417,7 +417,7 @@ E-1 and E-3 have resolutions the surrounding rulings force; the lane builds on t
 (reversible, doc-reconciled in the same commit that lands the code) and Rafael can overrule.
 E-2 needs no W2 decision but blocks real game wiring later.
 
-- [ ] **E-1 (ruling request) `ECS.md` §10.2's `kind_of` overload set cannot exist under the
+- [x] **E-1 (ruling request) `ECS.md` §10.2's `kind_of` overload set cannot exist under the
       RR-5 format-keyed ruling.** RR-5 (ruled 2026-08-25) keeps palette rows keyed by format, so
       `pos_t`/`invmass_t` are ONE C++ type (`fx<i32,18>`) and `stiff_t`/`q_t`/`angle_t`/`dt_t`
       are one (`fx<i32,30>`): `constexpr FieldKind kind_of(pos_t*)` and `kind_of(invmass_t*)`
@@ -434,7 +434,9 @@ E-2 needs no W2 decision but blocks real game wiring later.
       save-decode asymmetry). (c) collapse the enum to format kinds — changes the spec'd enum
       and the Luau kind-string surface. **Recommend and built (a)**; `ECS.md` §10.2 reconciled
       in the reflect commit. One-line revert path: the constants become one-per-format.
-- [ ] **E-2 (ruling request) `MAX_ARENAS = 64` cannot hold the component registry the ECS spec
+      **RULED 2026-08-26 (Rafael, as recommended): (a) ratified.** Token-keyed kinds stand;
+      the built resolution and the reconciled `ECS.md` §10.2 are the contract.
+- [x] **E-2 (ruling request) `MAX_ARENAS = 64` cannot hold the component registry the ECS spec
       requires.** Each registered component column is three registry entries (dense + entity
       hashed/snapshotted, sparse pages snapshot-only — `ECS.md` §10.3), the entity slotmap is
       four (`CONTAINERS.md` §8.6a), each singleton is one, plus Alloy pools and data tables —
@@ -447,7 +449,11 @@ E-2 needs no W2 decision but blocks real game wiring later.
       column-is-the-hash-unit rule and per-arena desync bisection. (c) cap real component counts
       at ~20 — contradicts `ECS.md` §9 R-1's own rationale ("256 would cap a modded game").
       **Recommend (a)**, deferred to Rafael (CANON constants move by ruling only).
-- [ ] **E-3 (ruling request) `ECS.md` §10.3 "world_spawn reserves an id immediately by inserting
+      **RULED 2026-08-26 (Rafael, as recommended): (a) — `MAX_ARENAS` 64 → 4096.** `CANON.md`
+      edit + the code sweep (`arena_registry.h`, docaudit's constant pin, `MEMORY.md`'s inline
+      value) land in the implementation commit that follows this ruling commit; the full-house
+      registry test re-derives at the new cap.
+- [x] **E-3 (ruling request) `ECS.md` §10.3 "world_spawn reserves an id immediately by inserting
       a zero record" contradicts `MEMORY.md` §2 ("registered arenas grow only inside barrier
       windows") and §1's own "realization (slot commit) happens at the barrier".** An immediate
       `slotmap_insert` crosses an `arena_push` whenever the slots/gen columns hit a page
@@ -470,8 +476,10 @@ E-2 needs no W2 decision but blocks real game wiring later.
       captured with a reservation outstanding could not restore consistently - the reservation
       is now a cursor (`World.reserved_free`) and the pops apply at the window's start, inside
       the barrier. Both pinned by tests; `commands_discard` is now clean by construction.
+      **RULED 2026-08-26 (Rafael, as recommended): (a) ratified** — reserve-without-growth as
+      refined by the three review rounds is the spec; `ECS.md` §10.3 as reconciled stands.
 
-- [ ] **E-4 (ruling request) add-after-destroy inside one barrier window.** System A destroys
+- [x] **E-4 (ruling request) add-after-destroy inside one barrier window.** System A destroys
       entity e; system B - unaware, later in schedule order - records `world_add` on e in the
       same window. The destroy applies first (chunk order), so B's `CMD_ADD` meets a dead
       entity. Built behaviour: **TL_CHECK fatal** (fail loud; a silent drop is banned and a
@@ -490,8 +498,12 @@ E-2 needs no W2 decision but blocks real game wiring later.
       would resurrect a silently dropped destroy). Built: loud fatal via a pending-reservation
       check (`spawn_pending`), pinned by `commands_destroy_before_realize_is_fatal`; whatever
       is ruled for add-after-destroy should give both orders one consistent story.
+      **RULED 2026-08-26 (Rafael): (a) — strict TL_CHECK fatals, BOTH orders, is the policy.**
+      Both are programmer errors that fail loudly and deterministically at the barrier. (b)
+      "destroy wins" may be re-proposed only by a real consumer that hits the pattern — pulled
+      by need, never pushed on spec.
 
-- [ ] **E-5 (finding for the netcode/rollback lanes - net-p2/hovel, W3; not this lane's to
+- [x] **E-5 (finding for the netcode/rollback lanes - net-p2/hovel, W3; not this lane's to
       decide) rollback resim loses the restored tick's readable events.** The snapshot ring
       captures registered arenas only; the event halves are deliberately outside it and a
       restore clears them (`ECS.md` §10.4). So after `registry_restore(T)` + resim, tick T+1's
@@ -506,6 +518,25 @@ E-2 needs no W2 decision but blocks real game wiring later.
       (c) rule that sim systems may not carry event effects into hashed state across a
       confirmed-tick boundary - which today's docs do not state and gameplay code WILL violate.
       Recommend (a): one flag flip + ring sizing, no new ordering rules. For the W3 lane owner.
+      **RULED 2026-08-26 (Rafael): routed as filed** — this is the W3 net-p2/rollback lane's to
+      decide in its slice brief, with (a) as the standing recommendation; no semantic is
+      pre-committed before that lane's consumer exists.
+
+## W2 net-p1 — RR-17 (filed on `w2-net-p1` / PR #5; ruling recorded here on main)
+
+- [x] **RR-17 (ruling request) `NETCODE.md` §20.8 Phase 1 is unbuildable in W2 as specified**
+      (four blockers: TL_WIRE_STRUCT owned by the concurrent ecs lane; `InputFrame`/
+      `ActionState`/`MAX_ACTIONS`/`ZERO_FRAME` owned by W3 loop+input; Phase 1's done criterion
+      requires the W3 Replay producer; ByteWriter/ByteReader unowned). Options A–D and the full
+      filing are on PR #5 and the branch's TODO; the lane parked with zero `src/net/` code.
+      **RULED 2026-08-26 (Rafael, as the lane recommended): (B) — cut Phase 1 at the W2/W3
+      seam.** Blockers 1 and 4 are moot since the ecs merge (`core/reflect.h` TL_WIRE_STRUCT and
+      `foundation/bytes.h` are on main — `NETCODE.md` §1's home, `ECS.md` §10.1 records it).
+      `NETCODE.md` §20.8 Phase 1 amended (this commit): wire.h/encoder/archive build in W2
+      against main, with the input-frame geometry pinned to `INPUT.md` §9.1's constants and
+      test-local frame fixtures; the `RecordedInput`-replay half of the done criterion moves to
+      Phase 2's gate (W3, where the Replay producer exists). `ROADMAP.md` §2 net-p1 row drift
+      ("checkpoint writer, chain" are Phases 6–7) fixed same commit. The lane is un-parked.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [ ] **RR-6 A tighter sine?** Measured (`FX-PALETTE.md` §4.4): the ported `SinPoly4` gives
@@ -826,7 +857,7 @@ E-2 needs no W2 decision but blocks real game wiring later.
       Rafael's 2026-08-25 ruling verbatim ("my role through the phone: only rulings, important
       decisions, choices, multiple-choice — not typing merge"), docs-only, docaudit-gated.
       The next sweep reviews it alongside whatever else deferred.
-- [ ] **Perf-leg election (`WORKFLOW.md` §4, ruling request).** Run `perf.yml` (dispatch, or its
+- [x] **Perf-leg election (`WORKFLOW.md` §4, ruling request).** Run `perf.yml` (dispatch, or its
       first nightly), pull the four `perf-g05-*` artifacts, compute per-leg medians and variance
       grouped by CPU model, and file the election of the perf reference leg as a ruling here.
       Absolute grading is suspended at the committed PC rev-2 record regardless, until the Deck
@@ -860,6 +891,10 @@ E-2 needs no W2 decision but blocks real game wiring later.
       measured (13.9 % p95 spread); not defensible as a radar.
       (D) **dual radar** — both Linux legs, one baseline per silicon group; more coverage,
       two baselines to maintain.
+      **RULED 2026-08-26 (Rafael, as recommended): (A) — the elected perf leg is
+      `ubuntu-latest`.** Radar metric: 20k G-05 p50 median vs a committed baseline, compared
+      within the EPYC 7763 silicon group only (canonicalize by silicon, never by label).
+      Recorded in `WORKFLOW.md` §4/§5 (the home); the radar build item below is now unblocked.
 - [ ] **After the election: build the radar** (`WORKFLOW.md` §4 promises it; nothing implements
       it yet — sweep D7). Commit the elected leg's baseline medians, add the compare step
       (median vs baseline, same CPU model only, `CANON.md`'s `PERF_WARN_X`/`PERF_FAIL_X` bands)

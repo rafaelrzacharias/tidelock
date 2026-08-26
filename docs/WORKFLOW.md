@@ -10,16 +10,26 @@
 
 ## 1. The unit of work: one lane, one draft PR
 
-- A lane works on branch `w<N>-<lane>` cut from fresh `main`, and **opens a draft PR at lane
-  start** — before substantive commits pile up. The PR is not a request for outside review
-  (external PRs are disabled; every PR is Rafael's own work, `CLAUDE.md` public-repo protocol);
-  it is machinery: CI runs on every push, review findings have an anchor, and the branch
-  auto-deletes on merge. When a session's tooling cannot open the PR (integration permissions),
-  Rafael opens it from the branch's compare URL — one tap; everything else stays automated.
-  The repo's squash/rebase merge toggles remain enabled in settings; the merge-commit rule below
-  is convention until Rafael flips them off (a one-tap hardening).
+- A lane works on branch `w<N>-<lane>` cut from fresh `main`, and **opens a PR at lane
+  start — ready, never draft (ruled 2026-08-26)** — before substantive commits pile up. The PR
+  is not a request for outside review (external PRs are disabled; every PR is Rafael's own work,
+  `CLAUDE.md` public-repo protocol); it is machinery: CI runs on every push, review findings
+  have an anchor, and the branch auto-deletes on merge. Ready-not-draft because the draft flag
+  gated nothing (§1's merge preconditions do the gating) while lane sessions cannot flip
+  draft→ready and drafts cannot merge — the W2 ecs pilot had to merge through a ready successor
+  PR, splitting one lane's record across two PRs; this ruling retires that pattern. When a
+  session's tooling cannot open the PR (integration permissions), Rafael opens it from the
+  branch's compare URL — one tap; everything else stays automated. The repo's squash/rebase
+  merge toggles remain enabled in settings; the merge-commit rule below is convention until
+  Rafael flips them off (a one-tap hardening).
 - Inside the lane, `CLAUDE.md`'s operating contract applies unchanged: model gate, slice brief,
   one feature per commit, commit **and** push every turn, docaudit before docs commits.
+- **Before its first review round, a lane MAY rewrite its own branch** (amend/force-push) —
+  the sanctioned cure for a per-commit gate miss (e.g. a missing `[docs:none]`, which
+  `commit_docs`'s per-commit design lets no later commit waive) — because pre-review the branch
+  has no other consumer by convention. **Once review has begun, history is frozen**: fixes are
+  new commits, and `CLAUDE.md`'s no-force-overwrite rule applies in full. (Ruled 2026-08-26;
+  the W2 ecs pilot hit exactly this collision and resolved it this way.)
 - **Merging is autonomous (ruled 2026-08-25).** Once the head is CI-green on all four `CANON.md`
   legs and §2's verdict is *ship*, the session merges without waiting for Rafael — his word is
   not a merge precondition; both preconditions are machine-checkable facts, not judgments. What
@@ -55,13 +65,16 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
 
 - **Conformance** (bit-exact traces, one `build_id`) is the four hosted CI legs, every PR —
   the `CANON.md` target matrix.
-- **Perf grading moves to an elected CI leg.** `.github/workflows/perf.yml` measures the G-05
-  sweep N times per matrix leg, recording CPU model, medians and variance as artifacts; the
-  election of the reference leg is a **ruling made from that data** (request filed in
-  `TODO.md`), never before it. The elected leg carries the **regression radar only**: medians
-  against a committed baseline, grouped by CPU model — **never a comparison across models**
-  (the fleet is heterogeneous, so every measurement records its silicon). The radar bands live
-  in `CANON.md` (Perf grading).
+- **Perf grading moves to an elected CI leg — elected: `ubuntu-latest` (ruled 2026-08-26,
+  from perf.yml run 1's data; the request and the measurement record live in `TODO.md`).**
+  `.github/workflows/perf.yml` measures the G-05 sweep N times per matrix leg, recording CPU
+  model, medians and variance as artifacts. Run 1 measured the fleet as TWO silicon groups
+  (both x64 legs AMD EPYC 7763; both arm64 legs Azure Cobalt 100, one reporting its Neoverse-N2
+  core IP) — so the radar groups **by silicon, canonicalized, never by leg label**, and
+  `ubuntu-latest` won on steadiness at the graded sizes (20k/50k p95 spread ≤ 0.5 %) plus ISA
+  proximity to the Deck min-spec. The elected leg carries the **regression radar only**: the
+  20k G-05 p50 median against a committed baseline, within the EPYC 7763 group — **never a
+  comparison across models**. The radar bands live in `CANON.md` (Perf grading).
 - **Absolute grading is suspended at the committed PC rev-2 record**
   (`tests/gate0/results/`, the last fixed-silicon measurement) until the Steam Deck —
   the shipping min-spec machine and the only fixed silicon in the program's future — is
@@ -74,14 +87,20 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
 
 ## 5. Rulings (closed 2026-08-25 — nothing open)
 
-- **R-1 One lane = one draft PR**, merge commits, auto-delete; opened at lane start (§1).
-- **R-2 The perf reference retires from owned hardware to the elected CI leg** (§4); the
-  election itself waits on `perf.yml`'s first data set and is filed in `TODO.md`.
+- **R-1 One lane = one PR**, merge commits, auto-delete; opened at lane start (§1; drafts
+  retired by R-5).
+- **R-2 The perf reference retires from owned hardware to the elected CI leg** (§4);
+  **elected 2026-08-26: `ubuntu-latest`**, from perf.yml run 1's data (record in `TODO.md`).
 - **R-3 Autonomous merges (ruled 2026-08-25, Rafael's request):** green CI + a *ship* verdict
   merge without a human word; Rafael's phone-side role is rulings, important decisions and
   choices — put to him as multiple-choice where the surface allows — never merge ceremony (§1).
+- **R-4 Pre-review branch rewrites (ruled 2026-08-26):** a lane may rewrite its own branch
+  before its first review round; after review begins, history is frozen (§1).
+- **R-5 PRs open ready, never draft (ruled 2026-08-26):** the merge preconditions gate, the
+  draft flag gated nothing and split the W2 ecs record across two PRs (§1).
 
 *Rev 1 — 2026-08-25; §1/§4 amended same day by the slice's own adversarial review (D4/D6: the
 PR-fallback actor named, absolute grading pinned to the PC rev-2 record until the Deck). This
 doc shipped as the first §1-governed PR — opened via the App grant, review verdict recorded on
-it.*
+it. §1/§4/§5 amended 2026-08-26 by the morning ruling pass after the W2 autonomy pilot (R-2
+election, R-4, R-5).*
