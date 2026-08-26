@@ -30,6 +30,14 @@
   has no other consumer by convention. **Once review has begun, history is frozen**: fixes are
   new commits, and `CLAUDE.md`'s no-force-overwrite rule applies in full. (Ruled 2026-08-26;
   the W2 ecs pilot hit exactly this collision and resolved it this way.)
+- **A lane's final report is its FILED record (ruled 2026-08-26, after the net-p1 closeout):**
+  `TODO.md`/`LESSONS.md` entries and the PR body — never only a chat message, which dies with
+  the session (steward sessions cannot read lane transcripts, and the two-PC rule already makes
+  committed files the one durable channel). Every lane brief states this. **And every lane
+  merge gets a closeout sweep**: the steward reads what the lane filed and triages each entry —
+  act now, route to a named lane, or hold for the §3 wave sweep — before the lane is closed;
+  a wave does not close with an untriaged filing. (The pilot's proof: net-p1's last two commits
+  filed two ruling requests, one security-shaped, that no batch had seen.)
 - **An autonomous lane runs to its ship gate without ending its turn (ruled 2026-08-26).**
   "Commit and push every turn" is a rule against leaving work unpushed, never a reason to stop:
   a lane does NOT end its turn at commit boundaries — it commits, pushes, and continues
@@ -113,6 +121,9 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
   babysitting the net-p1 lane):** commit-and-push is an anti-unpushed-work rule, not a turn
   boundary; a lane runs to its ship gate and stops only for a blocking ruling request, a
   genuine external block, or the gate itself — and every lane brief cites this verbatim (§1).
+- **R-7 Lane closeout sweep (ruled 2026-08-26, Rafael):** a lane's report is its filed record,
+  and every merge is followed by a steward triage of that lane's filings before the lane
+  closes; a wave never closes over an untriaged filing (§1).
 
 *Rev 1 — 2026-08-25; §1/§4 amended same day by the slice's own adversarial review (D4/D6: the
 PR-fallback actor named, absolute grading pinned to the PC rev-2 record until the Deck). This

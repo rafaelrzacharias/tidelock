@@ -548,7 +548,7 @@ E-2 needs no W2 decision but blocks real game wiring later.
       enforced module prefixes; revisit only on a real collision.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
-- [ ] **Should the archive carry a PER-TICK bound on log records, or only the aggregate one?**
+- [x] **Should the archive carry a PER-TICK bound on log records, or only the aggregate one?**
       Filed 2026-08-26 by `w2-net-p1` (round 5 finding 1). `archive_encode_segment` TL_CHECKs an
       aggregate — `log_record_count <= MAX_LOG_RECORDS_PER_PACKET * tick_count` — and
       `NETCODE.md` §20.2.9 states no per-tick bound at all: a segment carrying 16 records at ONE
@@ -568,7 +568,10 @@ E-2 needs no W2 decision but blocks real game wiring later.
       aggregate allows — simpler, but then the store can build a set the encoder aborts on, which
       is what the rule was added for. (C) Keep today's split and document it as an admission
       policy (what the code does now, pending this ruling).
-- [ ] **`NETCODE.md` §20.2.9 states no maximum `tick_count`, and the archive decoder's cost is
+      **RULED 2026-08-26 (Rafael, as recommended): (A) — the per-tick bound goes in the format**
+      (§20.2.9), enforced in encoder AND decoder; the store's rule becomes the format's rule.
+      Implementation: the steward's `w2-net-close` valve slice (in flight).
+- [x] **`NETCODE.md` §20.2.9 states no maximum `tick_count`, and the archive decoder's cost is
       quadratic in it.** Filed 2026-08-26 by `w2-net-p1` (round 4 finding F8; the code comment
       that claimed otherwise is corrected in the same commit). The earlier log-array ruling
       removed the AMPLIFICATION - decode:encode was 941x, it is now ~1.3x - but not the absolute
@@ -590,6 +593,11 @@ E-2 needs no W2 decision but blocks real game wiring later.
       (C) Both. (D) Leave it: the amplification is gone and Phase 2's transport will bound
       datagram size anyway - which is true of `INPUT`/`CONTROL` but not of `BULK`, where
       `BK_LOG_SEGMENT` is explicitly a large reliable transfer.
+      **RULED 2026-08-26 (Rafael): (C) — BOTH rules.** §20.2.3 gains "seq ascends per
+      origin_slot" (the duplicate scan becomes 8 counters, O(n)); §20.2.9 gains
+      `tick_count <= CHECKPOINT_HOT_TICKS` (segments close on it anyway; also bounds the
+      decoder's frame buffer). Both restate what the sequencer/cadence already do.
+      Implementation: the same `w2-net-close` valve slice.
 - [x] **RULED 2026-08-26 (Rafael, as recommended): RATIFIED** — §20.2.9 now says 35 channels,
       `ch in 0..34`, amended with the option-A framing work on `w2-net-p1`. Original filing:
       **`NETCODE.md` §20.2.9 has an off-by-one in its channel count, and the code had encoded it
