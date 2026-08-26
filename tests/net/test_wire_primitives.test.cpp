@@ -170,3 +170,53 @@ TL_TEST(wire_wrap_add_is_defined_at_the_i32_edges, "net,wire,edge,fast") {
         TL_EXPECT_EQ(wire_wrap_sub_i32(wire_wrap_add_i32(a, b), b), a);
     }
 }
+
+TL_TEST(wire_uvarint_refuses_a_non_minimal_encoding, "net,wire,edge,fast") {
+    // Canonical form (wire.h): a multi-byte varint's final byte carries the value's high bits
+    // and cannot be zero. `80 00` and `00` would otherwise both mean 0 and re-encode differently,
+    // which the chain's hash over archive bytes cannot tolerate (docs/NETCODE.md §20.2.8).
+    struct Case { u32 n; u8 bytes[5]; };
+    const Case bad[] = {
+        { 2u, { 0x80, 0x00 } },                    // 0 in two bytes
+        { 3u, { 0x80, 0x80, 0x00 } },              // 0 in three
+        { 2u, { 0xFF, 0x00 } },                    // 127 in two bytes
+        { 5u, { 0x80, 0x80, 0x80, 0x80, 0x00 } },  // 0 in the full width
+    };
+    for (u32 c = 0; c < tl_count(bad); ++c) {
+        ByteReader r;
+        br_init(&r, bad[c].bytes, bad[c].n);
+        u32 got = 0xDEADBEEFu;
+        TL_EXPECT_EQ(wire_get_uvarint(&r, &got), ERR_NET_MALFORMED);
+        TL_EXPECT_EQ(got, 0u);
+    }
+    // The minimal spellings of the same values are accepted - the check must not overshoot.
+    const Case good[] = { { 1u, { 0x00 } }, { 1u, { 0x7F } }, { 2u, { 0x80, 0x01 } } };
+    const u32 want[] = { 0u, 127u, 128u };
+    for (u32 c = 0; c < tl_count(good); ++c) {
+        ByteReader r;
+        br_init(&r, good[c].bytes, good[c].n);
+        u32 got = 0xDEADBEEFu;
+        TL_EXPECT_EQ(wire_get_uvarint(&r, &got), ERR_OK);
+        TL_EXPECT_EQ(got, want[c]);
+    }
+}
+
+TL_TEST(wire_every_uvarint_encoding_is_the_only_one_accepted, "net,wire,property,fast") {
+    // The canonical property stated directly: for a spread of values, encode then decode gives
+    // the value back, and the encoding's length is exactly wire_uvarint_bytes - so there is no
+    // shorter spelling and no longer one would survive the minimality check.
+    for (u32 i = 0; i < 4096u; ++i) {
+        const u32 v = (i < 512u) ? i : (u32)nt_mix64(0x5A17u, i);
+        u8 buf[8];
+        ByteWriter w;
+        bw_init(&w, buf, sizeof(buf));
+        wire_put_uvarint(&w, v);
+        TL_ASSERT_EQ(w.len, (u64)wire_uvarint_bytes(v));
+        ByteReader r;
+        br_init(&r, buf, w.len);
+        u32 got = 0;
+        TL_ASSERT_EQ(wire_get_uvarint(&r, &got), ERR_OK);
+        TL_ASSERT_EQ(got, v);
+        TL_ASSERT_EQ(r.pos, r.len);
+    }
+}

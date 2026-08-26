@@ -539,6 +539,33 @@ E-2 needs no W2 decision but blocks real game wiring later.
       ("checkpoint writer, chain" are Phases 6–7) fixed same commit. The lane is un-parked.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **`NETCODE.md` §20.3(a)'s decoder refusal list is incomplete: the column format must be
+      CANONICAL, and the doc names only three of the five refusals.** Filed 2026-08-26 by
+      `w2-net-p1`; implemented, because canonicality is load-bearing rather than cosmetic and
+      two of the three additions are the doc's own words read strictly.
+      **Why it is load-bearing:** §20.2.8's `ChainEntry.log_segment_hash` is BLAKE2b over the
+      archive segment bytes and `chain[K]` is BLAKE2b over that entry (§20.3). Two peers that
+      encode the same confirmed input must produce the SAME BYTES or the chain forks with no
+      divergence behind it. A format with two encodings of one frame set cannot promise that.
+      §20.6 T1f already assumes it - "decodes to something re-encodable identically" is only
+      true of a canonical format - so the property was specified and its enforcement was not.
+      §20.3(a) lists three refusals (`rec & 0xF0`, a `changed` bit >= `MAX_ACTIONS`, a truncated
+      column). `net/encode.cpp` and `net/wire.h` enforce two more:
+      1. **A non-minimal uvarint** (a multi-byte varint whose last byte is 0): `80 00` and `00`
+         would both decode to 0 and re-encode differently.
+      2. **A `changed` bit whose decoded `ActionState` equals the previous frame's.** §20.2.2
+         states the rule as a biconditional - "bit a set <=> actions[a] != prev.actions[a]" - so
+         this is the doc read strictly, not an addition. **Found by T1f**, not by inspection: a
+         mutation that clears a `changed` bit yields a stream that still decodes, consumes fewer
+         bytes, and re-encodes shorter.
+      3. (Also enforced, same class:) **a value byte carrying the value the flags already imply**
+         - §20.2.2 defines `value_follows = (value != (i8)(flags & 1))`, again a biconditional.
+      Every one only TIGHTENS: no stream this encoder produces is refused, so no conforming peer
+      is affected. **Recommendation: amend §20.3(a)'s refusal list** to name all five and add one
+      sentence saying the column format is canonical because the chain hashes archive bytes.
+      Alternative if that is not wanted: drop the canonical clause from §20.6 T1f and accept that
+      two peers may encode one frame set differently - which would need a ruling of its own about
+      what `log_segment_hash` then means.
 - [ ] **`NETCODE.md` §20.2's opening sentence contradicts three of its own struct definitions.**
       Filed 2026-08-26 by `w2-net-p1` (doc bug, not a blocker - the concrete definitions win and
       the lane built to them). §20.2 opens "All are `TL_WIRE_STRUCT` (`CPP-SUBSET.md` §9 R-2):

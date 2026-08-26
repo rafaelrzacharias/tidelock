@@ -102,8 +102,24 @@ ErrCode decode_column(ByteReader* r, WireFrame* out, u32 frame_count, u64 base_t
                 const u8 raw = br_get_u8(r);
                 if (!br_ok(r)) { return ERR_BYTES_TRUNCATED; }
                 value = (i8)raw;
+                // Canonical form (wire.h): the encoder sets value_follows only when the value
+                // DIFFERS from the one the flags imply, so a value byte carrying the implied
+                // value is a second encoding of the same frame. Refused, because the archive's
+                // bytes are hashed into the chain (docs/NETCODE.md §20.2.8) and two encodings of
+                // one frame would fork it.
+                if (value == wire_implied_value(flags)) { return ERR_NET_MALFORMED; }
             } else {
                 value = wire_implied_value(flags);
+            }
+            // docs/NETCODE.md §20.2.2 states the rule as a BICONDITIONAL: "bit a set <=>
+            // actions[a] != prev.actions[a]". A set bit that decodes to the state the action
+            // already had is therefore not a valid stream - and, left accepted, it is a second
+            // encoding of the same frame set, which the chain's hash over archive bytes cannot
+            // tolerate (docs/NETCODE.md §20.2.8). Found by T1f: a mutation that clears a
+            // `changed` bit produces a stream that still decodes, consumes fewer bytes, and
+            // re-encodes differently.
+            if (value == prev.actions[a].value && flags == prev.actions[a].flags) {
+                return ERR_NET_MALFORMED;
             }
             f.actions[a].value = value;
             f.actions[a].flags = flags;

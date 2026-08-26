@@ -123,6 +123,16 @@ constexpr WireFrame wire_zero_frame() { return WireFrame{}; }
 
 // --- varint / zigzag (docs/NETCODE.md §20.2.2) ------------------------------------------------
 // uvarint = LEB128, 7 bits per byte, 0x80 continuation, <= 5 bytes for a u32.
+//
+// CANONICAL FORM (added by this lane; recorded in TODO.md for docs/NETCODE.md §20.3(a)'s refusal
+// list). Every value has exactly ONE valid encoding, and the decoders refuse the alternatives:
+// a non-minimal varint here, and a redundant value byte in the column codec. This is not
+// tidiness - docs/NETCODE.md §20.2.8 hashes the archive segment bytes into
+// ChainEntry.log_segment_hash, and §20.3's chain is BLAKE2b over that. Two peers that encode the
+// same confirmed input MUST produce the same bytes or the chain forks with no divergence behind
+// it. The encoder emits canonical output by construction; refusing non-canonical INPUT is what
+// stops a third-party or corrupted stream from decoding to frames that re-encode differently.
+// It only ever tightens: no stream this encoder produces is refused.
 constexpr u32 WIRE_UVARINT_MAX_BYTES = 5u;
 
 // zigzag32(v) = (u32(v) << 1) ^ u32(v >> 31) - maps small magnitudes of either sign to small
@@ -153,8 +163,9 @@ inline void wire_put_svarint(ByteWriter* w, i32 v) { wire_put_uvarint(w, wire_zi
 
 // Reads a LEB128 u32 into *out. Truncation is the reader's sticky ERR_BYTES_TRUNCATED (checked
 // by the caller once, at the end); a 6th continuation byte, or a 5th byte carrying bits above
-// 2^32, is ERR_NET_VARINT_OVERFLOW - malformed CONTENT, which the byte pair cannot name because
-// it has no format knowledge. On any failure *out is 0. Never runs inside a tick.
+// 2^32, is ERR_NET_VARINT_OVERFLOW; a NON-MINIMAL encoding (a multi-byte varint whose last byte
+// is 0, e.g. 80 00 for zero) is ERR_NET_MALFORMED - see the canonical-form note below. On any
+// failure *out is 0. Never runs inside a tick.
 inline ErrCode wire_get_uvarint(ByteReader* r, u32* out) {
     TL_ASSERT(out != nullptr);
     *out = 0u;
@@ -166,7 +177,14 @@ inline ErrCode wire_get_uvarint(ByteReader* r, u32* out) {
         // represented and is a malformed stream, not a big number.
         if (i == WIRE_UVARINT_MAX_BYTES - 1u && (b & 0xF0u) != 0u) { return ERR_NET_VARINT_OVERFLOW; }
         v |= (u32)(b & 0x7Fu) << (7u * i);
-        if ((b & 0x80u) == 0u) { *out = v; return ERR_OK; }
+        if ((b & 0x80u) == 0u) {
+            // Canonical form: a multi-byte varint's final byte carries the value's high bits and
+            // cannot be zero - `80 00` and `00` would otherwise both decode to 0 and re-encode
+            // to different bytes.
+            if (i > 0u && b == 0u) { return ERR_NET_MALFORMED; }
+            *out = v;
+            return ERR_OK;
+        }
     }
     // Five bytes read and the last still had its continuation bit set.
     return ERR_NET_VARINT_OVERFLOW;
