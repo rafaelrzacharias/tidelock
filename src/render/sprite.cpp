@@ -11,6 +11,8 @@
 // ---------------------------------------------------------------------------------------------
 #include "render/sprite.h"
 #include "core/transform.h"
+#include "foundation/fx_float.h"
+#include "foundation/fx_palette.h"
 
 void sys_sprite_render(World* w) {
     RenderQueue* q = w->render;
@@ -18,7 +20,9 @@ void sys_sprite_render(World* w) {
     const Span<Entity> ents = world_entities<Sprite>(w);
     const Transform* tbase = world_column<Transform>(w).data;
 
-    const f32 texel_m = 1.0f / 16.0f;   // docs/CANON.md "World constants": TEXEL = 1/16 m
+    // TEXEL is CANON.md's one home for this ratio (foundation/fx_palette.h) - derived, not
+    // restated (review round 1 M2).
+    const f32 texel_m = fx::to_f32(fx::TEXEL);
 
     for (u32 i = 0; i < sprites.count; ++i) {
         const Sprite s = sprites.data[i];

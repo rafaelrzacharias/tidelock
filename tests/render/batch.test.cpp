@@ -21,7 +21,8 @@ static void ref_stable_insertion_sort(K* keys, u32* vals, u32 n) {
 }
 
 // docs/RENDER2D.md §9.6: "sorted ascending; equal keys keep submission order (ties at every
-// byte); 1M random keys vs a naive reference; all-identical 1M keys unchanged; < 30 ms". This is
+// byte) over 1M random keys, checked against a naive stable-insertion-sort oracle on a 200-sample
+// slice; all-identical 1M keys unchanged; < 5000 ms". This is
 // sort_u64_kv (docs/CONTAINERS.md §4) exercised over render's own key format (key_pack) - the
 // containers lane's own suite (tests/foundation/sort.test.cpp) covers the primitive in general;
 // this is the render-scale/render-format instance §9.6 names explicitly. 1M-scale, so "slow"

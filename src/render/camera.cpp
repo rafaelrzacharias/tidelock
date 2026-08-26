@@ -3,6 +3,7 @@
 //   pixel_snap. Spec: docs/RENDER2D.md §9.3.1 (resolve_layout), §9.3.2 (projection).
 // ---------------------------------------------------------------------------------------------
 #include "render/camera.h"
+#include "foundation/tl_assert.h"
 #include <math.h>
 
 Layout resolve_layout(i32 win_w, i32 win_h, i32 logical_w, const Presentation& pres) {
@@ -20,6 +21,10 @@ Layout resolve_layout(i32 win_w, i32 win_h, i32 logical_w, const Presentation& p
 
     const i32 iw = (i32)pres.internal_w;
     const i32 ih = (i32)pres.internal_h;
+    // The early return above only checks internal_w == 0 - a Presentation with a nonzero
+    // internal_w but a zero internal_h would otherwise fall through to an integer/float divide
+    // by ih below (review round 1 D10).
+    TL_CHECK(ih != 0);
     i32 vw, vh;
 
     if (pres.mode == PRES_INTEGER_LETTERBOX) {
@@ -60,6 +65,9 @@ Mat3 view_matrix(const Camera2D& cam, const Layout& L) {
     f32 cx = cam.cx;
     f32 cy = cam.cy;
     if (cam.pixel_snap != 0) {
+        // ppu = cam.ppu * cam.zoom - a zero (or NaN) ppu/zoom divides by zero here
+        // (review round 1 D10).
+        TL_CHECK(ppu != 0.0f);
         cx = roundf(cx * ppu) / ppu;
         cy = roundf(cy * ppu) / ppu;
     }
@@ -81,6 +89,10 @@ void screen_to_world(const Mat3& M, f32 sx, f32 sy, f32* wx, f32* wy) {
     // affine inverse: translate by -[m2,m5], then invert the 2x2 linear part (det = -ppu^2 != 0
     // by construction - docs/RENDER2D.md §9.3.2).
     const f32 det = M.m[0] * M.m[4] - M.m[1] * M.m[3];
+    // det = -ppu^2 by construction (this function's own comment) - nonzero unless the view's ppu
+    // is itself zero (review round 1 D10; view_matrix's own TL_CHECK(ppu != 0) guards that at the
+    // source, this is the second line of defense for a matrix built some other way).
+    TL_CHECK(det != 0.0f);
     const f32 inv_det = 1.0f / det;
     const f32 tx = sx - M.m[2];
     const f32 ty = sy - M.m[5];

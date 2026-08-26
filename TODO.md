@@ -3014,8 +3014,8 @@ right; it is the template the others now follow.
 - [x] **v0 done-criterion verification (`docs/RENDER2D.md` §9.7 steps 1-4; `WORKFLOW.md` §6 R-11
       local validation).** All measured, not assumed:
       - Steps 1-4 green: `tests/render/{camera,queue,batch,backend_sdl,extract,sprite,
-        debugdraw}.test.cpp`, 20 tests, on BOTH a dev build and a `-DTL_TIER=netcode
-        -DTL_STRICT_TOOLCHAIN=OFF` build (the CI-red fix above made this mandatory going
+        debugdraw}.test.cpp`, 15 tests (counted directly, review round 1 M3 - not 20), on BOTH a
+        dev build and a `-DTL_TIER=netcode -DTL_STRICT_TOOLCHAIN=OFF` build (the CI-red fix above made this mandatory going
         forward, not just this once) - 0 failed on either tier.
       - `stats_draw_calls == batches`: asserted directly in `present_descriptor` (3 == 3).
       - Zero heap allocation per frame: `docs/MEMORY.md` §2's CRT-malloc counter was DROPPED by
@@ -3082,6 +3082,16 @@ right; it is the template the others now follow.
       `rect_visible(w, r, layer, space)`'s `layer` parameter - §9.3.4's one-line pseudocode
       references `layer_view[layer]` but the shown call site is 2-arg; restored as an explicit
       parameter since nothing else in scope carries an implicit "current layer".
+- [ ] **RR-24 (not blocking, w3-render2d, review round 1 D11): `docs/RENDER2D.md` §9.5's
+      `to_f32`/`to_f64`/`from_f32_quantized` call-site allowlist has no CI enforcement.**
+      Checked `tools/` and `.github/workflows/` for a grep gate matching the allowlist
+      (`render/extract.cpp`, `render/simview.cpp`, `editor/` for the first two;
+      `core/producers/live.cpp` and `editor/` for the third, per `FX-PALETTE.md` §6) - none
+      exists. §9.5 is fixed in this commit to state the allowlist as intent, not a live gate.
+      Filed as a ruling request for whichever lane owns CI tooling (`tools/docaudit/docaudit.py`'s
+      owner, or a new `tools/audit/` script) to decide: a dedicated grep step, or folded into
+      `docaudit.py`'s existing pass. Not blocking render2d's v0 - the two call sites in scope
+      today are exactly the allowlisted ones.
 - [ ] **`sim/views.h` still not on `main`** (alloy-substrate, expected after 2026-09-01, per this
       lane's brief). `src/render/simview.h` forward-declares the five view structs opaque and
       `simview_update` is v0's stub (empty body) - Milestone 2 replaces the forward declarations

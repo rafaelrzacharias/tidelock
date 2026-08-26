@@ -27,7 +27,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `MEMORY.md` -> §1
 - `PLATFORM.md` -> §1
 - `README.md` -> §9
-- `RENDER2D.md` -> §5, §8
+- `RENDER2D.md` -> §5, §8, §9
 - `ROADMAP.md` -> §9
 - `WORKFLOW.md` -> §9
 
@@ -193,6 +193,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `MEMORY.md` -> §1.2
 - `NETCODE.md` -> §5
 - `PLATFORM.md` -> §1.1, §1.5, §3, §8.2
+- `RENDER2D.md` -> §2
 - `ROADMAP.md` -> §8.8
 - `TESTING.md` -> §2
 - `TOOLING.md` -> §5
@@ -242,6 +243,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 
 ## RENDER2D.md
 - `ASSETS-AND-DATA.md` -> §5
+- `CPP-SUBSET.md` -> §9.1
 - `FRAME-LOOP.md` -> §2, §4
 - `INPUT.md` -> §2
 - `PLATFORM.md` -> §2
@@ -285,6 +287,6 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `DETERMINISM.md` -> §4
 - `GATE0-BENCH.md` -> §4
 - `NETCODE.md` -> §4
-- `RENDER2D.md` -> §4
+- `RENDER2D.md` -> §4, §6
 - `ROADMAP.md` -> §1, §6
 - `TESTING.md` -> §4

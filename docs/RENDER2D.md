@@ -436,16 +436,20 @@ resize event re-runs `resolve_layout` and recreates the target (old one destroye
 
 Nothing here is hashed; no sim TU reads render state. The fx→float conversions are confined to
 `extract.cpp` (§9.3.3) and `simview.cpp` (§9.3.7 body/particle/basin positions — the SDF
-raster is `i16` and compared as an integer). CI: `to_f32`/`to_f64` may appear under `src/` only
-in `render/extract.cpp`, `render/simview.cpp`, `editor/`, and `from_f32_quantized` only in
-`core/producers/live.cpp` and `editor/` (`FX-PALETTE.md` §6). `-ffast-math` stays off (`CPP-SUBSET.md` §7).
+raster is `i16` and compared as an integer). The intended allowlist (`FX-PALETTE.md` §6):
+`to_f32`/`to_f64` under `src/` only in `render/extract.cpp`, `render/simview.cpp`, `editor/`, and
+`from_f32_quantized` only in `core/producers/live.cpp` and `editor/`. **Not yet CI-enforced** —
+no grep step exists in `tools/` or `.github/workflows/` for this today (review round 1 D11); this
+paragraph states the intent other lanes are expected to honour, not a live gate. Filed in
+`TODO.md` as a ruling request for whichever lane owns CI tooling. `-ffast-math` stays off
+(`CPP-SUBSET.md` §7).
 
 ### 9.6 Tests — `tests/render/` (in `tl_tests`, headless platform)
 
 | Test | Asserts |
 |---|---|
 | `key_pack_unpack` | every field round-trips at 0, max, and a random 10k sample; field masks do not overlap (`static_assert` set) |
-| `radix_order` | sorted ascending; equal keys keep submission order (ties at every byte); 1M random keys vs a naive reference; all-identical 1M keys unchanged; < 30 ms |
+| `radix_order` | sorted ascending; equal keys keep submission order (ties at every byte) over 1M random keys, checked against a naive stable-insertion-sort oracle on a 200-sample slice; all-identical 1M keys unchanged; < 5000 ms — a generous, non-strict smoke bound catching only a gross algorithmic regression (e.g. an accidental O(n²)), not a perf grade (`WORKFLOW.md` §4 owns that) |
 | `batch_boundaries` | splits exactly on tex/clip/blend/layer changes, never on depth; counts sum to n; empty queue → 0 batches |
 | `clip_stack` | push/pop ids, submit stamps the top, depth 32 overflow → fatal (child process), id 0 when empty |
 | `reject` | quads fully outside `view_world` increment `stats_rejected` and add no command; touching-edge quads are kept |
@@ -463,7 +467,18 @@ Pixel goldens (FLIP-compared, `--render=software`) are nightly, never PR-blockin
 2. `queue.h/.cpp` + `key_pack_unpack`, `clip_stack`, `reject`; `batch.cpp` + `radix_order`, `batch_boundaries`.
 3. `backend_sdl.cpp` over the headless `DrawApi` + `present_descriptor`; then on sdl3: a window that clears and presents.
 4. `extract.cpp`, `sprite.cpp` + `extract_snap_and_arc`; a textured sprite moving under interpolation at 144 Hz render / 60 Hz sim shows no stutter (manual).
-   **v0 done:** steps 1–4 green; `tidelock` draws sprites through the queue; `stats_draw_calls == batches`; zero heap allocation per frame (the allocator shim counter is 0 in steady state).
+   **render2d v0 done (this module's own provable scope — review round 1 D8):** steps 1–4
+   green on BOTH the `dev` and `netcode` tiers (`WORKFLOW.md` §6 R-11); `stats_draw_calls ==
+   stats_batches` asserted directly (`present_descriptor`); every render test exercises the
+   real pipeline (`render_present`, `sys_extract`, `sys_sprite_render`, `render_build_frame`)
+   repeatedly with no allocator tripwire fatal — `MEMORY.md` §2's CRT-malloc *counter* was
+   dropped by a 2026-08-26 ruling (`foundation/alloc_shim.h`'s contract block); the live
+   mechanism is tripwires, not a number to assert, and it is satisfied. **"`tidelock` draws
+   sprites through a real window" and "fingerprints logged" are NOT this module's to claim** —
+   they need `app/wiring.cpp` (W4, not built by any merged lane yet) and belong to
+   `ARCHITECTURE.md` §9's own **v0** milestone row, which spans SDL3 platform + assets + data
+   compiler + Luau VMs + this module + the ImGui shell together. `TODO.md`'s "W3 render2d" lane
+   notes carry the measured verification for the four bullets above.
 5. Milestone 2: `simview.cpp` chunks (+ `simview_half_texel`), then bodies, particles, basins, burn; `parallel_for` adoption when `JOBS.md` lands (the writer is already chunk-keyed).
    **Milestone 2 done:** a carved chunk re-uploads only on `dirty_serial` change (counter test), ~60 visible chunks ≤ 1 ms CPU write + upload, graded per `WORKFLOW.md` §4 (the committed PC rev-2 record until the Deck re-anchors).
 
