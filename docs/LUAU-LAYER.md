@@ -247,7 +247,12 @@ returns `Result<ScriptVm*>` with `SCRIPT_*` codes; no partial VM survives.
 7. **`require`** installed (§10.9); `_G.world` = the `WorldView` table (§10.6).
 8. **Callbacks:** `lua_Callbacks* cb = lua_callbacks(L)`; `cb->interrupt = script_interrupt`;
    `cb->useratom = script_useratom`
-   (**NOT INSTALLED as of 2026-08-26 — ruling request RR-19 in `TODO.md`:** Luau's `useratom` carries no context pointer and no `lua_State*`, so reaching the process `Interner` needs namespace-scope mutable state, which `CPP-SUBSET.md` §1 bans. `script_useratom_installed()` reports the fact; `lua_tostringatom` yields −1 until the ruling lands); `cb->panic = script_panic` (`TL_FATAL` — reached only on an
+   (**RULED 2026-08-26 — RR-19:** Luau's `useratom` carries no context pointer and no
+   `lua_State*`, so the process `Interner` is reached through one exempted pointer in
+   `src/script/atom.cpp`, named in `tools/audit/static_allow.txt`. It is a LOOKUP, never an
+   insert: a string a script builds at runtime must not be able to grow a capped,
+   fingerprint-adjacent interner, so an unregistered name yields −1. A VM created with a null
+   interner installs nothing and `script_useratom_installed()` says so); `cb->panic = script_panic` (`TL_FATAL` — reached only on an
    error outside any protected call, which is a bug in this module); `cb->userthread = NULL`
    (sim has no coroutines; the dev debugger thread is created by C, §10.10). Dev: `debugbreak`,
    `debugstep`, `debuginterrupt` (§10.10).
@@ -632,14 +637,13 @@ construction (same tree); `luau_load` still reports it as a load error.
    (lands with Alloy's edit buffer). 8. `reload.cpp` + reload tests. 9. `bind_ui.cpp`, `debug.cpp`
    (with the Scripts panel, `TOOLING.md` §1).
 
-**Blocking as of 2026-08-26 (`TODO.md` RR-18):** every §10.11 row that runs Luau SOURCE is
-skipped in `dev` and `netcode`. Luau's *Compiler* exposes no allocator hook and allocates with
-global `operator new` (measured: 32 calls per `luau_compile`; the *VM* makes zero — it is fully
-pooled), and `MEMORY.md` §2's alloc-shim tripwire makes that fatal in exactly those two tiers.
-`script_can_compile_in_process()` reports it and `script_run_source` refuses with
-`SCRIPT_ERR_NO_COMPILER` instead of trapping. The rows run and pass in `debug` and `ship`.
-This also blocks §10.9's dev on-load compile permanently, which is why it is a ruling and not
-a lane decision.
+**RR-18, ruled 2026-08-26 (Rafael) — the in-process compile works in every tier.** Luau's
+*Compiler* exposes no allocator hook and allocates with global `operator new` (measured: 32 calls
+per `luau_compile`; the *VM* makes zero — it is fully pooled). `MEMORY.md` §1.5 now records the
+answer: the VM's own pool serves those allocations for the duration of one compile and nothing
+else in the process is inside that window. `script_can_compile_in_process()` remains the one home
+for the fact, so a build that ever cannot has one place to say so; §10.9's dev on-load compile is
+unblocked.
 
 **Done** when: every §10.11 test passes in `dev` and `netcode` (fatal-expected ones in child
 processes); the symbol audit shows `lua_*`/`luau_*` symbols only in `tl_script` (`tools/audit/symbols.py --wrap-lib`, built 2026-08-26 — it checks DEFINED as well as undefined names, because a hand-written `extern` needs no header and is precisely the shape the include firewall cannot see); no Luau header outside `src/script/` (`tools/audit/includes.py`'s `SYS_ALLOW_DIRS` + `BACKEND_HEADERS`, both halves with their own planted violations); `TL_ASSERT_NO_TICK_ALLOC` holds for a tick with Luau

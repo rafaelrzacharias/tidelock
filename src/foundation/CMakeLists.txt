@@ -25,7 +25,7 @@
 # table and lives in foundation only because foundation is a leaf and docs/JOBS.md's pool must
 # call through it (the VMemApi precedent, docs/MEMORY.md §8.2) - sim code has no business
 # reaching it, and jobs.h/atomic.h #error on TL_SIM_TU for the same boundary (W1 jobs lane).
-set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim arena_guard rect thread_api
+set(TL_FOUNDATION_NONDET jobs mem_pool fmt interner atomic alloc_shim alloc_shim_ops arena_guard rect thread_api
                          tl_assert log prof probe crash)
 
 # RR-7 ruling (docs/CPP-SUBSET.md §1, docs/TOOLING.md §9): the tooling plane - never hashed, never

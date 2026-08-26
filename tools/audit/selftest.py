@@ -47,6 +47,9 @@ def fixture_root(tmp, name):
                     os.path.join(root, "src", "foundation", "CMakeLists.txt"))
     shutil.copyfile(os.path.join(REPO, "src", "foundation", "tl_types.h"),
                     os.path.join(root, "src", "foundation", "tl_types.h"))
+    os.makedirs(os.path.join(root, "tools", "audit"), exist_ok=True)
+    shutil.copyfile(os.path.join(REPO, "tools", "audit", "static_allow.txt"),
+                    os.path.join(root, "tools", "audit", "static_allow.txt"))
     return root
 
 
@@ -359,6 +362,21 @@ INCLUDE_CASES = [
      "mem_pool's allocation API outside"),
     # The <stdlib.h> grant is scoped to src/vendor_glue (the folder that owns vendor heap
     # plumbing); it also admits malloc, so it must not leak to the wrap module next door.
+    # RR-18/RR-19's writable-static allowlist is (lib, DIRECTORY, STEM). Neither half alone is
+    # the exemption - RR-7's own lesson, where a stem-only grant covered `log.o` in every
+    # non-audited lib in the tree. One fixture per half, per exempted row.
+    ("static state in the exempted DIRECTORY but a different stem", "src/vendor_glue/other.cpp",
+     '#include "foundation/tl_types.h"\nstatic unsigned g_state = 0u;\nunsigned bump(void) { g_state += 1u; return g_state; }\n',
+     "static mutable state"),
+    ("static state with the exempted STEM but in a different directory", "src/core/vendor_new.cpp",
+     '#include "foundation/tl_types.h"\nstatic unsigned g_state = 0u;\nunsigned bump(void) { g_state += 1u; return g_state; }\n',
+     "static mutable state"),
+    ("static state in the script module outside atom.cpp", "src/script/other.cpp",
+     '#include "foundation/tl_types.h"\nstatic unsigned g_state = 0u;\nunsigned bump(void) { g_state += 1u; return g_state; }\n',
+     "static mutable state"),
+    ("static state with atom's stem in another module", "src/net/atom.cpp",
+     '#include "foundation/tl_types.h"\nstatic unsigned g_state = 0u;\nunsigned bump(void) { g_state += 1u; return g_state; }\n',
+     "static mutable state"),
     ("stdlib.h in the script module, where the vendor_glue grant does not reach",
      "src/script/stdlib_leak.cpp",
      '#include <stdlib.h>\n#include "foundation/tl_types.h"\nu32 leak8(void) { return 8u; }\n',
@@ -398,6 +416,13 @@ INCLUDE_CLEAN = [
     ("src/script may spell the vendored Luau headers", "src/script/ok_luau.cpp",
      '#include <lua.h>\n#include <lualib.h>\n#include <luacode.h>\n'
      '#include "foundation/tl_types.h"\nu32 ok_luau(void) { return 1u; }\n'),
+    # ...and the two rows that ARE exempt must not fire, or the gate would ban the one file in
+    # each module that exists to hold the pointer (RR-18: a replaceable operator new takes no
+    # context; RR-19: Luau's useratom takes none either).
+    ("src/vendor_glue/vendor_new.cpp may hold the pool pointer", "src/vendor_glue/vendor_new.cpp",
+     '#include "foundation/tl_types.h"\nstatic unsigned g_state = 0u;\nunsigned bump(void) { g_state += 1u; return g_state; }\n'),
+    ("src/script/atom.cpp may hold the interner pointer", "src/script/atom.cpp",
+     '#include "foundation/tl_types.h"\nstatic unsigned g_state = 0u;\nunsigned bump(void) { g_state += 1u; return g_state; }\n'),
     ("src/vendor_glue may spell stdlib.h for the vendored malloc'd buffer it must free",
      "src/vendor_glue/ok_free.cpp",
      '#include <stdlib.h>\n#include "foundation/tl_types.h"\n'
@@ -622,6 +647,30 @@ def test_symbols(tmp, nm, objdump, ar, cxx):
                               "--wrap-lib", "tl_scrpit"])
         record("symbols: a --wrap-lib naming no registered lib is an error",
                rc != 0 and "not a registered lib" in out, out.strip()[:200])
+
+    # --- the writable-static allowlist (RR-18/RR-19), keyed by LIB + STEM --------------------
+    # --root is what turns the exemption on at all (like RR-7's), so these rows pass the REAL
+    # repo root and therefore the REAL tools/audit/static_allow.txt.
+    exempt_lib, err = build_lib_named(cxx, ar, root, "vgexempt", "vendor_new.cpp", MUTABLE_CPP)
+    wrong_stem, err2 = build_lib_named(cxx, ar, root, "vgwrong", "other_glue.cpp", MUTABLE_CPP)
+    if exempt_lib and wrong_stem:
+        rooted = base + ["--root", REPO, "--tooling-lib", "tl_foundation", "--layer", "upper=" + upper]
+        rc, out = run(rooted + ["--data-only", "tl_vendor_glue=" + exempt_lib])
+        record("symbols: the allowlisted lib+stem may hold writable static storage",
+               rc == 0, out.strip()[:200])
+        rc, out = run(rooted + ["--data-only", "tl_vendor_glue=" + wrong_stem])
+        record("symbols: the allowlisted LIB with a different stem is still a violation",
+               rc == 1 and "writable static storage" in out, out.strip()[:200])
+        rc, out = run(rooted + ["--data-only", "tl_core=" + exempt_lib])
+        record("symbols: the allowlisted STEM in a different lib is still a violation",
+               rc == 1 and "writable static storage" in out, out.strip()[:200])
+        # Without --root there is no exemption at all: opt-in, never accidentally silent.
+        rc, out = run(base + ["--layer", "upper=" + upper, "--data-only", "tl_vendor_glue=" + exempt_lib])
+        record("symbols: no --root means no static exemption",
+               rc == 1 and "writable static storage" in out, out.strip()[:200])
+    else:
+        record("symbols: the allowlisted lib+stem may hold writable static storage", False,
+               (err or err2)[:200])
 
     # Weak undefined symbols are an ELF concept; the same source on COFF produces no `w` entry
     # (and drags in _fltused), so this one is built for ELF explicitly.

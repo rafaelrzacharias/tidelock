@@ -1,0 +1,22 @@
+# Namespace-scope mutable storage: the exemption list. Spec: docs/CPP-SUBSET.md §1 (the ban),
+# docs/MEMORY.md §1.5 (RR-18), docs/LUAU-LAYER.md §10.2 step 8 (RR-19).
+#
+# ONE home, read by BOTH gates: tools/audit/includes.py (the `static <type> <name>;` regex, keyed
+# by directory + stem) and tools/audit/symbols.py (the .data/.bss archive check, keyed by lib +
+# stem). Two hand-typed copies of an exemption list have drifted twice in this repo already
+# (LESSONS.md), which is why RR-7's tooling-plane list lives in exactly one file too.
+#
+# Format, whitespace-separated:  <lib>  <directory>  <stem>  # why
+#
+# Every row is a RULING, never a convenience, and every row exists for the same reason: a
+# replaceable or registered C callback with a FIXED signature and no context parameter cannot be
+# handed the state it must reach. If a context parameter exists, use it - there is no row for you.
+# A row's blast radius is one archive member of one lib: adding the stem to a second lib does
+# nothing, and a same-named file elsewhere is an ordinary violation (RR-7's own lesson - a
+# stem-only exemption once covered `log.o` in every non-audited lib in the tree).
+#
+# Adding a row means: the ruling is recorded in TODO.md, the owning doc's section says so, and
+# tools/audit/selftest.py gains a planted violation for the neighbouring file that is NOT exempt.
+
+tl_vendor_glue   src/vendor_glue   vendor_new   # RR-18: the pool `operator new` draws from. `operator new` is replaceable per-PROGRAM and takes no context; the Luau Compiler has no allocator hook, so a program-wide pointer is the only way to budget its heap (docs/MEMORY.md §1.5).
+tl_script        src/script        atom         # RR-19: the Interner `useratom` resolves against. Luau's callback is int16_t(*)(const char*, size_t) - no lua_State*, no userdata - so the process interner cannot be reached any other way (docs/LUAU-LAYER.md §10.2 step 8).

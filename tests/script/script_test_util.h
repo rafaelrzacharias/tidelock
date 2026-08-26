@@ -15,6 +15,7 @@
 // Includes: runner/tl_test.h, script/script.h, foundation/vmem_test_api.h.
 // ---------------------------------------------------------------------------------------------
 #include "foundation/vmem_test_api.h"
+#include "foundation/interner.h"
 #include "runner/tl_test.h"
 #include "script/script.h"
 
@@ -26,6 +27,28 @@ struct ScriptFixture {
     VMemArena perm;
     ScriptVm* vm;
 };
+
+// The ONE interner for this process, built on first use. Not per-fixture: `StrId` is
+// process-stable by docs/CANON.md, and script_install_useratom TL_FATALs on a second, different
+// Interner precisely because two numberings for one name would let a proxy built against one
+// read the wrong field through the other. A per-test interner tripped that guard on the second
+// test, which is the guard working - so the fixture models the real shape instead.
+// Tests may hold statics (docs/TESTING.md §8 R-2, docs/LESSONS.md); src/ may not.
+inline Interner* test_interner() {
+    static VMemApi api;
+    static VMemArena chars;
+    static VMemArena meta;
+    static Interner in;
+    static bool ready = false;
+    if (!ready) {
+        api = test_vmem_api();
+        if (vmem_arena_init(&chars, 0x5c13u, 1u << 20, 0u, &api) != ERR_OK) return nullptr;
+        if (vmem_arena_init(&meta, 0x5c14u, 1u << 20, 0u, &api) != ERR_OK) return nullptr;
+        interner_init(&in, &chars, &meta, 1024u);
+        ready = true;
+    }
+    return &in;
+}
 
 // Builds a VM of `kind` with a `budget_bytes` pool and the given safepoint budget. Returns false
 // (with vm == nullptr) if any step failed, so a caller's TL_ASSERT_TRUE reports the failure
@@ -41,7 +64,7 @@ inline bool script_fixture_up(ScriptFixture* f, ScriptVmKind kind, u64 budget_by
     d.pool_budget_bytes = budget_bytes;
     d.budget_safepoints = budget_safepoints;
     d.gc_step_kb = 16u;
-    d.interner = nullptr;
+    d.interner = test_interner();
     d.perm = &f->perm;
     d.os = &f->api;
     Result<ScriptVm*> r = kind == SCRIPT_VM_SIM  ? script_create_sim(&d)
@@ -69,17 +92,6 @@ inline void script_fixture_down(ScriptFixture* f) {
         f->perm.base = nullptr;
     }
 }
-
-// The RR-18 guard, spelled once. A test whose body runs Luau SOURCE cannot run in a tier whose
-// alloc-shim tripwire makes the Luau compiler's global operator new fatal; it reports SKIP - a
-// visible status, never a pass (docs/TESTING.md §1) - rather than killing the whole suite, which
-// is what a TL_FATAL inside a test body does (docs/LESSONS.md).
-#define TL_SKIP_WITHOUT_COMPILER()                                                             \
-    do {                                                                                       \
-        if (!script_can_compile_in_process()) {                                                \
-            TL_SKIP("TODO.md RR-18: this tier cannot compile Luau source in-process");          \
-        }                                                                                      \
-    } while (0)
 
 // True iff `src` runs to completion in `vm`. On failure the test's own message should quote
 // script_last_error(vm), which is why this does not assert on its own.

@@ -100,6 +100,30 @@ def vendor_symbol(sym):
     return False
 
 
+def static_allow_libs(root):
+    """{(lib, stem)} that may hold writable static storage. The SAME file includes.py reads
+    (tools/audit/static_allow.txt), keyed by lib + stem here because this gate sees archives and
+    not paths. RR-18 and RR-19 are its only rows; each is a ruling recorded in TODO.md.
+
+    Returns the empty set with no --root, so the exemption is opt-in and never accidentally
+    silent - the same rule tooling_stems() follows for RR-7."""
+    if not root:
+        return set()
+    path = os.path.join(root, "tools", "audit", "static_allow.txt")
+    if not os.path.exists(path):
+        return set()
+    out = set()
+    for n, line in enumerate(open(path, encoding="utf-8"), 1):
+        row = line.split("#")[0].split()
+        if not row:
+            continue
+        if len(row) != 3:
+            sys.exit("tools/audit/static_allow.txt:%d: want '<lib> <directory> <stem>', got %r"
+                     % (n, line.strip()))
+        out.add((row[0], row[2]))
+    return out
+
+
 def stem_of_member(member):
     """The source stem an archive member's object file was compiled from, independent of the
     object-naming convention the generator used (CMake+Ninja nests it under CMakeFiles/<target>.dir/
@@ -196,6 +220,8 @@ def main():
     patterns = [l.split("#")[0].strip() for l in open(a.allow, encoding="utf-8")]
     patterns = [p for p in patterns if p]
 
+    static_allow = static_allow_libs(a.root)
+
     violations = []
     below = set()
     for name, path in layers:
@@ -208,6 +234,8 @@ def main():
                 continue
             violations.append("%s: undefined symbol outside the allowlist: %s" % (name, sym))
         for member, section, size in data_bss_offenders(a.objdump, path):
+            if (name, stem_of_member(member)) in static_allow:
+                continue   # tools/audit/static_allow.txt: a named ruling, lib + stem
             violations.append("%s: %s has %d bytes of %s - writable static storage in an "
                               "audited lib (docs/CPP-SUBSET.md §1, docs/MEMORY.md)"
                               % (name, member, size, section))
@@ -222,6 +250,8 @@ def main():
         for member, section, size in data_bss_offenders(a.objdump, path):
             if stem_of_member(member) in exempt:
                 continue   # RR-7: the tooling plane, named in TL_FOUNDATION_TOOLING, is exempt
+            if (name, stem_of_member(member)) in static_allow:
+                continue   # tools/audit/static_allow.txt: a named ruling, lib + stem
             violations.append("%s: %s has %d bytes of %s - writable static storage in src/ "
                               "(docs/CPP-SUBSET.md §1)" % (name, member, size, section))
 

@@ -13,6 +13,7 @@
 #include "script/handles.h"
 #include "script/vm.h"
 #include "vendor_glue/luau_alloc.h"
+#include "vendor_glue/vendor_new.h"
 
 // The adaptor is declared without a Luau header on purpose (vendor_glue/luau_alloc.h says why);
 // this is the TU that may see lua_Alloc, so this is where the two are proved compatible.
@@ -119,7 +120,7 @@ Result<ScriptVm*> create(ScriptVmKind kind, const ScriptVmDesc* d) {
     cb->interrupt = &script_interrupt;
     cb->panic = &script_panic;
     cb->userthread = nullptr;     // the sim VM has no coroutines (docs/LUAU-LAYER.md section 9 R-1)
-    // cb->useratom stays null - see script_useratom_installed() and the ruling request in TODO.md.
+    script_install_useratom(vm->L, d->interner);   // RR-19, ruled 2026-08-26 (atom.cpp)
 
     script_register_tag_names(vm->L);
 
@@ -154,7 +155,17 @@ ErrCode load_chunk(ScriptVm* vm, const char* chunkname, StrView source) {
     }
     lua_CompileOptions opts = script_compile_options();
     size_t bc_size = 0;
+    // RR-18 (ruled 2026-08-26): Luau's Compiler has no allocator hook and allocates with global
+    // operator new. The window below is the whole answer - the VM's own pool serves those
+    // allocations (a compile is FOR this VM, so its transient bytes belong to this VM's budget),
+    // and outside it a global new is fatal exactly as before. The compiler frees everything it
+    // allocated before returning, which is asserted after the window closes.
+    const u64 live_before = pool_stats(&vm->pool)->live_bytes;
+    vendor_heap_install(&vm->pool);
     char* bc = luau_compile(source.ptr, (size_t)source.len, &opts, &bc_size);
+    vendor_heap_install(nullptr);
+    TL_ASSERT(pool_stats(&vm->pool)->live_bytes == live_before);
+    (void)live_before;
     if (bc == nullptr) {
         return script_set_error(vm, ERR_SCRIPT_COMPILE, "luau_compile returned no bytecode");
     }
@@ -373,22 +384,30 @@ bool script_codegen_available(void) {
     return false;
 }
 
+i32 script_atom_of(ScriptVm* vm, StrView s) {
+    TL_ASSERT(vm != nullptr && vm->L != nullptr);
+    if (s.ptr == nullptr) return -1;
+    lua_State* L = vm->L;
+    lua_pushlstring(L, s.ptr, (size_t)s.len);
+    int atom = -1;
+    (void)lua_tostringatom(L, -1, &atom);
+    lua_pop(L, 1);
+    return (i32)atom;
+}
+
 bool script_can_compile_in_process(void) {
-    // The one home for this fact; script.h's contract block carries the measurement and names
-    // RR-18. Mirroring the tier macro at a call site would put the same claim in two places, and
-    // a test that mirrors a header's #if cannot fail on the branch it does not take (LESSONS.md).
-#if TL_TIER_DEV || TL_TIER_NETCODE
-    return false;
-#else
+    // TRUE in every tier since RR-18 was ruled (2026-08-26): the Luau compiler's global
+    // operator new is served by the VM's own pool for the duration of the compile
+    // (vendor_glue/vendor_new.h), so the alloc-shim tripwire no longer stands in its way. The
+    // function stays as the one home for the fact - a build that ever cannot compile in-process
+    // has one place to say so, and the tests already ask rather than mirroring a tier macro.
     return true;
-#endif
 }
 
 bool script_useratom_installed(void) {
-    // Luau's useratom callback is `int16_t (*)(const char*, size_t)` - no context parameter and
-    // no lua_State - so reaching the process Interner from it needs namespace-scope mutable
-    // state, banned by docs/CPP-SUBSET.md section 1 and enforced by tools/audit/symbols.py's
-    // .data/.bss check. Ruling request in TODO.md; until it is answered the callback is not
-    // installed and lua_tostringatom yields -1 for every string.
-    return false;
+    // TRUE once any VM has been created with an interner (RR-19, ruled 2026-08-26): Luau's
+    // callback carries no context, so the interner is reached through the one pointer named in
+    // tools/audit/static_allow.txt. A VM created with a null interner leaves it uninstalled and
+    // lua_tostringatom yields -1 - the honest state for a program with no name registry.
+    return script_atom_interner() != nullptr;
 }

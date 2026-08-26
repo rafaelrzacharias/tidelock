@@ -116,6 +116,28 @@ commit) with a per-pool budget and a counter the profiler reads. **Engine and si
 it** (the gate and its exemption list are §8.6's). Luau gets one pool per VM; ImGui and
 SDL share one; ENet its own (net buffers are sized by the protocol anyway).
 
+**A vendored library with NO allocator hook (RULED 2026-08-26, Rafael — RR-18).** The table above
+assumes every vendored library exposes a hook. Measured at the Luau 0.696 pin, that is true of the
+Luau *VM* (`luau_load` + `lua_pcall`: **zero** global `operator new`, every byte through
+`lua_newstate`'s callback) and false of the Luau *Compiler*, which exposes none and makes **32**
+global `operator new` calls per `luau_compile`. `operator new` is replaceable per **program** and
+nowhere narrower, so the only way to budget such a heap is to replace it program-wide:
+
+- `src/vendor_glue/vendor_new.cpp` defines a pool-backed global `operator new`/`delete` over one
+  `MemPool`, installed by `vendor_heap_install(pool)` and uninstalled straight after. With no
+  pool installed it `TL_FATAL`s exactly as §2's tripwire does, so the ban is unchanged outside
+  the window; the window is opened around one `luau_compile` call and closed on return, and the
+  pool's live-byte counter is asserted back to its pre-compile value.
+- The pool is the **VM's own**: a compile is *for* a VM, so its transient bytes belong to that
+  VM's budget, and no extra reserve exists to size.
+- §2's tripwire operators moved into their own TU (`alloc_shim_ops.cpp`) so ordinary archive
+  semantics let the replacement win without a duplicate-symbol error. They previously shared a
+  member with `tl_alloc_shim_anchor`, which the guard force-pulls.
+- The one pointer this needs is namespace-scope mutable state; it is exempted by name in
+  `tools/audit/static_allow.txt` (lib + directory + stem), which is the ONE home both gates read.
+  `PLATFORM.md` §9.5 had already sanctioned exactly this pointer for `src/vendor_glue/`; until
+  now no gate knew about it.
+
 ---
 
 ## 2. The guards (DECIDED)
@@ -128,7 +150,10 @@ SDL share one; ENet its own (net buffers are sized by the protocol anyway).
   code is a link error (the symbol audit) for sim libs and a `TL_FATAL` tripwire shim for the
   rest; vendor libs are routed through `mem_pool` via their hook APIs (`lua_newstate(alloc_fn)`,
   `ImGui::SetAllocatorFunctions`, `SDL_SetMemoryFunctions`, `enet_initialize_with_callbacks`,
-  `STBI_MALLOC`). **The per-frame CRT-malloc COUNTER is dropped (ruled 2026-08-26):** it needed
+  `STBI_MALLOC`) — **except a vendored library that exposes no hook at all, which is served by the
+  program-wide replacement of §1.5 (RR-18, ruled 2026-08-26)**. The tripwire operators live in
+  their own TU (`alloc_shim_ops.cpp`) so that replacement is possible without a duplicate symbol;
+  a program that installs no vendor heap still gets the tripwire. **The per-frame CRT-malloc COUNTER is dropped (ruled 2026-08-26):** it needed
   writable static storage the §1 link gate bans, and the tripwires + the symbol audit + the
   per-pool budgets already fail loudly on every path the counter watched.
 - **Hash-region integrity test per pool** (`DETERMINISM.md` §4).

@@ -123,33 +123,66 @@ TL_TEST(vm_tick_bracket_resets_the_budget, "script") {
 }
 
 TL_TEST(vm_capability_facts_are_consistent, "script") {
-    // The three "this build cannot do X" facts are reported, not guessed, and each is queryable
-    // rather than discovered by a trap. Their VALUES are a build property; what this row pins is
-    // that the report and the behaviour agree - a fact that lies is worse than no fact.
+    // The capability facts are reported, not guessed, and each is queryable rather than
+    // discovered by a trap. What this row pins is that the report and the BEHAVIOUR agree - a
+    // fact that lies is worse than no fact.
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
 
-    // TODO.md RR-20: CodeGen is not vendored in rev 1.
+    // RR-20 (ruled 2026-08-26): CodeGen stays unvendored, so there is no luau_codegen_supported()
+    // in this binary to ask. The UI VM is interpreted and says so.
     TL_EXPECT_FALSE(script_codegen_available());
-    // TODO.md RR-19: Luau's useratom callback carries no context, so it is not installed.
-    TL_EXPECT_FALSE(script_useratom_installed());
 
-    // TODO.md RR-18: where the compiler cannot run, script_run_source REFUSES with a code -
-    // it does not trap, and it does not quietly succeed.
-    const ErrCode e = script_run_source(f.vm, "probe", sv_lit("return 1"));
-    if (script_can_compile_in_process()) {
-        TL_EXPECT_EQ(e, ERR_OK);
-    } else {
-        TL_EXPECT_EQ(e, ERR_SCRIPT_NO_COMPILER);
-        TL_EXPECT_NE(script_last_error(f.vm)[0], '\0');
-    }
-    // script_eval_int takes the same path, so the two entry points cannot disagree.
+    // RR-18 (ruled 2026-08-26): the Luau compiler's global operator new is served by the VM's own
+    // pool for the duration of a compile, so every tier compiles in-process now.
+    TL_EXPECT_TRUE(script_can_compile_in_process());
+    TL_EXPECT_EQ(script_run_source(f.vm, "probe", sv_lit("return 1")), ERR_OK);
     const Result<i64> r = script_eval_int(f.vm, sv_lit("1 + 1"));
-    TL_EXPECT_EQ(r.err, script_can_compile_in_process() ? ERR_OK : ERR_SCRIPT_NO_COMPILER);
-    if (r.err == ERR_OK) TL_EXPECT_EQ(r.value, (i64)2);
+    TL_EXPECT_EQ(r.err, ERR_OK);
+    TL_EXPECT_EQ(r.value, (i64)2);
 
-    // Bad arguments are rejected before the compiler is even consulted, in every tier.
+    // RR-19 (ruled 2026-08-26): the atom callback is installed against the process interner.
+    TL_EXPECT_TRUE(script_useratom_installed());
+
+    // Bad arguments are rejected before the compiler is consulted, in every tier.
     TL_EXPECT_EQ(script_run_source(f.vm, "probe", StrView{ nullptr, 0 }), ERR_SCRIPT_BAD_ARG);
     TL_EXPECT_EQ(script_eval_int(f.vm, StrView{ nullptr, 0 }).err, ERR_SCRIPT_BAD_ARG);
+    script_fixture_down(&f);
+}
+
+TL_TEST(interner_atoms, "script") {
+    // docs/LUAU-LAYER.md §10.11 interner_atoms, the half that exists without the W3 proxy: a name
+    // registered BEFORE the string is created gets a non-negative atom; anything else gets -1.
+    // The atom is what makes §10.5's field lookup a u16 compare instead of a hash per access.
+    Interner* in = test_interner();
+    TL_ASSERT_NOT_NULL(in);
+    const StrId hp = intern(in, sv_lit("hp"));
+    const StrId hp_max = intern(in, sv_lit("hp_max"));
+    TL_EXPECT_NE(hp, hp_max);
+
+    ScriptFixture f;
+    TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
+    TL_ASSERT_TRUE(script_useratom_installed());
+
+    // A registered name resolves to its OWN StrId - not merely to "some non-negative number",
+    // which is what a hash-shaped bug would also produce.
+    TL_EXPECT_EQ(script_atom_of(f.vm, sv_lit("hp")), (i32)hp);
+    TL_EXPECT_EQ(script_atom_of(f.vm, sv_lit("hp_max")), (i32)hp_max);
+
+    // An unregistered string is -1, and asking does NOT register it: the interner is capped and
+    // fingerprint-adjacent, so a script that builds strings at runtime must not be able to grow
+    // it. Checked by asking twice and confirming the answer did not change.
+    TL_EXPECT_EQ(script_atom_of(f.vm, sv_lit("not_a_registered_name")), (i32)-1);
+    TL_EXPECT_EQ(script_atom_of(f.vm, sv_lit("not_a_registered_name")), (i32)-1);
+
+    // Substrings and prefixes of a registered name are not that name.
+    TL_EXPECT_EQ(script_atom_of(f.vm, sv_lit("h")), (i32)-1);
+    TL_EXPECT_EQ(script_atom_of(f.vm, sv_lit("hp_")), (i32)-1);
+    TL_EXPECT_EQ(script_atom_of(f.vm, StrView{ nullptr, 0 }), (i32)-1);
+
+    // ...and the same holds for a string the SCRIPT builds, which is the path that matters: the
+    // atom must come from the interner, not from where the bytes happened to be allocated.
+    TL_EXPECT_TRUE(script_ok(f.vm, "local s = 'h' .. 'p' assert(#s == 2)"));
+    TL_EXPECT_EQ(script_atom_of(f.vm, sv_lit("hp")), (i32)hp);
     script_fixture_down(&f);
 }

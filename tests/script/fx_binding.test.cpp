@@ -37,7 +37,6 @@ bool eval_raises(ScriptVm* vm, const char* expr) {
 }  // namespace
 
 TL_TEST(fx_literals, "script") {
-    TL_SKIP_WITHOUT_COMPILER();
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
     bool ok = false;
@@ -80,7 +79,6 @@ TL_TEST(fx_literals, "script") {
 }
 
 TL_TEST(fx_ops_match_cpp, "script") {
-    TL_SKIP_WITHOUT_COMPILER();
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
     char expr[192];
@@ -177,7 +175,6 @@ TL_TEST(fx_ops_match_cpp, "script") {
 }
 
 TL_TEST(fx_argument_checks, "script") {
-    TL_SKIP_WITHOUT_COMPILER();
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
 

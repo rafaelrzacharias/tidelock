@@ -114,13 +114,14 @@ constructor. `vendor/luau` at the 0.696 pin (Common/VM/Ast/Compiler, **no CodeGe
       `extern` needs no header). `tools/audit/targets.py` needs no entry for this tree: it walks
       `src/sim` + `src/foundation` only, and neither can reach a Luau header.
 - [x] **The `pool_alloc` grep `MEMORY.md` promised since rev 1** landed with its first caller.
-- [ ] **RR-18 blocks the source-running half of §10.11 in `dev`/`netcode`** — see the ruling
-      requests above. Nine rows `TL_SKIP` there, naming the RR; they pass in `debug`/`ship`.
-      **When it is ruled, the only change needed is `script_can_compile_in_process()`** — the
-      tests and the refusal path are already written against it.
-- [ ] **RR-19 (`useratom` not installed) and RR-20 (CodeGen not vendored)** — both reported by a
-      queryable function rather than a silent fallback; neither blocks this lane, RR-19 blocks
-      W3's proxy field-lookup fast path.
+- [x] **RR-18, RR-19 and RR-20 all ruled 2026-08-26 and implemented in this lane** (records
+      above). Net effect: **19 rows, all four tiers, 0 skipped** — the in-process compile works
+      everywhere, atoms are live, and CodeGen stays out with `script_codegen_available()` saying
+      so. The one new mechanism, `tools/audit/static_allow.txt`, is the general answer to the
+      class that had already produced three instances (the dropped CRT-malloc counter,
+      `vendor_glue`'s pool pointer, the interner pointer): a callback with a fixed signature and
+      no context parameter cannot be handed its state, and the exemption is keyed by lib +
+      directory + stem so neither half alone grants anything.
 - [ ] **For W3 luau-bindings — what this lane published and W3 must not break:**
       `ScriptVm` is opaque and `script.h` names no Luau type; the §10.4 tag numbers and the §10.5
       userdata tags are pinned in `handles.h` (renumbering them is a cross-lane event);
@@ -592,7 +593,21 @@ E-2 needs no W2 decision but blocks real game wiring later.
       enforced module prefixes; revisit only on a real collision.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
-- [ ] **RR-18 (BLOCKING, w2-luau-vm, 2026-08-26): the alloc-shim tripwire and a vendored C++
+- [x] **RULED 2026-08-26 (Rafael): option (a) — pool the compiler's heap.** Shipped on
+      `w2-luau-vm`: `alloc_shim.cpp`'s six operators moved to their own TU
+      (`alloc_shim_ops.cpp`) so archive semantics let a replacement win without a duplicate
+      symbol; `src/vendor_glue/vendor_new.cpp` is a pool-backed global `operator new`/`delete`
+      that `TL_FATAL`s exactly like the tripwire when no pool is installed;
+      `src/script/vm.cpp` opens the window around one `luau_compile` and closes it on return,
+      serving the compiler from **the VM's own pool** (a compile is *for* a VM, so its
+      transient bytes belong to that VM's budget) and asserting the live-byte counter back to
+      its pre-compile value. The one pointer is exempted by name in the new
+      `tools/audit/static_allow.txt`, read by BOTH gates, keyed by lib + directory + stem,
+      with planted violations for each half alone. `MEMORY.md` §1.5/§2, `CPP-SUBSET.md` §1 and
+      `PLATFORM.md` §9.5 amended. **Result: all 19 `tests/script` rows pass in all four
+      tiers**, and §10.9's dev on-load compile is unblocked. The filing, with the measurement
+      and the two rejected options:
+  - [x] **RR-18 (was BLOCKING, w2-luau-vm, 2026-08-26): the alloc-shim tripwire and a vendored C++
       library with no allocator hook cannot both exist.** `MEMORY.md` §2's premise is
       "vendor libs are routed through `mem_pool` via their hook APIs (`lua_newstate(alloc_fn)`,
       ...)". **Measured against the Luau 0.696 pin:** the Luau **VM** honours that exactly —
@@ -634,7 +649,13 @@ E-2 needs no W2 decision but blocks real game wiring later.
       premise is factually wrong and must say so) and is a ruling, so it needs Rafael's word.
       **Parked meanwhile:** the lane ships everything that does not need an in-process compile;
       the source-running §10.11 rows are written and land the moment this is answered.
-- [ ] **RR-19 (w2-luau-vm, 2026-08-26): Luau's `useratom` callback cannot reach the Interner.**
+- [x] **RULED 2026-08-26 (Rafael): RR-19 rides RR-18's mechanism — one mechanism, three
+      users.** Shipped: `src/script/atom.cpp` holds the one exempted `Interner*` and installs
+      `cb->useratom`; it is a LOOKUP, never an insert, so a string a script builds at runtime
+      cannot grow a capped interner. `script_atom_of()` exposes the result for the
+      `interner_atoms` test row, which pins the atom against its own `StrId` rather than
+      against "some non-negative number" (a hash-shaped bug produces that too). The filing:
+  - [x] **RR-19 (w2-luau-vm, 2026-08-26): Luau's `useratom` callback cannot reach the Interner.**
       `LUAU-LAYER.md` §10.2 step 8 specifies `useratom(const char* s, size_t len) → int16_t`
       returning the interner's `StrId`. Luau's callback signature carries **no context pointer
       and no `lua_State*`** (`lua_Callbacks::useratom`, measured at the 0.696 pin), so reaching
@@ -652,7 +673,11 @@ E-2 needs no W2 decision but blocks real game wiring later.
       **Shipped meanwhile, loudly:** `cb->useratom` is NOT installed and
       `script_useratom_installed()` returns `false` — a queryable fact, not a silent fallback.
       Nothing in this lane depends on it; W3 luau-bindings does.
-- [ ] **RR-20 (w2-luau-vm, 2026-08-26, NOT blocking): Luau's CodeGen is not vendored, so the UI
+- [x] **RULED 2026-08-26 (Rafael): RR-20 as recommended** — CodeGen stays unvendored until the
+      W3 lane that writes `bind_ui.cpp` measures a UI-VM cost worth it; `LUAU-LAYER.md` §10.2
+      step 9 now says the call is conditional on the library being present, and
+      `script_codegen_available()` returns `false` and says why. The filing:
+  - [x] **RR-20 (w2-luau-vm, 2026-08-26, NOT blocking): Luau's CodeGen is not vendored, so the UI
       VM has no NCG.** `LUAU-LAYER.md` §10.2 step 9 calls `luau_codegen_create` for the UI VM
       when `luau_codegen_supported()`. CodeGen is 36 more TUs on top of the 53 vendored, against
       a cold-build budget with no headroom: **measured on this container (4 cores,

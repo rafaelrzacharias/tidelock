@@ -154,6 +154,12 @@ bool script_codegen_available(void);
 // and never a suite-killing abort.
 bool script_can_compile_in_process(void);
 
+// The atom Luau assigns to `s` inside this VM (docs/LUAU-LAYER.md §10.2 step 8): the interner's
+// StrId for a name registered BEFORE the string was created, and -1 for anything else. A read,
+// never a registration - a script that builds a string at runtime must not be able to grow the
+// interner. Returns -1 in a VM created with no interner.
+i32 script_atom_of(ScriptVm* vm, StrView s);
+
 // Whether the string-atom callback of docs/LUAU-LAYER.md §10.2 step 8 is installed. FALSE in
 // rev 1: Luau's useratom callback takes (const char*, size_t) and NO context pointer, so it
 // cannot reach the process Interner without namespace-scope mutable state, which

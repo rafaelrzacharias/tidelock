@@ -62,6 +62,15 @@ void script_sandbox_freeze(ScriptVm* vm);
 // literal constructors and the constants (a table compile writes fx literals and nothing else).
 void script_bind_fx(ScriptVm* vm);
 
+// docs/LUAU-LAYER.md §10.2 step 8: installs the string-atom callback on `L` against the process
+// interner. A null interner installs nothing, and lua_tostringatom then yields -1 for every
+// string - the honest state for a VM with no name registry, not a fallback. Implemented in
+// atom.cpp, which is alone in its TU because it holds the one exempted pointer (RR-19).
+void script_install_useratom(lua_State* L, Interner* interner);
+
+// The installed interner, or null. For the tests and for script_useratom_installed().
+const Interner* script_atom_interner(void);
+
 // Marks `t` at the top of the stack read-only and pops nothing. Used by every binding table so
 // a script cannot add a function to `fx` and have it look official.
 void script_freeze_table(lua_State* L, int idx);

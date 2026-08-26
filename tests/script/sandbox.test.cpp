@@ -10,7 +10,6 @@
 #include "script_test_util.h"
 
 TL_TEST(sandbox_removed_globals, "script") {
-    TL_SKIP_WITHOUT_COMPILER();
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
 
@@ -35,7 +34,6 @@ TL_TEST(sandbox_removed_globals, "script") {
 }
 
 TL_TEST(sandbox_ui_vm_keeps_everything, "script") {
-    TL_SKIP_WITHOUT_COMPILER();
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_UI));
     // The UI VM removes nothing (docs/LUAU-LAYER.md §10.2 step 4): it never touches sim state, and
@@ -49,7 +47,6 @@ TL_TEST(sandbox_ui_vm_keeps_everything, "script") {
 }
 
 TL_TEST(sandbox_data_vm_removals, "script") {
-    TL_SKIP_WITHOUT_COMPILER();
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_DATA));
     // docs/LUAU-LAYER.md §10.2 step 4: the data VM removes os, io, loadstring, getfenv, setfenv.
@@ -65,7 +62,6 @@ TL_TEST(sandbox_data_vm_removals, "script") {
 }
 
 TL_TEST(sandbox_readonly, "script") {
-    TL_SKIP_WITHOUT_COMPILER();
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
 
@@ -94,7 +90,6 @@ TL_TEST(sandbox_readonly, "script") {
 }
 
 TL_TEST(sandbox_tostring, "script") {
-    TL_SKIP_WITHOUT_COMPILER();
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
     // docs/LUAU-LAYER.md §10.2 step 5: no address may reach a script. The stock tostring prints
@@ -115,7 +110,6 @@ TL_TEST(sandbox_tostring, "script") {
 }
 
 TL_TEST(sortedpairs_order, "script") {
-    TL_SKIP_WITHOUT_COMPILER();
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
 

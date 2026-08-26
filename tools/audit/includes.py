@@ -130,6 +130,32 @@ _ENTROPY_CARRIERS = {}                    # root -> frozenset of headers that ex
 # OS calls belong to platform/, not foundation/ (docs/TOOLING.md §9.3.9).
 TOOLING_SYS_ALLOW = {"stdio.h", "stdlib.h", "stdarg.h"}
 
+# docs/CPP-SUBSET.md §1's writable-static ban has exactly two exemptions, and BOTH live in one
+# file so neither gate can carry a copy that drifts: tools/audit/static_allow.txt. RR-7's
+# tooling plane is the other, and it lives in src/foundation/CMakeLists.txt for the same reason.
+# Keyed by DIRECTORY + STEM here (this gate sees paths) and by LIB + STEM in symbols.py (that one
+# sees archives); a row must match both or the exemption is only half real.
+STATIC_ALLOW_FILE = os.path.join("tools", "audit", "static_allow.txt")
+
+
+def static_allow_dirs(root):
+    """{(directory, stem)} that may hold namespace-scope mutable state. Parsed, never guessed: a
+    malformed row is a hard error rather than a silently empty exemption set, because an empty
+    set here looks exactly like a correct one until the day it does not."""
+    out = set()
+    path = os.path.join(root, STATIC_ALLOW_FILE)
+    if not os.path.exists(path):
+        return out
+    for n, line in enumerate(open(path, encoding="utf-8"), 1):
+        row = line.split("#")[0].split()
+        if not row:
+            continue
+        if len(row) != 3:
+            sys.exit("%s:%d: want '<lib> <directory> <stem>', got %r" % (STATIC_ALLOW_FILE, n, line.strip()))
+        out.add((row[1], row[2]))
+    return out
+
+
 INC_SYS = re.compile(r'^\s*#\s*include\s*<([^>]+)>')
 INC_LOCAL = re.compile(r'^\s*#\s*include\s*"([^"]+)"')
 
@@ -532,7 +558,7 @@ def contract_block_end(raw_lines):
     return len(raw_lines)
 
 
-def check_file(root, path, nondet, tooling, errors):
+def check_file(root, path, nondet, tooling, static_allow, errors):
     rel = os.path.relpath(path, root).replace("\\", "/")
     try:
         raw = open(path, encoding="utf-8").read()
@@ -622,7 +648,11 @@ def check_file(root, path, nondet, tooling, errors):
                                   "(docs/BUILD.md §4)" % (rel, i, token, prefixes))
 
         tline = token_lines[i - 1] if i - 1 < len(token_lines) else ""
-        if is_mutable_static(tline) and not is_tooling_tu:
+        # The exemption is (directory, stem), never the stem alone and never the directory
+        # alone: a same-named file in another directory, or another file in the same directory,
+        # is an ordinary violation.
+        static_exempt = (os.path.dirname(rel), stem) in static_allow
+        if is_mutable_static(tline) and not is_tooling_tu and not static_exempt:
             errors.append("%s:%d: static mutable state (docs/CPP-SUBSET.md §1): %s"
                           % (rel, i, raw_lines[i - 1].strip()[:70]))
         if TLS_SPELLINGS.search(tline):
@@ -766,13 +796,14 @@ def main():
     src = os.path.join(a.root, "src")
     nondet = nondet_stems(a.root)
     tooling = tooling_stems(a.root)
+    static_allow = static_allow_dirs(a.root)
     errors = []
     scanned = 0
     for dirpath, _dirs, files in os.walk(src):
         for name in sorted(files):
             if name.endswith(SCAN_EXT):
                 scanned += 1
-                check_file(a.root, os.path.join(dirpath, name), nondet, tooling, errors)
+                check_file(a.root, os.path.join(dirpath, name), nondet, tooling, static_allow, errors)
     # Gate 7 alone also walks tests/ - windows.h is legal there (docs/TESTING.md §8 R-2) and the
     # break it causes is a test-tree break as often as a src/ one. Counted separately so `scanned`
     # keeps meaning "files the src/ gates saw".

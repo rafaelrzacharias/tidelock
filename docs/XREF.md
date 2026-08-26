@@ -80,7 +80,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ECS.md` -> §9
 - `FX-PALETTE.md` -> §1, §2, §4, §5, §6, §7, §9
 - `JOBS.md` -> §1
-- `LUAU-LAYER.md` -> §1, §6
+- `LUAU-LAYER.md` -> §6
 - `MEMORY.md` -> §4, §7
 - `NETCODE.md` -> §9
 - `PLATFORM.md` -> §1, §4
@@ -188,7 +188,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ECS.md` -> §2
 - `FRAME-LOOP.md` -> §5
 - `JOBS.md` -> §1.3
-- `LUAU-LAYER.md` -> §2, §6, §7, §8.6
+- `LUAU-LAYER.md` -> §1.5, §6, §7, §8.6
 - `MEMORY.md` -> §1.2
 - `NETCODE.md` -> §5
 - `PLATFORM.md` -> §1.1, §1.5, §3, §8.2
@@ -232,7 +232,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `DETERMINISM.md` -> §5
 - `FRAME-LOOP.md` -> §3, §6
 - `JOBS.md` -> §6, §9.2, §9.3
-- `MEMORY.md` -> §4, §9.2
+- `MEMORY.md` -> §4, §9.2, §9.5
 - `NETCODE.md` -> §3, §5
 - `RENDER2D.md` -> §0, §9.2, §9.3
 - `ROADMAP.md` -> §9

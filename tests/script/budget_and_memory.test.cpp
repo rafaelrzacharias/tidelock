@@ -11,7 +11,6 @@
 #include "script_test_util.h"
 
 TL_TEST(budget_trip, "script") {
-    TL_SKIP_WITHOUT_COMPILER();
     ScriptFixture f;
     // A budget small enough that a runaway loop trips it in milliseconds, and large enough that
     // the chunk's own prologue does not.
@@ -49,7 +48,6 @@ TL_TEST(budget_trip, "script") {
 }
 
 TL_TEST(memory_exhaustion, "script") {
-    TL_SKIP_WITHOUT_COMPILER();
     ScriptFixture f;
     // A pool far too small for the allocation the script asks for. docs/LUAU-LAYER.md §10.2 step
     // 2: over budget the adaptor returns NULL, Luau raises LUA_ERRMEM ("not enough memory"), and
@@ -78,7 +76,6 @@ TL_TEST(memory_exhaustion, "script") {
 }
 
 TL_TEST(sortedpairs_order_is_a_function_of_the_key_set, "script") {
-    TL_SKIP_WITHOUT_COMPILER();
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
 

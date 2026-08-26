@@ -316,7 +316,10 @@ spellings across the two docs). No `<atomic>`, no `volatile`.
 Pools (`MEMORY.md` §1.5): `pool_vendor` (SDL + ImGui + stb, 64 MB reserve), `pool_luau_sim`,
 `pool_luau_ui` (64 MB each, owned by `LUAU-LAYER`), `pool_enet` (16 MB, owned by `net/`). All
 `pool_*` calls live in `src/vendor_glue/` (the one folder allowed a static pool pointer, for the
-`STBI_MALLOC` compile-time macro).
+`STBI_MALLOC` compile-time macro and — since RR-18, ruled 2026-08-26 — for the program-wide
+`operator new` replacement of `MEMORY.md` §1.5). That sentence had no gate behind it until then;
+the pointer is now exempted by name in `tools/audit/static_allow.txt`, with planted violations for
+the same directory at a different stem and the same stem in a different directory.
 
 | Lib | Hook | Pool |
 |---|---|---|
