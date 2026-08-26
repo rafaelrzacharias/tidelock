@@ -82,10 +82,21 @@ void vendor_free(void* q) {
 // closes it immediately after, so the window is a few milliseconds per compile and nothing else
 // in the process is inside it.
 //
-// Link mechanics: tl_vendor_glue depends on tl_foundation, so CMake puts it EARLIER on the link
-// line; this member is pulled for `operator new` before libtl_foundation.a is scanned, and
-// alloc_shim_ops.o is then never needed. That ordering is a dependency, not luck - which is the
-// whole reason the tripwires were split into their own member (RR-18).
+// Link mechanics, MEASURED on the generated link lines rather than reasoned about (an earlier
+// version of this comment claimed CMake orders tl_vendor_glue before tl_foundation because of the
+// dependency - it does not; tl_tests lists libtl_foundation.a FIRST):
+//   - src/script/vm.cpp references vendor_heap_install, so THIS member is pulled while
+//     libtl_vendor_glue.a is scanned, and every reference to `operator new` from
+//     libluau_compiler.a is satisfied from here.
+//   - alloc_shim_ops.o is pulled only if `operator new` is still undefined when a
+//     libtl_foundation.a occurrence is scanned. In every current link line that never happens:
+//     nothing before foundation's first occurrence allocates, and by its last occurrence this
+//     member has already defined the operators.
+// If that ever stops holding, the failure is a DUPLICATE-SYMBOL LINK ERROR - loud, at build
+// time, on every leg - not a silent fallback. The property that could regress quietly is the
+// other one (the CRT serving the compiler instead of the pool), and that is pinned at runtime by
+// tests/script/vm_lifecycle.test.cpp's compile_allocations_go_through_the_vm_pool, which watches
+// the pool's peak move across a compile.
 void* operator new(size_t n) { return vendor_alloc(n); }
 void* operator new[](size_t n) { return vendor_alloc(n); }
 void operator delete(void* q) noexcept { vendor_free(q); }

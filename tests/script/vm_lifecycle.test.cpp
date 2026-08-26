@@ -186,3 +186,37 @@ TL_TEST(interner_atoms, "script") {
     TL_EXPECT_EQ(script_atom_of(f.vm, sv_lit("hp")), (i32)hp);
     script_fixture_down(&f);
 }
+
+TL_TEST(compile_allocations_go_through_the_vm_pool, "script") {
+    // RR-18's actual property, pinned. The window in load_chunk asserts the pool's LIVE bytes
+    // return to their pre-compile value - which is also true if the CRT served the compiler and
+    // the pool never moved at all. The PEAK is what distinguishes them: it only rises if the
+    // allocations really came from this pool.
+    //
+    // This is the one RR-18 property that could regress silently. The other - both definitions of
+    // operator new landing in one binary - is a duplicate-symbol link error, loud on every leg.
+    ScriptFixture f;
+    TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_SIM));
+    const u64 peak_before = script_pool_stats(f.vm)->peak_bytes;
+    const u64 live_before = script_pool_stats(f.vm)->live_bytes;
+
+    // A source big enough that the compiler's transient allocations clear the pool's existing
+    // high-water mark; a one-liner can compile entirely inside bytes the VM already peaked at.
+    TL_ASSERT_EQ(script_run_source(f.vm, "sized",
+        sv_lit("local t = {}\n"
+               "for i = 1, 200 do t[#t + 1] = i * 2 + 1 end\n"
+               "local function f(a, b, c) return a + b + c end\n"
+               "local s = 0\n"
+               "for i = 1, 200 do s = f(s, t[i], i) end\n"
+               "return s\n")), ERR_OK);
+
+    const MemPoolStats* st = script_pool_stats(f.vm);
+    // A MAGNITUDE floor, not just "> before": one incidental block would satisfy a bare > and the
+    // row would pass while the compiler ran on the CRT. Measured on this fixture (dev, x86-64,
+    // Luau 0.696): the peak moves 114,688 bytes. 16 KB is an eighth of that - comfortably above
+    // any single incidental allocation and far below the real figure, so the row neither flakes
+    // on a smaller compiler nor passes on a broken link.
+    TL_EXPECT_GT(st->peak_bytes, peak_before + (u64)(16u * 1024u));
+    TL_EXPECT_GE(st->live_bytes, live_before);      // and gave every byte of it back
+    script_fixture_down(&f);
+}
