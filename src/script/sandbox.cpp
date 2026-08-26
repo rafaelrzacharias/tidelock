@@ -172,10 +172,57 @@ void push_tostring(lua_State* L, int idx) {
     lua_remove(L, -2);                              // drop luaL_tolstring's own copy
 }
 
+// True for the types whose stock string form IS an address. luaL_tolstring's default case pushes
+// `"%s: 0x%016llx"` built from the object pointer (vendor/luau/VM/src/laux.cpp:606-612 at the
+// 0.696 pin), so all six leak the same channel by the same line. `vector` is deliberately NOT
+// here: Luau formats its components, which is a pure function of the value.
+//
+// The ship-round finding named three of these (table/function/userdata). Fixing only those three
+// would leave the other half of one channel open, so this is the whole set - see the ruling
+// record in TODO.md.
+bool is_address_kind(int t) {
+    return t == LUA_TTABLE || t == LUA_TFUNCTION || t == LUA_TUSERDATA
+        || t == LUA_TLIGHTUSERDATA || t == LUA_TTHREAD || t == LUA_TBUFFER;
+}
+
+// The DATA VM's string form (docs/LUAU-LAYER.md §10.2 step 5). Value types get the stock
+// conversion unchanged; a reference RAISES.
+//
+// RULED 2026-08-26 (Rafael), option (a) - error at the mistake. The data VM's OUTPUT is hashed
+// (§1), so `"tier_" .. tostring(x)` with a table `x` writes an address into a hashed table and
+// the divergence surfaces as a peer fingerprint mismatch on handshake instead of as an error on
+// the line that made it. This is the same class as the D4 math.random ruling and is answered the
+// same way: a data file has no legitimate reason to stringify a reference, so fail where the
+// mistake is. The sim VM's replacement (the type name) would have been the cheaper fix and is
+// the wrong one HERE - it is safe for the fingerprint but silent for the author.
+//
+// The raw type is checked BEFORE luaL_tolstring, so a table carrying a __tostring metamethod
+// raises too. Deliberate: that is still a reference being stringified, and the ruling's principle
+// is about the authoring mistake, not only about the bytes.
+void push_tostring_strict(lua_State* L, int idx, const char* what) {
+    const int t = lua_type(L, idx);
+    if (is_address_kind(t)) {
+        luaL_error(L, "%s: a %s has no deterministic string form - a data table is hashed, so its "
+                      "address would differ per peer (docs/LUAU-LAYER.md 10.2 step 5)",
+                   what, lua_typename(L, t));
+    }
+    size_t len = 0;
+    const char* s = luaL_tolstring(L, idx, &len);
+    lua_pushlstring(L, s, len);
+    lua_remove(L, -2);
+}
+
 // _G.tostring. One argument, one result; see push_tostring for why references lose their address.
 int sandbox_tostring(lua_State* L) {
     luaL_checkany(L, 1);
     push_tostring(L, 1);
+    return 1;
+}
+
+// _G.tostring in the data VM. Same shape; see push_tostring_strict for why a reference raises.
+int sandbox_tostring_strict(lua_State* L) {
+    luaL_checkany(L, 1);
+    push_tostring_strict(L, 1, "tostring");
     return 1;
 }
 
@@ -196,7 +243,10 @@ bool is_digit(char c) { return c >= '0' && c <= '9'; }
 // so a table argument is a TYPE ERROR there, never an address - but Luau's `%*` extension goes
 // through luaL_tolstring and prints `table: 0x...` (measured against the 0.696 pin). `%p` needs
 // no handling at all: Luau's format rejects it as an invalid option.
-int sandbox_string_format(lua_State* L) {
+// `strict` picks which of the two forms above each consumed argument goes through: the sim VM's
+// type-name replacement, or the data VM's raise. Everything else about the scan is identical, so
+// it is one function rather than two that would drift.
+int format_impl(lua_State* L, bool strict) {
     const int top = lua_gettop(L);
     size_t fl = 0;
     const char* f = luaL_checklstring(L, 1, &fl);
@@ -210,7 +260,11 @@ int sandbox_string_format(lua_State* L) {
         if (*p == '*') {
             ++p;
             ++arg;
-            if (arg <= top) { push_tostring(L, arg); lua_replace(L, arg); }
+            if (arg <= top) {
+                if (strict) push_tostring_strict(L, arg, "string.format(\'%*\')");
+                else        push_tostring(L, arg);
+                lua_replace(L, arg);
+            }
             continue;
         }
         while (p < end && is_format_flag(*p)) ++p;
@@ -219,13 +273,21 @@ int sandbox_string_format(lua_State* L) {
         if (p >= end) break;
         const char conv = *p++;
         ++arg;
-        if (conv == 's' && arg <= top) { push_tostring(L, arg); lua_replace(L, arg); }
+        if (conv == 's' && arg <= top) {
+            if (strict) push_tostring_strict(L, arg, "string.format(\'%s\')");
+            else        push_tostring(L, arg);
+            lua_replace(L, arg);
+        }
     }
     lua_pushvalue(L, lua_upvalueindex(1));
     for (int i = 1; i <= top; ++i) lua_pushvalue(L, i);
     lua_call(L, top, 1);
     return 1;
 }
+
+// _G.string.format for the sim VM and for the data VM. Upvalue 1 is the original in both.
+int sandbox_string_format(lua_State* L)        { return format_impl(L, false); }
+int sandbox_string_format_strict(lua_State* L) { return format_impl(L, true); }
 
 // --- sortedpairs (docs/LUAU-LAYER.md §10.2.1) ------------------------------------------------
 
@@ -401,17 +463,26 @@ ErrCode script_sandbox_open(ScriptVm* vm) {
         }
     }
 
-    // Step 5: the replacements. The sim VM is the one that must not see an address; the other two
-    // get sortedpairs (same code everywhere, §10.2.1) but keep their stock tostring/format, since
-    // neither feeds sim state and the UI's inspector genuinely wants the address.
-    if (vm->kind == SCRIPT_VM_SIM) {
-        lua_pushcfunction(L, &sandbox_tostring, "tostring");
+    // Step 5: the replacements. BOTH the sim and the data VM must be unable to see an address -
+    // the sim VM because a script could branch on one, the data VM because its OUTPUT is hashed
+    // (§1) - but they answer it differently: the sim VM substitutes the type name (a script that
+    // logs a table must keep running), the data VM raises (a data file that stringifies a
+    // reference is a bug, and the fingerprint mismatch it would otherwise cause surfaces on a
+    // different machine, in a different phase, with no line number). RULED 2026-08-26 (Rafael),
+    // option (a); record in TODO.md.
+    //
+    // The UI VM keeps stock both: it feeds no hashed state and its inspector genuinely wants the
+    // address. All three get sortedpairs (same code everywhere, §10.2.1).
+    if (vm->kind != SCRIPT_VM_UI) {
+        const bool strict = (vm->kind == SCRIPT_VM_DATA);
+        lua_pushcfunction(L, strict ? &sandbox_tostring_strict : &sandbox_tostring, "tostring");
         lua_setglobal(L, "tostring");
 
         lua_getglobal(L, LUA_STRLIBNAME);
         TL_ASSERT(lua_istable(L, -1));
         lua_getfield(L, -1, "format");                       // the original, as the upvalue
-        lua_pushcclosurek(L, &sandbox_string_format, "format", 1, nullptr);
+        lua_pushcclosurek(L, strict ? &sandbox_string_format_strict : &sandbox_string_format,
+                          "format", 1, nullptr);
         lua_setfield(L, -2, "format");
         lua_pop(L, 1);
     }

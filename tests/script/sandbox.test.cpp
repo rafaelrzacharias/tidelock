@@ -46,6 +46,96 @@ TL_TEST(sandbox_ui_vm_keeps_everything, "script") {
     script_fixture_down(&f);
 }
 
+// True iff `needle` occurs in `hay`. Spelled out: the test binary has no <string.h> grant and
+// docs/CPP-SUBSET.md §1 bans the STL, so a substring check is four lines rather than a call.
+static bool err_mentions(const char* hay, const char* needle) {
+    for (u32 i = 0; hay[i] != '\0'; ++i) {
+        u32 j = 0;
+        while (needle[j] != '\0' && hay[i + j] == needle[j]) ++j;
+        if (needle[j] == '\0') return true;
+    }
+    return false;
+}
+
+// Runs one expression in `vm` and asserts it was REFUSED by the data VM's reference guard - the
+// call failed AND the message is the guard's, not some other error. Both halves matter: a typo in
+// the source would also make script_ok false, and a row that accepted any failure would pass on
+// it (the "cannot fail on its subject" class review round 2 was about).
+static bool refuses_reference(ScriptVm* vm, const char* src) {
+    if (script_run_source(vm, "ref", sv(src)) == ERR_OK) return false;
+    return err_mentions(script_last_error(vm), "no deterministic string form");
+}
+
+TL_TEST(sandbox_data_vm_stringifying_a_reference_raises, "script") {
+    // RULED 2026-08-26 (Rafael), ship round F-1, option (a) - error at the mistake.
+    //
+    // The finding: the deterministic tostring/format were gated to the SIM VM, so the data VM
+    // kept stock both - and stock tostring of a reference is `luaL_tolstring`'s default case,
+    // which prints the object POINTER (vendor/luau/VM/src/laux.cpp:606-612 at the 0.696 pin).
+    // The data VM's OUTPUT is hashed (docs/LUAU-LAYER.md §1), so `"tier_" .. tostring(x)` with a
+    // table `x` writes an address into a hashed table: the peers disagree, and it surfaces as a
+    // fingerprint mismatch on handshake rather than as an error on the line that made it. Exactly
+    // the D4 math.random shape, through a different door, and ruled the same way.
+    ScriptFixture f;
+    TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_DATA));
+
+    // Every reference kind a data file can actually construct. lightuserdata is guarded by the
+    // same predicate and is deliberately absent here: Luau has no script-side constructor for it
+    // (it arrives from the engine), so a row would have to fake one.
+    TL_EXPECT_TRUE(refuses_reference(f.vm, "return tostring({})"));
+    TL_EXPECT_TRUE(refuses_reference(f.vm, "return tostring(function() end)"));
+    TL_EXPECT_TRUE(refuses_reference(f.vm, "return tostring(newproxy(false))"));
+    TL_EXPECT_TRUE(refuses_reference(f.vm, "return tostring(coroutine.create(function() end))"));
+    TL_EXPECT_TRUE(refuses_reference(f.vm, "return tostring(buffer.create(8))"));
+
+    // ...and through string.format, by BOTH conversions. `%*` is the one that leaks under stock
+    // Luau (stock `%s` type-errors on a table instead), so a fix that handled only `%s` would
+    // leave the real channel open - which is why CANON's contract now names both.
+    TL_EXPECT_TRUE(refuses_reference(f.vm, "return string.format('%s', {})"));
+    TL_EXPECT_TRUE(refuses_reference(f.vm, "return string.format('%*', {})"));
+    TL_EXPECT_TRUE(refuses_reference(f.vm, "return string.format('a %* b', coroutine.create(function() end))"));
+
+    // The control the ruling asks for: the data VM is restricted, not crippled. Value types keep
+    // the STOCK conversion - not the sim VM's substitution - because F-1 closes the address
+    // channel and changes nothing else about how a data file formats its numbers.
+    TL_EXPECT_TRUE(script_ok(f.vm,
+        "assert(tostring(12) == '12' and tostring(true) == 'true' and tostring(nil) == 'nil')\n"
+        "assert(tostring('hi') == 'hi' and tostring(2.5) == '2.5')\n"
+        "assert(string.format('%s %d', 'a', 3) == 'a 3')\n"
+        "assert(string.format('%*', 7) == '7')\n"
+        "assert(string.format('%%s') == '%s')\n"
+        "assert(string.format('%10s|', 'x') == '         x|')\n"));
+    TL_EXPECT_EQ(script_last_error(f.vm)[0], '\0');
+
+    // The process is alive and the VM still usable after a raise - the refusal is an error, not a
+    // TL_FATAL. A guard that took the VM down with it would turn an authoring typo into a crash.
+    TL_EXPECT_FALSE(script_ok(f.vm, "return tostring({})"));
+    TL_EXPECT_TRUE(script_ok(f.vm, "assert(1 + 1 == 2)"));
+    script_fixture_down(&f);
+
+    // The sim VM's half is UNCHANGED, pinned here beside the data VM's so the two philosophies
+    // sit in one place: sim SUBSTITUTES (a sim script that logs a table must keep running),
+    // data RAISES. A later edit that unified them - in either direction - turns this red.
+    ScriptFixture g;
+    TL_ASSERT_TRUE(script_fixture_up(&g, SCRIPT_VM_SIM));
+    TL_EXPECT_TRUE(script_ok(g.vm,
+        "assert(tostring({}) == 'table')\n"
+        "assert(string.format('%*', {}) == 'table')\n"));
+    TL_EXPECT_EQ(script_last_error(g.vm)[0], '\0');
+    script_fixture_down(&g);
+
+    // ...and so is the UI VM's: it keeps stock both, so an address is REACHABLE there by design
+    // (§10.2 step 5 - it feeds no hashed state and the inspector wants it). Asserting the address
+    // is present rather than merely "not equal to 'table'" is what makes this row notice if the
+    // guard is ever widened to all three VMs by accident.
+    ScriptFixture u;
+    TL_ASSERT_TRUE(script_fixture_up(&u, SCRIPT_VM_UI));
+    TL_EXPECT_TRUE(script_ok(u.vm,
+        "local s = tostring({})\n"
+        "assert(string.sub(s, 1, 7) == 'table: ', s)\n"));
+    script_fixture_down(&u);
+}
+
 TL_TEST(sandbox_data_vm_removals, "script") {
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_DATA));

@@ -113,8 +113,12 @@ void vendor_free(void* q) {
 // If that ever stops holding, the failure is a DUPLICATE-SYMBOL LINK ERROR - loud, at build
 // time, on every leg - not a silent fallback. The property that could regress quietly is the
 // other one (the CRT serving the compiler instead of the pool), and that is pinned at runtime by
-// tests/script/vm_lifecycle.test.cpp's compile_allocations_go_through_the_vm_pool, which watches
-// the pool's peak move across a compile.
+// tests/script/vm_lifecycle.test.cpp's compile_allocations_go_through_the_vendor_pool, which
+// reads the per-window counter defined ~90 lines above in this TU (g_window_peak, published by
+// vendor_heap_window_peak). Both halves of this sentence were stale until the ship round: the row
+// was renamed when the compile window moved to pool_vendor, and it stopped watching the POOL's
+// peak when review round 2 established that a lifetime high-water mark cannot answer a
+// per-window question.
 void* operator new(size_t n) { return vendor_alloc(n); }
 void* operator new[](size_t n) { return vendor_alloc(n); }
 void operator delete(void* q) noexcept { vendor_free(q); }

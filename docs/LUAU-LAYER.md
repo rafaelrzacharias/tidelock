@@ -37,7 +37,7 @@ Persistent script state = a component (Luau-declared, `ECS.md` §6.1) or a singl
 |---|---|---|---|---|
 | **sim** | `ipairs`, `sortedpairs` (ours), `table` (array ops), `string` (pure fns only), `fx` (det math bindings), engine bindings (§3). **Removed:** `math` (stock), `os`, `io`, `debug`, `pairs`/`next`, `coroutine`, `string.rep`, `require` beyond the init phase, `loadstring` | inside the lockstep contract; bytecode in the fingerprint | own `mem_pool`, budgeted | **interpreter only** (native codegen is another codegen surface) |
 | **ui/editor** | stock Luau + ImGui/draw/text bindings + read-only world access; `pairs` allowed | free | own pool | NCG allowed |
-| **data** | stock Luau minus `os`/`io` **and minus `math.random`/`math.randomseed`** (ruled 2026-08-26 — Luau seeds its PCG from `uintptr_t(L) ^ time(NULL) ^ clock()`, and this VM's output is hashed, so a single draw makes a peer-divergent table that surfaces as a fingerprint mismatch instead of an error at the mistake); used once per table compile then destroyed (`ASSETS-AND-DATA.md` §3) | its *output* is hashed | throwaway | — |
+| **data** | stock Luau minus `os`/`io` **and minus `math.random`/`math.randomseed`** (ruled 2026-08-26 — Luau seeds its PCG from `uintptr_t(L) ^ time(NULL) ^ clock()`, and this VM's output is hashed, so a single draw makes a peer-divergent table that surfaces as a fingerprint mismatch instead of an error at the mistake), **and with `tostring`/`string.format` of a reference raising** rather than printing an address (ruled 2026-08-26, same reasoning through a different door — §10.2 step 5); used once per table compile then destroyed (`ASSETS-AND-DATA.md` §3) | its *output* is hashed | throwaway | — |
 
 The sim VM and the UI VM never share a `lua_State`; the UI VM reads the world through the same
 read bindings the inspector uses and can only *write* by issuing commands (which are sealed).
@@ -236,10 +236,29 @@ returns `Result<ScriptVm*>` with `ERR_SCRIPT_*` codes; no partial VM survives.
    nobody ran is not a gate (`LESSONS.md`). VM creation fails with `ERR_SCRIPT_SANDBOX`. `_G.require` is installed
    in step 7 and removed at the end of init (§10.9). Data VM removes `os`, `io`, `loadstring`,
    `getfenv`, `setfenv`. UI VM removes nothing.
-5. **Replacements (sim VM):** `tostring` → C function returning the type name for tables,
-   functions and userdata (the stock form prints an address — a nondeterministic value a script
-   could branch on); `string.format` → a thin C wrapper that routes `%s` through that `tostring`.
-   `sortedpairs` (§10.2.1) is added to `_G`.
+5. **Replacements (sim and data VMs):** neither may see an address — the sim VM because a script
+   could branch on one, the data VM because its *output* is hashed (§1) — but they answer it
+   differently:
+   - **sim:** `tostring` → C function returning the **type name** for every reference kind (the
+     stock form prints an address, a nondeterministic value a script could branch on). A sim
+     script that logs a table must keep running.
+   - **data:** `tostring` of a reference **raises** (**RULED 2026-08-26** — a data file has no
+     legitimate reason to stringify a reference, and the alternative, substituting a type name,
+     is safe for the fingerprint but silent for the author: the mistake would surface as a peer
+     fingerprint mismatch on handshake instead of on the line that made it. Same class as the
+     `math.random` ruling in this section's step 4). Value types keep the **stock** conversion —
+     the ruling closes the address channel and changes nothing else.
+   - **ui:** stock both. It feeds no hashed state and the inspector genuinely wants the address.
+
+   The reference kinds are the ones whose stock form is `luaL_tolstring`'s default case — `table`,
+   `function`, `userdata`, `lightuserdata`, `thread`, `buffer`. `vector` is **not** one: Luau
+   formats its components, a pure function of the value.
+
+   `string.format` → a thin C wrapper (same rule per VM) that routes **both** `%s` **and `%*`**
+   through that `tostring`. `%*` is the conversion that actually leaks — stock `%s` calls
+   `luaL_checklstring`, so a reference is a type error there — and it was unspecced until the
+   ship round. `%p` needs no handling: Luau rejects it as an invalid option at the pin.
+   `sortedpairs` (§10.2.1) is added to `_G` in all three.
 6. **Binding tables** (§10.3–§10.6) created with `lua_createtable(L, 0, n)` + `lua_pushcfunction`
    (`lua_pushcclosurek` for closures), set as globals: `fx`, `ecs`, `events`, `input`, `alloy`,
    `data`, `log` (sim); the UI VM gets the read-only subset of `ecs`/`alloy`/`data` plus `ui`,
@@ -606,7 +625,8 @@ construction (same tree); `luau_load` still reports it as a load error.
 |---|---|
 | `sandbox_removed_globals` | every name in §10.2 step 4 is `nil` in the sim VM; `pairs` works in the UI VM; `os` is absent from the data VM |
 | `sandbox_readonly` | after init: global assignment, `rawset(_G, …)`, `fx.x = 1`, `setmetatable(proxy, …)` all raise |
-| `sandbox_tostring` | `tostring({})` == `"table"`; `string.format("%s", {})` == `"table"` |
+| `sandbox_tostring` | **sim VM:** `tostring({})` == `"table"`; `string.format("%s", {})` and `("%*", {})` == `"table"` |
+| `sandbox_data_vm_stringifying_a_reference_raises` | **data VM:** `tostring`/`format` of each script-constructible reference kind (table, function, userdata, thread, buffer) raises with the guard's own message, through `%s` and `%*` alike; value types keep the stock conversion; the VM survives the raise. Controls pin the sim VM still substituting and the UI VM still printing the address, so a later edit that unifies the three turns it red |
 | `sortedpairs_order` | keys `{3, "b", 1, "a", 2}` iterate `1,2,3,"a","b"`; non-integer/table key → error; deletion mid-walk skips |
 | `fx_literals` | `fx.pos(12.5)` == `12.5 × 2^18`; `fx.pos(0.1)` errors; `fx.q(2)` errors (range); `fx.raw(2^31)` errors; `fx.mul_q` vs `mul<pos_t>` over a seeded sweep (`TL_EXPECT_EQ` on raw bits) |
 | `fx_argument_checks` | every `fx.*` rejects `1.5`, `"1"`, `nil`, out-of-range — generated from the binding table |

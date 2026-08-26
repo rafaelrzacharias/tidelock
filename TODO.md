@@ -98,6 +98,50 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       (the steward session dispatches it after the push; the aarch64 evidence rides the CI arm64
       legs — the Pi left the program 2026-08-25).
 
+## W2 luau-vm — ship round (2026-08-26, fresh context, full re-read; verdict FIX FIRST)
+
+Three findings on head `6944d9dd`; full comment on PR #11, whose "checked and cleared" list is the
+bulk of the round (the RR-18 mechanism, the §0 freeze, the gates and every amended doc cohere).
+One needed a ruling; **Rafael ruled it 2026-08-26, relayed by the steward** — recorded with that
+provenance, the same shape as D4's, per `CLAUDE.md`'s doc-integrity protocol.
+
+- [x] **RULED 2026-08-26 (Rafael, via the steward) — F-1: in the data VM, `tostring`/
+      `string.format` of a reference RAISES (option (a) — error at the mistake).** The
+      deterministic replacements were gated to `SCRIPT_VM_SIM`, so the data VM kept stock both —
+      and stock `tostring` of a reference is `luaL_tolstring`'s default case, which prints the
+      object pointer (`vendor/luau/VM/src/laux.cpp:606-612` at the 0.696 pin). The data VM's
+      **output is hashed** (`LUAU-LAYER.md` §1), so `"tier_" .. tostring(x)` with a table `x`
+      writes an address into a hashed table: peers disagree and it surfaces as a fingerprint
+      mismatch on handshake rather than as an error on the line. **Identical class to D4**
+      (`math.random`) through a different door — round 1's "no route to address identity" sweep
+      was explicitly sim-VM-only, so this door was never on its list. **Ruling:** raise, because a
+      data file has no legitimate reason to stringify a reference; the cheaper option (b), extend
+      the sim VM's type-name substitution to the data VM, is safe for the fingerprint but silent
+      for the author. **Shipped:** `push_tostring_strict` + `sandbox_tostring_strict` +
+      `format_impl(strict)` in `sandbox.cpp`, installed for `kind != SCRIPT_VM_UI` with the mode
+      chosen per kind; `LUAU-LAYER.md` §10.2 step 5, §1's data row and §10.11's row list amended
+      at their homes; `sandbox_data_vm_stringifying_a_reference_raises` covers every
+      script-constructible reference kind through both conversions, with controls pinning the sim
+      VM still substituting and the UI VM still printing the address.
+      **One deliberate widening, stated rather than smuggled:** the finding named three types
+      (table/function/userdata); the guard covers **six** — `lightuserdata`, `thread` and `buffer`
+      reach the same `luaL_tolstring` line and leak the same bytes. Fixing three of six would have
+      left half of one channel open, which `CLAUDE.md` rule 2 calls patching symptoms. `vector` is
+      deliberately excluded: Luau formats its components, a pure function of the value.
+- [x] **F-2 — `CANON.md`'s "the exact removal list" was not exact, in the section whose title
+      claims it.** Three disagreements between the constants sheet, the spec and the code:
+      `gcinfo`/`newproxy`/`table.foreach`/`table.foreachi` were in `SIM_REMOVE` and in §10.2 step
+      4 but in neither CANON line (commit `36e822b` fixed this drift in one direction and left the
+      reverse standing); CANON claimed "`string.format %p` replaced", which is wrong in both
+      halves (`%p` is rejected upstream as an invalid option — measured in round 1 — and the
+      conversion that actually leaks is `%*`); and `%*` was specced **nowhere**, existing only in
+      code, test and a `LESSONS` entry, so a reimplementation from the spec as written would have
+      dropped precisely the address leak. All three fixed at their homes; `docaudit` structurally
+      cannot see any of them.
+- [x] **F-3 — `vendor_new.cpp`'s link-mechanics comment named a renamed test and a replaced
+      mechanism**, in the file whose own history is about comments matching the tree. Now cites
+      `..._vendor_pool` and the per-window counter defined ~90 lines above it.
+
 ## W2 luau-vm — review round 1 (2026-08-26, fresh context, Opus 5 high; verdict FIX FIRST)
 
 Ten findings, three HIGH and each independently disqualifying, every one reproduced on head
@@ -145,7 +189,9 @@ by the steward** — recorded here with that provenance, per `CLAUDE.md`'s doc-i
 Scope shipped: `docs/LUAU-LAYER.md` §10.12's **VM half** — build-order steps 1–2 plus the data-VM
 constructor. `vendor/luau` at the 0.696 pin (Common/VM/Ast/Compiler, **no CodeGen**), `tl_script`
 (`script.h`, `vm.h/.cpp`, `sandbox.cpp`, `handles.h`, `compile_opts.h`, `bind_fx.cpp`),
-`src/vendor_glue/luau_alloc.*`, and `tests/script/` (15 rows).
+`src/vendor_glue/luau_alloc.*`, and `tests/script/` (15 rows *at the time of this entry* — the
+final count is **25**; the intermediate figures below are likewise point-in-time and are left as
+written rather than back-edited, so the record reads as what was true when each was filed).
 
 - [x] **Three VMs, the sandbox, `sortedpairs`, the `fx` table.** All 15 test rows pass in `debug`
       and `ship`; 6 of them (everything that does not compile Luau source) pass in all four tiers.
@@ -157,7 +203,7 @@ constructor. `vendor/luau` at the 0.696 pin (Common/VM/Ast/Compiler, **no CodeGe
       `src/sim` + `src/foundation` only, and neither can reach a Luau header.
 - [x] **The `pool_alloc` grep `MEMORY.md` promised since rev 1** landed with its first caller.
 - [x] **RR-18, RR-19 and RR-20 all ruled 2026-08-26 and implemented in this lane** (records
-      above). Net effect: **19 rows, all four tiers, 0 skipped** — the in-process compile works
+      above). Net effect: **19 rows at that point, all four tiers, 0 skipped** — the in-process compile works
       everywhere, atoms are live, and CodeGen stays out with `script_codegen_available()` saying
       so. The one new mechanism, `tools/audit/static_allow.txt`, is the general answer to the
       class that had already produced three instances (the dropped CRT-malloc counter,
