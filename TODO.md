@@ -742,6 +742,13 @@ E-2 needs no W2 decision but blocks real game wiring later.
       rebuild-budget re-baseline entry above:** that entry's headroom arithmetic predates 53 new
       TUs and should be re-run on the merged tree, not on the W1 one.
 
+- [x] **RULED 2026-08-26 (Rafael): the doc-relevancy pass — `WORKFLOW.md` §5 R-12.** Lane
+      closeouts (R-7) check the lane's own doc against what shipped; wave boundaries add a pass
+      over the repo's status surfaces (§3 artifact 4: root `README.md` Status, `CLAUDE.md`
+      Status, `docs/README.md` header, merged lanes' doc status lines). Motivating rot fixed in
+      the ruling commit: all three surfaces still read "pre-code" two shipped waves later —
+      the staleness class `docaudit` structurally cannot see (it checks references and
+      constants, not prose claims about state).
 - [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**
       (budget-aware sequencing; two-tier reviews with the Fable full-re-read ship round —
       `ROADMAP.md` §2 amended at the pairing's home; steward economy; lane token discipline
@@ -1295,6 +1302,12 @@ E-2 needs no W2 decision but blocks real game wiring later.
       full-house registry test re-derived (actors arena-backed, 1-byte fills, a dedicated ring
       at the 64-B-per-arena packed cap). debug/dev-linux green locally; the other legs are the
       PR's CI. Review deferred to the sweep per the valve.
+- [ ] **Ship-tier link-footprint check (filed 2026-08-26, steward, from Rafael's dev-only-
+      stripping question):** after RR-18 the in-process Luau compile works in every tier — verify
+      the `ship` link line does NOT carry the Luau Compiler/Ast libraries (bytecode-only ship
+      needs the VM alone; `luauc` owns the compiler offline). If it does, add the tier-gated
+      link split and a size row proving it; measure the ship binary's size delta either way.
+      Owner: the W2 wave-boundary sweep, or the W3 luau-bindings lane if the sweep lands first.
 - [ ] **Wave-boundary sweep entry (`WORKFLOW.md` §2 valve):** the `w3-merge-autonomy` lane
       (WORKFLOW §1 autonomous-merge clause + §5 R-3) merged under the valve — it implements
       Rafael's 2026-08-25 ruling verbatim ("my role through the phone: only rulings, important

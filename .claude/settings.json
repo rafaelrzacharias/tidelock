@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__bf7c680d-5fdc-5ef4-b4a0-abadb619bf0a",
+      "mcp__claude-code-remote",
+      "mcp__Claude_Code_Remote"
+    ]
+  },
+  "env": {
+    "GIT_AUTHOR_NAME": "rafaelrzacharias",
+    "GIT_AUTHOR_EMAIL": "rafaelrzacharias@gmail.com",
+    "GIT_COMMITTER_NAME": "rafaelrzacharias",
+    "GIT_COMMITTER_EMAIL": "rafaelrzacharias@gmail.com"
+  },
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  }
+}
