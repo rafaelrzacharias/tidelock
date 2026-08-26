@@ -6,8 +6,34 @@ file(GLOB TL_VENDOR_GLUE_SRC CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cp
 add_library(tl_vendor_glue STATIC ${TL_VENDOR_GLUE_SRC})
 # SDL3/SDL3_ttf are PUBLIC: tests/vendor_glue/*.test.cpp calls their real API through this lib to
 # prove each hookup end to end, so it needs their headers too, not just tl_vendor_glue's own.
-# SDL_ttf has no adaptor .cpp of its own - docs/PLATFORM.md §9.5: it calls SDL_malloc/SDL_free
-# internally, so it inherits whatever allocator sdl3_glue installed on SDL3 with no separate hook.
+# SDL_ttf has no adaptor .cpp of its own for its own 4 SDL_malloc/6 SDL_free call sites -
+# docs/PLATFORM.md §9.5: it inherits whatever allocator sdl3_glue installed on SDL3. The font
+# memory itself is FreeType's, hooked separately by freetype_glue.cpp (below).
 target_link_libraries(tl_vendor_glue PRIVATE tl_flags_common tl_foundation stb
   PUBLIC SDL3::SDL3 SDL3_ttf::SDL3_ttf imgui enet monocypher)
 tl_register_lib(tl_vendor_glue FALSE)
+
+# freetype's own ftsystem.c (patched to call this lib's tl_freetype_alloc/realloc/free - see
+# freetype_glue.cpp) makes tl_vendor_glue a genuine, if unusual, dependency of SDL_ttf's static
+# build - but NOT of the "freetype" CMake target itself: vendor/sdl_ttf/CMakeLists.txt statically
+# links freetype by pulling its OBJECT files straight into SDL3_ttf-static
+# ($<TARGET_OBJECTS:Freetype::Freetype>, its own "static build" branch), so freetype's own
+# target_link_libraries never reaches the final link - the real consumer of tl_freetype_alloc at
+# link time is SDL3_ttf-static's own archive (confirmed: libSDL3_ttf.a(ftsystem.c.o), no separate
+# libfreetype.a ever appears on the link line). Declaring the dependency on "freetype" instead had
+# no effect (verified: link line unchanged, N1 still reproduced under ld.bfd).
+#
+# This is a real cycle between two STATIC libraries (tl_vendor_glue's existing PUBLIC dependency
+# on SDL3_ttf, and now SDL3_ttf-static needing tl_vendor_glue's symbols back), which CMake supports
+# and resolves by repeating both archives on the link line as needed (target_link_libraries(3)
+# "mutually-dependent STATIC libraries") - order-independent, unlike relying on LLD's archive-order
+# tolerance (review round 2, N1: linking without this declared, libSDL3_ttf.a(ftsystem.c.o) has an
+# undefined reference to tl_freetype_alloc that a non-order-tolerant linker cannot resolve, because
+# nothing told CMake tl_vendor_glue's archive must appear again after SDL3_ttf-static's).
+#
+# $<BUILD_INTERFACE:...>: SDL_ttf's own CMakeLists.txt installs an EXPORT set for SDL3_ttf-static
+# (a plain, non-generator-expression PRIVATE link here would then require tl_vendor_glue - which
+# this project never installs - to be in an export set too). Nothing in this tree ever runs
+# `cmake --install`, so the link is build-only in practice either way; the generator expression
+# just makes that explicit to CMake's export-set checker.
+target_link_libraries(SDL3_ttf-static PRIVATE $<BUILD_INTERFACE:tl_vendor_glue>)

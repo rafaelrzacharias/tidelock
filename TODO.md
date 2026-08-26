@@ -719,6 +719,60 @@ E-2 needs no W2 decision but blocks real game wiring later.
       Rafael's identity (the rewrite above). Remaining, not blocking: the standing
       tighten-rebuild-budget-after-~10-runs entry (this round only exercised the re-baseline).
 
+## w2-vendor — round-2 (delta-scoped) review, verdict "fix again" (2026-08-26, PR #12 comment 5428219933)
+
+- [x] **6 of 8 round-1 findings verified closed on re-check** (D1 by measurement — `LD_PRELOAD`
+      malloc counter, +0 hooked / +30 reverted; D3 by planting both directions against
+      `includes.py`; D5/D6/D7/D8 by re-reading the tree against the claims). **D2 and D4 each had
+      one row left; two new findings (N1, N2).** All fixed this round:
+- [x] **D2, `sdl_ttf_init_quit_through_pool_vendor` incomplete — fixed.** The row called
+      `vendor_glue_sdl3_install()` before `TTF_Init()`, so its `live_bytes > baseline` assertion
+      was an OR over two independent contributors (SDL_ttf's own 4 `SDL_malloc` sites AND
+      FreeType's ~30) — hooking either satisfied it, so it pinned neither; reverting the FreeType
+      hook alone left the row green. Fixed: dropped the `vendor_glue_sdl3_install()` call, so with
+      SDL3 left unhooked, only FreeType's seam can move `pool_vendor`'s `live_bytes`. Revert-tested
+      it myself (not just re-trusted the review): rebuilt with `ft_alloc` reverted to `malloc`,
+      the row now crashes (`TL_FATAL ... mem_pool.cpp:142: h->live > 0u`) instead of passing.
+      Restored and reconfirmed 11/11 `vendor_glue` tests green.
+- [x] **N1, backwards undeclared archive dependency — fixed.** `libSDL3_ttf.a(ftsystem.c.o)`'s
+      `U tl_freetype_alloc/_realloc/_free` is resolvable only from `libtl_vendor_glue.a`, which
+      CMake places earlier on the link line since nothing declared the reverse need — invisible
+      on this branch's own CI (the `linux`/`win` presets pin `CMAKE_LINKER_TYPE: LLD`, order-
+      tolerant) but real under any non-order-tolerant linker, and the `deck` preset inherits
+      `base`, not `linux` (no LLD pin, no CI job builds it). Reproduced for real, not inferred:
+      reconfigured a scratch `out/n1-check` tree with `-DCMAKE_LINKER_TYPE=BFD` (this container's
+      CMake is 4.4.2, which — unlike the review's own CMake 3.28 container — actually honors that
+      variable, so this needed a forced override rather than just an old CMake) and hit the exact
+      4 undefined references. **First fix attempt (`target_link_libraries(freetype PRIVATE ...)`)
+      had zero effect** — verified by re-linking and diffing the link line — because
+      `vendor/sdl_ttf/CMakeLists.txt`'s static-build branch pulls FreeType in via
+      `$<TARGET_OBJECTS:Freetype::Freetype>` straight into the `SDL3_ttf-static` archive itself
+      (no separate `libfreetype.a` ever appears on the link line, confirmed), so the "freetype"
+      target's own `target_link_libraries` never reaches final link. **Real fix:**
+      `target_link_libraries(SDL3_ttf-static PRIVATE $<BUILD_INTERFACE:tl_vendor_glue>)` from
+      `src/vendor_glue/CMakeLists.txt` (`$<BUILD_INTERFACE:...>` because `SDL3_ttf-static` has its
+      own `install(EXPORT ...)` that would otherwise demand `tl_vendor_glue` be exported too,
+      which this tree never does). Re-ran the same `ld.bfd` build: links clean, 11/11 pass, and
+      the FreeType-hook revert-test above still bites. This is a genuine two-STATIC-library CMake
+      cycle (`tl_vendor_glue` → `SDL3_ttf::SDL3_ttf` → back to `tl_vendor_glue`), which CMake's
+      own docs say it resolves by repeating archives on the link line — verified, not just quoted.
+- [x] **N2, `docs/BUILD.md` §4 cited for a rule it didn't state — fixed, plus a ruling filed.**
+      Five sites cited "§4's declared verbatim deviation"; the word "verbatim" appeared nowhere in
+      `BUILD.md`. Amended §4 in this commit with the rule those sites already assumed ("vendored
+      verbatim by default; a deviation is permitted only when the lib exposes no seam to reach the
+      same result, and only when declared in `vendor/VERSIONS`"). Per the review's own framing —
+      the FreeType patch is "defensible and probably correct" engineering but "a standing change
+      to how this repo vendors, and that is your call to record" — filed a non-blocking ruling
+      request (`## Ruling requests` below) rather than self-declaring the policy silently.
+- [x] **D4's two residual nits — fixed.** `PLATFORM.md` §9.5's Luau row still read
+      `glue_luau_alloc` (line 326) against `MEMORY.md` §8.6's `tl_luau_alloc` — corrected.
+      `src/vendor_glue/CMakeLists.txt:9-10`'s comment still claimed SDL_ttf's font memory has "no
+      separate hook" — corrected to name `freetype_glue.cpp` (this was also touched by the N1 fix
+      to the same file, so it landed in the same edit).
+- [ ] **Not yet done this round:** local full validation (`tl_tests` full suite, `includes.py`,
+      `selftest.py`, `docaudit.py`, `commit_docs.py`), commit, push, CI, remainder→commit comment,
+      steward completion poke.
+
 ## w2-vendor — round-1 findings pushed, CI re-confirmed green (2026-08-26)
 
 - [x] **All D1-D8 pushed (`83f1d77`, `6f67660`) and CI re-confirmed 23/23 green on head
@@ -869,6 +923,23 @@ E-2 needs no W2 decision but blocks real game wiring later.
       only the identity rewrite is parked.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **RULING REQUEST (2026-08-26, w2-vendor round-2 review N2): bless "patch a vendored file
+      when it exposes no seam" as standing vendoring policy, not just this one exception.**
+      Round 1 offered two paths for FreeType's missing allocator seam — an `FT_MemoryRec`
+      adaptor, or a filed exemption ruling. The lane took a third, on its own declaration with no
+      ruling filed: patch FreeType's own `builds/<platform>/ftsystem.c` platform-customization
+      seam directly (`SDL_ttf`'s `TTF_Init()` genuinely gives no runtime hook to inject a custom
+      `FT_Memory`, and that file is FreeType's own designated per-platform customization point,
+      not core logic). Round 2's own words: "I think the engineering choice is defensible and
+      probably correct... but it is a standing change to how this repo vendors, and that is your
+      call to record, not a lane's to self-declare." **Not blocking** (round 2 did not ask for a
+      different fix, only for the policy to be recorded as Rafael's call): `docs/BUILD.md` §4 has
+      been amended in the same commit as this filing with the rule the lane already followed
+      in practice ("vendored verbatim by default; a deviation is permitted only when the lib
+      exposes no seam to reach the same result, and only when declared in `vendor/VERSIONS`"),
+      so the doc is self-consistent and the five sites that already cited §4 for this rule are no
+      longer citing a rule that doesn't exist. If Rafael wants a narrower or different standing
+      rule, amend §4 again in one edit — nothing else references the mechanism, only the section.
 - [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**
       (budget-aware sequencing; two-tier reviews with the Fable full-re-read ship round —
       `ROADMAP.md` §2 amended at the pairing's home; steward economy; lane token discipline

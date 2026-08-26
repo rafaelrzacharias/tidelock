@@ -74,6 +74,13 @@ win), `-gline-tables-only` in dev, ccache.
 `vendor/<name>/` at a pinned upstream commit recorded in `vendor/VERSIONS`; a `CMakeLists.txt`
 per lib; its allocator hooked to a `mem_pool` (`MEMORY.md` §1.5); its headers never included above
 its wrap module (CI grep). Adding a dep is a design decision with a line in `ARCHITECTURE.md` §1.
+**Vendored source is kept verbatim by default.** A deviation from verbatim (patching a vendored
+file instead of using its own build-time configuration knobs) is permitted only when the vendored
+lib exposes no seam to reach the same result, and only when declared by name and reason in
+`vendor/VERSIONS`' row for that lib (ruled 2026-08-26, review round 2 N2, after the W2 vendor
+lane's FreeType `builds/<platform>/ftsystem.c` patch — FreeType's own platform-customization seam,
+since SDL_ttf's `TTF_Init()` gives no runtime hook to inject a custom `FT_Memory` — shipped as a
+declared deviation before this sentence existed to authorize it).
 Current set: SDL3, SDL_ttf, Dear ImGui (+docking, ImGuiColorTextEdit), Luau (`LUA_USE_LONGJMP=1`),
 ENet, stb_image, stb_sprintf, Monocypher, rapidhash. **FreeType** is vendored too (at
 `vendor/sdl_ttf/external/freetype`, upstream's own submodule layout) as SDL_ttf's one mandatory
