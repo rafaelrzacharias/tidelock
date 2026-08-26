@@ -127,10 +127,13 @@ Developed on two PCs synced via git; per-machine auto-memory does not sync.
 - Durable context → committed files only (`docs/`, `TODO.md`, `LESSONS.md`). Never substance in
   auto-memory.
 - **Commit AND push in the same turn.** (Exception: told not to, or a push would force-overwrite.)
-- **Every lane ships through its own draft PR** (`docs/WORKFLOW.md`, ruled 2026-08-25): opened
-  at lane start, CI green on all four targets before review, fresh-context adversarial review to
-  a *ship* verdict, merge commit (never squash/rebase), branch auto-deletes. Binds every
-  session — cloud, local, phone-spawned — identically.
+  This is a rule against leaving work UNPUSHED — never a license to stop: in an autonomous lane a
+  commit boundary is not a turn boundary (`docs/WORKFLOW.md` §1 R-6, ruled 2026-08-26 after the
+  net-p1 lane ended its turn at every commit and had to be babysat).
+- **Every lane ships through its own PR** (`docs/WORKFLOW.md`, ruled 2026-08-25; opened READY,
+  never draft — §1 R-5): opened at lane start, CI green on all four targets before review,
+  fresh-context adversarial review to a *ship* verdict, merge commit (never squash/rebase),
+  branch auto-deletes. Binds every session — cloud, local, phone-spawned — identically.
 - **No `Co-Authored-By` trailer** — Rafael is sole author, every commit. This holds for
   cloud/agent sessions too (ruled 2026-08-25): commits pushed from them carry Rafael's
   author+committer identity and GitHub's "Unverified" badge is accepted — never a bot identity

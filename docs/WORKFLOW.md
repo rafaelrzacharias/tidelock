@@ -30,6 +30,17 @@
   has no other consumer by convention. **Once review has begun, history is frozen**: fixes are
   new commits, and `CLAUDE.md`'s no-force-overwrite rule applies in full. (Ruled 2026-08-26;
   the W2 ecs pilot hit exactly this collision and resolved it this way.)
+- **An autonomous lane runs to its ship gate without ending its turn (ruled 2026-08-26).**
+  "Commit and push every turn" is a rule against leaving work unpushed, never a reason to stop:
+  a lane does NOT end its turn at commit boundaries — it commits, pushes, and continues
+  immediately to the next item. The ONLY stops are (1) a ruling request that blocks all
+  remaining work (park cleanly, per `CLAUDE.md` rule 7 — continue on unblocked parts first),
+  (2) a genuine external block, and (3) the ship gate itself (four-leg green + *ship* verdict →
+  merge, then the lane is done). Status reporting is a side effect of those stops, never a
+  reason for one — the commit trail and the PR are the live status surface. **Every lane brief
+  cites this rule verbatim.** (The W2 net-p1 pilot ended its turn at each of four commits to
+  report status — a misreading of the commit-and-push rule as a turn boundary; the lane's own
+  post-mortem is the source of this wording.)
 - **Merging is autonomous (ruled 2026-08-25).** Once the head is CI-green on all four `CANON.md`
   legs and §2's verdict is *ship*, the session merges without waiting for Rafael — his word is
   not a merge precondition; both preconditions are machine-checkable facts, not judgments. What
@@ -98,6 +109,10 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
   before its first review round; after review begins, history is frozen (§1).
 - **R-5 PRs open ready, never draft (ruled 2026-08-26):** the merge preconditions gate, the
   draft flag gated nothing and split the W2 ecs record across two PRs (§1).
+- **R-6 Autonomous lanes do not stop at commit boundaries (ruled 2026-08-26, Rafael, after
+  babysitting the net-p1 lane):** commit-and-push is an anti-unpushed-work rule, not a turn
+  boundary; a lane runs to its ship gate and stops only for a blocking ruling request, a
+  genuine external block, or the gate itself — and every lane brief cites this verbatim (§1).
 
 *Rev 1 — 2026-08-25; §1/§4 amended same day by the slice's own adversarial review (D4/D6: the
 PR-fallback actor named, absolute grading pinned to the PC rev-2 record until the Deck). This
