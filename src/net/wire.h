@@ -759,3 +759,43 @@ void encode_column(ByteWriter* w, const WireFrame* frames, u32 n);
 // On any error out[] holds only decoded-or-zero frames and must not be acted on. `out` must hold
 // frame_count entries; frame_count may be 0. Never runs inside a tick.
 ErrCode decode_column(ByteReader* r, WireFrame* out, u32 frame_count, u64 base_tick);
+
+// --- the archive segment codec (docs/NETCODE.md §20.2.9 layout, §13.3 encoding) ---------------
+// Implementation: net/archive.cpp. Declared here for the same reason as the column codec.
+
+// One decoded tick's worth of one slot, as the archive stores it: the segment holds the CONFIRMED
+// APPLIED frame of every live slot (docs/NETCODE.md §20.2.9), substituted and phantom frames
+// included literally. A slot outside the segment's slot_mask decodes as ZERO.
+struct ArchiveInput {
+    const WireFrame* frames;   // tick_count frames for this slot, ascending from base_tick
+    u32              slot;     // 0..MAX_PEERS-1
+    u32              _pad0;
+};
+
+// Bytes an encoded segment needs, given the worst case for its inputs. A caller sizes its buffer
+// with this rather than guessing; archive_encode_segment TL_CHECKs the buffer it is handed, since
+// a producer that blows its own budget is a bug (docs/NETCODE.md §20.1).
+u64 archive_segment_max_bytes(u32 slot_count, u32 tick_count, u32 log_record_count);
+
+// Encodes one segment: header + per-slot per-channel transition streams + the LogRecord array,
+// with both crc32 fields filled (docs/NETCODE.md §20.2.9). `inputs` holds slot_count entries in
+// ASCENDING slot order and each carries tick_count frames; `records` holds log_record_count
+// entries sorted by (effective_tick, origin_slot, seq) - the caller's ordering contract, asserted.
+// Writes into w. Returns the bytes written. Never runs inside a tick.
+u64 archive_encode_segment(ByteWriter* w, u64 base_tick, u32 tick_count,
+                           const ArchiveInput* inputs, u32 slot_count,
+                           const LogRecord* records, u32 log_record_count, u32 segment_seq,
+                           const u8 build_id[32], const u8 session_fingerprint[32]);
+
+// Decodes one segment written by archive_encode_segment. `out_frames` must hold
+// MAX_PEERS * tick_count frames, indexed [slot * tick_count + i]; slots outside the segment's
+// slot_mask are filled with ZERO_FRAME (docs/NETCODE.md §20.2.9). `out_records` must hold at
+// least the segment's log_record_count, which *out_record_count reports.
+// Returns ERR_BYTES_TRUNCATED on a short segment, ERR_NET_VERSION on a newer format_version,
+// ERR_NET_MALFORMED on a failed crc32, an out-of-range channel or slot, a non-canonical stream,
+// or a tick_count/record count the caller's buffers cannot hold. On any error nothing decoded
+// should be acted on. Never runs inside a tick.
+ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
+                               WireFrame* out_frames, u32 out_frame_capacity_per_slot,
+                               LogRecord* out_records, u32 out_record_capacity,
+                               u32* out_record_count);
