@@ -98,6 +98,50 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       (the steward session dispatches it after the push; the aarch64 evidence rides the CI arm64
       legs — the Pi left the program 2026-08-25).
 
+## W2 luau-vm — lane notes (2026-08-26, `w2-luau-vm`, PR #11)
+
+Scope shipped: `docs/LUAU-LAYER.md` §10.12's **VM half** — build-order steps 1–2 plus the data-VM
+constructor. `vendor/luau` at the 0.696 pin (Common/VM/Ast/Compiler, **no CodeGen**), `tl_script`
+(`script.h`, `vm.h/.cpp`, `sandbox.cpp`, `handles.h`, `compile_opts.h`, `bind_fx.cpp`),
+`src/vendor_glue/luau_alloc.*`, and `tests/script/` (15 rows).
+
+- [x] **Three VMs, the sandbox, `sortedpairs`, the `fx` table.** All 15 test rows pass in `debug`
+      and `ship`; 6 of them (everything that does not compile Luau source) pass in all four tiers.
+      Every `fx` op is compared against the C++ helper it wraps over a seeded sweep, on raw bits.
+- [x] **Both §10.12 audit criteria now have tools behind them**, each with planted violations:
+      `tools/audit/includes.py`'s `SYS_ALLOW_DIRS` + `BACKEND_HEADERS` (headers) and
+      `tools/audit/symbols.py --wrap-lib` (symbols, defined AND undefined — a hand-written
+      `extern` needs no header). `tools/audit/targets.py` needs no entry for this tree: it walks
+      `src/sim` + `src/foundation` only, and neither can reach a Luau header.
+- [x] **The `pool_alloc` grep `MEMORY.md` promised since rev 1** landed with its first caller.
+- [ ] **RR-18 blocks the source-running half of §10.11 in `dev`/`netcode`** — see the ruling
+      requests above. Nine rows `TL_SKIP` there, naming the RR; they pass in `debug`/`ship`.
+      **When it is ruled, the only change needed is `script_can_compile_in_process()`** — the
+      tests and the refusal path are already written against it.
+- [ ] **RR-19 (`useratom` not installed) and RR-20 (CodeGen not vendored)** — both reported by a
+      queryable function rather than a silent fallback; neither blocks this lane, RR-19 blocks
+      W3's proxy field-lookup fast path.
+- [ ] **For W3 luau-bindings — what this lane published and W3 must not break:**
+      `ScriptVm` is opaque and `script.h` names no Luau type; the §10.4 tag numbers and the §10.5
+      userdata tags are pinned in `handles.h` (renumbering them is a cross-lane event);
+      `script_compile_options()` is the ONE pinned `lua_CompileOptions` and `tools/luauc` must
+      share it (§10.9); `lua_Callbacks::userdata` is taken — it holds the `ScriptVm*` back-pointer
+      that lets the context-free callbacks work without a namespace-scope global, so a trampoline
+      must not repurpose it; `fx.rng_below`/`fx.rng_q` are written and error with "no system is
+      running" until a trampoline publishes `vm->running`.
+- [ ] **For the W2 vendor lane / the wave merge — a known conflict, by design.** Both lanes create
+      `src/vendor_glue/` (this one `luau_alloc.*`, that one `pool_vendor`/`pool_enet`/`imgui_glue`/
+      `sdl_glue`/`enet_glue`) and both add the root `CMakeLists.txt` line, the module's
+      `CMakeLists.txt`, and `SYS_ALLOW_DIRS` entries. Keep BOTH sides everywhere; this lane also
+      adds `MODULE_DAG["vendor_glue"]` (an unknown module resolves to an EMPTY allow-list, so
+      every include in the folder fails the gate without it) and the `pool_alloc` gate, which the
+      vendor lane's adaptors are already exempt under.
+- [ ] **Rebuild-budget headroom, feeding the open re-baseline entry above.** Measured on this
+      container (4 cores, `netcode-linux`, cold): **9.04 s without Luau, 13.39 s with it**
+      (+4.35 s, +48 %, 53 TUs). The CI gate is 25 s on a leg whose last measurement was 12.1 s, so
+      the projected leg cost is ~17.9 s and the workflow comment's claimed "2x margin" is now
+      ~1.4x. Re-run the re-baseline on the merged tree, not on the W1 one.
+
 ## W2 gate0 — the bench is built; what it measured (2026-08-25, `w2-gate0`, PC x86-64 netcode tier)
 
 The verdict table is `tests/gate0/results/2026-08-25-pc-win-netcode/README.md` (the CSVs beside
