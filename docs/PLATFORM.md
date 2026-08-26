@@ -313,13 +313,18 @@ spellings across the two docs). No `<atomic>`, no `volatile`.
 
 ### 9.5 Vendor hook wiring and init order
 
-Pools (`MEMORY.md` §1.5): `pool_vendor` (SDL + ImGui + stb + FreeType, 64 MB reserve), `pool_luau_sim`,
+Pools (`MEMORY.md` §1.5): `pool_vendor` (SDL + ImGui + stb + FreeType — and, since the D2 ruling
+of 2026-08-26, the Luau **compiler's** allocations for the duration of one `luau_compile`, which
+have no hook API of their own; 64 MB reserve), `pool_luau_sim`,
 `pool_luau_ui` (64 MB each, owned by `LUAU-LAYER`), `pool_enet` (16 MB, owned by `net/`). All
 `pool_*` calls live in `src/vendor_glue/` (the one folder allowed writable static state: the
-per-lib pool pointers — forced by `STBI_MALLOC`-class compile-time macros and context-free hook
-callbacks — and adaptor-side instrumentation such as the FreeType call counter; post-W2 the same
-whole-lib exemption covers the Luau glue's TUs. `tools/audit/symbols.py --vendor-glue-lib` is the
-gate's spelling).
+per-lib pool pointers — forced by `STBI_MALLOC`-class compile-time macros, context-free hook
+callbacks, and, since RR-18 (ruled 2026-08-26), the program-wide `operator new` replacement of
+`MEMORY.md` §1.5 — and adaptor-side instrumentation such as the FreeType call counter. The
+whole-lib exemption covers the Luau glue's TUs too; `tools/audit/symbols.py --vendor-glue-lib`
+is the gate's spelling, and `tools/audit/static_allow.txt` stays the (lib, directory, stem)
+record for exemptions *outside* this folder — RR-19's `atom` in `src/script/`; RR-18's
+`vendor_new` row predates the whole-lib spelling and stands as that ruling's record).
 
 | Lib | Hook | Pool |
 |---|---|---|

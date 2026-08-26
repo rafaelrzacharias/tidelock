@@ -1,17 +1,18 @@
-# Per-lib vendor allocator hookups (docs/MEMORY.md §8.6, docs/PLATFORM.md §9.5). Each vendored
-# lib's headers are wrap-module-gated to this directory (tools/audit/includes.py BACKEND_HEADERS),
-# so tl_vendor_glue links exactly the vendor archives its own TUs name - one per commit, per
-# docs/ROADMAP.md §2's W2 vendor lane.
-file(GLOB TL_VENDOR_GLUE_SRC CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
-add_library(tl_vendor_glue STATIC ${TL_VENDOR_GLUE_SRC})
+# vendor_glue - the per-library allocator adaptors (docs/MEMORY.md §8.6, docs/PLATFORM.md §9.5).
+# The ONE folder outside mem_pool.cpp allowed to call pool_* (tools/audit/includes.py enforces
+# it); each vendored lib's hook API is routed here so no vendor heap reaches the CRT. Each lib's
+# headers are wrap-module-gated to this directory (tools/audit/includes.py BACKEND_HEADERS), so
+# tl_vendor_glue links exactly the vendor archives its own TUs name. Owners are per-lane:
+# luau_*/vendor_new.* are the W2 luau-vm lane's, the imgui/sdl/enet/stb/freetype adaptors the
+# W2 vendor lane's.
+tl_module(tl_vendor_glue)
 # SDL3/SDL3_ttf are PUBLIC: tests/vendor_glue/*.test.cpp calls their real API through this lib to
 # prove each hookup end to end, so it needs their headers too, not just tl_vendor_glue's own.
 # SDL_ttf has no adaptor .cpp of its own for its own 4 SDL_malloc/6 SDL_free call sites -
 # docs/PLATFORM.md §9.5: it inherits whatever allocator sdl3_glue installed on SDL3. The font
 # memory itself is FreeType's, hooked separately by freetype_glue.cpp (below).
-target_link_libraries(tl_vendor_glue PRIVATE tl_flags_common tl_foundation stb
-  PUBLIC SDL3::SDL3 SDL3_ttf::SDL3_ttf imgui enet monocypher)
-tl_register_lib(tl_vendor_glue FALSE)
+target_link_libraries(tl_vendor_glue PRIVATE stb
+  PUBLIC tl_foundation SDL3::SDL3 SDL3_ttf::SDL3_ttf imgui enet monocypher)
 
 # freetype's own ftsystem.c (patched to call this lib's tl_freetype_alloc/realloc/free - see
 # freetype_glue.cpp) makes tl_vendor_glue a genuine, if unusual, dependency of SDL_ttf's static

@@ -65,6 +65,10 @@ endforeach()
 foreach(lib IN LISTS TL_MODULES)
   list(APPEND TL_SYMBOL_ARGS --data-only "${lib}=$<TARGET_FILE:${lib}>")
 endforeach()
+# docs/LUAU-LAYER.md §10.12: lua_*/luau_* symbols live in tl_script and nowhere else. Named here
+# rather than hard-coded in the tool, so the day a second vendored C API gets a wrap module the
+# list is one line, in the file that already knows which libs exist.
+list(APPEND TL_SYMBOL_ARGS --wrap-lib tl_script)
 if(TL_SANITIZE)
   list(APPEND TL_SYMBOL_ARGS --sanitized)   # the audit then refuses, loudly, instead of lying
 endif()

@@ -51,6 +51,8 @@ src/sim/        Alloy — the matter sim (own static lib, symbol-audited)      A
   │
 src/core/       world/ECS + reflection · events · input · assets · loop/time ECS.md FRAME-LOOP.md
   │                                                                          INPUT.md ASSETS-AND-DATA.md
+src/vendor_glue/ the per-library allocator adaptors over mem_pool           MEMORY.md §8.6
+  │             (the only folder that may call pool_alloc/realloc/free); sees foundation only
 src/foundation/ fx palette + det math · arenas/handles · containers ·        FX-PALETTE.md MEMORY.md
   │             keyed RNG · pinned hash · StrView/interner · jobs            CONTAINERS.md DETERMINISM.md
   │                                                                          JOBS.md

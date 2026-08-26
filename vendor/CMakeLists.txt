@@ -14,6 +14,7 @@
 # (docs/BUILD.md §4 "vendored verbatim") rather than hand-patched.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 
+add_subdirectory(luau)
 add_subdirectory(rapidhash)
 
 # SDL3 ships its own full CMake project (options + platform backend detection); we vendor the

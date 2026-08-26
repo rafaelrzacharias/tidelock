@@ -47,6 +47,9 @@ def fixture_root(tmp, name):
                     os.path.join(root, "src", "foundation", "CMakeLists.txt"))
     shutil.copyfile(os.path.join(REPO, "src", "foundation", "tl_types.h"),
                     os.path.join(root, "src", "foundation", "tl_types.h"))
+    os.makedirs(os.path.join(root, "tools", "audit"), exist_ok=True)
+    shutil.copyfile(os.path.join(REPO, "tools", "audit", "static_allow.txt"),
+                    os.path.join(root, "tools", "audit", "static_allow.txt"))
     return root
 
 
@@ -371,6 +374,56 @@ INCLUDE_CASES = [
      "src/platform/z4.cpp",
      "static int g_leaked = 0;\nint use(void) { return g_leaked; }\n",
      "static mutable state"),
+    # W2 luau-vm: the vendored Luau tree's gate entries and mem_pool's grep. Every one of these
+    # passed before the entry existed. LESSONS.md: a vendored lib needs BOTH SYS_ALLOW_DIRS and
+    # BACKEND_HEADERS, which check independently - so both halves get their own fixture.
+    ("a Luau public header outside src/script", "src/core/luau_leak.cpp",
+     '#include <lua.h>\n#include "foundation/tl_types.h"\nu32 leak(void) { return 1u; }\n',
+     "backend header lua.h outside its wrap module"),
+    ("lualib.h outside src/script - the spelling the pre-vendoring 'luau' token never matched",
+     "src/render/luau_leak2.cpp",
+     '#include <lualib.h>\n#include "foundation/tl_types.h"\nu32 leak2(void) { return 2u; }\n',
+     "backend header lualib.h outside its wrap module"),
+    ("an internal Luau/ header outside src/script", "src/net/luau_leak3.cpp",
+     '#include <Luau/Common.h>\n#include "foundation/tl_types.h"\nu32 leak3(void) { return 3u; }\n',
+     "backend header Luau/ outside its wrap module"),
+    ("a Luau header is not on the system allowlist outside src/script", "src/editor/luau_leak4.cpp",
+     '#include <luacode.h>\n#include "foundation/tl_types.h"\nu32 leak4(void) { return 4u; }\n',
+     "system include <luacode.h> is not on the allowlist"),
+    ("mem_pool's allocator called from engine code", "src/core/pool_leak.cpp",
+     '#include "foundation/tl_types.h"\nvoid* leak5(void* p);\n'
+     "void* leak5(void* p) { return pool_alloc(p, 16u); }\n",
+     "mem_pool's allocation API outside"),
+    ("mem_pool's free called from a sim TU", "src/sim/pool_leak2.cpp",
+     '#include "foundation/tl_types.h"\nvoid leak6(void* p, void* q);\n'
+     "void leak6(void* p, void* q) { pool_free(p, q); }\n",
+     "mem_pool's allocation API outside"),
+    # The <stdlib.h> grant is scoped to src/vendor_glue (the folder that owns vendor heap
+    # plumbing); it also admits malloc, so it must not leak to the wrap module next door.
+    # RR-18/RR-19's writable-static allowlist is (lib, DIRECTORY, STEM). Neither half alone is
+    # the exemption - RR-7's own lesson, where a stem-only grant covered `log.o` in every
+    # non-audited lib in the tree. One fixture per half, per exempted row - except RR-18's
+    # DIRECTORY half, which the W2-vendor whole-directory exemption for src/vendor_glue
+    # (docs/PLATFORM.md §9.5) subsumes: its own does-not-leak fixture is z4.cpp above, so the
+    # planted src/vendor_glue/other.cpp violation retired with the W2 lane merge. The STEM half
+    # keeps its fixture.
+    ("static state with the exempted STEM but in a different directory", "src/core/vendor_new.cpp",
+     '#include "foundation/tl_types.h"\nstatic unsigned g_state = 0u;\nunsigned bump(void) { g_state += 1u; return g_state; }\n',
+     "static mutable state"),
+    ("static state in the script module outside atom.cpp", "src/script/other.cpp",
+     '#include "foundation/tl_types.h"\nstatic unsigned g_state = 0u;\nunsigned bump(void) { g_state += 1u; return g_state; }\n',
+     "static mutable state"),
+    ("static state with atom's stem in another module", "src/net/atom.cpp",
+     '#include "foundation/tl_types.h"\nstatic unsigned g_state = 0u;\nunsigned bump(void) { g_state += 1u; return g_state; }\n',
+     "static mutable state"),
+    ("stdlib.h in the script module, where the vendor_glue grant does not reach",
+     "src/script/stdlib_leak.cpp",
+     '#include <stdlib.h>\n#include "foundation/tl_types.h"\nu32 leak8(void) { return 8u; }\n',
+     "system include <stdlib.h> is not on the allowlist"),
+    ("mem_pool's realloc called from the script module itself", "src/script/pool_leak3.cpp",
+     '#include "foundation/tl_types.h"\nvoid* leak7(void* p, void* q);\n'
+     "void* leak7(void* p, void* q) { return pool_realloc(p, q, 8u); }\n",
+     "mem_pool's allocation API outside"),
 ]
 
 # Things that must NOT fire: the gates have to be usable, not just loud.
@@ -396,6 +449,31 @@ INCLUDE_CLEAN = [
      "static u32 const K = 2u;\n"
      "static constexpr u32 C = 3u;\n"
      "u32 use(void) { return helper() + K + C; }\n"),
+    # W2 luau-vm: the sanctioned spellings. Without these the entries above could be "fixed" by
+    # banning the headers everywhere, which passes every negative fixture and breaks the one
+    # module that needs them.
+    ("src/script may spell the vendored Luau headers", "src/script/ok_luau.cpp",
+     '#include <lua.h>\n#include <lualib.h>\n#include <luacode.h>\n'
+     '#include "foundation/tl_types.h"\nu32 ok_luau(void) { return 1u; }\n'),
+    # ...and the two rows that ARE exempt must not fire, or the gate would ban the one file in
+    # each module that exists to hold the pointer (RR-18: a replaceable operator new takes no
+    # context; RR-19: Luau's useratom takes none either).
+    ("src/vendor_glue/vendor_new.cpp may hold the pool pointer", "src/vendor_glue/vendor_new.cpp",
+     '#include "foundation/tl_types.h"\nstatic unsigned g_state = 0u;\nunsigned bump(void) { g_state += 1u; return g_state; }\n'),
+    ("src/script/atom.cpp may hold the interner pointer", "src/script/atom.cpp",
+     '#include "foundation/tl_types.h"\nstatic unsigned g_state = 0u;\nunsigned bump(void) { g_state += 1u; return g_state; }\n'),
+    ("src/vendor_glue may spell stdlib.h for the vendored malloc'd buffer it must free",
+     "src/vendor_glue/ok_free.cpp",
+     '#include <stdlib.h>\n#include "foundation/tl_types.h"\n'
+     "void ok_free(void* p);\nvoid ok_free(void* p) { free(p); }\n"),
+    ("src/vendor_glue may call the pool allocator", "src/vendor_glue/ok_pool.cpp",
+     '#include "foundation/tl_types.h"\n'
+     "void* ok_pool(void* p);\nvoid* ok_pool(void* p) { return pool_alloc(p, 16u); }\n"),
+    ("mem_pool.h may declare the pool allocator", "src/foundation/mem_pool.h",
+     '#pragma once\n// Spec: docs/MEMORY.md §8.6 (the real path: the exemption is by path, not by stem).\n'
+     '#include "foundation/tl_types.h"\n\n'
+     "// Allocates size bytes from the class freelist or the large path. Null when over budget.\n"
+     "void* pool_alloc(void* p, u64 size);\n"),
     ("a message literal keeps const char*", "src/sim/ok6.cpp",
      '#include "foundation/tl_types.h"\n'
      "void fail(const char* msg);\nvoid f(void) { fail(\"bad\"); }\n"),
@@ -520,6 +598,26 @@ LIBM_CPP = ('extern "C" double sqrt(double);\n'
             "double tl_m(double x) { return sqrt(x); }\n")
 
 
+# docs/LUAU-LAYER.md section 10.12: lua_*/luau_* symbols live in the wrap module and nowhere
+# else. The plant is deliberately a HAND-WRITTEN extern with no #include: that is the shape the
+# include firewall cannot see, and therefore the only shape this gate is worth having for.
+LUAU_LEAK_CPP = ('extern "C" int lua_pcall(void*, int, int, int);\n'
+                 "int tl_leak(void* L) { return lua_pcall(L, 0, 0, 0); }\n")
+# A lib that DEFINES a lua_* name is the other half: reimplementing the symbol escapes an
+# undefined-reference-only check completely.
+LUAU_DEFINE_CPP = ('extern "C" int luaopen_base(void*);\n'
+                   "int luaopen_base(void*) { return 0; }\n")
+# ONE FIXTURE PER LINKAGE FAMILY (review round 1, D5). Both plants above are `extern "C"`, so
+# neither could ever catch Luau's C++-linkage surface - the VM's internal API (`_Z12luaS_newlstr
+# P9lua_StatePKcm`) and the Compiler's 8,483 mangled `Luau::` symbols. The reviewer measured a
+# lib shaped exactly like the first of these passing the gate with 0 violations. Same lesson as
+# the `__GNUC__` entry in LESSONS.md: one fixture per family, not one per rule.
+LUAU_CXX_LEAK_CPP = ("int luaS_newlstr(void*, const char*, unsigned long);\n"
+                     "int tl_cxx_leak(void* L) { return luaS_newlstr(L, \"x\", 1); }\n")
+LUAU_NS_LEAK_CPP = ("namespace Luau { int compileOrThrow(const char*); }\n"
+                    "int tl_ns_leak(const char* s) { return Luau::compileOrThrow(s); }\n")
+
+
 def build_lib(cxx, ar, root, name, sources):
     objs = []
     for i, src in enumerate(sources):
@@ -580,6 +678,85 @@ def test_symbols(tmp, nm, objdump, ar, cxx):
                rc == 1 and "sqrt" in out, out.strip()[:200])
     else:
         record("symbols: a libm call from an audited lib", False, err[:200])
+
+    # --- the Luau confinement (docs/LUAU-LAYER.md section 10.12) -------------------------------
+    leak, err = build_lib(cxx, ar, root, "luauleak", [LUAU_LEAK_CPP])
+    wrap, err2 = build_lib(cxx, ar, root, "wrapmod", [LUAU_LEAK_CPP])
+    if leak and wrap:
+        # `upper` and not `lower` as the base layer: the lower fixture carries a deliberate
+        # upward reference, and a negative row that passes on someone else's violation pins
+        # nothing (docs/LESSONS.md).
+        args = base + ["--layer", "upper=" + upper, "--data-only", "luauleak=" + leak,
+                       "--data-only", "wrapmod=" + wrap, "--wrap-lib", "wrapmod"]
+        rc, out = run(args)
+        record("symbols: a Luau symbol referenced outside the wrap module",
+               rc == 1 and "lua_pcall" in out and "luauleak" in out, out.strip()[:200])
+        # ...and the wrap module itself is NOT reported, or the gate would ban the one module that
+        # exists to hold these symbols - a gate that fails its own subject proves nothing.
+        rc2, out2 = run(base + ["--layer", "upper=" + upper, "--data-only", "wrapmod=" + wrap,
+                                "--wrap-lib", "wrapmod"])
+        record("symbols: the wrap module may reference Luau", rc2 == 0, out2.strip()[:200])
+    else:
+        record("symbols: a Luau symbol referenced outside the wrap module", False, (err or err2)[:200])
+
+    cxxleak, errc = build_lib(cxx, ar, root, "luaucxx", [LUAU_CXX_LEAK_CPP])
+    nsleak, errn = build_lib(cxx, ar, root, "luauns", [LUAU_NS_LEAK_CPP])
+    if cxxleak and nsleak and wrap:
+        args = base + ["--layer", "upper=" + upper, "--data-only", "luaucxx=" + cxxleak,
+                       "--wrap-lib", "wrapmod", "--data-only", "wrapmod=" + wrap]
+        rc, out = run(args)
+        record("symbols: a C++-linkage Luau symbol outside the wrap module",
+               rc == 1 and "luaS_newlstr" in out, out.strip()[:200])
+        args = base + ["--layer", "upper=" + upper, "--data-only", "luauns=" + nsleak,
+                       "--wrap-lib", "wrapmod", "--data-only", "wrapmod=" + wrap]
+        rc, out = run(args)
+        record("symbols: a Luau:: namespace symbol outside the wrap module",
+               rc == 1 and "Luau::" in out, out.strip()[:200])
+    else:
+        record("symbols: a C++-linkage Luau symbol outside the wrap module", False,
+               (errc or errn)[:200])
+
+    defined, err = build_lib(cxx, ar, root, "luaudef", [LUAU_DEFINE_CPP])
+    if defined:
+        rc, out = run(base + ["--layer", "upper=" + upper, "--data-only", "luaudef=" + defined,
+                              "--data-only", "wrapmod=" + wrap, "--wrap-lib", "wrapmod"])
+        record("symbols: a Luau symbol DEFINED outside the wrap module",
+               rc == 1 and "luaopen_base" in out, out.strip()[:200])
+    else:
+        record("symbols: a Luau symbol DEFINED outside the wrap module", False, err[:200])
+
+    # A filter that matches nothing must be an error, not a clean run (docs/LESSONS.md): a
+    # misspelled --wrap-lib would otherwise check every lib INCLUDING the wrap module, or - worse
+    # on a future refactor - nothing at all, and report 0 violations either way.
+    if wrap:
+        rc, out = run(base + ["--layer", "upper=" + upper, "--data-only", "wrapmod=" + wrap,
+                              "--wrap-lib", "tl_scrpit"])
+        record("symbols: a --wrap-lib naming no registered lib is an error",
+               rc != 0 and "not a registered lib" in out, out.strip()[:200])
+
+    # --- the writable-static allowlist (RR-18/RR-19), keyed by LIB + STEM --------------------
+    # --root is what turns the exemption on at all (like RR-7's), so these rows pass the REAL
+    # repo root and therefore the REAL tools/audit/static_allow.txt.
+    exempt_lib, err = build_lib_named(cxx, ar, root, "vgexempt", "vendor_new.cpp", MUTABLE_CPP)
+    wrong_stem, err2 = build_lib_named(cxx, ar, root, "vgwrong", "other_glue.cpp", MUTABLE_CPP)
+    if exempt_lib and wrong_stem:
+        rooted = base + ["--root", REPO, "--tooling-lib", "tl_foundation", "--layer", "upper=" + upper]
+        rc, out = run(rooted + ["--data-only", "tl_vendor_glue=" + exempt_lib])
+        record("symbols: the allowlisted lib+stem may hold writable static storage",
+               rc == 0, out.strip()[:200])
+        rc, out = run(rooted + ["--data-only", "tl_vendor_glue=" + wrong_stem])
+        record("symbols: the allowlisted LIB with a different stem is still a violation",
+               rc == 1 and "writable static storage" in out, out.strip()[:200])
+        rc, out = run(rooted + ["--data-only", "tl_core=" + exempt_lib])
+        record("symbols: the allowlisted STEM in a different lib is still a violation",
+               rc == 1 and "writable static storage" in out, out.strip()[:200])
+        # Without --root there is no exemption at all: opt-in, never accidentally silent.
+        rc, out = run(base + ["--layer", "upper=" + upper, "--data-only", "tl_vendor_glue=" + exempt_lib])
+        record("symbols: no --root means no static exemption",
+               rc == 1 and "writable static storage" in out, out.strip()[:200])
+    else:
+        record("symbols: the allowlisted lib+stem may hold writable static storage", False,
+               (err or err2)[:200])
 
     # Weak undefined symbols are an ELF concept; the same source on COFF produces no `w` entry
     # (and drags in _fltused), so this one is built for ELF explicitly.

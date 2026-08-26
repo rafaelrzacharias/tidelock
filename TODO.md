@@ -106,6 +106,161 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       `PLATFORM.md` §9.5's SDL3 row now carries the qualifier. Decide at impl_sdl3: patch (with
       declaration), accept-and-document, or upstream-report.
 
+## W2 luau-vm — ship round (2026-08-26, fresh context, full re-read; verdict FIX FIRST)
+
+Three findings on head `6944d9dd`; full comment on PR #11, whose "checked and cleared" list is the
+bulk of the round (the RR-18 mechanism, the §0 freeze, the gates and every amended doc cohere).
+One needed a ruling; **Rafael ruled it 2026-08-26, relayed by the steward** — recorded with that
+provenance, the same shape as D4's, per `CLAUDE.md`'s doc-integrity protocol.
+
+- [x] **RULED 2026-08-26 (Rafael, via the steward) — F-1: in the data VM, `tostring`/
+      `string.format` of a reference RAISES (option (a) — error at the mistake).** The
+      deterministic replacements were gated to `SCRIPT_VM_SIM`, so the data VM kept stock both —
+      and stock `tostring` of a reference is `luaL_tolstring`'s default case, which prints the
+      object pointer (`vendor/luau/VM/src/laux.cpp:606-612` at the 0.696 pin). The data VM's
+      **output is hashed** (`LUAU-LAYER.md` §1), so `"tier_" .. tostring(x)` with a table `x`
+      writes an address into a hashed table: peers disagree and it surfaces as a fingerprint
+      mismatch on handshake rather than as an error on the line. **Identical class to D4**
+      (`math.random`) through a different door — round 1's "no route to address identity" sweep
+      was explicitly sim-VM-only, so this door was never on its list. **Ruling:** raise, because a
+      data file has no legitimate reason to stringify a reference; the cheaper option (b), extend
+      the sim VM's type-name substitution to the data VM, is safe for the fingerprint but silent
+      for the author. **Shipped:** `push_tostring_strict` + `sandbox_tostring_strict` +
+      `format_impl(strict)` in `sandbox.cpp`, installed for `kind != SCRIPT_VM_UI` with the mode
+      chosen per kind; `LUAU-LAYER.md` §10.2 step 5, §1's data row and §10.11's row list amended
+      at their homes; `sandbox_data_vm_stringifying_a_reference_raises` covers every
+      script-constructible reference kind through both conversions, with controls pinning the sim
+      VM still substituting and the UI VM still printing the address.
+      **One deliberate widening, stated rather than smuggled:** the finding named three types
+      (table/function/userdata); the guard covers **six** — `lightuserdata`, `thread` and `buffer`
+      reach the same `luaL_tolstring` line and leak the same bytes. Fixing three of six would have
+      left half of one channel open, which `CLAUDE.md` rule 2 calls patching symptoms. `vector` is
+      deliberately excluded: Luau formats its components, a pure function of the value.
+- [x] **F-2 — `CANON.md`'s "the exact removal list" was not exact, in the section whose title
+      claims it.** Three disagreements between the constants sheet, the spec and the code:
+      `gcinfo`/`newproxy`/`table.foreach`/`table.foreachi` were in `SIM_REMOVE` and in §10.2 step
+      4 but in neither CANON line (commit `36e822b` fixed this drift in one direction and left the
+      reverse standing); CANON claimed "`string.format %p` replaced", which is wrong in both
+      halves (`%p` is rejected upstream as an invalid option — measured in round 1 — and the
+      conversion that actually leaks is `%*`); and `%*` was specced **nowhere**, existing only in
+      code, test and a `LESSONS` entry, so a reimplementation from the spec as written would have
+      dropped precisely the address leak. All three fixed at their homes; `docaudit` structurally
+      cannot see any of them.
+- [x] **F-3 — `vendor_new.cpp`'s link-mechanics comment named a renamed test and a replaced
+      mechanism**, in the file whose own history is about comments matching the tree. Now cites
+      `..._vendor_pool` and the per-window counter defined ~90 lines above it.
+
+## W2 luau-vm — review round 1 (2026-08-26, fresh context, Opus 5 high; verdict FIX FIRST)
+
+Ten findings, three HIGH and each independently disqualifying, every one reproduced on head
+`33d6efd`. Full comment on PR #11. Two needed rulings; **Rafael ruled both on 2026-08-26, relayed
+by the steward** — recorded here with that provenance, per `CLAUDE.md`'s doc-integrity protocol.
+
+- [x] **RULED 2026-08-26 (Rafael, via the steward) — D2: the compile window moves to
+      `pool_vendor`.** The RR-18 window drew from the live VM's pool, which put two allocators
+      with OPPOSITE failure semantics on one budget: `tl_luau_alloc` returns null over budget and
+      Luau makes that a recoverable error (the `memory_exhaustion` row pins it as the contract),
+      while the `operator new` replacement `TL_FATAL`s. Measured by the reviewer: a sim VM with a
+      512 KB budget compiling a ~200 KB source killed the process, in EVERY tier including `ship`,
+      from §10.9's on-load compile path fed by files on disk. It also made the trip point depend
+      on runtime heap occupancy rather than on the source. **Ruling:** the window draws from
+      `PLATFORM.md` §9.5's `pool_vendor`, so the VM budget stays a bound on VM state, plus a cheap
+      pre-window headroom check that refuses with `ERR_SCRIPT_COMPILE` instead of ever reaching
+      the fatal. **Shipped:** `ScriptVmDesc.compile_pool` (required — a null one is
+      `ERR_SCRIPT_BAD_ARG`, never a fall back), headroom constants DERIVED from measurement
+      (90.66x the source size at 1 KB, 49.83x at 64 KB, ~88 KB floor → 256 KB + 128 B/byte, ~3x
+      and ~1.4x margin), and `compile_headroom_is_refused_not_fatal`. `MEMORY.md` §1.5,
+      `PLATFORM.md` §9.5, `LUAU-LAYER.md` §10.12 and the RR-18 record above amended.
+- [x] **RULED 2026-08-26 (Rafael, via the steward) — D4: `math.random`/`math.randomseed` are
+      removed from the data VM.** Luau seeds its PCG from `uintptr_t(L) ^ time(NULL) ^ clock()`
+      (`lmathlib.cpp`), and the data VM's OUTPUT is hashed (`LUAU-LAYER.md` §1) — so a data script
+      that draws once produces a peer-divergent table, surfacing as a fingerprint mismatch rather
+      than as an error at the mistake. The reviewer measured two data VMs in one process returning
+      different values for one expression. **Ruling:** remove, because a data table wanting
+      randomness is a bug that should surface where the mistake is. **Shipped:** both names in
+      `DATA_REMOVE`, `LUAU-LAYER.md` §1 amended, and `sandbox.test.cpp`'s pin — which had been
+      BLESSING the hole with `assert(math ~= nil)` — replaced by one that refuses it. The residual
+      `time()`/`clock()` call inside `luaopen_math`'s seeding is inert once `random` is
+      unreachable: it touches only `rngstate`, which nothing can then read.
+- [x] The other eight are the lane's directly and are fixed in this branch; finding→commit is on
+      the PR. The two that changed a claim rather than code are worth keeping visible: **D1** —
+      the RR-18 guard could not fail on its own subject (the floor was measured across
+      `script_run_source`, which also loads and runs; only 28.8 % of the delta was the compiler,
+      and the reviewer's malloc/free swap passed the row). It now measures the WINDOW, via
+      `script_last_compile_bytes`. **D3** — the freeze missed the string metatable, and a sealed
+      sim script kept a field there across ten tick brackets: a live breach of `LUAU-LAYER.md`
+      §0. Now `luaL_sandbox()`, the vendored function the hand-rolled freeze had reimplemented
+      around, minus the one step that mattered.
+
+> **Lane closeout sweep DONE, 2026-08-26 (steward, `WORKFLOW.md` §1 R-7 + R-12) — merged as
+> `f673c5b1` (PR #11, merge commit, Fable SHIP verdict on `b409286`, 46/46 CI green; four
+> review rounds: fix-first → fix-again → all-verified → ship-round fix-first → SHIP).**
+> Triage of this lane's filings: (1) the "For W3 luau-bindings" published-surface entry HOLDS
+> as that lane's brief input — correctly routed, no action now. (2) the "For the W2 vendor
+> lane / wave merge" both-sides conflict entry now BINDS the vendor merge (this side is on
+> main; the steward resolves the vendor PR's merge keeping BOTH sides per the entry). (3) the
+> rebuild-budget 1.10x-headroom urgency is UPGRADED into the standing re-baseline entry: after
+> the vendor merge, re-baseline on the FULL merged W2 tree — the vendor lane's 50 s budget was
+> derived on a tree without Luau's +4.35 s. (4) R-12 doc check: `LUAU-LAYER.md`'s status line
+> was still "design rev 1, 2026-08-22" — re-dated in this sweep commit. Provenance note per
+> the net-p1 precedent: RR-18/19/20 were ruled by Rafael DIRECTLY in the lane session
+> (confirmed to the steward 2026-08-26); D2/D4/F-1 were ruled via the steward relay.
+
+## W2 luau-vm — lane notes (2026-08-26, `w2-luau-vm`, PR #11)
+
+Scope shipped: `docs/LUAU-LAYER.md` §10.12's **VM half** — build-order steps 1–2 plus the data-VM
+constructor. `vendor/luau` at the 0.696 pin (Common/VM/Ast/Compiler, **no CodeGen**), `tl_script`
+(`script.h`, `vm.h/.cpp`, `sandbox.cpp`, `handles.h`, `compile_opts.h`, `bind_fx.cpp`),
+`src/vendor_glue/luau_alloc.*`, and `tests/script/` (15 rows *at the time of this entry* — the
+final count is **25**; the intermediate figures below are likewise point-in-time and are left as
+written rather than back-edited, so the record reads as what was true when each was filed).
+
+- [x] **Three VMs, the sandbox, `sortedpairs`, the `fx` table.** All 15 test rows pass in `debug`
+      and `ship`; 6 of them (everything that does not compile Luau source) pass in all four tiers.
+      Every `fx` op is compared against the C++ helper it wraps over a seeded sweep, on raw bits.
+- [x] **Both §10.12 audit criteria now have tools behind them**, each with planted violations:
+      `tools/audit/includes.py`'s `SYS_ALLOW_DIRS` + `BACKEND_HEADERS` (headers) and
+      `tools/audit/symbols.py --wrap-lib` (symbols, defined AND undefined — a hand-written
+      `extern` needs no header). `tools/audit/targets.py` needs no entry for this tree: it walks
+      `src/sim` + `src/foundation` only, and neither can reach a Luau header.
+- [x] **The `pool_alloc` grep `MEMORY.md` promised since rev 1** landed with its first caller.
+- [x] **RR-18, RR-19 and RR-20 all ruled 2026-08-26 and implemented in this lane** (records
+      above). Net effect: **19 rows at that point, all four tiers, 0 skipped** — the in-process compile works
+      everywhere, atoms are live, and CodeGen stays out with `script_codegen_available()` saying
+      so. The one new mechanism, `tools/audit/static_allow.txt`, is the general answer to the
+      class that had already produced three instances (the dropped CRT-malloc counter,
+      `vendor_glue`'s pool pointer, the interner pointer): a callback with a fixed signature and
+      no context parameter cannot be handed its state, and the exemption is keyed by lib +
+      directory + stem so neither half alone grants anything.
+- [ ] **For W3 luau-bindings — what this lane published and W3 must not break:**
+      `ScriptVm` is opaque and `script.h` names no Luau type; the §10.4 tag numbers and the §10.5
+      userdata tags are pinned in `handles.h` (renumbering them is a cross-lane event);
+      `script_compile_options()` is the ONE pinned `lua_CompileOptions` and `tools/luauc` must
+      share it (§10.9); `lua_Callbacks::userdata` is taken — it holds the `ScriptVm*` back-pointer
+      that lets the context-free callbacks work without a namespace-scope global, so a trampoline
+      must not repurpose it; `fx.rng_below`/`fx.rng_q` are written and error with "no system is
+      running" until a trampoline publishes `vm->running`.
+- [ ] **For the W2 vendor lane / the wave merge — a known conflict, by design.** Both lanes create
+      `src/vendor_glue/` (this one `luau_alloc.*`, that one `pool_vendor`/`pool_enet`/`imgui_glue`/
+      `sdl_glue`/`enet_glue`) and both add the root `CMakeLists.txt` line, the module's
+      `CMakeLists.txt`, and `SYS_ALLOW_DIRS` entries. Keep BOTH sides everywhere; this lane also
+      adds `MODULE_DAG["vendor_glue"]` (an unknown module resolves to an EMPTY allow-list, so
+      every include in the folder fails the gate without it) and the `pool_alloc` gate, which the
+      vendor lane's adaptors are already exempt under.
+- [ ] **Rebuild-budget headroom is down to 1.10x — MEASURED on the leg, and it refuted this
+      lane's own projection.** Container figures (4 cores, `netcode-linux`, cold): 9.04 s without
+      Luau, 13.39 s with it (+4.35 s, +48 %, 53 TUs), from which this lane projected ~17.9 s and
+      ~1.4x headroom on the CI leg. **The leg itself measured 22.66 s against the 25.00 s budget**
+      (PR #11, run 129, `rebuild-budget` job): headroom **1.10x**, not 1.4x. The container's core
+      count and clock do not scale the way the estimate assumed, which is the whole reason
+      `CLAUDE.md` rule 4 says a number, not a projection.
+      **Why this is now urgent rather than a note:** the same gate went red at 25.27 s on a
+      DOCS-ONLY commit against a tree ~40 TUs smaller (main run #106), i.e. its measured variance
+      already exceeds the 2.34 s of headroom left. The concurrent `w2-vendor` lane adds SDL3,
+      SDL_ttf, imgui, ENet, Monocypher and stb on top of this. **Recommendation:** re-baseline on
+      the merged W2 tree with headroom stated as a multiple, not a constant, and re-read the
+      `pr.yml` comment that still claims a 2x margin.
+
 ## W2 gate0 — the bench is built; what it measured (2026-08-25, `w2-gate0`, PC x86-64 netcode tier)
 
 The verdict table is `tests/gate0/results/2026-08-25-pc-win-netcode/README.md` (the CSVs beside
@@ -987,6 +1142,106 @@ E-2 needs no W2 decision but blocks real game wiring later.
       so the doc is self-consistent and the five sites that already cited §4 for this rule are no
       longer citing a rule that doesn't exist. If Rafael wants a narrower or different standing
       rule, amend §4 again in one edit — nothing else references the mechanism, only the section.
+
+- [x] **RULED 2026-08-26 (Rafael): option (a) — pool the compiler's heap.** Shipped on
+      `w2-luau-vm`: `alloc_shim.cpp`'s six operators moved to their own TU
+      (`alloc_shim_ops.cpp`) so archive semantics let a replacement win without a duplicate
+      symbol; `src/vendor_glue/vendor_new.cpp` is a pool-backed global `operator new`/`delete`
+      that `TL_FATAL`s exactly like the tripwire when no pool is installed;
+      `src/script/vm.cpp` opens the window around one `luau_compile` and closes it on return,
+      serving the compiler from ~~the VM's own pool~~ **the shared vendor pool — amended by the
+      D2 ruling below (2026-08-26), which reversed this clause** — and asserting the live-byte
+      counter back to its pre-compile value. The one pointer is exempted by name in the new
+      `tools/audit/static_allow.txt`, read by BOTH gates, keyed by lib + directory + stem,
+      with planted violations for each half alone. `MEMORY.md` §1.5/§2, `CPP-SUBSET.md` §1 and
+      `PLATFORM.md` §9.5 amended. **Result: all `tests/script` rows pass in all four
+      tiers** (20 at the time of that claim, which said 19 — the reviewer's record nit), and §10.9's dev on-load compile is unblocked. The filing, with the measurement
+      and the two rejected options:
+  - [x] **RR-18 (was BLOCKING, w2-luau-vm, 2026-08-26): the alloc-shim tripwire and a vendored C++
+      library with no allocator hook cannot both exist.** `MEMORY.md` §2's premise is
+      "vendor libs are routed through `mem_pool` via their hook APIs (`lua_newstate(alloc_fn)`,
+      ...)". **Measured against the Luau 0.696 pin:** the Luau **VM** honours that exactly —
+      `luau_load` + `lua_pcall` make **zero** global `operator new` calls, every byte comes from
+      `tl_luau_alloc`. The Luau **Compiler** has no hook API at all and makes **32** global
+      `operator new` calls per `luau_compile` (a 24-character source; the count is the shape, not
+      the size). `alloc_shim.cpp`'s `operator new` is a `TL_FATAL` tripwire in `dev` and
+      `netcode`, so **any in-process compile dies**: `tl_tests --tag script` reports
+      `ERR src/foundation/alloc_shim.cpp:20: global operator new` and exits 2 on the first test
+      that runs a Luau string. This blocks every `LUAU-LAYER.md` §10.11 row that runs source
+      (sandbox, sortedpairs, fx literals, budget, memory exhaustion) in the two tiers §10.12's
+      done criterion names, and it blocks §10.9's dev on-load compile permanently.
+      `netcode`/`ship` are unaffected in production (they embed precompiled bytecode, §6) and
+      `debug`/`ship` have no tripwire at all, which is why nothing saw this until now.
+      **Options:**
+      **(a) RECOMMENDED — let a program replace the tripwire, and pool the compiler's heap.**
+      Three small pieces, all using mechanisms already in the tree: (1) move `alloc_shim.cpp`'s
+      six operators into their own TU so ordinary archive semantics let another definition win
+      without a duplicate-symbol error (today they share a member with `tl_alloc_shim_anchor`,
+      which is force-pulled by the guard); (2) add `src/vendor_glue/vendor_new.cpp` — a
+      pool-backed global `operator new/delete` over one `MemPool`, installed by `app/` (and by
+      the test fixture) for programs that link a vendored C++ library with no allocator hook;
+      (3) teach `tools/audit/symbols.py` the writable-static exemption for the ONE pointer that
+      needs — the same LIB+STEM shape RR-7 already uses for the tooling plane, with its own
+      negative fixtures. `PLATFORM.md` §9 **already sanctions** exactly this
+      ("`src/vendor_glue/` — the one folder allowed a static pool pointer"); only the gate
+      never learned it. Cost ~80 lines + fixtures. Value: the compiler's heap becomes budgeted
+      and measured, which is what `MEMORY.md` §1.5 wanted and cannot get any other way.
+      **(b) Replace the runtime tripwire with a static one.** Ban `_Znwm`/`_Znam`/`_ZdlPv` (and
+      the MSVC manglings) as undefined references from every registered `src/` lib in
+      `symbols.py`, and delete the runtime operators. Strictly stronger for `src/` (a path not
+      taken at runtime cannot hide), but it hands the vendored compiler the unbudgeted CRT heap
+      and loses the tripwire for `tests/`.
+      **(c) Forbid the in-process compile.** `tools/luauc` becomes the only compiler and `dev`
+      loads precompiled bytecode like `netcode`. Keeps every current rule intact and costs the
+      sub-second script iteration that is the whole reason `LUAU-LAYER.md` §6 exists.
+      Rejected here, recorded so it is not re-derived.
+      **Whichever wins amends `MEMORY.md` §1.5/§2** (the "every vendor lib has a hook"
+      premise is factually wrong and must say so) and is a ruling, so it needs Rafael's word.
+      **Parked meanwhile:** the lane ships everything that does not need an in-process compile;
+      the source-running §10.11 rows are written and land the moment this is answered.
+- [x] **RULED 2026-08-26 (Rafael): RR-19 rides RR-18's mechanism — one mechanism, three
+      users.** Shipped: `src/script/atom.cpp` holds the one exempted `Interner*` and installs
+      `cb->useratom`; it is a LOOKUP, never an insert, so a string a script builds at runtime
+      cannot grow a capped interner. `script_atom_of()` exposes the result for the
+      `interner_atoms` test row, which pins the atom against its own `StrId` rather than
+      against "some non-negative number" (a hash-shaped bug produces that too). The filing:
+  - [x] **RR-19 (w2-luau-vm, 2026-08-26): Luau's `useratom` callback cannot reach the Interner.**
+      `LUAU-LAYER.md` §10.2 step 8 specifies `useratom(const char* s, size_t len) → int16_t`
+      returning the interner's `StrId`. Luau's callback signature carries **no context pointer
+      and no `lua_State*`** (`lua_Callbacks::useratom`, measured at the 0.696 pin), so reaching
+      the process `Interner` from it needs namespace-scope mutable state, which
+      `CPP-SUBSET.md` §1 bans and `tools/audit/symbols.py`'s `.data`/`.bss` check enforces
+      with no exemption mechanism outside RR-7's tooling plane. This is the SAME class as the
+      dropped CRT-malloc counter and as RR-18's static pool pointer — three instances now, which
+      is the argument for one general mechanism rather than three exceptions.
+      **Options: (a)** the RR-18(a) exemption, extended to one `script`-lib stem holding the
+      interner pointer (recommended if RR-18(a) is ruled in — one mechanism, three users);
+      **(b)** drop atoms: `lua_tostringatom` yields −1 and W3's proxy hashes every field name
+      per access, on the hottest script path, and §10.5's `"<Comp> has no field <key>"` error
+      loses the name it is supposed to print; **(c)** give the atom a meaning that needs no
+      interner (rejected: `StrId` is a dense counter the interner assigns, by `CANON.md`).
+      **Shipped meanwhile, loudly:** `cb->useratom` is NOT installed and
+      `script_useratom_installed()` returns `false` — a queryable fact, not a silent fallback.
+      Nothing in this lane depends on it; W3 luau-bindings does.
+- [x] **RULED 2026-08-26 (Rafael): RR-20 as recommended** — CodeGen stays unvendored until the
+      W3 lane that writes `bind_ui.cpp` measures a UI-VM cost worth it; `LUAU-LAYER.md` §10.2
+      step 9 now says the call is conditional on the library being present, and
+      `script_codegen_available()` returns `false` and says why. The filing:
+  - [x] **RR-20 (w2-luau-vm, 2026-08-26, NOT blocking): Luau's CodeGen is not vendored, so the UI
+      VM has no NCG.** `LUAU-LAYER.md` §10.2 step 9 calls `luau_codegen_create` for the UI VM
+      when `luau_codegen_supported()`. CodeGen is 36 more TUs on top of the 53 vendored, against
+      a cold-build budget with no headroom: **measured on this container (4 cores,
+      `netcode-linux`, cold)** 9.04 s without Luau, 13.39 s with the VM+Ast+Compiler subset —
+      **+4.35 s, +48 %** — and the CI gate is 25 s on a leg whose last measurement was 12.1 s
+      (so the projected leg cost is ~17.9 s and the "2x margin" the workflow comment claims is
+      now ~1.4x). CodeGen would roughly double that delta for a VM whose first binding table
+      (`bind_ui.cpp`) is a W3 lane's and whose scripts do not exist. **Recommended:** leave it
+      unvendored until the W3 lane that writes `bind_ui.cpp` measures a UI-VM cost worth it, and
+      amend §10.2 step 9 to say the call is conditional on the library being present.
+      `script_codegen_available()` returns `false` and says why. **Also feeds the open
+      rebuild-budget re-baseline entry above:** that entry's headroom arithmetic predates 53 new
+      TUs and should be re-run on the merged tree, not on the W1 one.
+
 - [x] **RULED 2026-08-26 (Rafael): the doc-relevancy pass — `WORKFLOW.md` §5 R-12.** Lane
       closeouts (R-7) check the lane's own doc against what shipped; wave boundaries add a pass
       over the repo's status surfaces (§3 artifact 4: root `README.md` Status, `CLAUDE.md`
