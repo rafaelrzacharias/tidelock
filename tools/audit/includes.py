@@ -42,7 +42,7 @@ SYS_ALLOW_DIRS = {                        # additional system headers, by path p
     "src/foundation": {"rapidhash.h"},
     # The vendor allocator hookups (docs/MEMORY.md §8.6) include their lib's own headers to reach
     # its SetMemoryFunctions/SetAllocatorFunctions/STBI_MALLOC hook API.
-    "src/vendor_glue": {"SDL3/SDL.h"},
+    "src/vendor_glue": {"SDL3/SDL.h", "imgui.h"},
 }
 BACKEND_FREE = ("src/platform/impl_sdl3", "src/platform/impl_headless")   # OS headers live here
 

@@ -593,6 +593,21 @@ E-2 needs no W2 decision but blocks real game wiring later.
       real FreeType allocations through `pool_vendor`. See `LESSONS.md` for the `SDL3_DIR`
       in-tree-`find_package` trick this needed and the "the consumer add_subdirectory()s its own
       transitive dep" gotcha.
+- [x] **Dear ImGui vendored** at the `docking` branch's pinned commit `fd13a1e8` (`vendor/imgui`,
+      no upstream CMakeLists.txt to inherit - imgui ships as loose sources by design, so
+      `vendor/imgui/CMakeLists.txt` is ours). Builds only the 4 core TUs (`imgui.cpp`,
+      `imgui_draw.cpp`, `imgui_tables.cpp`, `imgui_widgets.cpp`) into a static lib named `imgui`;
+      `imgui_demo.cpp` and every `backends/imgui_impl_*.cpp` are vendored but NOT compiled - no
+      caller yet (the demo window, and each platform/renderer backend, are the future editor/
+      platform lanes' calls to make, not this one's to pre-build). `ImGuiColorTextEdit`
+      (`BUILD.md` §4's other parenthetical) is explicitly NOT vendored here: it is not named in
+      this lane's brief (SDL3/SDL_ttf/imgui/ENet/Monocypher/stb only) and nothing consumes it -
+      whichever lane builds the script/text-viewing editor panel vendors it then.
+      `src/vendor_glue/imgui_glue.{h,cpp}` hooks `ImGui::SetAllocatorFunctions` to `pool_vendor`;
+      `tests/vendor_glue/imgui_glue.test.cpp` proves a real `CreateContext`/`DestroyContext`
+      cycle allocates and frees through the pool. `tools/audit/includes.py`'s `SYS_ALLOW_DIRS`
+      gains `"imgui.h"` for `src/vendor_glue` (its `BACKEND_HEADERS` entry already listed
+      `src/vendor_glue`, from the SDL3 commit's batch edit).
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**

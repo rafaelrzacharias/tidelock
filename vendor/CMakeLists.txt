@@ -41,3 +41,5 @@ set(SDLTTF_SAMPLES OFF CACHE BOOL "" FORCE)
 set(SDLTTF_INSTALL OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(sdl_ttf)
+
+add_subdirectory(imgui)
