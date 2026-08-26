@@ -539,6 +539,19 @@ E-2 needs no W2 decision but blocks real game wiring later.
       ("checkpoint writer, chain" are Phases 6–7) fixed same commit. The lane is un-parked.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [x] **W2 net-p1 Phase 1 measurements (recorded per `NETCODE.md` §20.8: "a phase ends on the
+      full green gate plus the measurement recorded in `LESSONS.md` with the `build_id`").**
+      Recorded 2026-08-26 on branch `w2-net-p1`. Toolchain: clang 18.1.3, x86-64 Linux,
+      `dev-linux` / `sanitize-linux` presets. The `build_id` for the merged commit is CI's on the
+      four `CANON.md` legs; these are the lane-local numbers the gate asks for.
+      - **T1f fuzz soak:** 600 s under ASan/UBSan, **39 passes over seeds 1..39**, each pass the
+        full 10^6 round-trip and 10^6 mutation rows. Zero failures, zero sanitizer reports.
+      - **30-min synthetic 3-peer archive: 127,126 bytes (124.1 KB)** over 360 segments of 300
+        ticks - 39.4 KB segment headers (32%), 53.8 KB stream headers (43%), 31.0 KB transition
+        records (25%, 12,618 records at 2.52 B). **Over the < 80 KB criterion**; the framing
+        ruling request above carries the gap and the options.
+      - Suite: 368 selected / 364 passed / 0 failed / 4 skipped on `dev-linux`; 31/31 net rows
+        green under `sanitize-linux`.
 - [ ] **BLOCKS the net-p1 Phase 1 done criterion: the §20.2.9 segment framing cannot reach
       §20.8's < 80 KB at the CHECKPOINT_HOT_TICKS cadence. Measured, not estimated.** Filed
       2026-08-26 by `w2-net-p1`. The codec is built, green and canonical; the size gate is the
