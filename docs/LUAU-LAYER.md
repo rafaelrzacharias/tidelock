@@ -1,6 +1,9 @@
 # The Luau layer — data, meaning, iteration (tidelock, rev 1)
 
-> **Status:** design rev 1, 2026-08-22. **DECIDED** except §9. Expands `PIVOT-DESIGN.md` §7.
+> **Status:** rev 1 (2026-08-22), amended through 2026-08-26 — the W2 luau-vm lane built the
+> §10.12 VM half and folded in the rulings RR-18/19/20 (compiler heap pooled on `pool_vendor`,
+> atoms live, CodeGen out) and the data-VM determinism rules (`math.random` removed; reference
+> stringification raises). **DECIDED** except §9. Expands `PIVOT-DESIGN.md` §7.
 > §10 is the implementation specification (file layout, VM construction, binding signatures,
 > proxies, reload, bytecode pipeline, tests); it is placed before the rulings by convention.
 > **Owns:** `src/script/` (VM setup, bindings, reload, trampolines), `script/` (the game).

@@ -184,6 +184,20 @@ by the steward** — recorded here with that provenance, per `CLAUDE.md`'s doc-i
       §0. Now `luaL_sandbox()`, the vendored function the hand-rolled freeze had reimplemented
       around, minus the one step that mattered.
 
+> **Lane closeout sweep DONE, 2026-08-26 (steward, `WORKFLOW.md` §1 R-7 + R-12) — merged as
+> `f673c5b1` (PR #11, merge commit, Fable SHIP verdict on `b409286`, 46/46 CI green; four
+> review rounds: fix-first → fix-again → all-verified → ship-round fix-first → SHIP).**
+> Triage of this lane's filings: (1) the "For W3 luau-bindings" published-surface entry HOLDS
+> as that lane's brief input — correctly routed, no action now. (2) the "For the W2 vendor
+> lane / wave merge" both-sides conflict entry now BINDS the vendor merge (this side is on
+> main; the steward resolves the vendor PR's merge keeping BOTH sides per the entry). (3) the
+> rebuild-budget 1.10x-headroom urgency is UPGRADED into the standing re-baseline entry: after
+> the vendor merge, re-baseline on the FULL merged W2 tree — the vendor lane's 50 s budget was
+> derived on a tree without Luau's +4.35 s. (4) R-12 doc check: `LUAU-LAYER.md`'s status line
+> was still "design rev 1, 2026-08-22" — re-dated in this sweep commit. Provenance note per
+> the net-p1 precedent: RR-18/19/20 were ruled by Rafael DIRECTLY in the lane session
+> (confirmed to the steward 2026-08-26); D2/D4/F-1 were ruled via the steward relay.
+
 ## W2 luau-vm — lane notes (2026-08-26, `w2-luau-vm`, PR #11)
 
 Scope shipped: `docs/LUAU-LAYER.md` §10.12's **VM half** — build-order steps 1–2 plus the data-VM
