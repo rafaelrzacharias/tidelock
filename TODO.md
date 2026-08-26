@@ -548,25 +548,30 @@ E-2 needs no W2 decision but blocks real game wiring later.
       enforced module prefixes; revisit only on a real collision.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
-- [ ] **The CI `rebuild-budget` full-build budget (25.00 s) has ~0 headroom and fired on a
-      docs-only commit.** Filed 2026-08-26 by the steward. Main run #106 (`8524a8c`, a commit
-      touching only `TODO.md` + `docs/WORKFLOW.md`) measured `netcode-win` full rebuild
-      25.27 s > 25.00 s and turned main red; run #108 minutes later (the PR #10 merge — a
-      strictly larger tree) passed the same check. A docs-only commit cannot change compile
-      time, so the overshoot is runner variance — but the margin is real: the 25/5 budget was
-      baselined at the W1 tree (the run-#33 commit) and the tree has since grown through the
-      ecs and net-p1 merges (~139 build steps vs ~100 then). `docs/TESTING.md` §6 rules a flake
-      P0, and a timing gate with no stated variance headroom is one by construction (the
-      entropy-σ precedent). **Options:** (A) **RECOMMENDED — re-baseline with stated headroom:**
-      measure N ≥ 5 clean full builds on the CI runner at the current tree, set the budget to
-      median × 1.15 (variance measured, not guessed), record baseline commit + method in
-      `pr.yml` next to the numbers, and re-baseline as a standing wave-boundary step (the
-      budget then tracks deliberate tree growth while still catching a compile-time regression
-      within a wave). (B) Bump 25.00 → 30.00 flat — cheap, but an unmeasured number replaces a
-      measured one and silently absorbs ~20 % compile-time growth. (C) Keep 25.00 as a hard
-      ceiling and treat the overshoot as a signal to spend compile-time work now — honest about
-      the budget's intent, but it fails docs-only commits on runner noise, which is a flake,
-      not a signal.
+- [x] **The CI `rebuild-budget` gate flaked on a docs-only commit (main run #106 red).**
+      Filed and RULED 2026-08-26 (Rafael), in two steps because the first ruling's method was
+      refuted by measurement the same hour. The record:
+      **Filing:** run #106 (`8524a8c`, `TODO.md` + `docs/WORKFLOW.md` only) measured
+      `netcode-win` full rebuild 25.27 s > the 25.00 s budget and turned main red; a docs-only
+      commit cannot change compile time. `docs/TESTING.md` §6 rules a flake P0, and a timing
+      gate with no stated variance headroom is one by construction (the entropy-σ precedent).
+      **Ruling 1 (superseded):** re-baseline on the current tree with budget = measured
+      median × 1.15. **Refuted by the baselining measurement itself:** four runs on ONE tree
+      (#105/#106/PR-#10/#108) measured full builds of 10.34 / 25.27 / 9.90 / 14.38 s on
+      `windows-latest` — a 2.5× fleet spread, median 12.36 s ≈ the W1 baseline's 12.46 s, so
+      no tree drift at all: the fleet is heterogeneous silicon and NO fixed multiplier on it
+      both avoids flakes and catches a 2× regression.
+      **Ruling 2 (final, as recommended): the gate moves to the elected leg** —
+      `ubuntu-latest` / `netcode-linux` (`WORKFLOW.md` §4; the perf election measured the x64
+      ubuntu fleet as uniform EPYC 7763, the same cure as the perf radar: steady fleet first,
+      then a measured multiplier means something). Provisional budget 25/5 at the move (one
+      measured ubuntu build of this tree: 12.1 s full), tightened by the entry below.
+- [ ] **Tighten the rebuild budget on the elected leg (standing, from the 2026-08-26 ruling):**
+      after ~10 `pr.yml` runs on `ubuntu-latest` / `netcode-linux`, collect the TSV rows from
+      the `rebuild-budget` job logs, set full = median × 1.15 and incremental likewise, and
+      record the measurement in `pr.yml`'s comment. Re-check at each wave boundary alongside
+      the §3 sweep (deliberate tree growth re-baselines; within a wave the tightened budget
+      catches a compile-time regression).
 - [x] **Should the archive carry a PER-TICK bound on log records, or only the aggregate one?**
       Filed 2026-08-26 by `w2-net-p1` (round 5 finding 1). `archive_encode_segment` TL_CHECKs an
       aggregate — `log_record_count <= MAX_LOG_RECORDS_PER_PACKET * tick_count` — and

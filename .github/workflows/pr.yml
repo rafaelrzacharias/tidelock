@@ -216,15 +216,21 @@ jobs:
   rebuild-budget:
     # Cold, no compiler cache (docs/BUILD.md §9 R-1). The CI box has its own budget; the numbers
     # in docs/BUILD.md §3 are the reference PC's.
-    runs-on: windows-latest
+    # Runs on the ELECTED leg (ubuntu-latest, WORKFLOW.md §4) — ruled 2026-08-26: four
+    # windows-latest runs on one tree measured full builds of 9.90/10.34/14.38/25.27 s (a 2.5x
+    # fleet spread; the 25.27 turned a docs-only push red), while the x64 ubuntu fleet measured
+    # as uniform EPYC 7763 silicon in the perf election. A wall-clock gate needs the steady
+    # fleet. Measurement record in TODO.md (the rebuild-budget ruling, 2026-08-26).
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.13' }
-      - run: choco install ninja -y
-      - run: python tools/rebuild_budget.py --preset netcode-win --strict-toolchain off --full-budget 25 --incremental-budget 5
+      - run: sudo apt-get update && sudo apt-get install -y clang lld llvm ninja-build
+      - run: python tools/rebuild_budget.py --preset netcode-linux --strict-toolchain off --full-budget 25 --incremental-budget 5
         # The CI box's own budget, passed explicitly as the tool's contract requires (it must
-        # never inherit the reference PC's docs/BUILD.md numbers). Re-baselined 2026-08-24 at
-        # the W1 wave merge: the tree grew from 13 placeholder TUs to the full W1 foundation
-        # and measured 12.46 s full on this runner; 25/5 keeps a 2x regression visible.
+        # never inherit the reference PC's docs/BUILD.md numbers). PROVISIONAL at the leg move
+        # (2026-08-26): one measured ubuntu build of this tree took 12.1 s; 25/5 keeps a 2x
+        # regression visible while ~10 runs of TSV data accumulate, then the budget tightens to
+        # measured median x 1.15 by the standing TODO.md entry.
 
