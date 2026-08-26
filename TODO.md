@@ -722,9 +722,16 @@ E-2 needs no W2 decision but blocks real game wiring later.
 > HOLDS as the impl_sdl3 platform lane's decision (patch-with-declaration / accept-and-document
 > / upstream-report) — correctly routed, no action now. (2) the FreeType vendoring-policy
 > ruling request stands OPEN for Rafael (`BUILD.md` §4 already carries the rule; his word
-> blesses or narrows it). (3) the rebuild-budget re-baseline on the FULL merged tree rides
-> `e66c4f90`'s own main-push CI run — the first measurement of both lanes' TUs under the 50 s
-> budget; the number is recorded against this entry when that run reports. (4) R-12 doc check:
+> blesses or narrows it). (3) the rebuild-budget re-baseline on the FULL merged
+> tree: `e66c4f90`'s main-push run (the first with both lanes' TUs) **PASSED both budgets** on
+> the grading leg (full ≤ 50 s, incremental ≤ 5 s; gate step wall 80 s including configure and
+> both measurements). The exact seconds — and so the headroom-as-a-multiple the luau filing
+> asked for — live only in the job log, which a passing run surfaces nowhere the API can reach
+> (the steward container's proxy blocks log blobs; a FAILING run prints its number as an
+> annotation, a passing one is silent). Follow-up filed under Ruling requests' neighbour list:
+> make `tools/rebuild_budget.py` emit its measurement as a workflow notice, then restate the
+> budget as a multiple. Until then this item stands at "budget held on the merged tree, margin
+> unknown-but-positive". (4) R-12 doc check:
 > `MEMORY.md`/`PLATFORM.md`/`BUILD.md` status lines still read "design rev 1, 2026-08-22"
 > after both lanes amended all three — re-dated in this sweep commit — and README/CLAUDE.md
 > still carried "in review"/"in flight" for lanes now merged — moved to merged.
@@ -1142,6 +1149,15 @@ E-2 needs no W2 decision but blocks real game wiring later.
       pushed after a fix lands will carry the correct identity regardless of which option is
       chosen. **Not blocking:** all vendoring/code work in this lane is complete and CI-validated;
       only the identity rewrite is parked.
+
+- [ ] **Tooling (small, any lane or a steward window): `tools/rebuild_budget.py` should emit its
+      measured seconds as a `::notice::` workflow command (and/or `$GITHUB_STEP_SUMMARY`) on
+      PASS, not only in the failure message.** A passing gate currently records its number
+      nowhere the API exposes — the w2-vendor closeout could confirm the merged W2 tree held
+      the 50 s / 5 s budgets but not by how much, because job logs are unreadable from the
+      steward's container (proxy) and annotations only exist on failure. One print line turns
+      every green run into a headroom data point and unblocks the standing "state headroom as a
+      multiple" re-baseline (W2 luau-vm filing).
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [ ] **RULING REQUEST (2026-08-26, w2-vendor round-2 review N2): bless "patch a vendored file
