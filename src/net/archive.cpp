@@ -397,7 +397,12 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
 
     // Slots outside slot_mask decode as ZERO (docs/NETCODE.md §20.2.9).
     for (u32 s = 0; s < MAX_PEERS; ++s) {
-        for (u32 i = 0; i < tick_count; ++i) { out_frames[s * tick_count + i] = wire_zero_frame(); }
+        // (u64) like every other slot index here: the wrap needs tick_count >= 2^32/7 and a
+        // ~373 GB caller buffer, so ERR_NET_CAPACITY fires first today - but that is one edit to
+        // MAX_PEERS or the capacity contract away from being false.
+        for (u32 i = 0; i < tick_count; ++i) {
+            out_frames[(u64)s * tick_count + i] = wire_zero_frame();
+        }
     }
 
     // Empty streams are OMITTED on the wire, so the stream region is read until it ends rather

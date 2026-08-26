@@ -232,9 +232,13 @@ TL_TEST(net_log_store_signals_truncation_rather_than_returning_a_short_count, "n
 }
 
 TL_TEST(net_log_store_refuses_more_than_a_packet_of_records_at_one_tick, "net,internal,edge,fast") {
-    // Round 4 finding F11: docs/NETCODE.md §20.2.9 bounds a segment at
-    // MAX_LOG_RECORDS_PER_PACKET records per tick, and archive_encode_segment TL_CHECKs it -
-    // which ABORTS. A caller assembling a tick from this store must find out here instead.
+    // Round 4 finding F11, corrected by round 5 finding 1: this is the STORE's admission rule,
+    // stricter than the format. §20.2.9 states no per-tick bound and the encoder's TL_CHECK is an
+    // AGGREGATE (MAX_LOG_RECORDS_PER_PACKET * tick_count), so a segment with 16 records at one
+    // tick over two ticks encodes and decodes fine. Admitting at most one packet's worth per tick
+    // is sufficient for the aggregate and keeps a caller from assembling a set the encoder aborts
+    // on - at the cost of refusing records the format would carry, which is why the code is
+    // returned and not swallowed. Whether the format should carry the bound is filed in TODO.md.
     LogStore s;
     log_store_clear(&s);
     LogRecord r = {};

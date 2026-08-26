@@ -1762,8 +1762,11 @@ leading `u32 format_version` (`= NET_FORMAT_VERSION`), `static_assert` on `sizeo
 `ArchiveStreamHeader` (§20.2.9). Each is a repeated element *inside* a container that has
 already stated the version once in its own header, so they are versioned by their **container's**
 `format_version`, never per record — a per-element copy would be redundant bytes on every row,
-and their pinned sizes only close without one. They carry the same `sizeof`/`offsetof` pins and
-the same little-endian discipline; only the version field is absent. Readers refuse a
+and their pinned sizes only close without one. `CheckpointArenaEntry` and `ChainRecord` carry the
+same `sizeof`/`offsetof` pins and the same little-endian discipline; only the version field is
+absent. `ArchiveStreamHeader` is the exception to the exception — since the framing ruling below
+it is a **decoded form only**, its wire form being two canonical uvarints, so it has no on-wire
+struct layout to pin at all. Readers refuse a
 newer `format_version`, assert every `_padN` is zero, and reject any message whose declared
 `payload_bytes` disagrees with the datagram length (`ERR_NET_MALFORMED`; the whole packet is
 dropped, nothing partially applied). Offsets are natural-alignment offsets; every struct is
@@ -2126,6 +2129,12 @@ static_assert(sizeof(ArchiveFileHeader) == 72 && offsetof(ArchiveFileHeader, bui
 static_assert(sizeof(ArchiveSegmentHeader) == 56 && offsetof(ArchiveSegmentHeader, file_id) == 32
            && offsetof(ArchiveSegmentHeader, header_crc32) == 48);
 ```
+
+**Reader obligation:** a segment's `file_id` must equal the `file_id` of the `ArchiveFileHeader`
+it is read against; a segment carrying another file's id must be refused, because the identity it
+would otherwise be read under is not its own. Nothing inside the segment decoder can check this —
+it never sees the file header — so it is the reader's, and `net/wire.h`'s
+`archive_check_segment_file` is its name.
 
 A stream header is **two canonical uvarints**, not a fixed struct:
 

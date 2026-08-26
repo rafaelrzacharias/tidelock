@@ -548,6 +548,26 @@ E-2 needs no W2 decision but blocks real game wiring later.
       enforced module prefixes; revisit only on a real collision.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **Should the archive carry a PER-TICK bound on log records, or only the aggregate one?**
+      Filed 2026-08-26 by `w2-net-p1` (round 5 finding 1). `archive_encode_segment` TL_CHECKs an
+      aggregate — `log_record_count <= MAX_LOG_RECORDS_PER_PACKET * tick_count` — and
+      `NETCODE.md` §20.2.9 states no per-tick bound at all: a segment carrying 16 records at ONE
+      tick over a 2-tick span encodes and decodes cleanly today. §20.2.2 bounds only
+      `pending_count`; a `SeqSection`'s `record_count` is a bare `u8`.
+      `net_internal.h`'s `log_store_add` nonetheless admits at most `MAX_LOG_RECORDS_PER_PACKET`
+      per tick. That is SUFFICIENT for the aggregate (that many across `tick_count` ticks is
+      exactly the aggregate) and it stops a caller assembling a set the encoder aborts on — but
+      it is **stricter than the format**, so it refuses records a valid segment could carry, and
+      a Phase-2 caller that ignores the returned code would drop sequenced one-shots. The code
+      and both comments now say so plainly rather than citing a bound §20.2.9 does not have.
+      **Options:** (A) **RECOMMENDED — put the per-tick bound in the format** (§20.2.9), enforced
+      in the encoder AND decoder, so store, encoder and decoder agree and the strictness stops
+      being local. A tick's sequenced one-shots are coordinator-generated and a packet already
+      caps `pending_count` at the same number, so this looks like stating what the sequencer can
+      actually produce. (B) Drop the store's per-tick rule and let it admit whatever the
+      aggregate allows — simpler, but then the store can build a set the encoder aborts on, which
+      is what the rule was added for. (C) Keep today's split and document it as an admission
+      policy (what the code does now, pending this ruling).
 - [ ] **`NETCODE.md` §20.2.9 states no maximum `tick_count`, and the archive decoder's cost is
       quadratic in it.** Filed 2026-08-26 by `w2-net-p1` (round 4 finding F8; the code comment
       that claimed otherwise is corrected in the same commit). The earlier log-array ruling

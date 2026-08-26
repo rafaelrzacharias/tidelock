@@ -246,13 +246,12 @@ constexpr i32 wire_wrap_sub_i32(i32 a, i32 b) { return (i32)((u32)a - (u32)b); }
 // pins the layout - and it cannot drift silently: a wrong number fails the build at the
 // TL_X_WIRE_OFFSET assert, and the sizeof pin catches a field list that has gone out of step.
 //
-// NOTE (spec, docs/NETCODE.md §20.2): the section opens "All are TL_WIRE_STRUCT", but three of
-// its own struct definitions carry no leading format_version - CheckpointArenaEntry,
-// ChainRecord and ArchiveStreamHeader. They are repeated elements INSIDE a container that
-// already versioned itself once in its header, so a per-element version would be redundant
-// bytes on every row. They are declared as plain PODs at the end of this section with the same
-// sizeof/offsetof pins. Recorded in TODO.md rather than resolved here: the concrete definitions
-// win over the summary sentence, but the sentence should say so.
+// docs/NETCODE.md §20.2 carries the interior-record exemption (stamped 2026-08-26):
+// CheckpointArenaEntry, ChainRecord and ArchiveStreamHeader carry no leading format_version
+// because each is a repeated element INSIDE a container that has already stated the version
+// once in its own header. The first two are plain PODs with the same sizeof/offsetof pins; the
+// third is a DECODED form only - its wire form is two uvarints, so it has no on-wire layout to
+// pin (see its declaration below).
 
 // PacketHeader - docs/NETCODE.md §20.2.1: INPUT channel, every packet
 #define TL_FIELDS_PacketHeader(X, XA, XH) \
@@ -716,11 +715,9 @@ static_assert(offsetof(ChainRecord, hash) == 152u, "docs/NETCODE.md §20.2.8");
 constexpr u8  ARCHIVE_CH_POINTER_X  = 32u;
 constexpr u8  ARCHIVE_CH_POINTER_Y  = 33u;
 constexpr u8  ARCHIVE_CH_FLAG_ESCAPE = 34u;
-// docs/NETCODE.md §20.2.9's layout line says "for ch in 0..35" and "36 streams per slot", but it
-// defines 35 channels: 0..31 action, 32, 33, 34. ARCHIVE_CH_COUNT keeps the doc's figure because
-// the encoder's size budget is stated in it; ARCHIVE_CH_MAX is the real bound a decoder checks,
-// and channel 35 is refused rather than aliased onto the escape channel. Filed in TODO.md.
-constexpr u32 ARCHIVE_CH_COUNT      = 36u;
+// docs/NETCODE.md §20.2.9 (as amended 2026-08-26) states 35 channels: 0..31 action, 32
+// pointer_x, 33 pointer_y, 34 flag escape. ARCHIVE_CH_MAX is the last real one and the bound a
+// decoder checks; ARCHIVE_CH_REAL_COUNT below is the stream key's radix.
 constexpr u8  ARCHIVE_CH_MAX        = ARCHIVE_CH_FLAG_ESCAPE;
 static_assert(ARCHIVE_CH_POINTER_X == NET_FRAME_MAX_ACTIONS,
               "the action channels are 0..MAX_ACTIONS-1, so pointer_x starts at MAX_ACTIONS");
@@ -848,9 +845,18 @@ u64 archive_write_file_header(ByteWriter* w, u32 file_id, const u8 build_id[32],
                               const u8 session_fingerprint[32]);
 
 // Reads one back. ERR_NET_VERSION for a version with no reader, ERR_WIRE_PAD_NONZERO / the
-// sticky truncation code otherwise. A segment whose file_id differs from the file header's
-// belongs to another file and must not be read against this identity - the caller compares.
+// sticky truncation code otherwise.
 ErrCode archive_read_file_header(ByteReader* r, ArchiveFileHeader* out);
+
+// The segment-to-file binding, as a function rather than a sentence: a segment whose file_id
+// differs from its file header's belongs to another file and must not be read against this
+// identity. Nothing inside archive_decode_segment can check it - the decoder never sees the file
+// header - so this is the READER's obligation, and giving it a name is what stops it staying a
+// comment nobody calls (docs/NETCODE.md §20.2.9 names it as a reader obligation).
+// ERR_OK when they match, ERR_NET_MALFORMED otherwise.
+constexpr ErrCode archive_check_segment_file(u32 file_header_id, u32 segment_file_id) {
+    return file_header_id == segment_file_id ? ERR_OK : ERR_NET_MALFORMED;
+}
 
 // Decodes one segment written by archive_encode_segment. `out_frames` must hold
 // MAX_PEERS * tick_count frames, indexed [slot * tick_count + i]; slots outside the segment's

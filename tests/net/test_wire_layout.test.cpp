@@ -195,11 +195,18 @@ TL_TEST(wire_repeated_element_structs_are_pinned, "net,wire,layout,fast") {
     TL_EXPECT_EQ((u64)offsetof(ChainRecord, hash), (u64)152u);
     TL_EXPECT_EQ(sizeof(ChainEntry), (u64)152u);   // ChainRecord's first member, hence its offset
 
-    TL_EXPECT_EQ(sizeof(ArchiveStreamHeader), (u64)8u);
-    TL_EXPECT_EQ((u64)offsetof(ArchiveStreamHeader, record_count), (u64)0u);
-    TL_EXPECT_EQ((u64)offsetof(ArchiveStreamHeader, channel), (u64)4u);
-    TL_EXPECT_EQ((u64)offsetof(ArchiveStreamHeader, slot), (u64)5u);
-    TL_EXPECT_EQ((u64)offsetof(ArchiveStreamHeader, _pad0), (u64)6u);
+    // ArchiveStreamHeader is a DECODED form only since the option-A ruling - its wire form is
+    // two canonical uvarints - so there is no on-wire layout to pin. Pinning the old 8-byte
+    // struct here would be layout protection for bytes that no longer cross the wire (round 4's
+    // own lesson, applied to this file). What IS on the wire is the key, so that is what is
+    // pinned: the radix, the last legal channel, and the bound.
+    TL_EXPECT_EQ(ARCHIVE_CH_REAL_COUNT, 35u);
+    TL_EXPECT_EQ((u32)ARCHIVE_CH_MAX, 34u);
+    TL_EXPECT_EQ(archive_stream_key(0u, 0u), 0u);
+    TL_EXPECT_EQ(archive_stream_key(0u, ARCHIVE_CH_MAX), 34u);
+    TL_EXPECT_EQ(archive_stream_key(1u, 0u), 35u);
+    TL_EXPECT_EQ(archive_stream_key((u8)(MAX_PEERS - 1u), ARCHIVE_CH_MAX),
+                 MAX_PEERS * ARCHIVE_CH_REAL_COUNT - 1u);
 }
 
 TL_TEST(wire_kind_enums_match_the_spec_values, "net,wire,fast") {
@@ -217,10 +224,9 @@ TL_TEST(wire_kind_enums_match_the_spec_values, "net,wire,fast") {
     TL_EXPECT_EQ((u8)CK_SUSPICION, (u8)1u);   TL_EXPECT_EQ((u8)CK_LOBBY_PROBE, (u8)8u);
     TL_EXPECT_EQ((u8)BK_JOIN_CHALLENGE, (u8)1u); TL_EXPECT_EQ((u8)BK_ACK, (u8)8u);
 
-    TL_EXPECT_EQ((u32)ARCHIVE_CH_POINTER_X, 32u);
+    TL_EXPECT_EQ((u32)ARCHIVE_CH_POINTER_X, 32u);   // 35 channels: 0..31 action, then 32,33,34
     TL_EXPECT_EQ((u32)ARCHIVE_CH_POINTER_Y, 33u);
     TL_EXPECT_EQ((u32)ARCHIVE_CH_FLAG_ESCAPE, 34u);
-    TL_EXPECT_EQ(ARCHIVE_CH_COUNT, 36u);
 }
 
 // wire.h's roll call declares the structs, so coverage is structural rather than asserted: a

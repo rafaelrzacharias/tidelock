@@ -110,10 +110,19 @@ inline bool log_store_has(const LogStore* s, u8 origin_slot, u32 seq) {
     return false;
 }
 
-// The archive refuses more than MAX_LOG_RECORDS_PER_PACKET records at one effective_tick
-// (docs/NETCODE.md §20.2.9, the bound archive_encode_segment TL_CHECKs). Counting them here is
-// what stops a caller assembling a tick the encoder would then abort on: the invariant belongs
-// where records are ADMITTED, not only where they are written out.
+// How many records this store holds at one effective_tick.
+//
+// The store applies an admission rule STRICTER THAN THE FORMAT, deliberately, and this is the
+// only place that is true - so it is stated rather than implied. archive_encode_segment's
+// TL_CHECK is an AGGREGATE (log_record_count <= MAX_LOG_RECORDS_PER_PACKET * tick_count), and
+// docs/NETCODE.md §20.2.9 states no per-tick bound at all: a segment carrying 16 records at one
+// tick over a 2-tick span encodes and decodes cleanly today. Admitting at most
+// MAX_LOG_RECORDS_PER_PACKET per tick is SUFFICIENT for the aggregate bound (that many across
+// tick_count ticks is exactly the aggregate) and is what keeps a caller from assembling a set
+// the encoder aborts on - but it will refuse records the format would carry, so a caller must
+// read the code rather than assume success. Whether the per-tick bound belongs in the FORMAT is
+// filed in TODO.md; if it is ruled in, encoder and decoder enforce it and this stops being
+// stricter than its spec.
 inline u32 log_store_count_at_tick(const LogStore* s, u64 tick) {
     TL_ASSERT(s != nullptr);
     u32 n = 0;
@@ -130,9 +139,9 @@ inline ErrCode log_store_add(LogStore* s, const LogRecord* rec) {
     TL_ASSERT(s != nullptr && rec != nullptr);
     if (log_store_has(s, rec->origin_slot, rec->seq)) { return ERR_NET_DUPLICATE_RECORD; }
     if (s->count >= LOG_STORE_CAPACITY) { return ERR_NET_STORE_FULL; }
-    // ERR_NET_MALFORMED rather than a fatal: a caller that has produced too many records for one
-    // tick has a bug, but finding out here beats finding out inside the encoder's TL_CHECK,
-    // which aborts the process.
+    // ERR_NET_MALFORMED rather than a fatal, and stricter than the format on purpose (see
+    // log_store_count_at_tick): finding out here beats assembling a set that trips the encoder's
+    // aggregate TL_CHECK, which aborts the process.
     if (log_store_count_at_tick(s, rec->effective_tick) >= MAX_LOG_RECORDS_PER_PACKET) {
         return ERR_NET_MALFORMED;
     }

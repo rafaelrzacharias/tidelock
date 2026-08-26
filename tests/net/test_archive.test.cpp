@@ -1223,3 +1223,42 @@ TL_TEST(archive_regression_effective_tick_range_survives_a_u64_wrap, "net,archiv
     TL_EXPECT_EQ(h.base_tick, base);
     api.release(api.ctx, arena.base, arena.reserved);
 }
+
+TL_TEST(archive_segment_file_binding_is_a_named_reader_obligation, "net,archive,fast") {
+    // Round 5 finding 2: the segment-to-file binding was asserted in a comment and implemented
+    // nowhere. It cannot live inside archive_decode_segment - the decoder never sees the file
+    // header - so it is the reader's obligation, and archive_check_segment_file is its name.
+    u8 build_id[32], fingerprint[32];
+    ar_ids(build_id, fingerprint);
+    u8 fh[128];
+    ByteWriter w;
+    bw_init(&w, fh, sizeof(fh));
+    archive_write_file_header(&w, AR_FILE_ID, build_id, fingerprint);
+    ArchiveFileHeader h = {};
+    ByteReader r;
+    br_init(&r, fh, w.len);
+    TL_ASSERT_EQ(archive_read_file_header(&r, &h), ERR_OK);
+
+    TL_EXPECT_EQ(archive_check_segment_file(h.file_id, AR_FILE_ID), ERR_OK);
+    TL_EXPECT_EQ(archive_check_segment_file(h.file_id, AR_FILE_ID + 1u), ERR_NET_MALFORMED);
+    TL_EXPECT_EQ(archive_check_segment_file(h.file_id, 0u), ERR_NET_MALFORMED);
+
+    // And a real segment's file_id is what the reader compares.
+    VMemApi api = test_vmem_api();
+    VMemArena arena = {};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, 0xA5C28u, 4u << 20, 0u, &api), ERR_OK);
+    const u32 ticks = 2u;
+    WireFrame* src = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * ticks, 16u);
+    for (u32 i = 0; i < ticks; ++i) { src[i] = nt_zero_frame(0u); }
+    u8 seg[512];
+    const u64 n = ar_encode(seg, sizeof(seg), src, 1u, ticks, nullptr, 0u, 0u);
+    ArchiveSegmentHeader sh = {};
+    WireFrame* got = (WireFrame*)arena_push(&arena, sizeof(WireFrame) * ticks * MAX_PEERS, 16u);
+    LogRecord none[1] = {};
+    u32 rc = 0;
+    ByteReader sr;
+    br_init(&sr, seg, n);
+    TL_ASSERT_EQ(archive_decode_segment(&sr, &sh, got, ticks, none, 1u, &rc), ERR_OK);
+    TL_EXPECT_EQ(archive_check_segment_file(h.file_id, sh.file_id), ERR_OK);
+    api.release(api.ctx, arena.base, arena.reserved);
+}
