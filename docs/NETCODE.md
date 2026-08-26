@@ -1847,6 +1847,12 @@ set to `u32(base_tick + i)` by the decoder, never transmitted.
 
 #### 20.2.3 `LogRecord` — every sequenced one-shot (R6 stable id = `(origin_slot, seq)`)
 
+**Per origin, `seq` ascends strictly in segment record order (ruled 2026-08-26).** The
+sequencer's frontier only grows, so per `origin_slot` a later `seq` can never carry an earlier
+`effective_tick` — the rule states what the protocol already produces. It subsumes R6's global
+`(origin_slot, seq)` uniqueness (a repeat cannot ascend) and turns the archive decoder's
+duplicate scan from O(n²) into eight counters; encoder and decoder both enforce it.
+
 ```cpp
 struct LogRecord {               // 24 B
     u32 format_version;          //  0
@@ -2101,6 +2107,15 @@ identity is stated once, in that header; each segment names its file with a 4-by
 30-minute session cost 23 KB of identical bytes, and the fixed 8-byte stream header another
 54 KB — together 60 KB of the 124 KB an early implementation measured, against §20.8's 80 KB
 criterion. Shrinking both took the same session to 64 KB.)
+
+Two format bounds, both ruled 2026-08-26 and enforced by encoder AND decoder: **a segment's
+`tick_count` is at most `CHECKPOINT_HOT_TICKS`** (segments close on the hot-checkpoint cadence
+anyway; the cap also bounds the decoder's frame buffer and its cost — `BK_LOG_SEGMENT` makes
+`tick_count` an untrusted peer's choice, and unbounded it bought a 61-second decode at 40,000
+ticks), and **at most `MAX_LOG_RECORDS_PER_PACKET` log records per `effective_tick`** — the
+per-tick bound the store already applied is the format's own rule now, so store, encoder and
+decoder agree (the aggregate `≤ MAX_LOG_RECORDS_PER_PACKET × tick_count` remains as the
+pre-parse header check it always was).
 
 ```cpp
 struct ArchiveFileHeader {       // 72 B, one per archive file

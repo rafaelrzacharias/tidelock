@@ -270,7 +270,13 @@ u64 archive_encode_segment(ByteWriter* w, u64 base_tick, u32 tick_count,
     // decoder then refused - a segment written, hashed into ChainEntry.log_segment_hash, and
     // permanently unreadable. `LogRecord r = {}` with the semantic fields filled is the live
     // path: net_internal.h's store neither sets nor validates format_version.
+    TL_CHECK(tick_count <= CHECKPOINT_HOT_TICKS);   // s20.2.9's format maximum (ruled 2026-08-26)
     TL_CHECK((u64)log_record_count <= (u64)MAX_LOG_RECORDS_PER_PACKET * (u64)tick_count);
+    u32 enc_last_seq[MAX_PEERS];
+    u8  enc_seq_seen[MAX_PEERS];
+    for (u32 o = 0; o < MAX_PEERS; ++o) { enc_last_seq[o] = 0u; enc_seq_seen[o] = 0u; }
+    u64 enc_run_tick = 0u;
+    u32 enc_run_count = 0u;
     for (u32 i = 0; i < log_record_count; ++i) {
         TL_CHECK(records[i].format_version == NET_FORMAT_VERSION);
         TL_CHECK(records[i]._pad0 == 0u);
@@ -278,12 +284,23 @@ u64 archive_encode_segment(ByteWriter* w, u64 base_tick, u32 tick_count,
         TL_CHECK(records[i].kind >= (u8)LR_JOIN && records[i].kind <= (u8)LR_END);
         TL_CHECK(records[i].effective_tick >= base_tick
               && records[i].effective_tick - base_tick < (u64)tick_count);
-        // Global (origin_slot, seq) uniqueness - R6's stable id. Adjacent ordering alone does
-        // not imply it: a repeat at a different effective_tick is not adjacent.
-        for (u32 j = 0; j < i; ++j) {
-            TL_CHECK(!(records[j].origin_slot == records[i].origin_slot
-                       && records[j].seq == records[i].seq));
+        // s20.2.3 (ruled 2026-08-26): seq ascends strictly per origin_slot in record order -
+        // the sequencer's frontier only grows, so per origin a later seq cannot precede. This
+        // SUBSUMES R6's global (origin_slot, seq) uniqueness (a repeat cannot ascend) and
+        // retires the O(n^2) whole-array scan that enforced it.
+        const u8 o = records[i].origin_slot;
+        TL_CHECK(enc_seq_seen[o] == 0u || records[i].seq > enc_last_seq[o]);
+        enc_last_seq[o] = records[i].seq;
+        enc_seq_seen[o] = 1u;
+        // s20.2.9 (ruled 2026-08-26): at most MAX_LOG_RECORDS_PER_PACKET records per
+        // effective_tick - the per-tick bound is the FORMAT's now, not a store admission
+        // policy; records are tick-ordered, so a run counter is the whole check.
+        if (i == 0u || records[i].effective_tick != enc_run_tick) {
+            enc_run_tick = records[i].effective_tick;
+            enc_run_count = 0u;
         }
+        enc_run_count += 1u;
+        TL_CHECK(enc_run_count <= MAX_LOG_RECORDS_PER_PACKET);
     }
 
     // Header with both crc fields zeroed; patched below once the payload exists.
@@ -367,6 +384,12 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
     if (out_header->max_actions != NET_FRAME_MAX_ACTIONS) { return ERR_NET_MALFORMED; }
 
     const u32 tick_count = out_header->tick_count;
+    // s20.2.9's format maximum (ruled 2026-08-26): a segment covers at most the hot-checkpoint
+    // cadence it closes on. Checked before anything sized by tick_count is touched - with the
+    // per-origin seq rule below it closes the absolute-cost hole the earlier log-array ruling
+    // left (decode was O(tick_count^2) with tick_count chosen by an untrusted peer via
+    // s20.2.5's BK_LOG_SEGMENT: 61 s at 40,000 ticks, measured).
+    if (tick_count > CHECKPOINT_HOT_TICKS) { return ERR_NET_MALFORMED; }
     // The CALLER's buffers being too small is a local condition - the same bytes are fine on a
     // peer with a bigger buffer - so it must not be reported as "the sender sent garbage".
     if (tick_count > out_frame_capacity_per_slot) { return ERR_NET_CAPACITY; }
@@ -378,12 +401,9 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
     // scan dangerous: 200,000 records was 4.6 MB on the wire, 19 ms to encode and 17.8 s to
     // decode, and decode:encode is now ~1.3x.
     //
-    // What it does NOT remove is absolute cost as a function of tick_count, which an untrusted
-    // peer still chooses (§20.2.5's BK_LOG_SEGMENT) - the caller bounds it only with
-    // out_frame_capacity_per_slot, and §20.2.9 states no maximum. Both duplicate scans are
-    // O(log_record_count^2) = O(tick_count^2): 40,000 ticks is 61 s to decode. Closing that
-    // needs either a format maximum on tick_count or a §20.2.3 rule that `seq` ascends per
-    // origin_slot (which would make the scan 8 counters); both are rulings, filed in TODO.md.
+    // The absolute cost as a function of tick_count is bounded by the format cap above and by
+    // the per-origin seq rule below (both ruled 2026-08-26), which together retire the
+    // O(tick_count^2) duplicate scans this comment used to document.
     if ((u64)out_header->log_record_count
         > (u64)MAX_LOG_RECORDS_PER_PACKET * (u64)tick_count) {
         return ERR_NET_MALFORMED;
@@ -625,6 +645,11 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
     // segments with different hashes, a repeated R6 id was accepted, and records decoded here
     // and handed back to the encoder tripped its contract - which is reachable from
     // §20.2.5's BK_LOG_SEGMENT, i.e. from an untrusted peer.
+    u32 dec_last_seq[MAX_PEERS];
+    u8  dec_seq_seen[MAX_PEERS];
+    for (u32 o = 0; o < MAX_PEERS; ++o) { dec_last_seq[o] = 0u; dec_seq_seen[o] = 0u; }
+    u64 dec_run_tick = 0u;
+    u32 dec_run_count = 0u;
     for (u32 i = 0; i < out_header->log_record_count; ++i) {
         const ErrCode e = wire_read_LogRecord(r, &out_records[i]);
         if (e != ERR_OK) { return e; }
@@ -658,17 +683,28 @@ ErrCode archive_decode_segment(ByteReader* r, ArchiveSegmentHeader* out_header,
                  && prev->seq < rec->seq);
             if (!ascending) { return ERR_NET_MALFORMED; }
         }
-        // R6's stable id is (origin_slot, seq): ONE id, one record. Two records sharing an id at
-        // DIFFERENT effective ticks are contradictory and are not adjacent under the ordering
-        // above, so the ascending check cannot see them - this scan is what catches them. It is
-        // O(n^2) in log_record_count, which the caller bounds with out_record_capacity (a
-        // segment's log is a working set, not a history - docs/NETCODE.md §13.5).
-        for (u32 j = 0; j < i; ++j) {
-            if (out_records[j].origin_slot == rec->origin_slot
-                && out_records[j].seq == rec->seq) {
+        // §20.2.3 (ruled 2026-08-26): seq ascends strictly per origin_slot in record order -
+        // a restatement of what the sequencer produces (its frontier only grows). It SUBSUMES
+        // R6's global (origin_slot, seq) uniqueness - a repeated id at a DIFFERENT tick is not
+        // adjacent, so the ascending check above cannot see it, but it cannot ascend either -
+        // and it replaces the O(n^2) whole-array scan with eight counters.
+        {
+            const u8 o = rec->origin_slot;
+            if (dec_seq_seen[o] != 0u && rec->seq <= dec_last_seq[o]) {
                 return ERR_NET_MALFORMED;
             }
+            dec_last_seq[o] = rec->seq;
+            dec_seq_seen[o] = 1u;
         }
+        // §20.2.9 (ruled 2026-08-26): at most MAX_LOG_RECORDS_PER_PACKET records per
+        // effective_tick - the format's own bound now, matching the store's admission rule and
+        // the encoder's contract. Records are tick-ordered, so a run counter is the check.
+        if (i == 0u || rec->effective_tick != dec_run_tick) {
+            dec_run_tick = rec->effective_tick;
+            dec_run_count = 0u;
+        }
+        dec_run_count += 1u;
+        if (dec_run_count > MAX_LOG_RECORDS_PER_PACKET) { return ERR_NET_MALFORMED; }
     }
     *out_record_count = out_header->log_record_count;
 

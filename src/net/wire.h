@@ -71,6 +71,9 @@ constexpr u32 MIN_TICKS_PER_PACKET         = 3u;
 constexpr u32 CONFIRMATION_HORIZON_TICKS   = 6u;
 constexpr u32 SUB_DECAY_TICKS              = 6u;
 constexpr u32 MAX_LOG_RECORDS_PER_PACKET   = 8u;
+constexpr u32 CHECKPOINT_HOT_TICKS         = 300u; // docs/CANON.md; s20.2.9's format maximum on a
+                                                   // segment's tick_count (ruled 2026-08-26) - the
+                                                   // hot-checkpoint cadence segments close on anyway
 
 // docs/NETCODE.md §20: SLOT_RING_TICKS is a power of two and covers the window the sequencer
 // can still be asked about. Both are asserted here rather than commented, per the spec.

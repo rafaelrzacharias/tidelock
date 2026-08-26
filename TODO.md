@@ -1056,6 +1056,13 @@ E-2 needs no W2 decision but blocks real game wiring later.
       the *network-soak* half (replay-diff against PR artifacts over a real LAN) gains a
       self-hosted `deck` runner when the Deck is benched (the Pi left the program, 2026-08-25).
       `weekly.yml` unchanged.
+- [ ] **Wave-boundary sweep entry (`WORKFLOW.md` §2 valve):** `w2-net-close` (steward,
+      2026-08-26) implements the two closeout-sweep rulings verbatim — §20.2.3's per-origin seq
+      ascent (the O(n²) duplicate scans become eight counters, encoder + decoder) and §20.2.9's
+      two format bounds (`tick_count` ≤ `CHECKPOINT_HOT_TICKS`, ≤ `MAX_LOG_RECORDS_PER_PACKET`
+      records per tick), each with a hand-forged revert-catching test row; the pre-ruling
+      100-at-one-tick fixture re-derived to the ruled spread. debug/dev-linux 386/386 green
+      locally. Review deferred to the sweep per the valve.
 - [ ] **Wave-boundary sweep entry (`WORKFLOW.md` §2 valve):** `w2-max-arenas` (steward,
       2026-08-26) implements the E-2 ruling verbatim — `MAX_ARENAS` 64 → 4096 in its four homes
       (`arena_registry.h`, `CANON.md`, docaudit's pin, `MEMORY.md`'s inline value) + the
