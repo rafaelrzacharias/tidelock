@@ -134,7 +134,9 @@ protocol anyway).
   vendored lib with no runtime hook API, §8.6). **The per-frame CRT-malloc COUNTER is dropped
   (ruled 2026-08-26):** it needed
   writable static storage the §1 link gate bans, and the tripwires + the symbol audit + the
-  per-pool budgets already fail loudly on every path the counter watched.
+  per-pool budgets already fail loudly on every path the counter watched. (That ban is the
+  `src/`-wide rule; `vendor_glue`'s whole-lib exemption — `PLATFORM.md` §9.5 — stands outside
+  it, which is how the FreeType adaptor's test counter legitimately exists.)
 - **Hash-region integrity test per pool** (`DETERMINISM.md` §4).
 
 ---

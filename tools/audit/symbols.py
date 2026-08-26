@@ -144,8 +144,8 @@ def main():
     ap.add_argument("--vendor-glue-lib", default=None, metavar="NAME",
                     help="the ONE --data-only lib docs/PLATFORM.md §9.5 allows a static pool "
                          "pointer in (vendor_glue's per-lib mem_pool hookups). A WHOLE-LIB "
-                         "exemption, not stem-keyed like --tooling-lib: every TU vendor_glue ever "
-                         "holds is a per-lib allocator hookup that legitimately owns one, so there "
+                         "exemption, not stem-keyed like --tooling-lib: vendor_glue TUs hold per-lib "
+                         "pool pointers and adaptor-side instrumentation (e.g. call counters), so there "
                          "is no narrower stem to key on the way RR-7 keys on the non-det half of "
                          "src/foundation/. A lib under any other name gets no exemption.")
     ap.add_argument("--sanitized", action="store_true",

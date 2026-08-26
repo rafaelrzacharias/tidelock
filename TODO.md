@@ -98,6 +98,14 @@ Worked top to bottom; the first open `[ ]` is what to do next. History → `git 
       (the steward session dispatches it after the push; the aarch64 evidence rides the CI arm64
       legs — the Pi left the program 2026-08-25).
 
+- [ ] **For the platform lane (impl_sdl3): SDL3's X11 `xsettings` client allocates outside
+      `SDL_SetMemoryFunctions`** (filed 2026-08-26 by the w2-vendor SHIP round, S3). Nine raw
+      `malloc`/`free` sites in `vendor/sdl3/src/video/x11/xsettings-client.c` are pulled into the
+      binary and are unreachable until X11 video init - latent, upstream code, so patching it is
+      a NEW verbatim deviation needing its own `vendor/VERSIONS` declaration and Rafael's word.
+      `PLATFORM.md` §9.5's SDL3 row now carries the qualifier. Decide at impl_sdl3: patch (with
+      declaration), accept-and-document, or upstream-report.
+
 ## W2 gate0 — the bench is built; what it measured (2026-08-25, `w2-gate0`, PC x86-64 netcode tier)
 
 The verdict table is `tests/gate0/results/2026-08-25-pc-win-netcode/README.md` (the CSVs beside

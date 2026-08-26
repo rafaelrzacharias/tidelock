@@ -315,12 +315,15 @@ spellings across the two docs). No `<atomic>`, no `volatile`.
 
 Pools (`MEMORY.md` §1.5): `pool_vendor` (SDL + ImGui + stb + FreeType, 64 MB reserve), `pool_luau_sim`,
 `pool_luau_ui` (64 MB each, owned by `LUAU-LAYER`), `pool_enet` (16 MB, owned by `net/`). All
-`pool_*` calls live in `src/vendor_glue/` (the one folder allowed a static pool pointer, for the
-`STBI_MALLOC` compile-time macro).
+`pool_*` calls live in `src/vendor_glue/` (the one folder allowed writable static state: the
+per-lib pool pointers — forced by `STBI_MALLOC`-class compile-time macros and context-free hook
+callbacks — and adaptor-side instrumentation such as the FreeType call counter; post-W2 the same
+whole-lib exemption covers the Luau glue's TUs. `tools/audit/symbols.py --vendor-glue-lib` is the
+gate's spelling).
 
 | Lib | Hook | Pool |
 |---|---|---|
-| SDL3 | `SDL_SetMemoryFunctions(tl_sdl_malloc, tl_sdl_calloc, tl_sdl_realloc, tl_sdl_free)` — **before** `SDL_Init` | `pool_vendor` |
+| SDL3 | `SDL_SetMemoryFunctions(tl_sdl_malloc, tl_sdl_calloc, tl_sdl_realloc, tl_sdl_free)` — **before** `SDL_Init`. Known residue: the X11 `xsettings` client (`src/video/x11/xsettings-client.c`, 9 sites) calls raw `malloc`/`free` outside this hook — latent until X11 video init; the platform lane owns the call (`TODO.md`) | `pool_vendor` |
 | Dear ImGui | `ImGui::SetAllocatorFunctions(tl_imgui_alloc, tl_imgui_free)` — before `CreateContext` (no `user_data`; the adaptor closes over `pool_vendor()` directly) | `pool_vendor` |
 | stb_image / stb_sprintf | `#define STBI_MALLOC/REALLOC/FREE` → `tl_stbi_*` (stb_sprintf allocates nothing) | `pool_vendor` |
 | Luau | `lua_newstate(tl_luau_alloc, &pool_luau_x)` per VM | per VM |
