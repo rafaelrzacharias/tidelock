@@ -3111,19 +3111,54 @@ right; it is the template the others now follow.
       row and the doc's reconciliation footer in the same commit as `backend_sdl.cpp` and its
       `present_descriptor` test, which assert the corrected numbers.
 - [ ] **CI infra gap found (not this lane's to fix — flagging for whoever owns `.github/workflows/`
-      or the repo's webhook config): the `pull_request` webhook silently stopped firing for PR #13
+      or the repo's webhook config): the `pull_request` webhook was badly delayed/absent for PR #13
       after commit `e59f32f`.** All 6 of this round's review-fix commits (`0005038` through
-      `aa36864`) show zero workflow runs in the Actions API (`gh api
-      repos/.../actions/runs?branch=w3-render2d` / the equivalent MCP call) — not queued, not
-      failed, simply absent — despite `pr.yml`'s `on: pull_request` trigger and every earlier push
-      on this same PR triggering normally. Worked around this once via `workflow_dispatch` (the
-      trigger `pr.yml`'s own header comment says exists for exactly this: "a session branch can be
-      proven green before it merges"); all 23 checks came back green once manually kicked. Cause
-      not diagnosed (webhook delivery gap on GitHub's side vs. something repo-side) - flagging
-      because a lane that does not think to cross-check the Actions API against `git log` would
-      see a PR sitting with zero check runs and could misread it as "CI hasn't started" indefinitely
-      rather than "the trigger never fired," and because a merge gate that trusts webhook delivery
-      alone has a silent blind spot here.
+      `aa36864`) showed zero workflow runs in the Actions API for a 20+ minute window - not queued,
+      not failed, simply absent - despite `pr.yml`'s `on: pull_request` trigger and every earlier
+      push on this same PR triggering promptly. **CORRECTION to this entry's first version:** the
+      `pull_request`-triggered run for the NEXT commit (`b50fde5`) did eventually appear, ~5 minutes
+      late - so "stopped firing" overstated it; "badly delayed, unpredictably" is what's actually
+      confirmed. Cause still not diagnosed (GitHub-side delivery backlog vs. something repo-side).
+- [ ] **BLOCKING ruling request (RR-25, w3-render2d): a real `commit_docs` gate violation is baked
+      into 4 already-pushed, post-review commits, and cannot be fixed without rewriting frozen
+      history.** Discovered because of the entry above: worked around the webhook delay by manually
+      firing `pr.yml` via `workflow_dispatch` (`gh workflow run` / the equivalent MCP call) for
+      `aa36864`, got all 23 checks green, and reported that to the steward as the round's CI state.
+      **That green was wrong.** `pr.yml:55`'s `audits` job computes `commit_docs.py`'s `--base` as
+      `github.event.pull_request.base.sha || github.event.before || 'HEAD~1'` - a `workflow_dispatch`
+      run has neither of the first two (no PR/push event context), so it silently falls back to
+      `HEAD~1` and only diffs the single latest commit against its immediate parent, never the true
+      PR range. My two manual runs (`aa36864`, `b50fde5`) both validated only one commit's diff each,
+      not the full `docaudit`/`commit_docs`/`includes.py` sweep over the whole PR - a materially
+      weaker check than the one `pull_request` events run, with no signal in the run's own output
+      that it happened. Once the real webhook-triggered run for `b50fde5` finally landed, `audits`
+      failed for real: `commit_docs.py` (walks `git rev-list --reverse --no-merges base..HEAD`,
+      per-commit, by design - "a later commit's `[docs:none]` does not waive an earlier one") flags
+      `1da56f8`, `0005038`, `d683e41`, and `1734144` - four commits in this round's review-fix series
+      that touched `src/render/` without touching `docs/RENDER2D.md` or writing `[docs:none]` in
+      their own message. My mistake: those four were pure/mostly-code fixes (D2/D3, D4, D5, D6) and
+      I should have written `[docs:none]` in each, matching this lane's own earlier commits
+      (`38e7f40`, `75d503d`, `c080257`, `b4e5beed`, `338e5d3`, `e59f32f` all correctly carry it).
+      **Why this cannot be fixed forward:** `docs/WORKFLOW.md` §1 states plainly that pre-review a
+      lane may amend/force-push to cure exactly this kind of per-commit gate miss, but "once review
+      has begun, history is frozen: fixes are new commits" - and `commit_docs.py`'s own design
+      (confirmed by its passing selftest case "a later `[docs:none]` does not waive an earlier
+      commit") means no new commit can retroactively satisfy the check for `1da56f8`/`0005038`/
+      `d683e41`/`1734144`. Review round 1 landed at 21:46, all four violating commits were made
+      after that, so R-4's "history is frozen" applies in full - I have not amended or rebased
+      anything. **What I need a ruling on:** (a) a one-time, explicitly-granted exception to rewrite
+      just these four commits' messages (adding `[docs:none]` - no code content changes), or
+      (b) some other resolution to `audits`' permanent-red state on this PR that doesn't require
+      rewriting history, or (c) confirmation that `audits` is not actually a hard merge
+      precondition here (only "CI-green on all four `CANON.md` legs" is named in `WORKFLOW.md` §1's
+      merge-precondition sentence) and this can be noted and left red. Separately, the
+      `workflow_dispatch` `--base` fallback bug (masks the real gate behind a false green) is its
+      own smaller finding for whoever owns `pr.yml` - a manual re-run should validate the same range
+      a `pull_request` event would, not silently narrow to `HEAD~1`.
+      **Corrective action taken:** posted this same finding as a PR #13 comment and sent a follow-up
+      correction to the steward retracting the earlier "23 checks green" claim. Parking this lane
+      here per `CLAUDE.md` rule 7 / `WORKFLOW.md` §1's stop condition (a ruling request blocking all
+      remaining work) - D1 was already the other open block on this PR.
 
 ## Alloy (`docs/ALLOY.md` — headless-first; its own build queue in "Gates & rulings ledger")
 - [ ] **W3 alloy-liquids-gases OPENING task — the liquid design pass (the RR-10 ruling,
