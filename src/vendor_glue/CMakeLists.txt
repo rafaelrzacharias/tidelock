@@ -4,7 +4,10 @@
 # docs/ROADMAP.md §2's W2 vendor lane.
 file(GLOB TL_VENDOR_GLUE_SRC CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 add_library(tl_vendor_glue STATIC ${TL_VENDOR_GLUE_SRC})
-# SDL3 is PUBLIC: tests/vendor_glue/*.test.cpp calls the real SDL3 API through this lib to prove
-# the hookup end to end, so it needs SDL3's headers too, not just tl_vendor_glue's own.
-target_link_libraries(tl_vendor_glue PRIVATE tl_flags_common tl_foundation PUBLIC SDL3::SDL3)
+# SDL3/SDL3_ttf are PUBLIC: tests/vendor_glue/*.test.cpp calls their real API through this lib to
+# prove each hookup end to end, so it needs their headers too, not just tl_vendor_glue's own.
+# SDL_ttf has no adaptor .cpp of its own - docs/PLATFORM.md §9.5: it calls SDL_malloc/SDL_free
+# internally, so it inherits whatever allocator sdl3_glue installed on SDL3 with no separate hook.
+target_link_libraries(tl_vendor_glue PRIVATE tl_flags_common tl_foundation
+  PUBLIC SDL3::SDL3 SDL3_ttf::SDL3_ttf)
 tl_register_lib(tl_vendor_glue FALSE)

@@ -75,7 +75,12 @@ win), `-gline-tables-only` in dev, ccache.
 per lib; its allocator hooked to a `mem_pool` (`MEMORY.md` §1.5); its headers never included above
 its wrap module (CI grep). Adding a dep is a design decision with a line in `ARCHITECTURE.md` §1.
 Current set: SDL3, SDL_ttf, Dear ImGui (+docking, ImGuiColorTextEdit), Luau (`LUA_USE_LONGJMP=1`),
-ENet, stb_image, stb_sprintf, Monocypher, rapidhash. The vendored tree hashes into the fingerprint.
+ENet, stb_image, stb_sprintf, Monocypher, rapidhash. **FreeType** is vendored too (at
+`vendor/sdl_ttf/external/freetype`, upstream's own submodule layout) as SDL_ttf's one mandatory
+dependency - not itself in the original list, added by the W2 vendor lane the day SDL_ttf landed
+(2026-08-26); its own optional codecs (zlib/bzip2/PNG/brotli) and SDL_ttf's optional HarfBuzz/
+plutosvg backends stay off until a real consumer needs shaped or colour-emoji text (no speculative
+breadth). The vendored tree hashes into the fingerprint.
 
 ---
 

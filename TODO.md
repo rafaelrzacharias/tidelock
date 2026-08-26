@@ -577,6 +577,22 @@ E-2 needs no W2 decision but blocks real game wiring later.
       Remaining in this lane: SDL_ttf, Dear ImGui (docking), ENet, Monocypher, stb — one commit
       each, same shape (vendor tree + CMakeLists + VERSIONS row + glue adaptor + tests), reusing
       `pool_vendor` for SDL_ttf/ImGui/stb and a new `pool_enet` for ENet (`PLATFORM.md` §9.5).
+- [x] **SDL_ttf vendored** at `release-3.2.2` (`vendor/sdl_ttf`) plus its one mandatory
+      dependency, **FreeType** (`VER-2-13-2-SDL` fork branch, `vendor/sdl_ttf/external/freetype` —
+      upstream's own submodule layout; not in `BUILD.md` §4's original vendored-set list, added
+      there this commit). **Design call, not a spec requirement:** SDL_ttf's optional HarfBuzz
+      (text shaping) and plutosvg/plutovg (colour-emoji glyphs) backends are OFF, and so are
+      FreeType's own optional zlib/bzip2/PNG/brotli font codecs — no consumer needs shaped or
+      colour-emoji text yet, and vendoring 3 more trees (plus FreeType's codec deps) for zero
+      current consumers is the speculative breadth `CLAUDE.md`'s design rules ask to challenge. A
+      future text-rendering lane can file a ruling and flip `SDLTTF_HARFBUZZ`/`SDLTTF_PLUTOSVG`
+      back on (`vendor/CMakeLists.txt`) when a real consumer exists. No adaptor `.cpp`: SDL_ttf
+      calls `SDL_malloc`/`SDL_free` internally, so it inherits `sdl3_glue`'s hookup with no
+      separate hook (`PLATFORM.md` §9.5) — `tl_vendor_glue` just links `SDL3_ttf::SDL3_ttf`
+      PUBLIC, and `tests/vendor_glue/sdl_ttf_glue.test.cpp` proves `TTF_Init`/`TTF_Quit` round-trip
+      real FreeType allocations through `pool_vendor`. See `LESSONS.md` for the `SDL3_DIR`
+      in-tree-`find_package` trick this needed and the "the consumer add_subdirectory()s its own
+      transitive dep" gotcha.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**

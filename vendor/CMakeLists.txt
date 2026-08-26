@@ -21,3 +21,23 @@ set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
 set(SDL_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
 set(SDL_DISABLE_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(sdl3)
+# SDL3's CMakeLists.txt unconditionally writes an in-BUILD-tree SDL3Config.cmake (not gated on
+# SDL_INSTALL, which we force off above) - pointing SDL3_DIR at it is what lets SDL_ttf's
+# find_package(SDL3 REQUIRED) below resolve to this in-tree build instead of failing configure.
+set(SDL3_DIR "${CMAKE_CURRENT_BINARY_DIR}/sdl3" CACHE PATH "" FORCE)
+
+# SDL_ttf's own CMakeLists.txt add_subdirectory()s external/freetype ITSELF (with EXCLUDE_FROM_ALL
+# and its own FT_DISABLE_* forcing) whenever SDLTTF_VENDORED is ON - do not add it a second time
+# here, CMake refuses a directory added twice. HarfBuzz (text shaping) and plutosvg/plutovg
+# (colour-emoji glyphs) are left OFF independently of SDLTTF_VENDORED: optional per SDL_ttf's own
+# CMakeLists.txt, and nothing in this tree consumes shaped or colour text yet - vendoring three
+# more trees (plus FreeType's own zlib/libpng/bzip2/brotli codecs those pull in) for zero current
+# consumers is exactly the speculative breadth CLAUDE.md's design-phase rules ask to challenge. A
+# future text-rendering lane files a ruling to turn them back on when a real consumer needs them.
+set(SDLTTF_VENDORED ON CACHE BOOL "" FORCE)      # FreeType only - HarfBuzz/plutosvg forced off below
+set(SDLTTF_HARFBUZZ OFF CACHE BOOL "" FORCE)
+set(SDLTTF_PLUTOSVG OFF CACHE BOOL "" FORCE)
+set(SDLTTF_SAMPLES OFF CACHE BOOL "" FORCE)
+set(SDLTTF_INSTALL OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+add_subdirectory(sdl_ttf)
