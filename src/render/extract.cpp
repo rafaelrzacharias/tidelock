@@ -33,7 +33,7 @@ void sys_extract(World* w) {
     const Span<Transform> cur = world_column<Transform>(w);
     const Span<TransformPrev> prev = world_column<TransformPrev>(w);
     const u32 n = cur.count;
-    TL_ASSERT(prev.count == n);
+    TL_CHECK(prev.count == n);
     packet_reserve(&q->packet, w->scratch, n);
 
     for (u32 i = 0; i < n; ++i) {
@@ -51,7 +51,7 @@ void sys_extract(World* w) {
     const Span<Camera2D> cams = world_column<Camera2D>(w);
     const Span<CameraPrev> cprev = world_column<CameraPrev>(w);
     const Span<Entity> cam_ents = world_entities<Camera2D>(w);
-    TL_ASSERT(cprev.count == cams.count);
+    TL_CHECK(cprev.count == cams.count);
 
     for (u32 i = 0; i < cams.count; ++i) {
         const Camera2D c = cams.data[i];
