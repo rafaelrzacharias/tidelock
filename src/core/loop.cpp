@@ -74,13 +74,23 @@ f32 engine_frame(Engine* e) {
     // stall) - alpha must stay in [0, 1) per loop.h's contract (docs/FRAME-LOOP.md section 0), so
     // take only the fractional remainder past whatever whole ticks are stuck pending (a plain
     // clamp to FIXED_DT_SECONDS instead of this would return exactly 1.0, not < 1.0, whenever the
-    // stall lands on a whole-tick multiple). Truncating cast, not fmod: accumulator is never
-    // negative (real_dt only adds; the loop above only subtracts whole FIXED_DT_SECONDS steps or
-    // zeroes it at the MAX_STEPS cap), so (u64) truncation is floor here, and this avoids pulling
-    // in libm for a one-line division.
-    const f64 whole_ticks = (f64)(u64)(e->accumulator / FIXED_DT_SECONDS);
-    const f64 pending = e->accumulator - whole_ticks * FIXED_DT_SECONDS;
-    const f32 alpha = (f32)(pending / FIXED_DT_SECONDS);
+    // stall lands on a whole-tick multiple). Plain repeated subtraction, not a division + a
+    // multiply-back: a division's rounding is not guaranteed to invert exactly against
+    // FIXED_DT_SECONDS's own rounding (an off-by-one in the whole-tick count right at a
+    // boundary), and a subtraction has no multiply for the compiler to fuse into an FMA - unlike
+    // division, subtraction of the same constant is bit-identical on every CANON.md ISA under the
+    // standing -ffast-math-free, -ffp-contract-default flags (no adjacent multiply to fuse
+    // in this expression at all). Bounded in practice: WAIT is rare and adaptive delay keeps a
+    // stall short (NETCODE.md section 7.4); a few hundred iterations for a multi-second stall,
+    // once per rendered frame, is not a hot path.
+    f64 pending = e->accumulator;
+    while (pending >= FIXED_DT_SECONDS) { pending -= FIXED_DT_SECONDS; }
+    f32 alpha = (f32)(pending / FIXED_DT_SECONDS);
+    // pending is strictly < FIXED_DT_SECONDS in f64, but the f64->f32 downcast has coarser
+    // precision near 1.0 (f32's ULP there is ~1.19e-7, f64's ~2.22e-16) - an f64 quotient closer
+    // to 1.0 than f32 can represent rounds UP to exactly 1.0f even though the f64 value was
+    // strictly less. Enforce the [0, 1) contract by construction rather than by argument.
+    if (alpha >= 1.0f) { alpha = 0.0f; }
     e->last_alpha = alpha;
     run_phase(&e->world, PHASE_PRE_RENDER);
     run_phase(&e->world, PHASE_RENDER);

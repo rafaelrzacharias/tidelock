@@ -31,9 +31,11 @@ for (;;) {
         accumulator -= FIXED_DT_SECONDS; steps += 1;
     }
     if (steps == MAX_STEPS) accumulator = 0;                 // spiral-of-death cap: DROP time (slowdown, not spiral)
-    f64 whole_ticks = (f64)(u64)(accumulator / FIXED_DT_SECONDS);
-    f64 pending = accumulator - whole_ticks * FIXED_DT_SECONDS;  // fractional remainder only - PRODUCE_WAIT can leave several whole ticks stuck in accumulator
-    f32 alpha = (f32)(pending / FIXED_DT_SECONDS);           // render-side float, fine; always in [0, 1)
+    f64 pending = accumulator;                                // PRODUCE_WAIT can leave several whole ticks stuck in accumulator
+    while (pending >= FIXED_DT_SECONDS) pending -= FIXED_DT_SECONDS;  // fractional remainder only - subtraction, not a division:
+                                                               // no multiply for -ffp-contract to fuse into an FMA (cross-ISA bit divergence)
+    f32 alpha = (f32)(pending / FIXED_DT_SECONDS);           // render-side float, fine
+    if (alpha >= 1.0f) alpha = 0.0f;                          // the f64->f32 downcast can still round exactly to 1.0 near the boundary
     run_phases_render(&world, alpha);                        // PRE_RENDER, RENDER — reads sim, never writes
     render_present(&world);                                  // sort + batch + SDL present
     scratch_reset(&world.scratch_main);
