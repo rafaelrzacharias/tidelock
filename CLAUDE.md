@@ -187,6 +187,7 @@ environment in the same call, or use the self-sourcing scripts. Build traps go i
 ## Status
 Building — W2 (re-dated 2026-08-26; the live truth is `TODO.md` + `docs/ROADMAP.md`, never this
 paragraph). W0–W1 shipped and reviewed; Gate 0 run and ruled (`FX-PALETTE.md` rev 2); W2 ecs +
-net-p1 + luau-vm + vendor merged, alloy-substrate launches at the weekly reset. Next:
+net-p1 + luau-vm + vendor merged; the W3 slack lanes loop+input/assets+data/render2d are in
+flight (early launch ruled 2026-08-26) and alloy-substrate launches at the weekly reset. Next:
 W3 (alloy-solver ★ → v0). This paragraph is checked at every wave boundary (`WORKFLOW.md` §3
 artifact 4, R-12).

@@ -3,6 +3,19 @@
 > **Parallelism:** this list is the serial queue inside each lane; which lanes run concurrently,
 > and the critical path, is `docs/ROADMAP.md`. Start a wave by opening one worktree per lane.
 
+> **W3 slack lanes launched early — RULED 2026-08-26 (Rafael, in the steward session).** The
+> weekly Fable budget is spent until the Tuesday reset (alloy-substrate holds for it, R-8), but
+> the Sonnet/Opus budget is not; rather than idle the week, the three fully-unblocked W3 Sonnet
+> lanes launch now: **loop+input**, **assets+data**, **render2d** (branches `w3-loop-input`,
+> `w3-assets-data`, `w3-render2d`; Opus reviews end-to-end per R-9's Sonnet-lane ladder, so the
+> lanes spend no Fable). **editor** chains after render2d ships. This bends `ROADMAP.md` §4's
+> "never start a lane from the next wave" line ahead of W2's alloy-substrate — Rafael's call,
+> with ci-matrix + governance (both W3, shipped during W2) as precedent; §4's own wave-boundary
+> revision note absorbs the record at the W2 boundary. render2d's `sim/views.h` input is an
+> alloy-substrate deliverable: render2d's v0 rows are already worded "header + an empty
+> update", so that lane builds everything else and picks the header up by merging main once
+> substrate lands.
+
 Worked top to bottom; the first open `[ ]` is what to do next. History → `git log`; gotchas →
 `LESSONS.md`; rationale → the doc named on each line. Governing rules: `CLAUDE.md` principles,
 `docs/ARCHITECTURE.md` §0/§4, test-infra-first.

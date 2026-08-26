@@ -42,7 +42,9 @@ containers, RNG/hash, headless platform, test runner, tooling runtimes, jobs); G
 ruled (`FX-PALETTE.md` rev 2, 2026-08-25); the W2 ECS and netcode Phase 1 merges; the W2
 luau-vm and vendor merges (2026-08-26 — Luau 0.696, SDL3, SDL_ttf + FreeType, ImGui, ENet,
 Monocypher and stb, every allocator pooled and gated); four-leg hosted CI ({Windows, Linux} ×
-{x86-64, arm64}) green on `main`. In flight: alloy-substrate (launches at the weekly reset).
+{x86-64, arm64}) green on `main`. In flight: the W3 slack lanes loop+input, assets+data and render2d (launched early
+on the spare non-Fable budget, ruled 2026-08-26); alloy-substrate launches at the weekly
+reset.
 Next: W3 — alloy-solver ★ and the v0 lanes.
 
 ## Lineage
