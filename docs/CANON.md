@@ -75,7 +75,8 @@
 ## Netcode constants (`NETCODE.md` App. B) — all in sim ticks at 60 Hz
 
 `CONFIRMATION_HORIZON_TICKS` 6 · `LOCAL_INPUT_DELAY_TICKS` 3–6 adaptive · `REDUNDANCY_TICKS` 9 ·
-`MAX_TICKS_PER_PACKET` 9 (floor 3) · `SUB_DECAY_TICKS` 6 · `AOE_ISLAND_LIMIT` 4 (min telegraph 6) ·
+`MAX_TICKS_PER_PACKET` 9 (floor 3) · `LOG_STORE_CAPACITY` 256 (net's in-memory sequenced-record
+working set; the durable history is the archive, `NETCODE.md` §13.5) · `SUB_DECAY_TICKS` 6 · `AOE_ISLAND_LIMIT` 4 (min telegraph 6) ·
 `QUORUM` = strict majority of sequenced-live · `QUORUM_LOSS_TICKS` 600 · `SUSPECT_TO_EVICT_TICKS`
 1800 · `SHADOW_COUNT` 2 · `CHECKPOINT_HOT_TICKS` 300 · `CHECKPOINT_DURABLE_TICKS` 18000 ·
 `DURABLE_KEEP` 5 · `CHECKSUM_INTERVAL_TICKS` 30 · `LOBBY_PROBE_HZ` 1 · ENet channels `INPUT`=0

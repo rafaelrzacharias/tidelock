@@ -1755,7 +1755,18 @@ reachable only from `net/session.cpp`, `net/checkpoint.cpp` (custody signing) an
 
 All are `TL_WIRE_STRUCT` (`CPP-SUBSET.md` §9 R-2): concrete, non-template, explicitly padded,
 leading `u32 format_version` (`= NET_FORMAT_VERSION`), `static_assert` on `sizeof` and every
-`offsetof`, written/read through the little-endian byte pair, never `memcpy`. Readers refuse a
+`offsetof`, written/read through the little-endian byte pair, never `memcpy`.
+
+**Exemption — interior records (ruled 2026-08-26).** Three of the structs below carry no
+`format_version` of their own: `CheckpointArenaEntry` (§20.2.8), `ChainRecord` (§20.2.8) and
+`ArchiveStreamHeader` (§20.2.9). Each is a repeated element *inside* a container that has
+already stated the version once in its own header, so they are versioned by their **container's**
+`format_version`, never per record — a per-element copy would be redundant bytes on every row,
+and their pinned sizes only close without one. `CheckpointArenaEntry` and `ChainRecord` carry the
+same `sizeof`/`offsetof` pins and the same little-endian discipline; only the version field is
+absent. `ArchiveStreamHeader` is the exception to the exception — since the framing ruling below
+it is a **decoded form only**, its wire form being two canonical uvarints, so it has no on-wire
+struct layout to pin at all. Readers refuse a
 newer `format_version`, assert every `_padN` is zero, and reject any message whose declared
 `payload_bytes` disagrees with the datagram length (`ERR_NET_MALFORMED`; the whole packet is
 dropped, nothing partially applied). Offsets are natural-alignment offsets; every struct is
@@ -1819,7 +1830,17 @@ decoded frame `i-1`:
 ```
 
 `uvarint` = LEB128, 7 bits per byte, `0x80` continuation, ≤ 5 bytes for a `u32`; `svarint(v)` =
-`uvarint(zigzag32(v))`, `zigzag32(v) = (u32(v) << 1) ^ u32(v >> 31)`. Decoder arithmetic is
+`uvarint(zigzag32(v))`, `zigzag32(v) = (u32(v) << 1) ^ u32(v >> 31)`.
+
+**The column format is CANONICAL: one frame set has exactly one byte encoding** (ruled
+2026-08-26). This is load-bearing, not tidiness — §20.2.8 hashes the archive's bytes into
+`ChainEntry.log_segment_hash`, so two peers that encode the same confirmed input must produce the
+same bytes or the chain forks with no divergence behind it. Decoders therefore refuse, beyond a
+truncated column: a **non-minimal `uvarint`** (a multi-byte varint whose final byte is 0); a
+**value byte carrying the value the flags already imply** (§20.2.2 states `value_follows` as a
+biconditional); and a **`changed` bit whose decoded `ActionState` equals the previous frame's**
+(§20.2.2 states that rule as `⇔`). Every one only tightens — no stream a conforming encoder
+produces is refused. Decoder arithmetic is
 `wrap_add` on `i32`. Steady state: `1 + 1 + 1 = 3 B`; an idle peer's column of 9 frames is 27 B;
 frame 0's absolute pointer costs ≤ 10 B per column per packet. A decoded frame's `tick` field is
 set to `u32(base_tick + i)` by the decoder, never transmitted.
@@ -2074,8 +2095,21 @@ under `matches/<session_nonce_hex16>/` with only `hot/` and `log/`.
 
 #### 20.2.9 Archive segment
 
+An archive FILE is one `ArchiveFileHeader` followed by its segments. The build and session
+identity is stated once, in that header; each segment names its file with a 4-byte `file_id`.
+(Ruled 2026-08-26: repeating `build_id` + `session_fingerprint` in all 360 segments of a
+30-minute session cost 23 KB of identical bytes, and the fixed 8-byte stream header another
+54 KB — together 60 KB of the 124 KB an early implementation measured, against §20.8's 80 KB
+criterion. Shrinking both took the same session to 64 KB.)
+
 ```cpp
-struct ArchiveSegmentHeader {    // 112 B
+struct ArchiveFileHeader {       // 72 B, one per archive file
+    u32 format_version;          //  0
+    u32 file_id;                 //  4  every segment in this file carries it
+    u8  build_id[32];            //  8
+    u8  session_fingerprint[32]; // 40
+};
+struct ArchiveSegmentHeader {    // 56 B
     u32 format_version;          //  0
     u32 max_actions;             //  4  MAX_ACTIONS at write
     u64 base_tick;               //  8
@@ -2084,22 +2118,43 @@ struct ArchiveSegmentHeader {    // 112 B
     u8  _pad0[3];                // 21
     u32 record_count;            // 24  total transition records over all streams
     u32 log_record_count;        // 28
-    u8  build_id[32];            // 32
-    u8  session_fingerprint[32]; // 64
-    u32 payload_bytes;           // 96
-    u32 payload_crc32;           // 100
-    u32 segment_seq;             // 104 monotonic per world/session
-    u32 header_crc32;            // 108 over bytes [0,108)
+    u32 file_id;                 // 32  the ArchiveFileHeader this segment belongs to
+    u32 payload_bytes;           // 36
+    u32 payload_crc32;           // 40
+    u32 segment_seq;             // 44  monotonic per world/session
+    u32 header_crc32;            // 48  over bytes [0,48)
+    u8  _pad1[4];                // 52  the struct aligns to 8; outside the crc'd span
 };
-struct ArchiveStreamHeader {     // 8 B
-    u32 record_count;            //  0
-    u8  channel;                 //  4  0..31 action · 32 pointer_x · 33 pointer_y · 34 flag escape
-    u8  slot;                    //  5
-    u16 _pad0;                   //  6
-};
-static_assert(sizeof(ArchiveSegmentHeader) == 112 && offsetof(ArchiveSegmentHeader, build_id) == 32
-           && offsetof(ArchiveSegmentHeader, header_crc32) == 108 && sizeof(ArchiveStreamHeader) == 8);
-// Segment = header + for s ascending in slot_mask: for ch in 0..35: ArchiveStreamHeader + records
+static_assert(sizeof(ArchiveFileHeader) == 72 && offsetof(ArchiveFileHeader, build_id) == 8);
+static_assert(sizeof(ArchiveSegmentHeader) == 56 && offsetof(ArchiveSegmentHeader, file_id) == 32
+           && offsetof(ArchiveSegmentHeader, header_crc32) == 48);
+```
+
+**Reader obligation:** a segment's `file_id` must equal the `file_id` of the `ArchiveFileHeader`
+it is read against; a segment carrying another file's id must be refused, because the identity it
+would otherwise be read under is not its own. Nothing inside the segment decoder can check this —
+it never sees the file header — so it is the reader's, and `net/wire.h`'s
+`archive_check_segment_file` is its name.
+
+A stream header is **two canonical uvarints**, not a fixed struct:
+
+```
+  uvarint record_count
+  uvarint key            key = slot * 35 + channel
+                         channel: 0..31 action · 32 pointer_x · 33 pointer_y · 34 flag escape
+```
+
+35 channels exist, so the key is slot-major over 35 and ascending key means ascending
+`(slot, channel)` — the order a segment's streams are already required to be in. (A single
+packed byte cannot carry it: slot needs 3 bits and channel 6.) A stream with
+`record_count == 0` is never written and is refused on read: **empty streams are OMITTED**, so a
+segment carries only the streams that have records, and the stream region is read to where the
+`LogRecord` array begins, which `payload_bytes` and `log_record_count` locate.
+
+```
+// File    = ArchiveFileHeader + ArchiveSegment[]
+// Segment = ArchiveSegmentHeader
+//         + for each NON-EMPTY stream, ascending by (slot, channel): stream header + records
 //         + LogRecord[log_record_count] sorted by (effective_tick, origin_slot, seq)
 ```
 

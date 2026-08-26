@@ -548,6 +548,192 @@ E-2 needs no W2 decision but blocks real game wiring later.
       enforced module prefixes; revisit only on a real collision.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
+- [ ] **Should the archive carry a PER-TICK bound on log records, or only the aggregate one?**
+      Filed 2026-08-26 by `w2-net-p1` (round 5 finding 1). `archive_encode_segment` TL_CHECKs an
+      aggregate — `log_record_count <= MAX_LOG_RECORDS_PER_PACKET * tick_count` — and
+      `NETCODE.md` §20.2.9 states no per-tick bound at all: a segment carrying 16 records at ONE
+      tick over a 2-tick span encodes and decodes cleanly today. §20.2.2 bounds only
+      `pending_count`; a `SeqSection`'s `record_count` is a bare `u8`.
+      `net_internal.h`'s `log_store_add` nonetheless admits at most `MAX_LOG_RECORDS_PER_PACKET`
+      per tick. That is SUFFICIENT for the aggregate (that many across `tick_count` ticks is
+      exactly the aggregate) and it stops a caller assembling a set the encoder aborts on — but
+      it is **stricter than the format**, so it refuses records a valid segment could carry, and
+      a Phase-2 caller that ignores the returned code would drop sequenced one-shots. The code
+      and both comments now say so plainly rather than citing a bound §20.2.9 does not have.
+      **Options:** (A) **RECOMMENDED — put the per-tick bound in the format** (§20.2.9), enforced
+      in the encoder AND decoder, so store, encoder and decoder agree and the strictness stops
+      being local. A tick's sequenced one-shots are coordinator-generated and a packet already
+      caps `pending_count` at the same number, so this looks like stating what the sequencer can
+      actually produce. (B) Drop the store's per-tick rule and let it admit whatever the
+      aggregate allows — simpler, but then the store can build a set the encoder aborts on, which
+      is what the rule was added for. (C) Keep today's split and document it as an admission
+      policy (what the code does now, pending this ruling).
+- [ ] **`NETCODE.md` §20.2.9 states no maximum `tick_count`, and the archive decoder's cost is
+      quadratic in it.** Filed 2026-08-26 by `w2-net-p1` (round 4 finding F8; the code comment
+      that claimed otherwise is corrected in the same commit). The earlier log-array ruling
+      removed the AMPLIFICATION - decode:encode was 941x, it is now ~1.3x - but not the absolute
+      cost, because `log_record_count` is bounded by `MAX_LOG_RECORDS_PER_PACKET * tick_count`
+      and both duplicate scans are O(n^2), i.e. **O(tick_count^2)**. `tick_count` is chosen by
+      whoever wrote the segment, and §20.2.5's `BK_LOG_SEGMENT` makes that an untrusted peer.
+      Measured (clang 18, -O1, one slot): 300 ticks 2.9 ms · 3,000 ticks 309 ms · 10,000 ticks
+      3.65 s · **40,000 ticks 61 s**. Today's only bound is the caller's
+      `out_frame_capacity_per_slot`, which is a buffer size, not a format rule.
+      **Options:** (A) **RECOMMENDED - a §20.2.3 rule that `seq` ascends per `origin_slot`.**
+      Records already ascend by `(effective_tick, origin_slot, seq)`, and the coordinator assigns
+      `effective_tick = max(requested, frontier + 1)` with a frontier that only grows, so per
+      origin a higher `seq` cannot have an earlier tick - the rule looks like a restatement of
+      what the sequencer already does. It makes the duplicate scan **8 counters instead of
+      O(n^2)**, and it is strictly stronger than the global scan. It needs a ruling because it is
+      an inference about the protocol, not about the format, and this lane will not assume it.
+      (B) A format maximum on `tick_count` in §20.2.9 (`CHECKPOINT_HOT_TICKS` is the natural
+      one - segments close on it anyway). Cheap, and it also bounds the decoder's frame buffer.
+      (C) Both. (D) Leave it: the amplification is gone and Phase 2's transport will bound
+      datagram size anyway - which is true of `INPUT`/`CONTROL` but not of `BULK`, where
+      `BK_LOG_SEGMENT` is explicitly a large reliable transfer.
+- [x] **RULED 2026-08-26 (Rafael, as recommended): RATIFIED** — §20.2.9 now says 35 channels,
+      `ch in 0..34`, amended with the option-A framing work on `w2-net-p1`. Original filing:
+      **`NETCODE.md` §20.2.9 has an off-by-one in its channel count, and the code had encoded it
+      as an exploitable alias.** Filed 2026-08-26 by `w2-net-p1` (found by the lane's adversarial
+      review). §20.2.9 says "36 streams per slot" and "for ch in 0..35", but it DEFINES 35
+      channels: 0..31 action, 32 `pointer_x`, 33 `pointer_y`, 34 flag escape. `net/wire.h`'s
+      `ARCHIVE_CH_COUNT` followed the doc's 36, so a decoder bound of `>= ARCHIVE_CH_COUNT` left
+      **channel 35 a valid channel byte**, which the dispatch treated as the escape channel - a
+      second byte spelling of one segment, in a format whose bytes are hashed into the chain
+      (§20.2.8). Fixed in code (`ARCHIVE_CH_MAX` = 34 is the decoder's bound; 35 is refused).
+      **Recommendation: amend §20.2.9** to "35 channels per slot, `ch in 0..34`" in both the
+      prose and the layout line. No code change follows; the code already refuses 35.
+- [x] **RULED 2026-08-26 (Rafael, as recommended): RATIFIED as a wire-format amendment in its own
+      right** — §20.2.9's layout line now reads "for each NON-EMPTY stream, ascending by
+      (slot, channel)" and states that `record_count == 0` is refused. Original filing:
+      **`NETCODE.md` §20.2.9's segment layout omits empty streams in `net/archive.cpp`, and that
+      divergence needs its own amendment rather than a mention inside the size request.** Filed
+      2026-08-26 by `w2-net-p1` (raised by its adversarial review as a CLAUDE.md rule 8 point).
+      The doc's layout line is literally `for s ascending in slot_mask: for ch in 0..35:
+      ArchiveStreamHeader + records`. The code writes a stream only when it has records, because
+      the literal form costs 810 KB of stream headers alone at 8 peers over 30 minutes against
+      §13.4's ~165 KB TOTAL. It is a WIRE-FORMAT change: a segment written by a literal-§20.2.9
+      implementation will not decode here, and vice versa. Streams are self-describing (each
+      header names its slot and channel) and the region ends where the `LogRecord` array begins,
+      which `payload_bytes` and `log_record_count` already locate, so no format field was added.
+      **Recommendation: amend §20.2.9's layout line** to "for each NON-EMPTY stream, ascending by
+      (slot, channel): `ArchiveStreamHeader` + records", and state that a stream with
+      `record_count == 0` is refused (the code refuses it, so the omission is canonical rather
+      than optional).
+- [x] **RULED 2026-08-26 (Rafael, as recommended): homed in `CANON.md`'s netcode tunables** with
+      wire.h's value; `net_internal.h` now cites CANON as the home rather than owning the number.
+      Original filing: **`LOG_STORE_CAPACITY` (256) has no home.** Filed 2026-08-26 by `w2-net-p1`. `net_internal.h`
+      needs a bound on the sequenced one-shots held in memory; `CANON.md` does not carry one and
+      §20's constant list does not name it. "Silence in the spec is not permission" - it is
+      currently a number this lane chose. **Recommendation: `CANON.md`'s netcode tunables**, sized
+      from the records that can be in flight across a segment plus a confirmation horizon, or a
+      statement in §20 that the store is bounded by `MAX_LOG_RECORDS_PER_PACKET` x the horizon.
+      Either way it should stop being a lane's choice.
+- [x] **RULED 2026-08-26 (Rafael, as recommended): STATUS QUO** — the global namespace with
+      enforced module prefixes is the convention, now recorded in `CPP-SUBSET.md` §0. No action
+      for this lane; the half-applied alternative the filing warned about is off the table.
+      Original filing: **No `net` namespace, and `CPP-SUBSET.md` §6 asks for one.** Filed 2026-08-26 by
+      `w2-net-p1`. §6 says "Namespaces: one per module (`fx`, `mem`, `ecs`, `alloy`, `net`, ...)".
+      `net/wire.h` puts `MAX_PEERS`, `Leave`, `Suspicion`, `HashDigest`, `Handshake`, `ChainEntry`,
+      `encode_column` and the rest at global scope in a header linked into `tl_tests` beside every
+      other module - `Leave` and `Suspicion` in particular are collision bait. This is very likely
+      a PROJECT-WIDE gap rather than this lane's: `core/` has no namespace either, and
+      `TL_WIRE_STRUCT` generates `wire_write_<Name>` free functions that a namespace would move.
+      Not fixed unilaterally, because wrapping `net` alone while `core` stays global is the kind
+      of half-applied rule that reads as a decision later. **Recommendation: one ruling covering
+      every module** - either adopt namespaces tree-wide (and say what happens to the generated
+      symbol names, which `tools/audit/symbols.py` matches on) or amend §6 to record that the
+      `tl_`/module prefix convention replaced them.
+- [x] **W2 net-p1 Phase 1 measurements (recorded per `NETCODE.md` §20.8: "a phase ends on the
+      full green gate plus the measurement recorded in `LESSONS.md` with the `build_id`").**
+      Recorded 2026-08-26 on branch `w2-net-p1`. Toolchain: clang 18.1.3, x86-64 Linux,
+      `dev-linux` / `sanitize-linux` presets. The `build_id` for the merged commit is CI's on the
+      four `CANON.md` legs; these are the lane-local numbers the gate asks for.
+      - **T1f fuzz soak:** 600 s under ASan/UBSan, **39 passes over seeds 1..39**, each pass the
+        full 10^6 round-trip and 10^6 mutation rows. Zero failures, zero sanitizer reports.
+      - **30-min synthetic 3-peer archive: 127,126 bytes (124.1 KB)** over 360 segments of 300
+        ticks - 39.4 KB segment headers (32%), 53.8 KB stream headers (43%), 31.0 KB transition
+        records (25%, 12,618 records at 2.52 B). **Over the < 80 KB criterion**; the framing
+        ruling request above carries the gap and the options.
+      - Suite: 368 selected / 364 passed / 0 failed / 4 skipped on `dev-linux`; 31/31 net rows
+        green under `sanitize-linux`.
+- [x] **The §20.2.9 segment framing vs `NETCODE.md` §20.8's < 80 KB criterion. RULED 2026-08-26
+      (Rafael, relayed by the steward): option (A), as the lane recommended — shrink both
+      headers, leave the segment cadence alone.** The < 80 KB criterion STANDS.
+      *Provenance note for Rafael:* this ruling reached the lane through the steward relay and,
+      unlike the RR-17 un-park, had no corresponding commit on `main` at the time it was applied,
+      so the lane recorded it here itself. Worth a glance to confirm it says what you intended.
+      **Implemented** (`w2-net-p1`, same commit as this entry, `NETCODE.md` §20.2.9 amended):
+      - `ArchiveStreamHeader`'s 8-byte fixed struct becomes two canonical uvarints,
+        `uvarint(record_count), uvarint(slot * 35 + channel)` — 2 bytes in practice, and the key
+        is slot-major so ascending key still means ascending `(slot, channel)`.
+      - `build_id` + `session_fingerprint` move out of every segment into one `ArchiveFileHeader`
+        per archive file (72 B); a segment names its file with a 4-byte `file_id`. The segment
+        header goes 112 B -> 56 B.
+      **Measured: 127,126 B (124.1 KB) -> 65,686 B (64.1 KB)** for the 30-minute synthetic 3-peer
+      session — 48% smaller, 16,234 B under the gate. `test_archive.test.cpp`'s size row is
+      flipped from measure-and-pin back to ASSERTING < 80 KB, with a 40 KB floor so a fixture
+      that stops producing input fails instead of passing.
+      **One correction to the ruling as stated, needing a nod rather than a decision:** the
+      ruled key `u8 (slot << 5 | channel)` cannot be built. `slot` needs 3 bits and `channel`
+      0..34 needs 6 — 9 bits, and channels 32/33/34 (pointer_x, pointer_y, escape) have no
+      encoding under it. The multiply-and-add key above holds the same intent (one small
+      canonical number, slot-major) and fits. If a single byte was wanted for a reason beyond
+      size, say so and the channel numbering would have to move first.
+- [x] **RULED 2026-08-26 (Rafael, as recommended): RATIFIED.** §20.2.2 now states that the column
+      format is canonical, with the reason (§20.2.8 hashes archive bytes into the chain) and all
+      three added refusals — landed on `w2-net-p1`. Original filing:
+      **`NETCODE.md` §20.3(a)'s decoder refusal list is incomplete: the column format must be
+      CANONICAL, and the doc names only three of the five refusals.** Filed 2026-08-26 by
+      `w2-net-p1`; implemented, because canonicality is load-bearing rather than cosmetic and
+      two of the three additions are the doc's own words read strictly.
+      **Why it is load-bearing:** §20.2.8's `ChainEntry.log_segment_hash` is BLAKE2b over the
+      archive segment bytes and `chain[K]` is BLAKE2b over that entry (§20.3). Two peers that
+      encode the same confirmed input must produce the SAME BYTES or the chain forks with no
+      divergence behind it. A format with two encodings of one frame set cannot promise that.
+      §20.6 T1f already assumes it - "decodes to something re-encodable identically" is only
+      true of a canonical format - so the property was specified and its enforcement was not.
+      §20.3(a) lists three refusals (`rec & 0xF0`, a `changed` bit >= `MAX_ACTIONS`, a truncated
+      column). `net/encode.cpp` and `net/wire.h` enforce two more:
+      1. **A non-minimal uvarint** (a multi-byte varint whose last byte is 0): `80 00` and `00`
+         would both decode to 0 and re-encode differently.
+      2. **A `changed` bit whose decoded `ActionState` equals the previous frame's.** §20.2.2
+         states the rule as a biconditional - "bit a set <=> actions[a] != prev.actions[a]" - so
+         this is the doc read strictly, not an addition. **Found by T1f**, not by inspection: a
+         mutation that clears a `changed` bit yields a stream that still decodes, consumes fewer
+         bytes, and re-encodes shorter.
+      3. (Also enforced, same class:) **a value byte carrying the value the flags already imply**
+         - §20.2.2 defines `value_follows = (value != (i8)(flags & 1))`, again a biconditional.
+      Every one only TIGHTENS: no stream this encoder produces is refused, so no conforming peer
+      is affected. **Recommendation: amend §20.3(a)'s refusal list** to name all five and add one
+      sentence saying the column format is canonical because the chain hashes archive bytes.
+      Alternative if that is not wanted: drop the canonical clause from §20.6 T1f and accept that
+      two peers may encode one frame set differently - which would need a ruling of its own about
+      what `log_segment_hash` then means.
+- [x] **RULED 2026-08-26 (Rafael, as recommended): the exemption clause is stamped.** §20.2 now
+      states that interior records are versioned by their CONTAINER's `format_version`, never per
+      record — landed on `w2-net-p1` with the option-A work. Original filing:
+      **`NETCODE.md` §20.2's opening sentence contradicts three of its own struct definitions.**
+      Filed 2026-08-26 by `w2-net-p1` (doc bug, not a blocker - the concrete definitions win and
+      the lane built to them). §20.2 opens "All are `TL_WIRE_STRUCT` (`CPP-SUBSET.md` §9 R-2):
+      concrete, non-template, explicitly padded, leading `u32 format_version`", but
+      `CheckpointArenaEntry` (§20.2.8, 16 B), `ChainRecord` (§20.2.8, 184 B) and
+      `ArchiveStreamHeader` (§20.2.9, 8 B) are each written with NO leading `format_version`,
+      and their pinned sizes only close without one. They are repeated elements inside a
+      container that has already versioned itself in its own header, so a per-element version
+      would be redundant bytes on every row - the definitions are right and the sentence is too
+      broad. (`ChainRecord` additionally embeds `ChainEntry`, which `TL_WIRE_STRUCT`'s field
+      table cannot express: the kinds are scalars, arrays and handles, not nested records.)
+      `net/wire.h` declares all three as plain PODs with the same `sizeof`/`offsetof` pins and
+      carries this note. **Recommendation: amend the sentence** to "All are `TL_WIRE_STRUCT`
+      except the repeated elements of an already-versioned container - `CheckpointArenaEntry`,
+      `ChainRecord`, `ArchiveStreamHeader` - which carry the same layout pins without a
+      per-element `format_version`." One sentence in `NETCODE.md` §20.2; no code changes.
+- [x] **RR-17 net-p1 Phase 1 blocked (filed here 2026-08-25 by the `w2-net-p1` lane, before any
+      `src/net/` code). RULED 2026-08-26 (B) — the record is the `W2 net-p1 — RR-17` section
+      above, on main; the full four-blocker filing is in this branch's history and on PR #5.
+      Blockers 1 and 4 cleared by the ecs merge (`core/reflect.h`, `foundation/bytes.h`);
+      2 and 3 cleared by the `NETCODE.md` §20.8 Phase 1 / §20.6 T2 amendment. Lane un-parked.
+- [ ] **RR-6 A tighter sine?** Measured (`FX-PALETTE.md` §4.4): the ported `SinPoly4` gives
 - [x] **RR-6 A tighter sine?** Measured (`FX-PALETTE.md` §4.4): the ported `SinPoly4` gives
       max 9.06 ulp of `q_t` (its documented 27.13 bits), not the 2 ulp §10.5 had guessed; the
       reference ships nothing better (its 64-bit `Sin` uses the same polynomial). At 1 m lever

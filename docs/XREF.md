@@ -201,7 +201,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ARCHITECTURE.md` -> §5, §19.5
 - `ASSETS-AND-DATA.md` -> §11, §11.4
 - `BUILD.md` -> §15.1, §19.5
-- `CANON.md` -> §15.1, §19.4
+- `CANON.md` -> §13.5, §15.1, §19.4
 - `CONTAINERS.md` -> §14.1
 - `DETERMINISM.md` -> §14, §19.4
 - `ECS.md` -> §1, §20.1
