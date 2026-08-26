@@ -640,6 +640,31 @@ E-2 needs no W2 decision but blocks real game wiring later.
       cone (disjoint from concurrent lanes, `ROADMAP.md` §2); both archives link clean via
       `tl_vendor_glue` today, so linking them into `tl_net` is unblocked, real work for whichever
       lane wires ENet/Monocypher into net/'s actual protocol code.
+- [x] **stb vendored** (`vendor/stb`): only `stb_image.h` + `stb_sprintf.h` of the upstream
+      repo's ~20 headers - the two `docs/BUILD.md` §4 names - pinned at a bare commit (stb tags
+      nothing). **Root-cause redesign this exposed:** the naive plan (instantiate
+      `STB_IMAGE_IMPLEMENTATION`/`STB_SPRINTF_IMPLEMENTATION` inside
+      `src/vendor_glue/stb_glue.cpp`, matching every other adaptor's shape) does not compile -
+      the header bodies trip `-Wsign-conversion -Werror` under `tl_flags_common` in ~20 places.
+      Fixed by moving the `IMPLEMENTATION` instantiation into `vendor/stb/stb_impl.c` (ours, no
+      upstream `.c` exists) compiled by `vendor/stb/CMakeLists.txt` with vendor's own (relaxed)
+      flags; only two `extern` C-linkage hook declarations (`tl_stbi_malloc/realloc/free`) cross
+      into `src/vendor_glue/stb_glue.cpp`, which defines them over `pool_vendor` and re-exports
+      `vendor_glue_stbi_load_from_memory`/`vendor_glue_stbsp_snprintf` via DECLARATION-ONLY
+      includes of the same headers (prototypes only, compiles clean under strict flags). See
+      `LESSONS.md`. Tests: a hand-built 1×1 BMP decodes through `pool_vendor` with the expected
+      RGBA bytes; `stbsp_snprintf` is checked against expected output AND its truncation contract
+      (returns the FULL length needed, NUL-terminates a too-small buffer).
+      **`CONTAINERS.md` §8.6b's `fmt_buf` stub is updated, not replaced** - see that TODO entry
+      above (W1 containers lane notes) for why the wiring needs a fn-ptr seam, not a plain
+      include, and is left for whichever lane replaces the stub.
+      **This closes the six-library brief (SDL3, SDL_ttf, Dear ImGui, ENet, Monocypher, stb).**
+      All four `CANON.md` target legs are CI's job to prove green (PR #12); local proof on this
+      container (clang 18 vs the pin of 22, `WORKFLOW.md` §6 R-11): `tl_tests --tag smoke` 88/88
+      pass (14 of them the new `vendor_glue.*` cases, one 3-test group per lib except SDL_ttf/
+      Monocypher's own counts), `includes.py` 113 files/0 violations, `selftest.py` clean except
+      the pre-existing local `targets.py` msvc-triple rows (env gap, CI-only), `docaudit.py` 0
+      errors, `commit_docs.py --base origin/main` clean on every commit.
 
 ## Ruling requests (filed, not improvised — CLAUDE.md rule 7)
 - [x] **RULED 2026-08-26 (Rafael): the four token-budget rules — `WORKFLOW.md` §6 R-8..R-11**
@@ -1386,11 +1411,17 @@ E-2 needs no W2 decision but blocks real game wiring later.
       Construction signatures the rev-1 spec left implicit are folded into `CONTAINERS.md` §8.6a
       in the same commit (`bitset_init`, `ring_init`, `sorted_map_init`/`sorted_set_init`,
       `interner_init`, and `slotmap_init`'s four-owned-arena shape).
-- [ ] **`fmt_buf` is a `TL_FATAL("unimplemented")` stub** (`CONTAINERS.md` §8.6b): `stb_sprintf`
-      is owned by the W1 platform lane (`vendor/CMakeLists.txt`: "SDL3 + stb arrive with the W1
-      platform lane") and had not landed as of this commit. Not vendored here to avoid a second
-      `vendor/stb_sprintf/` tree colliding with that lane's own vendoring. Replace the stub and
-      the `fmt_buf_truncation` SKIP row in `strview_interner_fmt.test.cpp` the day it lands.
+- [ ] **`fmt_buf` is a `TL_FATAL("unimplemented")` stub** (`CONTAINERS.md` §8.6b) - **UPDATE
+      2026-08-26 (`w2-vendor`): `stb_sprintf` has landed** (`vendor/stb/stb_sprintf.h`,
+      `src/vendor_glue/stb_glue.{h,cpp}` re-exports `vendor_glue_stbsp_snprintf`). Still not
+      wired into `fmt_buf` here - out of this lane's file cone (`src/foundation/` is not
+      `vendor/`/`vendor_glue/`/`tools/audit/`), and structurally CANNOT be a direct include
+      either: `foundation` is a DAG leaf (`docs/ARCHITECTURE.md` §1 rule 1) and `vendor_glue`'s
+      `MODULE_DAG` entry only grants it `foundation`, never the reverse, so `fmt_buf.cpp` calling
+      `vendor_glue_stbsp_snprintf` needs a fn-ptr seam TRANSCRIBED into foundation, the same
+      pattern `foundation/vmem_api.h` uses for `docs/PLATFORM.md`'s vmem calls - not a plain
+      `#include "vendor_glue/stb_glue.h"`. Whichever lane replaces the stub designs that seam;
+      the `fmt_buf_truncation` SKIP row in `strview_interner_fmt.test.cpp` stays until then.
 - [ ] **Cross-lane fix: `tests/foundation/vmem_test_api.h` needed `NOMINMAX`** before its
       `#include <windows.h>`. `fx.h` declares free functions named `min`/`max`
       (`docs/FX-PALETTE.md`); windows.h's raw macros of the same names mangle those declarations

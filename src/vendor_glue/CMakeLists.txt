@@ -8,6 +8,6 @@ add_library(tl_vendor_glue STATIC ${TL_VENDOR_GLUE_SRC})
 # prove each hookup end to end, so it needs their headers too, not just tl_vendor_glue's own.
 # SDL_ttf has no adaptor .cpp of its own - docs/PLATFORM.md §9.5: it calls SDL_malloc/SDL_free
 # internally, so it inherits whatever allocator sdl3_glue installed on SDL3 with no separate hook.
-target_link_libraries(tl_vendor_glue PRIVATE tl_flags_common tl_foundation
+target_link_libraries(tl_vendor_glue PRIVATE tl_flags_common tl_foundation stb
   PUBLIC SDL3::SDL3 SDL3_ttf::SDL3_ttf imgui enet monocypher)
 tl_register_lib(tl_vendor_glue FALSE)
