@@ -31,7 +31,11 @@ already owns (`fx::`, `mem::`) stay as they are.
 | operator overloads beyond fx arithmetic | hidden cost | review |
 | `new`/`delete`/`malloc`/`free` outside arena backing | zero per-tick allocation | symbol audit (§4) + debug counting shim |
 | `<math.h>` in sim TUs | libm is the cross-platform determinism hole | include firewall + symbol audit |
-| static mutable state | two-worlds-one-process test; rollback restores only registered arenas | link gate: every object file in every `src/` lib must have zero bytes of `.data`/`.bss`/TLS (`tools/audit/symbols.py`), **except the named tooling-plane stems (§9 R-4)** — never hashed, never snapshotted, never part of a world's registered arena set, so none of this row's reasons apply to them. A grep cannot see anonymous-namespace globals, `inline static` or static locals; the earlier `^static [^c]` line also rejected every `static` *function*, which is internal linkage, not state |
+| static mutable state | two-worlds-one-process test; rollback restores only registered arenas | link gate: every object file in every `src/` lib must have zero bytes of `.data`/`.bss`/TLS (`tools/audit/symbols.py`), **except the named tooling-plane stems (§9 R-4) and the rows of `tools/audit/static_allow.txt`
+(RR-18/RR-19, ruled 2026-08-26 — each is a replaceable or registered C callback with a fixed
+signature and no context parameter, so the state it must reach cannot be passed to it; the file is
+the ONE home both gates read, keyed by lib + directory + stem so neither half alone is the
+exemption)** — never hashed, never snapshotted, never part of a world's registered arena set, so none of this row's reasons apply to them. A grep cannot see anonymous-namespace globals, `inline static` or static locals; the earlier `^static [^c]` line also rejected every `static` *function*, which is internal linkage, not state |
 | recursive/meta templates, SFINAE, concepts, expression templates | compile time + cognitive cost | review; the sanctioned list is closed |
 | `auto` for non-iterator locals, lambdas capturing by reference across a call | readability / hidden lifetime | review |
 | `thread_local` outside the job system's worker slot | hidden per-thread state the hash can't see | CI grep |

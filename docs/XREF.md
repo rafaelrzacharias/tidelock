@@ -65,7 +65,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ARCHITECTURE.md` -> §8.7
 - `CPP-SUBSET.md` -> §8
 - `DETERMINISM.md` -> §3, §5
-- `LUAU-LAYER.md` -> §4
+- `LUAU-LAYER.md` -> §4, §8.6
 - `MEMORY.md` -> §2, §3, §5, §8.1, §8.3
 - `RENDER2D.md` -> §1, §4
 - `ROADMAP.md` -> §8.7
@@ -81,7 +81,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `FX-PALETTE.md` -> §1, §2, §4, §5, §6, §7, §9
 - `JOBS.md` -> §1
 - `LUAU-LAYER.md` -> §6
-- `MEMORY.md` -> §4, §7
+- `MEMORY.md` -> §1, §4, §7
 - `NETCODE.md` -> §9
 - `PLATFORM.md` -> §1, §4
 - `RENDER2D.md` -> §1, §7
@@ -174,21 +174,22 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ECS.md` -> §3, §4, §10.6
 - `FX-PALETTE.md` -> §3
 - `INPUT.md` -> §6
-- `MEMORY.md` -> §2, §5
+- `MEMORY.md` -> §2, §5, §10.12
 - `ROADMAP.md` -> §10.12
 
 ## MEMORY.md
 - `ALLOY.md` -> §1.1, §1.2, §6
-- `ARCHITECTURE.md` -> §1, §8.8
+- `ARCHITECTURE.md` -> §1, §8.6, §8.8
 - `ASSETS-AND-DATA.md` -> §3, §5
 - `BUILD.md` -> §1.5
+- `CANON.md` -> §8.6
 - `CONTAINERS.md` -> §1.2, §3, §7, §8.2, §8.4
 - `CPP-SUBSET.md` -> §1.1, §3
 - `DETERMINISM.md` -> §2
 - `ECS.md` -> §2
 - `FRAME-LOOP.md` -> §5
 - `JOBS.md` -> §1.3
-- `LUAU-LAYER.md` -> §6, §7
+- `LUAU-LAYER.md` -> §1.5, §6, §7, §8.6
 - `MEMORY.md` -> §1.2
 - `NETCODE.md` -> §5
 - `PLATFORM.md` -> §1.1, §1.5, §3, §8.2
@@ -232,7 +233,8 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `DETERMINISM.md` -> §5
 - `FRAME-LOOP.md` -> §3, §6
 - `JOBS.md` -> §6, §9.2, §9.3
-- `MEMORY.md` -> §4, §9.2
+- `LUAU-LAYER.md` -> §9.5
+- `MEMORY.md` -> §4, §9.2, §9.5
 - `NETCODE.md` -> §3, §5
 - `RENDER2D.md` -> §0, §9.2, §9.3
 - `ROADMAP.md` -> §9

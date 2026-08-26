@@ -40,6 +40,15 @@ SYS_ALLOW_DIRS = {                        # additional system headers, by path p
     "src/editor": {"math.h"},
     "src/platform": {"math.h"},
     "src/foundation": {"rapidhash.h"},
+    # Luau is vendored with its own include dirs on the target (vendor/luau/CMakeLists.txt),
+    # so its public headers are spelled bare and reach gate 1 as system includes. The set is
+    # closed: lua.h (the C API), lualib.h (luaopen_*/luaL_*), luacode.h (luau_compile).
+    "src/script": {"lua.h", "lualib.h", "luacode.h"},
+    # vendor_glue is where a vendored library's heap plumbing lives (docs/MEMORY.md §8.6),
+    # and one vendored buffer - the one luau_compile returns - is malloc'd by upstream
+    # contract and must be free()d. The grant is scoped to THIS folder on purpose: it also
+    # admits malloc, and the folder whose job is allocators is the only one that may have it.
+    "src/vendor_glue": {"stdlib.h"},
 }
 BACKEND_FREE = ("src/platform/impl_sdl3", "src/platform/impl_headless")   # OS headers live here
 
@@ -61,8 +70,15 @@ BACKEND_HEADERS = {                       # token in the include path -> allowed
     "SDL_ttf": ("src/platform/impl_sdl3",),
     "imgui": ("src/editor",),
     "enet": ("src/net",),
-    "luau": ("src/script",),
+    # The vendored tree spells its public headers bare (<lua.h>, <lualib.h>, <luacode.h>)
+    # and its internal ones under Luau/. The pre-vendoring token here was a bare "luau",
+    # which matched no upstream spelling at all AND matched our own
+    # #include "vendor_glue/luau_alloc.h" - a gate that fires on the wrong file and never
+    # on the right one. Measured against the real tree at the 0.696 pin (W2 luau-vm).
     "lua.h": ("src/script",),
+    "lualib.h": ("src/script",),
+    "luacode.h": ("src/script",),
+    "Luau/": ("src/script",),
     "monocypher": ("src/net",),
     "stb_": ("src/platform/impl_sdl3", "src/core"),
     "rapidhash": ("src/foundation",),
@@ -73,14 +89,20 @@ BACKEND_HEADERS = {                       # token in the include path -> allowed
 # only sim/views.h.
 MODULE_DAG = {
     "foundation": ("foundation",),
+    # vendor_glue/ holds the per-library allocator adaptors (docs/MEMORY.md §8.6). It sits
+    # directly above foundation and below every wrap module: a vendored lib's hook API is
+    # routed through it, so it may never reach a module that would let a vendor heap see
+    # engine state.
+    "vendor_glue": ("vendor_glue", "foundation"),
     "platform": ("platform", "foundation"),
     "sim": ("sim", "foundation"),
     "core": ("core", "foundation", "platform"),
     "render": ("render", "core", "foundation", "platform"),
     "net": ("net", "core", "foundation", "platform"),
     "editor": ("editor", "core", "render", "foundation", "platform"),
-    "script": ("script", "core", "foundation", "platform"),
-    "app": ("app", "editor", "net", "render", "script", "sim", "core", "platform", "foundation"),
+    "script": ("script", "core", "foundation", "platform", "vendor_glue"),
+    "app": ("app", "editor", "net", "render", "script", "sim", "core", "platform",
+            "vendor_glue", "foundation"),
 }
 RENDER_SIM_HEADER = "sim/views.h"
 
@@ -107,6 +129,32 @@ _ENTROPY_CARRIERS = {}                    # root -> frozenset of headers that ex
 # set - `<math.h>` is still not granted here, and neither is any OS header; the crash writer's raw
 # OS calls belong to platform/, not foundation/ (docs/TOOLING.md §9.3.9).
 TOOLING_SYS_ALLOW = {"stdio.h", "stdlib.h", "stdarg.h"}
+
+# docs/CPP-SUBSET.md §1's writable-static ban has exactly two exemptions, and BOTH live in one
+# file so neither gate can carry a copy that drifts: tools/audit/static_allow.txt. RR-7's
+# tooling plane is the other, and it lives in src/foundation/CMakeLists.txt for the same reason.
+# Keyed by DIRECTORY + STEM here (this gate sees paths) and by LIB + STEM in symbols.py (that one
+# sees archives); a row must match both or the exemption is only half real.
+STATIC_ALLOW_FILE = os.path.join("tools", "audit", "static_allow.txt")
+
+
+def static_allow_dirs(root):
+    """{(directory, stem)} that may hold namespace-scope mutable state. Parsed, never guessed: a
+    malformed row is a hard error rather than a silently empty exemption set, because an empty
+    set here looks exactly like a correct one until the day it does not."""
+    out = set()
+    path = os.path.join(root, STATIC_ALLOW_FILE)
+    if not os.path.exists(path):
+        return out
+    for n, line in enumerate(open(path, encoding="utf-8"), 1):
+        row = line.split("#")[0].split()
+        if not row:
+            continue
+        if len(row) != 3:
+            sys.exit("%s:%d: want '<lib> <directory> <stem>', got %r" % (STATIC_ALLOW_FILE, n, line.strip()))
+        out.add((row[1], row[2]))
+    return out
+
 
 INC_SYS = re.compile(r'^\s*#\s*include\s*<([^>]+)>')
 INC_LOCAL = re.compile(r'^\s*#\s*include\s*"([^"]+)"')
@@ -195,6 +243,17 @@ GREP_BANS = (
     (re.compile(r'\b__?rdtsc\b'), "rdtsc (docs/CPP-SUBSET.md §4)"),
     (re.compile(r'__builtin_ia32_'), "ISA intrinsic builtin (docs/CPP-SUBSET.md §4)"),
 )
+# docs/MEMORY.md §1.5/§8.6: mem_pool is the ONE general allocator in the binary and it exists for
+# VENDOR heaps. Engine and sim code never call it - the doc has promised a CI grep for this since
+# rev 1 and TODO.md carried "not built yet" until the first caller (the Luau VM pool) arrived.
+# A phantom gate is worth nothing (LESSONS.md), so it lands with its first user.
+# The three allocation verbs only: pool_init/pool_reset are lifecycle (app/ wiring builds the
+# pools) and pool_stats is the profiler's read, all legitimate above this line.
+POOL_VERBS = re.compile(r'\bpool_(?:alloc|realloc|free)\b')
+# mem_pool.h's own declarations are named here for the same reason the doc names them: the header
+# IS the API, and TODO.md's entry for this gate asks for exactly this exemption.
+POOL_ALLOWED = ("src/foundation/mem_pool.cpp", "src/foundation/mem_pool.h", "src/vendor_glue/")
+
 TLS_SPELLINGS = re.compile(r'\bthread_local\b|\b__thread\b|__declspec\s*\(\s*thread\s*\)')
 
 CONTAINER_OPEN = re.compile(r'^\s*(?:template\s*<.*>\s*)?'
@@ -499,7 +558,7 @@ def contract_block_end(raw_lines):
     return len(raw_lines)
 
 
-def check_file(root, path, nondet, tooling, errors):
+def check_file(root, path, nondet, tooling, static_allow, errors):
     rel = os.path.relpath(path, root).replace("\\", "/")
     try:
         raw = open(path, encoding="utf-8").read()
@@ -589,7 +648,11 @@ def check_file(root, path, nondet, tooling, errors):
                                   "(docs/BUILD.md §4)" % (rel, i, token, prefixes))
 
         tline = token_lines[i - 1] if i - 1 < len(token_lines) else ""
-        if is_mutable_static(tline) and not is_tooling_tu:
+        # The exemption is (directory, stem), never the stem alone and never the directory
+        # alone: a same-named file in another directory, or another file in the same directory,
+        # is an ordinary violation.
+        static_exempt = (os.path.dirname(rel), stem) in static_allow
+        if is_mutable_static(tline) and not is_tooling_tu and not static_exempt:
             errors.append("%s:%d: static mutable state (docs/CPP-SUBSET.md §1): %s"
                           % (rel, i, raw_lines[i - 1].strip()[:70]))
         if TLS_SPELLINGS.search(tline):
@@ -598,6 +661,10 @@ def check_file(root, path, nondet, tooling, errors):
         for rx, why in GREP_BANS:
             if rx.search(tline):
                 errors.append("%s:%d: %s" % (rel, i, why))
+        if POOL_VERBS.search(tline) and not rel.startswith(POOL_ALLOWED):
+            errors.append("%s:%d: mem_pool's allocation API outside %s - it is the vendor heap, "
+                          "not an engine allocator (docs/MEMORY.md §1.5, §8.6): %s"
+                          % (rel, i, ", ".join(POOL_ALLOWED), raw_lines[i - 1].strip()[:60]))
         if BUILD_CLOCK.search(tline):
             errors.append("%s:%d: compile-time wall clock in src/ - two peers building the same "
                           "tree get different bytes (docs/CPP-SUBSET.md §5)" % (rel, i))
@@ -729,13 +796,14 @@ def main():
     src = os.path.join(a.root, "src")
     nondet = nondet_stems(a.root)
     tooling = tooling_stems(a.root)
+    static_allow = static_allow_dirs(a.root)
     errors = []
     scanned = 0
     for dirpath, _dirs, files in os.walk(src):
         for name in sorted(files):
             if name.endswith(SCAN_EXT):
                 scanned += 1
-                check_file(a.root, os.path.join(dirpath, name), nondet, tooling, errors)
+                check_file(a.root, os.path.join(dirpath, name), nondet, tooling, static_allow, errors)
     # Gate 7 alone also walks tests/ - windows.h is legal there (docs/TESTING.md §8 R-2) and the
     # break it causes is a test-tree break as often as a src/ one. Counted separately so `scanned`
     # keeps meaning "files the src/ gates saw".

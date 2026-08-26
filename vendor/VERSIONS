@@ -3,3 +3,4 @@
 #
 # name           pin                                                  note
 rapidhash        rapidhash_v3 (bc4b4baa48a15ff52ff4725e1ccdcda62815221c)   github.com/Nicoshev/rapidhash, MIT, vendored verbatim (RAPIDHASH_COMPACT + RAPIDHASH_FAST pinned in src/foundation/hash.cpp)
+luau             0.696 (6169fa15d85c766c108c90eb68289021b5eee705)          github.com/luau-lang/luau, MIT (+ lua_LICENSE.txt), subset vendored: Common/VM/Ast/Compiler (no CodeGen - docs/LUAU-LAYER.md §10.1); LUA_USE_LONGJMP=1

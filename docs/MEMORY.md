@@ -113,8 +113,52 @@ authoritative; none is hashed or snapshotted. Options weighed:
 
 `mem_pool.h` is a power-of-two size-class freelist (≤ 64 KB classes; larger → direct page
 commit) with a per-pool budget and a counter the profiler reads. **Engine and sim code never call
-it** (CI grep: `pool_alloc` appears only in `vendor_glue/`). Luau gets one pool per VM; ImGui and
+it** (the gate and its exemption list are §8.6's). Luau gets one pool per VM; ImGui and
 SDL share one; ENet its own (net buffers are sized by the protocol anyway).
+
+**A vendored library with NO allocator hook (RULED 2026-08-26, Rafael — RR-18).** The table above
+assumes every vendored library exposes a hook. Measured at the Luau 0.696 pin, that is true of the
+Luau *VM* (`luau_load` + `lua_pcall`: **zero** global `operator new`, every byte through
+`lua_newstate`'s callback) and false of the Luau *Compiler*, which exposes none and makes **32**
+global `operator new` calls per `luau_compile`. `operator new` is replaceable per **program** and
+nowhere narrower, so the only way to budget such a heap is to replace it program-wide:
+
+- `src/vendor_glue/vendor_new.cpp` defines a pool-backed global `operator new`/`delete` over one
+  `MemPool`, installed by `vendor_heap_install(pool)` and uninstalled straight after. With no
+  pool installed it `TL_FATAL`s exactly as §2's tripwire does, so the ban is unchanged outside
+  the window; the window is opened around one `luau_compile` call and closed on return, and the
+  pool's live-byte counter is asserted back to its pre-compile value.
+- The pool is the **shared vendor pool** — `PLATFORM.md` §9.5's `pool_vendor` — and NOT the
+  compiling VM's own (**ruled 2026-08-26, Rafael**, on review round 1's D2; this reverses the
+  wording RR-18 shipped with). Binding it to the VM pool put two allocators with **opposite
+  failure semantics** on one budget: `tl_luau_alloc` returns null over budget and Luau turns that
+  into a recoverable error — §8.7's `memory_exhaustion` row pins that as the contract — while the
+  `operator new` replacement `TL_FATAL`s. Measured: a sim VM with a 512 KB budget compiling a
+  200 KB source killed the process, in every tier including `ship`, from the on-load compile path
+  fed by files on disk. It also made the trip point a function of runtime heap occupancy rather
+  than of the source, so a chunk that compiled at startup could kill the process when reloaded
+  after the heap had grown. The VM budget is a bound on VM state; a compile is not VM state.
+- **A headroom check precedes the window**, so the fatal is never the only outcome available for
+  an ordinary large source: short headroom is an `ErrCode` the caller reports. Its constants are
+  derived, not guessed — the Luau compiler's pool peak measured **90.66x** the source size for a
+  1 KB source, falling to **49.83x** at 64 KB, with an ~88 KB floor for even a tiny one (0.696,
+  x86-64); `LUAU-LAYER.md` §10.12 carries the two constants and their margins.
+- §2's tripwire operators moved into their own TU (`alloc_shim_ops.cpp`) so ordinary archive
+  semantics let the replacement win without a duplicate-symbol error. They previously shared a
+  member with `tl_alloc_shim_anchor`, which the guard force-pulls.
+- The one pointer this needs is namespace-scope mutable state; it is exempted by name in
+  `tools/audit/static_allow.txt` (lib + directory + stem), which is the ONE home both gates read.
+  `PLATFORM.md` §9.5 had already sanctioned exactly this pointer for `src/vendor_glue/`; until
+  now no gate knew about it.
+- **Tier consequence, stated rather than discovered.** §2's tripwire is a `dev`/`netcode` rule;
+  the replacement exists in **every** tier, because a program that installs a vendor heap needs
+  it wherever it runs. So in a binary that links `tl_vendor_glue`, a global `new` or `delete`
+  outside an install window is fatal in `debug` and `ship` too, where it previously reached the
+  CRT silently. That is the stronger reading of §1.5's own objection to the CRT ("invisible to
+  the alloc guard") and is consistent with the ban `CPP-SUBSET.md` §1 already enforces at link
+  time for `src/`; it is called out here because it changes what those two tiers do, and a
+  behaviour change that only shows up under an unrelated failure is the kind this project
+  refuses to leave implicit.
 
 ---
 
@@ -128,7 +172,10 @@ SDL share one; ENet its own (net buffers are sized by the protocol anyway).
   code is a link error (the symbol audit) for sim libs and a `TL_FATAL` tripwire shim for the
   rest; vendor libs are routed through `mem_pool` via their hook APIs (`lua_newstate(alloc_fn)`,
   `ImGui::SetAllocatorFunctions`, `SDL_SetMemoryFunctions`, `enet_initialize_with_callbacks`,
-  `STBI_MALLOC`). **The per-frame CRT-malloc COUNTER is dropped (ruled 2026-08-26):** it needed
+  `STBI_MALLOC`) — **except a vendored library that exposes no hook at all, which is served by the
+  program-wide replacement of §1.5 (RR-18, ruled 2026-08-26)**. The tripwire operators live in
+  their own TU (`alloc_shim_ops.cpp`) so that replacement is possible without a duplicate symbol;
+  a program that installs no vendor heap still gets the tripwire. **The per-frame CRT-malloc COUNTER is dropped (ruled 2026-08-26):** it needed
   writable static storage the §1 link gate bans, and the tripwires + the symbol audit + the
   per-pool budgets already fail loudly on every path the counter watched.
 - **Hash-region integrity test per pool** (`DETERMINISM.md` §4).
@@ -223,8 +270,9 @@ render interpolation is snapped. That is the only hook; nothing else may observe
 | `snapshot.h/.cpp` | `Snapshot`, `SnapshotRing`, `ring_init/push/find` |
 | `scratch.h` | `Scratch` (a `VMemArena` + a `SCRATCH_MAX_SCOPES = 16` marker stack), `scratch_init/push/scope_begin/scope_end/reset`, `TL_SCRATCH_SCOPE_BEGIN/_END` (the explicit pair of `CPP-SUBSET.md` §7b) |
 | `handle.h` | `Handle<Tag,IDX,GEN>`, `handle_make/index/gen/is_null` |
-| `mem_pool.h/.cpp` | the vendor-heap pool (§1.5); the per-lib adaptor functions live in `vendor_glue/` (the W2 vendor lane) |
-| `alloc_shim.h/.cpp` | `dev`/`netcode` tiers: global `operator new/delete` → `TL_FATAL` tripwires, stateless. The header declares `tl_alloc_shim_anchor()`, the no-op the guard calls so every guard user links the tripwire object (counting dropped by ruling 2026-08-26 — §2) |
+| `mem_pool.h/.cpp` | the vendor-heap pool (§1.5); the per-lib adaptor functions live in `src/vendor_glue/` — `luau_*` is the W2 luau-vm lane's, the imgui/sdl/enet/stb adaptors the W2 vendor lane's |
+| `alloc_shim.h/.cpp` | the header plus `tl_alloc_shim_anchor()` — the no-op the guard calls so every guard user links the shim (counting dropped by ruling 2026-08-26 — §2). The TRIPWIRE OPERATORS are not here: see the row below |
+| `alloc_shim_ops.cpp` | `dev`/`netcode` tiers: global `operator new/delete` → `TL_FATAL`, stateless, and **alone in this archive member** so a program that must host a vendored library with no allocator hook can supply a pool-backed replacement without a duplicate symbol (§1.5, RR-18). While they shared a member with the anchor — which the guard force-pulls — no replacement was possible |
 
 ### 8.2 `VMemArena`
 
@@ -350,8 +398,12 @@ assert). Stats (`live_bytes`, `peak`, per-class counts, `large_count`) are read 
 Adaptors (one per vendored lib, in `vendor_glue/`): `tl_luau_alloc(void* ud, void* p, size_t
 osize, size_t nsize)`, `tl_imgui_alloc/free`, `tl_sdl_malloc/calloc/realloc/free`
 (`SDL_SetMemoryFunctions` before `SDL_Init`), `tl_enet_malloc/free` (`ENetCallbacks`),
-`STBI_MALLOC/REALLOC/FREE` macros pointing at the shared pool. Grep rule: `pool_alloc` appears
-only in `mem_pool.cpp` and `vendor_glue/`.
+`STBI_MALLOC/REALLOC/FREE` macros pointing at the shared pool. **Gate** (`tools/audit/includes.py`,
+built 2026-08-26 with its first caller, the Luau VM pool): the three allocation verbs
+`pool_alloc`/`pool_realloc`/`pool_free` appear only in `src/foundation/mem_pool.cpp`, in
+`mem_pool.h`'s own declarations, and under `src/vendor_glue/`. `pool_init`/`pool_reset` are
+lifecycle (`app/` builds the pools) and `pool_stats` is the profiler's read; all three stay
+legal above this line.
 
 ### 8.7 Tests (`tests/foundation/`)
 

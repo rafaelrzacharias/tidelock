@@ -105,10 +105,19 @@ exe run as `tidelock --dump` (no new exe). `TexHandle`s are minted by the platfo
 ## Luau sim VM — the exact removal list (`LUAU-LAYER.md` §10.2)
 
 Removed globals: `math`, `os`, `io`, `debug`, `pairs`, `next`, `coroutine`, `string.rep`,
-`loadstring`, `collectgarbage`, `print` (→ `log.info`), `require` after init, `getfenv`/`setfenv`,
-`rawequal`/`rawget`/`rawset` (the proxies forbid raw access), `tostring` on userdata replaced (no
-address leaks), `string.format %p` replaced. Provided: `ipairs`, `sortedpairs`, `fx.*`, engine
-binding tables, pure `string`/`table` functions. The interrupt budget counts **safepoints**
+`loadstring`, `collectgarbage`, `gcinfo`, `newproxy`, `print` (→ `log.info`), `require` after
+init, `getfenv`/`setfenv`, `rawequal`/`rawget`/`rawset` (the proxies forbid raw access),
+`table.foreach`/`table.foreachi` (they call `next`). Provided: `ipairs`, `sortedpairs`, `fx.*`,
+engine binding tables, pure `string`/`table` functions.
+
+**The address channel is closed by replacement, not removal** (`LUAU-LAYER.md` §10.2 step 5):
+`tostring` and `string.format` are replaced, and **both** conversions that can reach
+`luaL_tolstring` — `%s` **and Luau's `%*` extension** — are routed through the replacement. `%*`
+is the one that leaks: stock `%s` calls `luaL_checklstring`, so a reference is a type error
+there, while `%*` prints `table: 0x…`. `%p` needs no handling — Luau rejects it as an invalid
+option at the pin (measured, review round 1); an earlier revision of this line claimed `%p` was
+"replaced", which was wrong in both halves. The sim VM substitutes the type name; the **data VM
+raises** (ruled 2026-08-26 — its output is hashed, so the mistake must surface at the line). The interrupt budget counts **safepoints**
 (Luau's interrupt granularity), not instructions — equally deterministic.
 
 ## Ticks, hashes, fingerprints, RNG
@@ -154,7 +163,8 @@ as Hovel's network-soak hardware (`NETCODE.md` §19.4). The Pi 4 left the progra
 
 Tiers `debug` (`-O0 -g`), `dev` (`-O1 -g`, `TL_DEV=1`), `netcode` (`-O2 -g1`), `ship`. Libs
 `tl_foundation`, `tl_foundation_det` (audited), `tl_core`, `tl_sim` (audited), `tl_net`,
-`tl_render`, `tl_platform_sdl3`, `tl_platform_headless`, `tl_editor` (dev only), `tl_script`. Exes
+`tl_render`, `tl_platform_sdl3`, `tl_platform_headless`, `tl_editor` (dev only), `tl_script`,
+`tl_vendor_glue` (the per-library allocator adaptors, `MEMORY.md` §8.6). Exes
 `tidelock`, `tl_tests`, `tl_driver`, `tl_gate0`, `tl_hovel`. Tools `fingerprint`, `luauc`, `audit`,
 `fxcheck`, `sysroot`, `deploy`. Toolchain: clang (clang-cl on Windows), C++20, pinned in
 `toolchain/VERSIONS`. Budgets: full rebuild < 10 s, incremental < 2 s, cold.
