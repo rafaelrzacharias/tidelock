@@ -649,6 +649,34 @@ def test_sim_tu_error(tmp, cxx):
                % header, rc == 0, out.strip()[:200])
 
 
+# The reflection macros' explicit-padding assert (docs/ECS.md section 10.2, section 10.8: the
+# "padding assert trips on a crafted struct" compile-fail negative lives here, in the negatives
+# lane). One interior-gap plant, one tail-gap plant, and a padded positive control so the checks
+# cannot pass via an unrelated breakage.
+def test_reflect_padding(tmp, cxx):
+    root = os.path.join(tmp, "reflect_pad")
+    os.makedirs(root, exist_ok=True)
+    cases = (
+        ("interior gap without _padN",
+         '#define TL_FIELDS_BadPadA(X, XA, XH) X(u8, a) X(u32, b)\nTL_COMPONENT(BadPadA)\n', False),
+        ("tail gap without _padN",
+         '#define TL_FIELDS_BadPadB(X, XA, XH) X(u32, a) X(u16, b)\nTL_COMPONENT(BadPadB)\n', False),
+        ("explicit pads compile",
+         '#define TL_FIELDS_GoodPad(X, XA, XH) X(u8, a) XA(u8, _pad0, 3) X(u32, b)\nTL_COMPONENT(GoodPad)\n', True),
+    )
+    for name, body, ok_expected in cases:
+        tu = write(root, name.replace(" ", "_") + ".cpp",
+                   '#include "core/reflect.h"\n' + body + "int tl_probe_anchor;\n")
+        obj = os.path.join(root, "probe.o")
+        rc, out = run([cxx, "-std=c++20", "-fno-exceptions", "-fno-rtti",
+                       "-I", os.path.join(REPO, "src"), "-c", "-o", obj, tu])
+        if ok_expected:
+            record("reflect_pad: " + name, rc == 0, out.strip()[:200])
+        else:
+            record("reflect_pad: " + name,
+                   rc != 0 and "explicit padding required" in out, out.strip()[:200])
+
+
 # --- fingerprint.py ---------------------------------------------------------------------------
 WIN_CMD = ("clang-cl /nologo -TP -DWIN32 -D_WINDOWS -D_HAS_EXCEPTIONS=0 -DTL_TIER_NETCODE=1 "
            "-DTL_DEV=0 -DTL_SIM_TU=1 -std:c++20 /W4 /WX /EHs-c- /GR- /O2 /Z7 "
@@ -932,6 +960,7 @@ def main():
         test_symbols_tooling(tmp, a.nm, a.objdump, a.ar, a.cxx)
         test_targets(tmp, a.cxx)
         test_sim_tu_error(tmp, a.cxx)
+        test_reflect_padding(tmp, a.cxx)
         test_tier_parity(tmp)
         test_fingerprint(tmp)
         test_commit_docs(tmp)
