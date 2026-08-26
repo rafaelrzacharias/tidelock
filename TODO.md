@@ -137,11 +137,19 @@ constructor. `vendor/luau` at the 0.696 pin (Common/VM/Ast/Compiler, **no CodeGe
       adds `MODULE_DAG["vendor_glue"]` (an unknown module resolves to an EMPTY allow-list, so
       every include in the folder fails the gate without it) and the `pool_alloc` gate, which the
       vendor lane's adaptors are already exempt under.
-- [ ] **Rebuild-budget headroom, feeding the open re-baseline entry above.** Measured on this
-      container (4 cores, `netcode-linux`, cold): **9.04 s without Luau, 13.39 s with it**
-      (+4.35 s, +48 %, 53 TUs). The CI gate is 25 s on a leg whose last measurement was 12.1 s, so
-      the projected leg cost is ~17.9 s and the workflow comment's claimed "2x margin" is now
-      ~1.4x. Re-run the re-baseline on the merged tree, not on the W1 one.
+- [ ] **Rebuild-budget headroom is down to 1.10x — MEASURED on the leg, and it refuted this
+      lane's own projection.** Container figures (4 cores, `netcode-linux`, cold): 9.04 s without
+      Luau, 13.39 s with it (+4.35 s, +48 %, 53 TUs), from which this lane projected ~17.9 s and
+      ~1.4x headroom on the CI leg. **The leg itself measured 22.66 s against the 25.00 s budget**
+      (PR #11, run 129, `rebuild-budget` job): headroom **1.10x**, not 1.4x. The container's core
+      count and clock do not scale the way the estimate assumed, which is the whole reason
+      `CLAUDE.md` rule 4 says a number, not a projection.
+      **Why this is now urgent rather than a note:** the same gate went red at 25.27 s on a
+      DOCS-ONLY commit against a tree ~40 TUs smaller (main run #106), i.e. its measured variance
+      already exceeds the 2.34 s of headroom left. The concurrent `w2-vendor` lane adds SDL3,
+      SDL_ttf, imgui, ENet, Monocypher and stb on top of this. **Recommendation:** re-baseline on
+      the merged W2 tree with headroom stated as a multiple, not a constant, and re-read the
+      `pr.yml` comment that still claims a 2x margin.
 
 ## W2 gate0 — the bench is built; what it measured (2026-08-25, `w2-gate0`, PC x86-64 netcode tier)
 
