@@ -1,0 +1,51 @@
+#pragma once
+// ---------------------------------------------------------------------------------------------
+// debugdraw.h - immediate lines/rects/circles/text in world or screen space, + persistent
+//   (n-tick) variants for sim debugging.
+//
+// Spec: docs/RENDER2D.md §7 (design), §9.3.8 (algorithms), §9.1 (file layout: "dev tiers only -
+//   in netcode/ship the TL_DBG_* macros expand to ((void)0) and the TU is not built").
+// Purpose: data-only geometry into the LAYER_DEBUG draw buffer - per-system `debug_draw(World*)`
+//   hooks (docs/TOOLING.md §2, the editor lane) emit here; this module owns only the primitives.
+// Invariants: butt caps, no joins (polylines are independent segments); all debug geometry goes
+//   to LAYER_DEBUG, null texture, depth = submission order (docs/RENDER2D.md §9.3.8). Persistent
+//   entries live in a 4096-entry ring on a render-owned arena and are re-emitted every frame
+//   while `until_tick > world.tick` (docs/RENDER2D.md §7).
+// Determinism: none - dev-tier only, never built in netcode/ship (this whole TU is compiled out
+//   there, docs/RENDER2D.md §9.1); no sim TU ever calls it directly (the hook is per-system, but
+//   the call itself is dev-tooling, docs/TOOLING.md §2).
+// Threading: main thread, RENDER phase (or any dev-tier immediate caller).
+// Includes: render/render.h.
+// ---------------------------------------------------------------------------------------------
+#include "render/render.h"
+
+enum DbgKind : u8 { DBG_LINE = 0, DBG_RECT = 1, DBG_CIRCLE = 2 };
+
+enum : u32 { DBG_PERSIST_RING_CAP = 4096 };
+
+// 40 B (docs/RENDER2D.md §9.3.8): p[6] holds the shape's params by kind - LINE: ax,ay,bx,by,
+// width_px,_; RECT: x,y,w,h,_,_; CIRCLE: cx,cy,r_px,_,_,_.
+struct DbgPersist { u64 until_tick; u8 kind; u8 space; u16 _pad0; u32 rgba; f32 p[6]; };
+static_assert(sizeof(DbgPersist) == 40, "docs/RENDER2D.md section 9.3.8");
+
+// dbg_line(a, b, width_px, rgba, space): d = normalize(b - a) in target px; n = (-d.y, d.x)*
+// width/2; quad a+n, b+n, b-n, a-n (docs/RENDER2D.md §9.3.8).
+void dbg_line(World* w, f32 ax, f32 ay, f32 bx, f32 by, f32 width_px, u32 rgba, RectSpace space);
+
+// dbg_rect = 4 dbg_line calls (docs/RENDER2D.md §9.3.8), corners of {x,y,w,h}.
+void dbg_rect(World* w, f32 x, f32 y, f32 width, f32 height, f32 line_width_px, u32 rgba, RectSpace space);
+
+// dbg_circle: N = clamp(ceil(r_px / 2), 8, 64) segments (docs/RENDER2D.md §9.3.8).
+void dbg_circle(World* w, f32 cx, f32 cy, f32 r_px, f32 line_width_px, u32 rgba, RectSpace space);
+
+// Persistent line (docs/RENDER2D.md §7): pushes a DbgPersist row (until_tick = current tick +
+// ticks) into the ring, TL_FATAL at DBG_PERSIST_RING_CAP, and draws it immediately for this frame.
+void dbg_line_persist(World* w, f32 ax, f32 ay, f32 bx, f32 by, f32 width_px, u32 rgba, RectSpace space, u64 ticks);
+// Persistent rect - same ring/lifetime contract as dbg_line_persist.
+void dbg_rect_persist(World* w, f32 x, f32 y, f32 width, f32 height, f32 line_width_px, u32 rgba, RectSpace space, u64 ticks);
+// Persistent circle - same ring/lifetime contract as dbg_line_persist.
+void dbg_circle_persist(World* w, f32 cx, f32 cy, f32 r_px, f32 line_width_px, u32 rgba, RectSpace space, u64 ticks);
+
+// Re-emits every ring entry with until_tick > world.tick (docs/RENDER2D.md §7). Call once per
+// frame, RENDER phase, before any one-shot dbg_* calls the same frame would double-draw.
+void debugdraw_replay_persistent(World* w);

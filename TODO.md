@@ -3010,6 +3010,57 @@ right; it is the template the others now follow.
 - [ ] Hand the combat-design constraints (`AOE_ISLAND_LIMIT` = 4, min telegraph 6 ticks, `commit_ticks`)
       to the game design docs when a game repo exists (NAT is ruled: LAN/direct-IP v1, `NETCODE.md` §5.5).
 
+## W3 render2d — lane notes (2026-08-26, `w3-render2d`)
+- [x] **Cross-lane landing: `core/transform.h` (Transform/TransformPrev).** Neither this lane's
+      nor `w3-loop-input`'s `docs/ROADMAP.md` §2 "Builds" column names the file, but
+      `docs/FRAME-LOOP.md` §8.2 step 4 and `docs/RENDER2D.md` §9.2's `extract.cpp` both need it,
+      and at the time of this commit `w3-loop-input` had not pushed a branch yet (checked:
+      `git ls-remote --heads origin` had no `w3-loop-input`). Landed under the `foundation/rect.h`
+      precedent (that header's own contract block: a downstream lane may transcribe a struct
+      VERBATIM from the doc that pins its exact shape, when no lane's Builds column currently
+      claims it and the consumer needs it now) - the shape is pinned identically in
+      `docs/RENDER2D.md` §9.2 and `docs/CPP-SUBSET.md` §8, so there was no judgment call, only a
+      landing-order race to record. **If `w3-loop-input` also lands a `Transform` definition, the
+      two branches conflict on this one file — whichever merges second must rebase onto the
+      first's `core/transform.h`, not redeclare it.** No ruling needed unless a real conflict
+      lands; recorded here so the steward's closeout sweep checks it.
+- [ ] **RR-21 (not blocking, w3-render2d): `core/reflect.h`'s `FieldKind` enum has no float row.**
+      `docs/RENDER2D.md` §9.2 pins `Camera2D`/`CameraPrev`/`CameraFollow` as f32-fielded
+      "render-side components" registered per `docs/FRAME-LOOP.md` §8.2 step 4, but
+      `TL_COMPONENT`/`TL_FIELDS_Name` (`docs/ECS.md` §10.2) can only reflect the closed
+      int/fx/handle kind set — there is no `K_f32`/`tl_field_kind_f32`. Worked around locally in
+      `src/render/camera.h`: these three structs hand-roll a `ComponentInfo` with an empty field
+      table (`fields = nullptr, field_count = 0`) instead of going through the macro - still valid
+      `world_register_component`/`world_column<T>` subjects (registration only needs size/align +
+      `tl_info_of`), just opaque to the generic inspector and the reflection hash, which is
+      accurate since nothing render-side is ever hashed (`docs/RENDER2D.md` §9.5). Filed as a
+      ruling request because the *editor* lane (chains after this one) may want Camera2D's fields
+      individually editable in the generic inspector (`docs/TOOLING.md` §2), which needs a real
+      `K_f32` row from `core/reflect.h`'s owner (the ECS lane/steward), not another module's
+      workaround. Not blocking: render2d's v0 does not need the inspector.
+- [ ] **RR-22 (not blocking, w3-render2d): no module can add `tl_field_kind_TexHandle` "beside
+      the type definition" as `core/reflect.h`'s own comment instructs.** `TexHandle` is defined
+      in `platform/platform.h`; `tools/audit/includes.py`'s `MODULE_DAG` has `platform` unable to
+      include `core` (core depends on platform, not the reverse), so the constant cannot live next
+      to the typedef without a circular include. Landed instead in `src/render/sprite.h` (`Sprite`
+      is the first reflected component with a `TexHandle` field, and render's DAG entry already
+      reaches both `core` and `platform`). Filed so a future reflected `Font`/`Audio`/`Clip`/`Data`
+      handle field (assets+data lane) does not rediscover the same DAG constraint from scratch -
+      the fix is the same shape (declare the constant in the first module that needs it and can
+      see both headers), or a ruling to relocate the whole token-keyed kind table somewhere both
+      `core` and `platform` can reach, if this keeps recurring.
+- [ ] **Recorded (not a ruling — filled genuine spec silence, not a contradiction):**
+      `RenderQueue.platform` (a `const PlatformApi*` field beyond `docs/RENDER2D.md` §9.2's pinned
+      struct dump) - no doc states how `backend_sdl.cpp`'s `render_present(w)` reaches the device
+      verbs, and the queue is where every other backend-facing field already lives.
+      `rect_visible(w, r, layer, space)`'s `layer` parameter - §9.3.4's one-line pseudocode
+      references `layer_view[layer]` but the shown call site is 2-arg; restored as an explicit
+      parameter since nothing else in scope carries an implicit "current layer".
+- [ ] **`sim/views.h` still not on `main`** (alloy-substrate, expected after 2026-09-01, per this
+      lane's brief). `src/render/simview.h` forward-declares the five view structs opaque and
+      `simview_update` is v0's stub (empty body) - Milestone 2 replaces the forward declarations
+      with the real include once alloy-substrate lands; never invent the header here.
+
 ## Alloy (`docs/ALLOY.md` — headless-first; its own build queue in "Gates & rulings ledger")
 - [ ] **W3 alloy-liquids-gases OPENING task — the liquid design pass (the RR-10 ruling,
       2026-08-25).** The two-pass Jacobi λᵢ+λⱼ form is the spec (`ALLOY.md` §14.4.3); this pass
