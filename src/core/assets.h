@@ -38,7 +38,7 @@
 #include "foundation/map.h"
 #include "foundation/vmem_arena.h"
 #include "foundation/strview.h"
-#include "platform.h"
+#include "platform/platform.h"
 
 // The assets module's ErrCode range is 0x033x (docs/CANON.md "Types": per-module ranges; core's
 // other files hold 0x0301, 0x0311-0x0317, 0x0320-0x0322 - see reflect.h/world.h/encoder.h).
@@ -108,18 +108,24 @@ struct AssetRegistry {
 
 // Reserves the registry's arenas (textures: 4096 slots, fonts: 4096 slots, both Handle<_,12,4>'s
 // full domain; by_name: a fixed-capacity map sized 2x the combined domain at load <= 0.75) under
-// `id`-prefixed NameHash ids, and wires every member. Returns the first failing vmem/slotmap
+// fixed literal NameHash ids ("assets.tex.slots" etc. - one process ever has one AssetRegistry,
+// so a caller-supplied prefix buys nothing a literal doesn't already give, docs/CONTAINERS.md
+// §8.6's "four distinct ids, not derived" - deriving four columns from one caller id is exactly
+// what that rule warns against), and wires every member. Returns the first failing vmem/slotmap
 // init's code.
-ErrCode asset_registry_init(AssetRegistry* reg, NameHash id, const VMemApi* os);
+ErrCode asset_registry_init(AssetRegistry* reg, const VMemApi* os);
 
-// Dedup by name hash (refcount++) or load from disk: platform->file.read_all into `scratch`,
-// decode with stb_image (forced 4 channels), platform->draw.texture_create + texture_upload,
-// insert a new AssetRec, refcount 1. Returns ERR_ASSET_NOT_FOUND/ERR_ASSET_FILE_IO (wrapping the
-// ErrPlatform code) or ERR_ASSET_IMAGE_DECODE; ERR_ASSET_LIMIT if the texture domain is
-// exhausted. Defined in loaders/image.cpp. `scratch` is rolled back by the caller (this call
-// only pushes, never scopes).
+// `name` is the asset's path relative to the content root (`sv_hash(name)` is the dedup key and
+// the returned record's identity - §1 "the name hash is the cross-machine identity"; a save file
+// or the wire carries only that hash, never this call's string, so this is the one door a path
+// string crosses). Dedup by that hash (refcount++) or load from disk: platform->file.read_all
+// into `scratch`, decode with stb_image (forced 4 channels), platform->draw.texture_create +
+// texture_upload, insert a new AssetRec, refcount 1. Returns ERR_ASSET_NOT_FOUND/ERR_ASSET_FILE_IO
+// (wrapping the ErrPlatform code) or ERR_ASSET_IMAGE_DECODE; ERR_ASSET_LIMIT if the texture
+// domain is exhausted. Defined in loaders/image.cpp. `scratch` is rolled back by the caller (this
+// call only pushes, never scopes).
 Result<TexHandle> asset_load_texture(AssetRegistry* reg, const PlatformApi* platform,
-                                     VMemArena* scratch, NameHash name);
+                                     VMemArena* scratch, StrView name);
 
 // Creates a streaming texture (docs/ASSETS-AND-DATA.md §2 - the sim view Alloy's render extract
 // writes each frame) through the same registry, kind = ASSET_STREAMING, no name (never entered
@@ -133,8 +139,18 @@ Result<TexHandle> asset_create_streaming(AssetRegistry* reg, const PlatformApi* 
 // hand the bytes to SDL_ttf (TTF_OpenFontFromMem-shaped), insert a new AssetRec, refcount 1.
 // Returns ERR_ASSET_NOT_FOUND/ERR_ASSET_FILE_IO or ERR_ASSET_FONT_DECODE; ERR_ASSET_LIMIT if the
 // font domain is exhausted. Defined in loaders/font.cpp.
+//
+// NOT YET IMPLEMENTED (recorded in TODO.md, W3 assets+data lane notes, the same "no real
+// consumer yet" scope cut as save.h's SAVE_ENC_RAW_POOL/CHUNK_STORE): render/text.cpp (the
+// glyph-atlas consumer this loader hands a face to, §8.1) does not exist yet - no render2d work
+// has landed - and opening a real SDL_ttf face from `src/core` needs `tools/audit/includes.py`'s
+// BACKEND_HEADERS widened for the "SDL_ttf" token (currently `src/platform/impl_sdl3` and
+// `src/vendor_glue` only), a shared-gate-file edit this lane can make (cone discipline: "your
+// OWN entries in the shared gate files... tools/audit allowlists") but which building against a
+// guessed glyph-atlas shape would be the Layr trap either way. TL_FATAL stub until render2d
+// lands render/text.cpp.
 Result<FontHandle> asset_load_font(AssetRegistry* reg, const PlatformApi* platform,
-                                   VMemArena* scratch, NameHash name);
+                                   VMemArena* scratch, StrView name);
 
 // Decrements h's refcount; at 0, destroys the platform texture (draw.texture_destroy) and
 // removes the slot from both `textures` and (if named) `by_name`. A stale/null h is a no-op

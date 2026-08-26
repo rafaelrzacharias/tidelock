@@ -3219,8 +3219,25 @@ change a DECIDED design, `CLAUDE.md` rule 8).
   member and this lane does not touch `world.h` (not its module, `ASSETS-AND-DATA.md` §8.1's file
   list). The registry is not sim state (§1: "not a registered arena... the sim never touches" its
   contents) and does not need `World` to reach it - shipped as
-  `asset_load_texture(AssetRegistry*, const PlatformApi*, VMemArena* scratch, NameHash)`, the
+  `asset_load_texture(AssetRegistry*, const PlatformApi*, VMemArena* scratch, StrView name)`, the
   same "engine-side facility, passed explicitly" shape `ScriptVm*` callers already use.
+- **`asset_load_texture`/`asset_load_font` take `StrView name` (a path), not a pre-hashed
+  `NameHash`** (revised from this note's first cut, same commit family): §8.2's own pseudocode
+  step ("path = resolve(name) // content root + interned name -> StrView") only makes sense if
+  something can turn the identity back into bytes to open a file, and `NameHash` (FNV-1a) is
+  one-way by construction - a `NameHash`-only loader would need a reverse lookup through a process
+  `Interner` this header has no reason to depend on. §1's "the name hash is the cross-machine
+  identity... never paths" is about SAVE FILES and the WIRE, which this call is neither - it is
+  the one door a path string legitimately crosses (asset loading is a startup-time, non-sim, non-
+  fingerprinted call). `sv_hash(name)` is computed internally as the dedup key and the returned
+  record's identity; `resolve()` is `name` handed straight to `platform->file.read_all` (the
+  shipped `FileApi` has no separate "content root" concept to prepend - a caller wanting one
+  prefixes it into `name` itself).
+- **`asset_registry_init` takes no caller-supplied id** (revised from this note's first cut):
+  one process ever has one `AssetRegistry`, so a caller prefix buys nothing eight fixed literals
+  ("assets.tex.slots" etc.) don't already give, and deriving eight distinct `SlotMap` column ids
+  from one caller value is exactly what `CONTAINERS.md` §8.6's "four distinct ids, not derived"
+  warns against.
 - **`AssetRec.kind_specific` is the platform DrawApi's own `TexHandle` bits, not this registry's.**
   `docs/CANON.md` "the asset registry holds them, never a second [handle] id" reads as: don't
   invent a THIRD C++ handle type for "an asset reference" - reuse the `TexHandle` SHAPE

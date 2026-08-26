@@ -14,3 +14,7 @@ target_sources(tl_core PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/loaders/image.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/loaders/font.cpp"
 )
+
+# loaders/image.cpp reaches <stb_image.h> declaration-only (tools/audit/includes.py's "stb_"
+# BACKEND_HEADERS token grants src/core exactly this); PRIVATE because only that one TU calls it.
+target_link_libraries(tl_core PRIVATE stb)

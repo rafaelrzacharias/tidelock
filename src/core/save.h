@@ -45,7 +45,7 @@
 #include "foundation/interner.h"
 #include "foundation/strview.h"
 #include "foundation/array.h"
-#include "platform.h"
+#include "platform/platform.h"
 
 // The save module's ErrCode range is 0x035x (docs/CANON.md "Types": per-module ranges).
 constexpr ErrCode ERR_SAVE_BAD_MAGIC     = (ErrCode)0x0350;  // header magic mismatch - not a tidelock save file
