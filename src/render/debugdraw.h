@@ -3,21 +3,53 @@
 // debugdraw.h - immediate lines/rects/circles/text in world or screen space, + persistent
 //   (n-tick) variants for sim debugging.
 //
-// Spec: docs/RENDER2D.md §7 (design), §9.3.8 (algorithms), §9.1 (file layout: "dev tiers only -
-//   in netcode/ship the TL_DBG_* macros expand to ((void)0) and the TU is not built").
+// Spec: docs/RENDER2D.md §7 (design), §9.3.8 (algorithms), §9.1 (file layout: TL_DBG_* macros
+//   expand to ((void)0) outside TL_DEV - the tl_prof.h/tl_probe.h precedent, review round 1 D7 -
+//   this TU itself still builds and is still tested in every tier).
 // Purpose: data-only geometry into the LAYER_DEBUG draw buffer - per-system `debug_draw(World*)`
-//   hooks (docs/TOOLING.md §2, the editor lane) emit here; this module owns only the primitives.
+//   hooks (docs/TOOLING.md §2, the editor lane) emit here through the TL_DBG_* macros; this
+//   module owns only the primitives (and the macros gating them).
 // Invariants: butt caps, no joins (polylines are independent segments); all debug geometry goes
 //   to LAYER_DEBUG, null texture, depth = submission order (docs/RENDER2D.md §9.3.8). Persistent
 //   entries live in a 4096-entry ring on a render-owned arena and are re-emitted every frame
 //   while `until_tick > world.tick` (docs/RENDER2D.md §7).
-// Determinism: none - dev-tier only, never built in netcode/ship (this whole TU is compiled out
-//   there, docs/RENDER2D.md §9.1); no sim TU ever calls it directly (the hook is per-system, but
-//   the call itself is dev-tooling, docs/TOOLING.md §2).
+// Determinism: none - dev-tooling. Outside TL_DEV every TL_DBG_* call site compiles to
+//   ((void)0), argument list unevaluated, so no netcode/ship build pays for it; the underlying
+//   dbg_* functions stay linkable in every tier (so this TU's own tests still run there) but no
+//   sim TU calls them directly (the hook is per-system, but the call itself is dev-tooling,
+//   docs/TOOLING.md §2).
 // Threading: main thread, RENDER phase (or any dev-tier immediate caller).
 // Includes: render/render.h.
 // ---------------------------------------------------------------------------------------------
 #include "render/render.h"
+
+// TL_DBG_* (docs/CPP-SUBSET.md §7b macro catalogue): the call-site macros for the six emit
+// entry points below, following the foundation/tl_prof.h and foundation/tl_probe.h precedent -
+// this TU (debugdraw.cpp) still builds and is still tested in every tier (a caller like
+// debugdraw.test.cpp may call dbg_line/dbg_rect/... directly, in any tier); only a CALL SITE
+// that goes through these macros pays zero cost - argument list unevaluated - outside TL_DEV
+// (review round 1 D7).
+#if TL_DEV
+#  define TL_DBG_LINE(w, ax, ay, bx, by, width_px, rgba, space) \
+       dbg_line((w), (ax), (ay), (bx), (by), (width_px), (rgba), (space))
+#  define TL_DBG_RECT(w, x, y, width, height, line_width_px, rgba, space) \
+       dbg_rect((w), (x), (y), (width), (height), (line_width_px), (rgba), (space))
+#  define TL_DBG_CIRCLE(w, cx, cy, r_px, line_width_px, rgba, space) \
+       dbg_circle((w), (cx), (cy), (r_px), (line_width_px), (rgba), (space))
+#  define TL_DBG_LINE_PERSIST(w, ax, ay, bx, by, width_px, rgba, space, ticks) \
+       dbg_line_persist((w), (ax), (ay), (bx), (by), (width_px), (rgba), (space), (ticks))
+#  define TL_DBG_RECT_PERSIST(w, x, y, width, height, line_width_px, rgba, space, ticks) \
+       dbg_rect_persist((w), (x), (y), (width), (height), (line_width_px), (rgba), (space), (ticks))
+#  define TL_DBG_CIRCLE_PERSIST(w, cx, cy, r_px, line_width_px, rgba, space, ticks) \
+       dbg_circle_persist((w), (cx), (cy), (r_px), (line_width_px), (rgba), (space), (ticks))
+#else
+#  define TL_DBG_LINE(w, ax, ay, bx, by, width_px, rgba, space)                          ((void)0)
+#  define TL_DBG_RECT(w, x, y, width, height, line_width_px, rgba, space)                ((void)0)
+#  define TL_DBG_CIRCLE(w, cx, cy, r_px, line_width_px, rgba, space)                     ((void)0)
+#  define TL_DBG_LINE_PERSIST(w, ax, ay, bx, by, width_px, rgba, space, ticks)           ((void)0)
+#  define TL_DBG_RECT_PERSIST(w, x, y, width, height, line_width_px, rgba, space, ticks) ((void)0)
+#  define TL_DBG_CIRCLE_PERSIST(w, cx, cy, r_px, line_width_px, rgba, space, ticks)      ((void)0)
+#endif
 
 enum DbgKind : u8 { DBG_LINE = 0, DBG_RECT = 1, DBG_CIRCLE = 2 };
 

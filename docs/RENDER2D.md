@@ -188,7 +188,7 @@ failures are `Result<T>`/`ErrCode` in the `ERR_RENDER_*` range. Draw verbs are t
 | `batch.cpp` | key sort (calls `sort_u64_kv`), scan-batching, vertex/index emission | all |
 | `sprite.cpp` | `Sprite` component + `sys_sprite_render` (`RENDER`) | all |
 | `simview.h/.cpp` | material LUT, chunk/body/particle/basin writers over `sim/views.h`, `simview_texel_to_world` | all (Milestone 2; v0 ships the header + an empty update) |
-| `debugdraw.h/.cpp` | immediate lines/rects/circles, persistent list, tessellation | `debug`, `dev` — in `netcode`/`ship` the `TL_DBG_*` macros expand to `((void)0)` and the TU is not built |
+| `debugdraw.h/.cpp` | immediate lines/rects/circles, persistent list, tessellation | all — the `foundation/tl_prof.h`/`tl_probe.h` precedent (`CPP-SUBSET.md` §7b): the TU itself builds and is tested in every tier; only a call site that goes through the `TL_DBG_*` macros pays for it, and outside `TL_DEV` those expand to `((void)0)`, argument list unevaluated |
 | `text.cpp` | reserved stub: `text_layout()` returns `ERR_RENDER_UNSUPPORTED` | all |
 | `backend_sdl.cpp` | `render_present`: sort → batch → `DrawApi` verbs. Includes `platform/platform.h` only; the name records the SDL_Render-shaped verb set. A future `backend_gpu.cpp` replaces this one TU | all |
 
