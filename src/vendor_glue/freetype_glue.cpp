@@ -9,20 +9,32 @@
 // vendor/VERSIONS' freetype row). No install() call is needed: the wiring is compile-time, not
 // runtime, so the only precondition is that pool_vendor_init has already run before FreeType's
 // first allocation (i.e. before the first TTF_Init()).
+#include "vendor_glue/freetype_glue.h"
 #include "vendor_glue/pool_vendor.h"
+
+namespace {
+u64 g_freetype_call_count = 0;
+}  // namespace
 
 extern "C" {
 
 void* tl_freetype_alloc(long size) {
+    ++g_freetype_call_count;
     return pool_alloc(pool_vendor(), (u64)size);
 }
 
 void* tl_freetype_realloc(long /*cur_size*/, long new_size, void* block) {
+    ++g_freetype_call_count;
     return pool_realloc(pool_vendor(), block, (u64)new_size);
 }
 
 void tl_freetype_free(void* block) {
+    ++g_freetype_call_count;
     pool_free(pool_vendor(), block);
 }
 
 }  // extern "C"
+
+u64 tl_freetype_call_count(void) {
+    return g_freetype_call_count;
+}

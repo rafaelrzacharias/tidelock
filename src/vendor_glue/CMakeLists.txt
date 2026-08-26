@@ -31,9 +31,11 @@ tl_register_lib(tl_vendor_glue FALSE)
 # undefined reference to tl_freetype_alloc that a non-order-tolerant linker cannot resolve, because
 # nothing told CMake tl_vendor_glue's archive must appear again after SDL3_ttf-static's).
 #
-# $<BUILD_INTERFACE:...>: SDL_ttf's own CMakeLists.txt installs an EXPORT set for SDL3_ttf-static
-# (a plain, non-generator-expression PRIVATE link here would then require tl_vendor_glue - which
-# this project never installs - to be in an export set too). Nothing in this tree ever runs
-# `cmake --install`, so the link is build-only in practice either way; the generator expression
-# just makes that explicit to CMake's export-set checker.
+# $<BUILD_INTERFACE:...>: defensive, not load-bearing here (review round 3 nit - verified a
+# plain PRIVATE link configures clean too). SDL_ttf's install(EXPORT SDL3_ttfTargets ...) sits
+# behind SDLTTF_INSTALL, and vendor/CMakeLists.txt forces that OFF, so there is no export set for
+# tl_vendor_glue to offend in this tree. The generator expression costs nothing and survives a
+# future flip of that option, so it stays; "SDL3_ttf-static" is hardcoded because
+# vendor/CMakeLists.txt also forces BUILD_SHARED_LIBS OFF - upstream would otherwise name this
+# target SDL3_ttf-shared, and a mismatch here would be a hard configure error, not a silent miss.
 target_link_libraries(SDL3_ttf-static PRIVATE $<BUILD_INTERFACE:tl_vendor_glue>)

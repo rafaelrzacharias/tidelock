@@ -77,10 +77,12 @@ its wrap module (CI grep). Adding a dep is a design decision with a line in `ARC
 **Vendored source is kept verbatim by default.** A deviation from verbatim (patching a vendored
 file instead of using its own build-time configuration knobs) is permitted only when the vendored
 lib exposes no seam to reach the same result, and only when declared by name and reason in
-`vendor/VERSIONS`' row for that lib (ruled 2026-08-26, review round 2 N2, after the W2 vendor
+`vendor/VERSIONS`' row for that lib (stated 2026-08-26 per review round 2 N2, after the W2 vendor
 lane's FreeType `builds/<platform>/ftsystem.c` patch — FreeType's own platform-customization seam,
 since SDL_ttf's `TTF_Init()` gives no runtime hook to inject a custom `FT_Memory` — shipped as a
-declared deviation before this sentence existed to authorize it).
+declared deviation before this sentence existed to authorize it). **Not yet a ruling**: this is
+the lane's own declared practice, pending Rafael's sign-off on the open `TODO.md` ruling request
+(`## Ruling requests`) — that request, not this sentence, is what converts it to `(ruled ...)`.
 Current set: SDL3, SDL_ttf, Dear ImGui (+docking, ImGuiColorTextEdit), Luau (`LUA_USE_LONGJMP=1`),
 ENet, stb_image, stb_sprintf, Monocypher, rapidhash. **FreeType** is vendored too (at
 `vendor/sdl_ttf/external/freetype`, upstream's own submodule layout) as SDL_ttf's one mandatory

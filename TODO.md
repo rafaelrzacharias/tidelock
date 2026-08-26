@@ -719,6 +719,45 @@ E-2 needs no W2 decision but blocks real game wiring later.
       Rafael's identity (the rewrite above). Remaining, not blocking: the standing
       tighten-rebuild-budget-after-~10-runs entry (this round only exercised the re-baseline).
 
+## w2-vendor — round-3 (delta-scoped) review, verdict "fix again", narrow (2026-08-26, PR #12 comment 5429151012)
+
+- [x] **Round 2's entire remainder verified closed** (D2 revert-tested red under `--isolate`; N1
+      revert-tested failing under GNU `ld` without the declaration, and confirmed load-bearing —
+      this container's CMake 3.28 ignores `CMAKE_LINKER_TYPE`, so its default GNU `ld` link *is*
+      the non-LLD proof; N2 `docaudit`-clean; D4's two nits closed; adjacency clean — exactly 5
+      lane files touched in `5af03cd`, everything else in the range is `main`'s own merged
+      commits). **One new blocking finding (N3) plus two comment-accuracy nits — all fixed:**
+- [x] **N3 (blocking) — `sdl_ttf_init_quit_through_pool_vendor` was a witness only under
+      `--isolate`.** `pr.yml`'s `sanitize-linux` job runs the suite in-process
+      (`tl_tests --tag '!slow'`, no `--isolate`); there, `SDL_SetMemoryFunctions` is process-wide
+      and permanent, so once any earlier `sdl3_glue_*` row installs it, SDL_ttf's own
+      `SDL_malloc` sites move `pool_vendor` too and the round-2 fix's `live_bytes` assertion is
+      satisfied by that alone — round 2's OR, reintroduced through run order rather than an
+      in-test call. Third appearance of one defect class in one row (round 1: couldn't fail at
+      all; round 2: couldn't fail for the hook it names; round 3: couldn't fail in a shared
+      process) — `CLAUDE.md`'s "the third special case = patching symptoms" named directly.
+      **Fix:** added `tl_freetype_call_count()` (new `src/vendor_glue/freetype_glue.h`, a
+      monotonic counter incremented in `tl_freetype_alloc/realloc/free`) — attributable to
+      FreeType's seam alone in any invocation mode, since it cannot be moved by SDL3's allocator
+      state. The test now asserts on this counter's delta as its primary witness, keeping the
+      `pool_vendor` `live_bytes` delta as a secondary check that the allocation actually landed
+      in the shared pool. Revert-tested in **both** modes the review named, matching its own bar:
+      with `ft_alloc` reverted to `malloc`, `tl_tests --tag vendor_glue` (in-process, `sdl3_glue_*`
+      rows running first — the exact scenario N3 measured passing vacuously before) now crashes
+      (`TL_FATAL ... mem_pool.cpp:142: h->live > 0u`) rather than passing, in-process AND under
+      `--isolate` AND with the row run alone. Restored; reconfirmed 11/11 clean in every mode.
+- [x] **N1's comment nit — fixed.** The `$<BUILD_INTERFACE:...>` rationale claimed
+      `SDL3_ttf-static`'s `install(EXPORT ...)` would demand `tl_vendor_glue` be exported too —
+      false in this tree, since `vendor/CMakeLists.txt` forces `SDLTTF_INSTALL` OFF (verified: a
+      plain `PRIVATE` link configures clean). Corrected to state the generator expression is
+      defensive, not load-bearing, and named the `SDL3_ttf-static` name's own coupling to
+      `BUILD_SHARED_LIBS OFF` while at it (also flagged, not previously stated).
+- [x] **N2's attribution nit — fixed.** `docs/BUILD.md` §4's new clause was stamped
+      "(ruled 2026-08-26, review round 2 N2, ...)" while the matching `TODO.md` ruling request
+      sits open, awaiting Rafael — two homes disagreeing about whether this is ruled. Reworded to
+      "stated ... per review round 2 N2" plus an explicit "not yet a ruling" sentence pointing at
+      the open request as the thing that actually converts it.
+
 ## w2-vendor — round-2 (delta-scoped) review, verdict "fix again" (2026-08-26, PR #12 comment 5428219933)
 
 - [x] **6 of 8 round-1 findings verified closed on re-check** (D1 by measurement — `LD_PRELOAD`
