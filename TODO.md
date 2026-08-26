@@ -3155,6 +3155,58 @@ guard without a double retire (measured); main-always-waits deadlocks as three T
 a hang (measured). dev-win 254/250/0 isolate + 274/265/0 serial; netcode-win 254/229/0;
 tl_audit 113 selftest checks green on both tiers.
 
+## W3 assets+data — lane notes and ruling requests (2026-08-26, w3-assets-data)
+
+Filed at lane start from the slice brief's big-picture check (`CLAUDE.md` doc-integrity protocol,
+step 6), before the data-table compiler's `.cpp` was written.
+
+- [ ] **RR-21 (ruling request) `ASSETS-AND-DATA.md` §8.3's data-table compiler needs to read a
+      Luau table from C++, and `src/script/script.h` exposes no such call.** §8.3 step 1: "run
+      each script; each returns a table `{ <table_name> = { {name=...}, ... }, ... }`"; step 3
+      walks each row's named fields against the schema. The shipped data-VM surface
+      (`script_create_data`/`script_run_source`/`script_eval_int`/`script_seal`/`script_destroy`,
+      W2 luau-vm, merged PR #11) lets a script run (`script_run_source` discards the result) or
+      evaluates ONE expression to an `i64` (`script_eval_int`) — nothing reads back a table.
+      `LUAU-LAYER.md` §10.12's build order step 5 (`bind_data.cpp`) is the OPPOSITE direction —
+      exposing already-compiled POD rows TO further Luau code (`data.table(name)`) — not a
+      C++-side reader of a script's raw return value. The raw Luau C API is walled off by design
+      ("A `lua_State*` or a Luau header may appear ONLY under `src/script`" — script.h's own
+      contract block, enforced by `tools/audit/symbols.py --wrap-lib` and `includes.py`'s
+      `BACKEND_HEADERS`), and `src/script/` is not this lane's module (cone discipline) — this
+      lane cannot add the missing call without crossing a firewall a different, already-merged
+      and closed-out lane owns.
+      **Options:** (a) **a small generic table-read surface added to `script.h`/`vm.cpp`**:
+      `Result<ScriptValue> script_eval(ScriptVm*, StrView expr)` returning a tagged union
+      (nil/bool/int/string/table-ref), plus `script_table_get`/`script_table_next`/
+      `script_table_len` over a table-ref, walking the Luau stack the same way
+      `script_eval_int` already does. Smallest new surface; the firewall holds (only `script/`
+      touches `lua_State*`); does not change the already-DECIDED data-script authoring shape
+      (§3: "the same language as the game", a script still just returns a table). Cost: touches
+      a module this lane does not own — needs a ruling-granted exception for this lane (or
+      whichever lane) to build it, precedented by `core/encoder.h/.cpp`, which the W2 ecs lane
+      built ahead of this lane's own turn because `save.h` cannot exist without it (`TODO.md`'s
+      W2 ecs notes: "`save.h`'s file format/migrations stay W3 assets+data"). (b) **a callback
+      shape**: `data_compile` registers a C closure the data script calls once per row
+      (`emit(table_name, row)`) instead of returning a table for the compiler to walk — no
+      generic "read a table from outside" primitive needed, only a way to register a plain C
+      closure into the VM (still `script/`-only, since `lua_pushcfunction` is Luau API too; same
+      ownership problem as (a), smaller surface). Changes the authoring contract §3/§8.3 already
+      fixed: scripts return tables today, not `emit()` calls — a bigger doc/behavior delta for a
+      false economy. (c) **defer the compiler's `.cpp` body** until a `script/`-owning session
+      ships (a) or (b), shipping only `data_tables.h`'s public header this lane's own doc §8.3
+      already fully specifies (`TableSchema`/`DataTable`/`DataTables`/`data_compile`,
+      `TL_FATAL("unimplemented")` stub body) plus the parts of this lane that do not depend on
+      the gap (asset registry + loaders, `save.h/.cpp` over the already-shipped `encoder.h`).
+      Blocks §8.5's data-table tests and this lane's own done criterion until resolved.
+      **Recommend (a), built under a ruling-granted exception the same shape as `encoder.h`'s
+      precedent** — smallest surface, no authoring-contract change, and a lane precedent already
+      on `main` for exactly this "one small piece of another module's contract, built by the
+      lane that needs it, ahead of that other module's own next turn" case. Meanwhile this lane
+      proceeds on (c)'s unblocked verticals so nothing stalls waiting on the ruling: asset
+      registry + loaders and `save.h/.cpp` land first; `data_tables.h` lands header-first per
+      `ROADMAP.md` §0 rule 1 with a `TL_FATAL("unimplemented — RR-21")` compile body until this
+      ruling resolves one way or the other.
+
 ## Reserved (design complete, build on first consumer — `docs/RESERVED-SEAMS.md`)
 Audio · game UI (Luau) · spatial index · tilemap · nav/AI · frame animation · replay UI/cinematics ·
 modding (Luau profiles) · game-logic substrate · streaming/cook · SDL_GPU path · editor shell.
