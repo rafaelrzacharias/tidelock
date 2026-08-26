@@ -216,6 +216,11 @@ void script_destroy(ScriptVm* vm) {
     if (vm->L != nullptr) {
         lua_close(vm->L);                  // every byte goes back to the pool through the adaptor
         vm->L = nullptr;
+        // docs/LUAU-LAYER.md section 10.11 (memory_exhaustion): "the pool counter returns to
+        // baseline after lua_close". Asserted HERE rather than only in a test, because it is an
+        // invariant of the allocator adaptor - a byte Luau handed back that the pool did not
+        // account for is a leak in tl_luau_alloc, and the counter is the only witness.
+        TL_ASSERT(pool_stats(&vm->pool)->live_bytes == 0);
     }
     // The pool's whole reserve returns to the OS. The ScriptVm struct itself belongs to the
     // caller's permanent arena and is deliberately not freed (docs/MEMORY.md section 1.2).
