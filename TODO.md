@@ -77,10 +77,23 @@
 > has never launched and blocks five of the seven remaining W3 lanes — it is the critical path
 > and is scheduled for the Fable reset (Tue 2026-09-01, R-8).
 >
-> **Open ruling request for Rafael:** `ROADMAP.md` §1's graph lists a **`save` (ecs encoder)**
-> W3 lane that §2's table has no row for, while assets+data's row already covers "save v1".
-> Either §1 is stale or a lane is unscoped. `docaudit` cannot see a graph and a table
-> disagreeing — the R-12 class exactly.
+> **RULED 2026-08-27 (Rafael, to the steward) — `ROADMAP.md` §1 was stale, not a missing lane.**
+> The open request (§1's graph carried a W3 **`save` (ecs encoder)** node that §2's table had no
+> row for, while assets+data's row already covers "save v1") is CLOSED: the node is **deleted**
+> from §1's graph. Evidence on the tree, not inference — assets+data built save v1 for real
+> (`src/core/save.*`, the REFLECTED + `ECS_COLUMN` encoder, `b3bab92` on PR #14). **§2's table is
+> the authority on which lanes exist; §1's graph is a picture of it.** The amendment is recorded
+> in `ROADMAP.md`'s footer. This was the R-12 class exactly — `docaudit` structurally cannot see
+> a graph and a table disagreeing, so nothing but a human read finds it.
+>
+> **RULED 2026-08-27 (Rafael, to the steward) — `editor` HOLDS until #14 and #15 merge.** It is
+> unblocked by render2d's merge and off the critical path, so launching it now buys no
+> critical-path time while both remaining PRs still owe a round 2, a likely fix round, a merge
+> and an R-7 + R-12 closeout each. The binding constraint is steward attention, not lane
+> capacity — `LESSONS.md` records the trap directly (a review-ready lane sat ten hours with no
+> reviewer spawned while another PR consumed five rounds). `net-p2` still waits on #15's
+> `InputProducer` seam; `alloy-solver` ★, `luau-bindings` and the three alloy pass lanes still
+> wait on **alloy-substrate** at the Fable reset (Tue 2026-09-01, R-8).
 
 > **W3 render2d MERGED 2026-08-27 — `31da431` (PR #13), closeout sweep done (R-7 + R-12).**
 > Five adversarial review rounds to *ship*. Two rulings landed in it: **D1** (camera off the
