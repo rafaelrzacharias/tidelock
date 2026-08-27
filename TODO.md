@@ -5303,3 +5303,44 @@ non-isolated (`--tag '!slow'`) runs, 0 failed in every combination. `includes.py
 clean. `[docs:none]` on the `foundation/` half of this diff per the RR-34 addendum above —
 `TOOLING.md` §9.4 genuinely documents the promotion and the v0 scope narrowing in this same
 commit, but `commit_docs.py`'s `MODULE_DOCS["foundation"]` does not credit `TOOLING.md` for it.
+
+### editor/probes_panel: the Probes panel (2026-08-27), and a THIRD instance of the stack-temporary bug
+
+Seventh panel in `TOOLING.md` §9.6 build order item 5's list, after Profiler. New
+`editor/probes_panel.h`/`.cpp`: a read-only summary table over `foundation/tl_probe.h`'s
+registered keys (name, kind, enabled, count, changes, min/max/mean, last value, last tick).
+
+`tl_probe_test_key_count`/`_key_at` promoted to `tl_probe_key_count`/`_key_at`, same shape as the
+Log/Profiler panels' own promotions. `_key_at` gained a `TL_CHECK(slot < count)` bound it never
+had as a test-only function (`&g_probe.keys[slot]` with no guard) — added while promoting it to a
+real API a panel calls with a caller-supplied index, matching `tl_log_ring_at`/`tl_prof_ring_at`'s
+own precedent of checking `slot`. Every other accessor (`_staging`, `_reset`, `_set_tick`,
+`_set_enabled`) stays test-scoped — no real toggle path exists yet (`TOOLING.md` §9.4's Probes row,
+corrected in this same commit).
+
+**Found a third instance of this session's own stack-temporary bug class while touching
+`probe.cpp` for the promotion — not hypothetical, found by re-running the exact grep
+(`= \w+{};` on a namespace-scope static) `LESSONS.md`'s second-instance entry called for.**
+`tl_probe_test_reset`'s `g_probe = ProbeState{}` value-initializes a ~160 KB temporary
+(`ProbeKey keys[1024]` at 96 B each, plus a 64 KB `staging` buffer) before assigning it — the
+identical shape already fixed twice this lane (`prof.cpp`'s ~53 MB ring, `log.cpp`'s ~0.97 MB
+ring). 160 KB is well under Linux's 8 MB default stack (why every tier this lane validates never
+tripped it) but is exactly the class of number that tips over on a smaller stack budget (Windows'
+1 MB default thread stack, `log.cpp`'s own CI-red precedent) the moment it stacks with other
+frames in the same call chain — not yet observed failing, but not proven safe either, and the fix
+costs nothing. Fixed the same way: `memset(&g_probe, 0, sizeof(g_probe))`. Re-ran the pattern grep
+across all of `src/` after this fix; the only remaining matches (`render/queue.cpp`'s
+`TexHandle{}`, `mem_pool.cpp`'s `MemPoolStats{}`, `probe.cpp`'s own per-key `ProbeKey{}` at line
+51) are single small structs, not risky — this is the actual state of the codebase today, not an
+assumption carried forward from the second-instance fix's "no third exists" claim, which this
+finding falsifies for whatever grep scope that check actually ran.
+
+Four tests (`tests/editor/probes_panel.test.cpp`): registration, empty-table no-crash, every
+`ProbeKind` drawn together (LOG, an fx-scaled LOG, ON_CHANGE, MARK, in-range ASSERT — proves the
+row renders for each kind without crashing on a kind's own always-zero fields, e.g. MARK never
+sets min/max/mean), and a disabled key still shown (read-only means no control to hide it behind).
+
+Validated on all four tiers, both isolated and non-isolated (`--tag '!slow'`) runs, 0 failed in
+every combination. `includes.py`/`docaudit.py` clean. `[docs:none]` on the `foundation/` half of
+this diff, same RR-34-addendum reasoning as the Profiler commit above — `TOOLING.md` §9.4 is
+genuinely updated in this same commit.

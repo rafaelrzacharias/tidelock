@@ -21,8 +21,8 @@ TL_TEST(probe_log_throttles_by_tick_count, "foundation") {
     TL_EXPECT_TRUE(strstr(s, "0\tk.log\t10\n") != nullptr);
     TL_EXPECT_TRUE(strstr(s, "2\tk.log\t20\n") == nullptr);
     TL_EXPECT_TRUE(strstr(s, "3\tk.log\t30\n") != nullptr);
-    TL_ASSERT_EQ(tl_probe_test_key_count(), 1u);
-    const ProbeKey* k = tl_probe_test_key_at(0);
+    TL_ASSERT_EQ(tl_probe_key_count(), 1u);
+    const ProbeKey* k = tl_probe_key_at(0);
     TL_EXPECT_EQ((u32)k->count, 2u);      // the throttled call did not update stats
     TL_EXPECT_EQ((u32)k->changes, 1u);    // 10 -> 30 is one change; the baseline is not a change
     tl_probe_test_reset();
@@ -79,8 +79,8 @@ TL_TEST(probe_mark_rows_every_call, "foundation") {
     u32 rows = 0;
     for (const char* p = s; (p = strstr(p, "k.mark\t\n")) != nullptr; p += 8) { ++rows; }
     TL_EXPECT_EQ(rows, 3u);
-    TL_ASSERT_EQ(tl_probe_test_key_count(), 1u);
-    TL_EXPECT_EQ((u32)tl_probe_test_key_at(0)->count, 3u);
+    TL_ASSERT_EQ(tl_probe_key_count(), 1u);
+    TL_EXPECT_EQ((u32)tl_probe_key_at(0)->count, 3u);
     tl_probe_test_reset();
 #else
     // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
@@ -116,8 +116,8 @@ TL_TEST(probe_disabled_key_emits_nothing, "foundation") {
     tl_probe_log(6, "k.off", 42, 0, 1);
     const char* s = tl_probe_test_staging();
     TL_EXPECT_TRUE(strstr(s, "k.off") == nullptr);
-    TL_ASSERT_EQ(tl_probe_test_key_count(), 1u);
-    TL_EXPECT_EQ((u32)tl_probe_test_key_at(0)->count, 0u);   // no stats update either
+    TL_ASSERT_EQ(tl_probe_key_count(), 1u);
+    TL_EXPECT_EQ((u32)tl_probe_key_at(0)->count, 0u);   // no stats update either
     tl_probe_test_reset();
 #else
     // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols

@@ -432,7 +432,7 @@ with `write_atomic`.
 | Console | `ConsoleCmd` table, `CvarTable`, history ring, Luau UI VM | on input; log lines appended as they arrive |
 | Log | `LogState.ring` | every frame; filter by level/tick range; follows tail unless scrolled |
 | Profiler | `ProfState.ring`, counters | every frame, depth-indented node list of the latest ring frame (**v0: text list, not a rendered flame graph** — built W3, `profiler_panel.cpp`); pause freezes the panel's own view slot, never `ring.head` itself (`Editor.prof_paused`/`prof_view_slot`) — every other reader keeps seeing live frames; `dump` → §9.3.2 deferred until `trace_export.cpp` unblocks (§9.6 build order item 3) |
-| Probes | `ProbeState.keys` | every frame; enable/disable per key, profile masks; summary table |
+| Probes | `ProbeState.keys` | every frame, summary table (**v0: READ ONLY** — built W3, `probes_panel.cpp`; no enable/disable checkbox and no "profile masks" control — the real toggle is console/cvar-routed and that wiring does not exist yet, the same class of gap already deferred for Console's own cvar UI, and `ProbeKey` carries no "profile mask" field for any control to back) |
 | Replay | `KeyframeRing`, the `Replay` producer | scrub events only; per-frame tick readout |
 | Scripts | Luau VM file list, ImGuiColorTextEdit buffers, Tier 0/1 debugger state (`LUAU-LAYER.md`) | on edit / breakpoint events |
 | World | `World.entities` (slot walk), singleton list, `ArenaRegistry` + last per-arena hashes | every frame; entity list virtualized (`ImGuiListClipper`) |
