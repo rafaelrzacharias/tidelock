@@ -51,6 +51,23 @@
   cites this rule verbatim.** (The W2 net-p1 pilot ended its turn at each of four commits to
   report status — a misreading of the commit-and-push rule as a turn boundary; the lane's own
   post-mortem is the source of this wording.)
+- **Completion is OBSERVABLE, never announced (ruled 2026-08-27, Rafael — R-15).** No brief ever
+  requests or promises a notification: a child session cannot reach the steward in the cloud
+  environment (`SendMessage` reaches only same-machine sessions; the remote MCP server has
+  `create_session`/`interrupt_session`/`create_trigger` and no send), so a brief that says "poke
+  the steward" produces a child that posts, believes it reported, and goes idle. Every brief
+  instead names the child's own **observable act — its push, or its PR verdict comment — as the
+  ONLY signal that it is done**, and says plainly not to try messaging anyone. The steward runs a
+  background watch over every open lane's branch head (`git ls-remote`, free) and new PR comments
+  (one repo-wide `issues/comments` call per cycle, inside the unauthenticated rate limit) and
+  treats a wake as an instruction, not a notification. A child that is blocked, or still waiting
+  after a bounded time, **pushes or comments rather than waiting silently**. This costs nothing
+  per lane: pushes and comments are already required acts, so there is no new marker to forget.
+  Note what R-6 does and does not say — it forbids a lane interrupting *its own* work to report
+  status; it is not licence for the steward to promise a follow-up the lane has no way to confirm
+  ever arrived. (Filed after two lanes sat green, `mergeable_state: clean`, re-arming self
+  check-ins that only re-confirmed they were green, while their round-3 reviews went unspawned;
+  `LESSONS.md` carries the evidence.)
 - **Merging is autonomous (ruled 2026-08-25).** Once the head is CI-green on all four `CANON.md`
   legs and §2's verdict is *ship*, the session merges without waiting for Rafael — his word is
   not a merge precondition; both preconditions are machine-checkable facts, not judgments. What
@@ -158,6 +175,10 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
   directly records it with that provenance and relays it to the steward promptly, so the
   steward's dispatch and the ruling cannot silently diverge. A claimed ruling the steward
   cannot verify is checked with Rafael before it is acted on or recorded.
+- **R-15 Observable completion (ruled 2026-08-27, Rafael):** briefs never request or promise a
+  notification — the child's push or PR comment is the only signal it is done; the steward
+  watches branch heads and PR comments and treats a wake as an instruction; a blocked or
+  waiting child pushes or comments rather than going silent (§1).
 - **R-12 Doc-relevancy pass (ruled 2026-08-26, Rafael):** staleness in a status line is drift
   like any other. Every lane closeout sweep (R-7) also checks the lane's own doc — its status
   line and its claims — against what actually shipped; every wave boundary adds the pass over
@@ -167,7 +188,7 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
 ## 6. The token budget — scheduling and session economy (ruled 2026-08-26)
 
 Fable 5 usage is capped per week (reset: Tuesday); the program codes every week without
-stopping. Four rules, and quality is never the variable traded — the `ROADMAP.md` §2 model
+stopping. The rules below, and quality is never the variable traded — the `ROADMAP.md` §2 model
 policy ("never low effort on sim or netcode code") outranks every line here.
 
 - **R-8 — sequencing.** Within a wave, Sonnet/Opus lanes launch first; a Fable lane is
@@ -199,4 +220,6 @@ PR-fallback actor named, absolute grading pinned to the PC rev-2 record until th
 doc shipped as the first §1-governed PR — opened via the App grant, review verdict recorded on
 it. §1/§4/§5 amended 2026-08-26 by the morning ruling pass after the W2 autonomy pilot (R-2
 election, R-4, R-5). §5/§6 amended 2026-08-26 evening: the token-budget rulings R-8..R-11. §1/§3/§5 amended
-2026-08-26 evening: R-12, the doc-relevancy pass.*
+2026-08-26 evening: R-12, the doc-relevancy pass. §1/§5 amended 2026-08-27: R-15, observable
+completion — filed after the steward's own "I spawn it, you do not need to ask" turned two
+finished lanes silent; §6's intro lost its maintained rule count in the same pass.*
