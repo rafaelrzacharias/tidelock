@@ -4696,6 +4696,24 @@ once `v0-integration` (W4) or a sibling lane starts depending on them.
 
 ### Ruling requests (ids are steward-allocated per `WORKFLOW.md`/the lane brief)
 
+- **RR-34 (steward-allocated 2026-08-27, PR #16, "STOP: red head" message): `commit_docs.py`'s
+  `MODULE_DOCS["core"]` omits `TOOLING.md`, even though `TOOLING.md` §9.1's own file table places
+  `core/cvar.h` (and, by the same table, `core/console.h`, `core/dotpath.h`, `core/watch.h`,
+  `core/desync_diff.h`, `core/crash_report.cpp`) under `core/`.** The two facts side by side:
+  `tools/audit/commit_docs.py`'s `MODULE_DOCS = {"core": ["docs/ECS.md", "docs/FRAME-LOOP.md",
+  "docs/INPUT.md", "docs/ASSETS-AND-DATA.md"], ..., "editor": ["docs/TOOLING.md"], ...}` credits
+  `TOOLING.md` only for commits touching `src/editor/`, never `src/core/` — so every past and
+  future `editor`-lane commit that touches one of the `core/` files above and genuinely documents
+  it in `TOOLING.md` still fails the gate unless it also adds `[docs:none]`, which is accurate to
+  the gate's own (incomplete) model but misleading on its face (a doc WAS touched and IS the
+  right one). Hit twice already this lane (`381cc71`'s original message, `f592b88`'s fix) via
+  `[docs:none]` each time. **What needs ruling: does `MODULE_DOCS["core"]` gain `"docs/TOOLING.md"`
+  (the map widens to match where editor's files actually live), or does `TOOLING.md` §9.1's file
+  table move those entries to state they are `core/`-directory-but-`editor`-owned in some way the
+  gate can already see (unclear what that would look like given the gate keys purely on
+  directory)?** `commit_docs.py` is very likely `ci-matrix`'s or `governance`'s file (both W3,
+  neither confirmed merged/closed as of this lane's launch) — cone discipline bars editor from
+  editing it unilaterally either way.
 - **RR-33 (steward-allocated 2026-08-27, PR #16): `CMD_SET_CVAR` does not exist in
   `core/commands.h`, so no `CVAR_SIM` cvar can be written end to end.** `TOOLING.md` §3 requires
   a `CVAR_SIM`-flagged cvar's write to be a sealed, tick-stamped command so a lockstep session can
