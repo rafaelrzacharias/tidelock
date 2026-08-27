@@ -6025,3 +6025,109 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > identity. That is detection after the fact rather than prevention, and it should be stated as such
 > rather than sold as a gate. It belongs with RR-44's enforcement slice in `tools/`, outside any
 > current lane's cone. Owner: unassigned.
+> **RANGE REQUIREMENT, added 2026-08-27 by the next steward window — the gate as worded above
+> would pass forever.** "Any commit reachable from `main`" is evaluated over whatever history the
+> checkout actually holds, and `actions/checkout` defaults to `fetch-depth: 1`;
+> `.github/workflows/pr.yml` sets `fetch-depth: 0` on its FIRST checkout only. So the gate must
+> set the depth **and assert its own range** — a commit-count floor, or the three known-bad SHAs
+> (`821cdb1`, `3c15ea3`, `f21fc24`) being visible before it judges anything — or it is a green
+> light wired to nothing. Found the expensive way: this window's own baseline measurement was
+> taken in a shallow container and contradicted RR-45's record until `--unshallow` reconciled it
+> at 417 commits, confirming RR-45 correct in every particular (`LESSONS.md` carries the general
+> form; this row carries what the implementer needs).
+
+
+> **STEWARD WINDOW OPENS 2026-08-27 ~22:15 local — the W3 slack cohort is closed out; nothing is
+> in flight.** Verified, not inherited: `main` = `9a595d6`, clean tree, **zero open PRs**, `main`
+> the only remote branch, `pr.yml` run **312** on `9a595d6` (event `push`) conclusion **success**,
+> `docaudit` 0 errors. Next free ids at open: **RR-46**, **R-17** (R-17/R-18 allocated below).
+> The "23/23" figure carried by the previous handoff is deliberately NOT repeated — the run number
+> and its conclusion are the fact, a maintained count is not (`LESSONS.md`).
+>
+> **VERDICT: W3 is not at a wave boundary and will not be for weeks.** `WORKFLOW.md` §3's
+> artifact 1 is the ★ lane's done criterion; W3's ★ is **alloy-solver**, which has never launched
+> and waits on **alloy-substrate** — a *W2* lane, also never launched, blocking five of the seven
+> remaining W3 lanes. Four W3 lanes have merged (render2d, assets+data, loop+input, editor) plus
+> ci-matrix and governance which shipped early during W2; alloy-solver ★, luau-bindings, net-p2
+> and the three alloy pass lanes have not started. What completed on 2026-08-27 is the **slack
+> cohort**, not the wave.
+>
+> **RULED 2026-08-27 (Rafael, this window), three decisions:**
+> 1. **Neither W2 nor W3 is declared closed.** W2's ★ (gate0) is met and ruled, so W2 was
+>    closeable on §3's literal text — with `alloy-substrate`, a W2 lane, unlaunched. Rejected:
+>    that would be true to the letter and false in substance, and no gate we own can see it.
+>    §3's artifacts 2–4 run instead as an **unlabelled mid-wave sweep**. Generalised as
+>    **`WORKFLOW.md` §5 R-18** (artifact 1 gates the label, not the work).
+> 2. **Schedule: converge on the Fable reset (Tue 2026-09-01 02:00 local).** Now→Tue on Opus:
+>    dispatch the sweep's fresh-context breadth rounds; the steward personally does the ROADMAP
+>    retro lines, the R-12 residue, and `alloy-substrate`'s launch prep (its own reading, not a
+>    spawned lane, so no second concurrent review chain — the failure mode this wave already
+>    paid for). Tuesday's Fable pays for the sweep's ship-verdict round (R-9) and the
+>    `alloy-substrate` launch. Rejected: strictly serial (Tuesday arrives with no brief written,
+>    delaying the critical path) and prep-first (the oldest deferral is 2026-08-25 and the
+>    loop+input × assets+data combined tree still has no adversarial read).
+> 3. **`WORKFLOW.md` §5 R-17** — a demoted steward may hold the queue but must never adjudicate
+>    a lane seated above it. Filed because R-8's "defer, don't demote" is written for lanes and
+>    the steward cannot defer, and because `alloy-substrate` (Fable 5 high) launches at the reset
+>    and would otherwise be adjudicated from an Opus seat.
+>
+> **THE RANKED QUEUE, as approved.** Items 1–3 are §3's artifacts; the rest are not, and are
+> ranked by what decides whether the next wave starts well.
+> 1. **Deferred-review sweep (§3 artifact 2). Owner: unassigned; steward dispatches.** Six
+>    deferrals, oldest 2026-08-25, each recorded at merge time as §2 requires: `w2-net-close`
+>    (PR #10), `w2-max-arenas` (PR #8), `w3-merge-autonomy` (PR #4), PR #14's `1a14424`/`3b428e3`,
+>    PR #15's `3061af2`/`dd11b38`. The sixth is the heavy one and is CODE, not docs: **the merged
+>    combination of `loop+input` and `assets+data` has had no adversarial read by anyone** — each
+>    was reviewed against `main` separately and they first coexist in that merge. PR #15's valve
+>    use carries a caveat #14's does not: no reviewer endorsed it, the steward substituted its own
+>    verification. PR #16 used no valve and owes nothing here.
+> 2. **`ROADMAP.md` retro lines (§3 artifact 3). Owner: steward.** Its footer requires one line
+>    per lane per wave; there are **none**, after three shipped waves — verified by grep, only the
+>    footer's instruction is present. This is the artifact that makes the next wave's cut measured
+>    rather than guessed, and W3's cut is the one about to be made.
+> 3. **R-12 doc-relevancy pass (§3 artifact 4). Owner: steward.** Mostly pre-paid by the per-lane
+>    R-7 closeouts. Known residue: `docs/README.md:4` still reads "born rev 1 (2026-08-22,
+>    **pre-code**)" — the exact phrase `LESSONS.md` names as the fastest-rotting surface no gate
+>    can see. Root `README.md`'s Status is current and correctly points at the live truth.
+>    `TOOLING.md`'s status line was deliberately left at #16 (it describes the DESIGN's state);
+>    that call is upheld, not reopened.
+> 4. **`alloy-substrate` launch prep — do now; LAUNCH ONLY ON RAFAEL'S WORD at the reset.** Two
+>    `LESSONS.md` entries make the prep non-optional and both were paid for twice: resolve every
+>    type `ALLOY.md` §14.7 steps 1/3/4 mention to an owning doc AND a file that exists on `main`
+>    (the net-p1 lesson — `ByteWriter`/`ByteReader` were named in no doc), and check the done
+>    criterion's REACHABILITY at lane start (the `TOOLING.md` §9.6 lesson — a criterion unreachable
+>    from the day it was written, found with the lane five-sixths through).
+> 5. **The merged-and-closed-lane ownership rule. Needs a ruling; steward to put options.** Seven
+>    instances across six files; the `fmt_buf` instance produced an out-of-bounds write. **Note,
+>    corrected against the tree:** that write is **already fixed on `main`** —
+>    `src/foundation/fmt.cpp:31` carries the zero-capacity/null guard and
+>    `strview_interner_fmt.test.cpp:126` pins it. It is evidence for the rule, not an open bug;
+>    the previous record invited the opposite reading.
+> 6. **The unowned findings from #16's closeout.** `TL_PROF_SCOPE_W`'s argument drop (sweep the
+>    other `TL_*` pairs, do not fix the instance), `test_list.inc` regenerating on add but not on
+>    remove, the `X = Type{}` sweep in `tests/`/`tools/` (five measured sites;
+>    `tests/render/render_test_util.h:36` at 257 KB in a HEADER is first), Review B's three editor
+>    nits, Review C's `TL_CVAR` two-homes. Want doing; not this week.
+> 7. **RR-45's detection gate + RR-44's enforcement, as ONE `tools/` slice.** Both are gates over
+>    shared repo config belonging to no cone; bundling is cheaper than twice. RR-45's row above now
+>    carries the range requirement without which the gate passes forever.
+> 8. **`allow_squash_merge` still `true`** — the merge-commit rule remains convention. One tap,
+>    Rafael's. NOT independently verified by this window (no loaded tool reads repo settings).
+> 9. **`.claude/settings.json` hygiene — permissions are Rafael's (2026-08-27 ruling).**
+>    `Bash(git commit *)` also matches `--amend` (history rewriting; permitted pre-review under
+>    R-4, forbidden once review begins) — the narrowing recommendation is on the record and
+>    unactioned. `Bash(git push origin w3-editor)` and its `-u` twin are now DEAD entries: that
+>    branch auto-deleted on merge. Also undocumented anywhere: the file's `env` block already pins
+>    `GIT_AUTHOR_*`/`GIT_COMMITTER_*` to Rafael's identity and wins over `git config`, which in a
+>    fresh container still reads the agent default (`LESSONS.md`).
+>
+> **HELD, deliberately — not oversight (each with the reason, so the next window does not re-open
+> it):** the `SIM_REMOVE`/`DATA_REMOVE` audit slice (owner is the next lane to touch
+> `src/script/sandbox.cpp`; launching it standalone was already considered and rejected, and
+> steward attention is still the binding constraint); extending `docaudit.py:13`'s glob to
+> `TODO.md`/`LESSONS.md`/`CLAUDE.md` (Rafael's own scoping call; it would surface a large backlog
+> and swamp the sweep — after, not during); `net-p2`, `luau-bindings`, `alloy-solver` ★ and the
+> three alloy pass lanes (blocked or off the critical path); rewriting the four historical
+> identity commits (explicitly ruled against — they stand as R-16's evidence); the `Doc debt`
+> entries; and `TOOLING.md`'s `shell v0` / build-order item 7 (correctly deferred with blockers
+> named — reopening them re-litigates RR-40/RR-43).
