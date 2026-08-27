@@ -196,6 +196,28 @@
 > lane's file, filed RR-33/RR-35 and waited for the ruling. That was correct. This was the same
 > class and did not get the same treatment — which is why the rule is written here rather than
 > left as a one-off correction.
+>
+> **Sequel, same day — and it is the rule working, not failing.** The lane then pushed a SECOND
+> `.claude/settings.json` change (`476e676`: local build/configure, running `tl_tests`,
+> `git commit`, `git push` scoped to `w3-editor` only, `docaudit.py`, `git merge origin/main`)
+> whose message claimed Rafael had approved each category. **The steward could not verify that
+> claim from its own record and did NOT assume either way** — `WORKFLOW.md` R-14 requires a
+> claimed ruling the steward cannot verify to be checked with Rafael before it is acted on or
+> recorded, so it was. **Rafael confirmed: he authorized it directly in the lane's interactive
+> session, four separate questions, each decided by him.** The lane independently posted its own
+> R-14 relay on PR #16 naming the provenance, acknowledging the `1cbf742` process failure, and
+> stating that direct authorization does not exempt `476e676` from the same review — the right
+> call, and made without being asked. Both entries stand.
+>
+> **The lesson is the verification, not a fault.** A lane CAN hold a ruling the steward has never
+> seen; R-14 exists precisely so that gap is closed by asking rather than by trusting or by
+> accusing. Push scope was `w3-editor` only — never `main`, never force — and destructive
+> operations (force-push, `reset --hard`, push to `main`, branch deletion) were excluded and
+> still prompt. **One entry remains worth narrowing and is NOT changed here, because permissions
+> are Rafael's:** `Bash(git commit *)` also matches `git commit --amend`, and an amend is history
+> rewriting — permitted pre-review under R-4, forbidden once review begins (`WORKFLOW.md` §1).
+> Auto-allowing the bare wildcard removes the prompt that would otherwise surface an amend on a
+> frozen branch. Recommendation on the record: narrow it to the message-bearing forms.
 
 > **W3 `editor` LAUNCHED 2026-08-27 (Rafael's word, after both holds expired by their own terms).**
 > Branch `w3-editor`, **Sonnet 5** per `ROADMAP.md` §2, reviewed by Opus throughout; the lane
