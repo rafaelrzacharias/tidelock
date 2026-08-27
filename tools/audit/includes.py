@@ -397,6 +397,15 @@ def strip_comments(text, blank_strings=True):
     return "".join(out)
 
 
+def path_under(rel, prefix):
+    """`rel` is `prefix` itself, or lies under it with a '/' (prefix names a directory, e.g.
+    "src/render") or '.' (prefix names a bare file stem, e.g. "src/foundation/fmt") boundary
+    between them. A bare `rel.startswith(prefix)` would let "src/foundation/fmt" also admit
+    "src/foundation/fmt_buf.cpp"/"fmtx.cpp" - a grant several callers' own comments claim is
+    scoped to one file or one directory, not a name prefix."""
+    return rel == prefix or rel.startswith(prefix + "/") or rel.startswith(prefix + ".")
+
+
 def stem_matches(stem, stem_set):
     """A file's stem is in `stem_set` (nondet or tooling), or is that stem's header sibling:
     TOOLING.md §9.1's file table keeps the `tl_` prefix on the HEADER (`tl_log.h`) but drops it
@@ -642,7 +651,7 @@ def check_file(root, path, nondet, tooling, static_allow, errors):
 
     allow = set(SYS_ALLOW)
     for prefix, extra in SYS_ALLOW_DIRS.items():
-        if rel.startswith(prefix):
+        if path_under(rel, prefix):
             allow |= extra
     if is_tooling_tu:
         allow |= TOOLING_SYS_ALLOW
@@ -679,7 +688,7 @@ def check_file(root, path, nondet, tooling, static_allow, errors):
                               "(docs/PLATFORM.md §5, docs/DETERMINISM.md §2)" % (rel, i, inc, via))
         if m or m2:
             for token, prefixes in BACKEND_HEADERS.items():
-                if token in line and not any(rel.startswith(p) for p in prefixes):
+                if token in line and not any(path_under(rel, p) for p in prefixes):
                     errors.append("%s:%d: backend header %s outside its wrap module %s "
                                   "(docs/BUILD.md §4)" % (rel, i, token, prefixes))
 
