@@ -4625,3 +4625,99 @@ verdict, 11 defects (1-4 ship-blocking, 5-8 before merge, 9-11 minor).** All add
 All 11 items validated per-item (the command AND the real failure output — revert/mutate, rebuild,
 confirm the named test fails, restore, confirm green again), not just asserted fixed. Full-suite
 and audit validation recorded at the round's closing commit below.
+
+## W3 editor — lane notes, ruling requests, and the continuation queue (2026-08-27, `w3-editor`)
+
+Model gate: `ROADMAP.md` §2 — `editor` is a **Sonnet 5** lane, reviewed by Opus throughout. Slice
+brief (per commit, not repeated per-file): spec = `TOOLING.md` §9 build order items 2–3 (cvar,
+prof); consumes `CANON.md` "Cvars", `CPP-SUBSET.md` §2/§3/§7b; consumers = none yet (`XREF.md` has
+no section citing `TOOLING.md` internals — nothing downstream exists before W4 v0-integration);
+next milestone = `TOOLING.md` §9.6 step 5 ("v0 editor done": Log/Console/Inspector/Profiler/
+Probes/World panels). Two commits shipped this session, each validated on **both** `dev` and
+`netcode` tiers (full suite, `--isolate --tag !slow`, 0 failures both tiers) plus
+`tools/audit/commit_docs.py --base origin/main` and `tools/docaudit/docaudit.py` before push:
+
+- `core/cvar.h`/`.cpp` + `tests/core/cvar.test.cpp` — the reflected cvar table (build order item
+  2, cvar half). Caller-owned (no global, no `World` field added — see the ruling request below).
+- `foundation/tl_prof.h` (extended) + `foundation/prof.cpp` + `tests/foundation/tl_prof.test.cpp`
+  — the profiler runtime (build order item 3). Found and fixed a **pre-existing `-Wshadow` bug**
+  in `TL_PROF_SCOPE`/`TL_PROF_SCOPE_W` (W1 tooling-rt, never instantiated before this lane's
+  test — `LESSONS.md`'s "a template with no call site has never been compiled" struck again):
+  nesting two scopes shadowed the for-loop control variable and failed `-Werror`. Fixed with a
+  `__COUNTER__`-uniqued name; `LESSONS.md` entry filed below.
+
+**Not started this session** (parked cleanly, not half-built — the remaining `TOOLING.md` §9.6
+build-order items for whoever continues this lane): `core/console.h`/`.cpp` (§9.3.5), `core/
+dotpath.h` + `watch.cpp` (§9.3.6), `editor/trace_export.cpp` (the Chrome-trace JSON half of
+build order item 3 — `prof.cpp`'s ring/counters are ready for it), `core/crash_report.cpp`
+(blocked, see ruling request below), `editor/shell.cpp` + the six v0 panels (Log, Console,
+Inspector, Profiler, Probes, World) over ImGui's headless null backend (`vendor/imgui` is
+present, `vendor_glue/imgui_glue` is tested — no `imgui_test_engine` or backend TUs are
+vendored, so panel tests drive `ImGui::NewFrame`/widget calls directly against a mocked `io`,
+never a real backend), `core/desync_diff.cpp` (build order item 6), `editor/keyframes.cpp` +
+the Replay panel (build order item 7). None of these are half-implemented — nothing was started
+that wasn't finished and tested.
+
+### Ruling requests (ids are steward-allocated per `WORKFLOW.md`/the lane brief — **not
+self-numbered here**; the brief named RR-33 as next-free at lane start, but three sibling W3
+lanes have filed since, so the real next-free id must be confirmed, not assumed)
+
+- **RR-pending (a): `CMD_SET_CVAR` does not exist in `core/commands.h`.** `TOOLING.md` §3 requires
+  a `CVAR_SIM`-flagged cvar's write to be a sealed, tick-stamped command so a lockstep session can
+  refuse it (`CANON.md` "Cvars": SIM cvars fold into `session_fingerprint`). `core/commands.h`'s
+  `CmdKind` enum and `core/commands.cpp`'s `apply_commands` are `ecs`-lane files (merged, closed —
+  `ROADMAP.md` §0 rule 2 cone discipline bars editor from adding a member there). `core/cvar.h`
+  ships the seam (`cvar_apply_sim_raw`, documented as "only the future `CMD_SET_CVAR` applier may
+  call this") and `cvar_set_raw` refuses every `CVAR_SIM` write with `ERR_CVAR_SIM_UNROUTED` in
+  the meantime — correct, not a workaround, but no cvar can actually BE a live `SIM` cvar end to
+  end until `CMD_SET_CVAR` lands. Needs: a `CmdKind` row, a `CvarTable*` reachable from whatever
+  applies commands (which in turn needs the `World` question below), and a `core/commands.cpp`
+  applier case. Whoever owns `ecs`'s follow-ups (or a ruling that `editor` may make this one
+  narrow, additive enum-row edit) should pick this up.
+- **RR-pending (b): should `CvarTable` live inside `World`?** `TOOLING.md` §9.1 says "`CvarTable`
+  in `World` (non-registered arena)" but `core/world.h` (ecs, merged/closed) has no `cvars` field,
+  and adding one is the same cone-discipline question as (a) above (`world.h` already carries
+  forward-declared pointers for every OTHER W3 consumer — `Editor* editor`, `AlloyWorld* sim`,
+  `RenderQueue* render` — added by each of those lanes; `CvarTable* cvars` would be the same
+  one-line shape). `core/cvar.h` deliberately does NOT assume this and is fully usable
+  caller-owned (every test in `tests/core/cvar.test.cpp` constructs its own `CvarTable`) — but
+  `core/console.h`'s future `set <cvar>`/completion and RR-pending (a)'s applier both need SOME
+  way to reach the live table from wherever they run, and "who owns the one real `CvarTable`
+  instance" is a design question this lane should not decide unilaterally by editing `world.h`.
+- **RR-pending (c): `core/crash_report.cpp` is blocked on `platform/`'s crash OS-half, which is
+  still a stub.** `platform.h`'s `CrashApi::install`/`raise_fatal` are real seam members, but
+  every implementation (`impl_headless/init.cpp`'s `crash_install_stub`/`crash_raise_fatal_stub`)
+  is `TL_FATAL("PlatformApi.crash is not implemented yet (docs/PLATFORM.md §9.7 step 5,
+  TODO.md)")` — and `os_crash_win.cpp`/`os_crash_posix.cpp` are already noted elsewhere in this
+  file (search "os_crash_win") as living directly in `src/platform/`, not `editor/`. `TOOLING.md`
+  §9.3.9's `core/crash_report.cpp` is real work editor CAN do without platform (`CrashHeader`/
+  `CrashSection` layout, assembling the report into the caller-supplied 16 MB arena from
+  explicit pointers — no `PlatformApi` needed for that half, and `crash_report_layout`'s
+  structural assertions, per `TOOLING.md` §9.5, are testable against it directly); what editor
+  CANNOT do is the raw OS file write (`TOOLING.md` §9.3.9: "raw `CreateFileW`/`WriteFile` /
+  `open`/`write`/`fsync` — not the `FileApi`" — and `core/` isn't on the `TL_FOUNDATION_TOOLING`
+  `<stdio.h>` exemption either, which is scoped to `src/foundation/` only, `CPP-SUBSET.md` §9
+  R-4) or the actual `platform.crash.install` call (calling it today would `TL_FATAL` in every
+  test that exercises init). Recommendation: split `core/crash_report.cpp`'s public surface into
+  a pure assembly function (buffer in, buffer out — testable now, no platform dependency) and a
+  separate `CrashWriterFn`-shaped adapter `app/wiring.cpp` (W4, not built) wires to
+  `platform.crash.install` once `platform/`'s OS half lands — not a ruling this lane needs
+  Rafael for, just recorded so the next editor slice doesn't rediscover the blocker from scratch.
+
+### Defects found in passing, not editor's to fix (cone discipline — filed as pointers)
+
+- `core/encoder.h`'s `ERR_ENC_FIELD_KIND` (`0x0321`) collides with `core/recorder.h`'s
+  `ERR_RECORDER_BAD_MAGIC` (also `0x0321`); `ERR_ENC_OVERFLOW` (`0x0322`) collides with
+  `ERR_RECORDER_FINGERPRINT` (also `0x0322`). Both pairs are within the `core` module's `0x03xx`
+  range but were assigned independently by two different lanes' files with no shared registry.
+  `core/cvar.h`'s own range starts at `0x0360` specifically to stay clear of every existing
+  block including these two. Not editor's file to fix.
+
+### `LESSONS.md`-shaped finding, recorded there too
+
+`TL_PROF_SCOPE`'s for-loop control variable was a fixed name (`_tl_ps`) shared across every
+expansion site; nesting two scopes (the profiler's entire reason to exist) redeclares it in the
+same block scope and fails `-Wshadow -Werror`. No call site had ever instantiated the macro
+before this lane's test wrote the first one. Fixed with the two-layer `__COUNTER__`/token-paste
+idiom (`TL_PROF_CONCAT`), applied to both the `TL_DEV` and compiled-out branches of both
+`TL_PROF_SCOPE` and `TL_PROF_SCOPE_W`.
