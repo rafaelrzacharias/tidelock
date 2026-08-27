@@ -3198,10 +3198,12 @@ contract blocks):
 - [ ] **RR-25 (w3-loop-input): `SystemFn`'s `void(*)(World*)` shape has no path to Engine-level
       context — hit twice in this slice, plus a third half still open.** (a) `FRAME-LOOP.md` §4's
       interpolation ping-pong needs a registered "which columns are interpolated" table; the
-      concrete columns (`Transform`/`TransformPrev`/`Camera2D`) are render2d's (not landed —
-      checked at slice-brief time, no consumer defines them anywhere in the tree) and a
-      registered system reading them could not reach a table living on `Engine` (only
-      `core/loop.h` owns `Engine`; a system only ever gets `World*`). (b) `INPUT.md` §9.5's
+      concrete columns (`Transform`/`TransformPrev`) are render2d's (not landed — checked at
+      slice-brief time, no consumer defines them anywhere in the tree) and a registered system
+      reading them could not reach a table living on `Engine` (only `core/loop.h` owns `Engine`;
+      a system only ever gets `World*`). `Camera2D` is dropped from this list, not left stale:
+      Rafael's D1 ruling (render2d lane, 2026-08-27) took camera state off the ECS entirely onto
+      `RenderQueue` — it was never going to be an interp-pingponged column. (b) `INPUT.md` §9.5's
       recorder is specified as "the LAST-phase recorder SYSTEM", but it needs `Engine`-owned
       state (the per-tick `InputFrame[MAX_PEERS]` and this lane's `Recorder`) a `World*`-only
       system cannot reach either. Interim (both, same root cause): `core/loop.h`'s `Engine`
@@ -3220,7 +3222,9 @@ contract blocks):
       That template is worked pseudocode (`TL_FIELDS_Transform(...) /* bit 0 = snap
       (FRAME-LOOP.md §4) */`); no lane has landed the real component (render2d's, by
       `FRAME-LOOP.md` §8.2 step 4's "engine components" grouping — Transform/TransformPrev/
-      Sprite/Camera2D together). Built instead: `interp_register_pair(Engine*, ComponentId
+      Sprite together; `Camera2D` is not in that grouping and never will be — Rafael's D1 ruling,
+      render2d lane 2026-08-27, put camera state on `RenderQueue`, off the ECS). Built instead:
+      `interp_register_pair(Engine*, ComponentId
       current, ComponentId prev)` plus a generic byte-copy ping-pong/snap over any two
       same-stride columns; render2d registers its own pair once Transform/TransformPrev exist.
       NOT built: `FRAME-LOOP.md` §4's "the engine auto-snaps newly realized entities" (spawn
