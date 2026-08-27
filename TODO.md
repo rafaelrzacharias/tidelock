@@ -4135,14 +4135,17 @@ question, per the steward's explicit instruction not to act on either.
   `FAIL script.script_table_next_key_removed_and_rehashed_between_calls_is_refused`,
   `33 passed, 2 failed` (isolation kept the crash from taking down the rest of the suite).
   Restored, rebuilt, reran: `35 passed, 0 failed`.
-- **R3, HELD for ruling** - `gcinfo` is present in the data VM (`SIM_REMOVE` has it, `DATA_REMOVE`
-  did not), returning the VM heap's size in KB: host state reaching a hashed output, the same
-  shape as the `math.random`/`pairs` rulings, one door further. The reviewer could not demonstrate
-  actual divergence (three fresh data VMs running an identical script gave identical readings
-  every time, in-container) and stated High confidence it is an unaudited asymmetry but only
-  Medium confidence it is a real cross-ISA channel, naming what would raise that confidence (an
-  arm64-vs-x86-64 reading). Per the steward's explicit instruction, not acted on this round -
-  awaiting the ruling alongside RR-22 below.
+- **R3, RULED (not acted on this round)** - `gcinfo` is present in the data VM (`SIM_REMOVE` has
+  it, `DATA_REMOVE` did not), returning the VM heap's size in KB: host state reaching a hashed
+  output, the same shape as the `math.random`/`pairs` rulings, one door further. The reviewer
+  could not demonstrate actual divergence (three fresh data VMs running an identical script gave
+  identical readings every time, in-container) and stated High confidence it is an unaudited
+  asymmetry but only Medium confidence it is a real cross-ISA channel. **Ruled** (top-of-file
+  status block, "THREE RULINGS 2026-08-27" #3): not a one-name patch - the full
+  `SIM_REMOVE`/`DATA_REMOVE` diff becomes its own reviewed slice, QUEUED and held until #14 and
+  #15 both merge, owner the next lane to touch `src/script/sandbox.cpp` (`luau-bindings` likely).
+  This lane does not touch `sandbox.cpp` or `DATA_REMOVE` this round - it files and proceeds, per
+  the ruling's own last line.
 - **R4 - the data VM's removal list had two homes**, `LUAU-LAYER.md` §1's table row and §10.2 step
   4 - and §10.2 step 4 having drifted from §1 once already (missing `math.random`/
   `math.randomseed` until round 1 caught it) is exactly what "one fact, one home" exists to
@@ -4153,42 +4156,41 @@ question, per the steward's explicit instruction not to act on either.
   list once; `LUAU-LAYER.md` §1's table row and §10.2 step 4 both now cite it instead of
   restating it. `docaudit.py` clean afterward.
 
-**RR-22 (ruling request), filed per the steward's explicit instruction: does `ASSETS-AND-DATA.md`
-§8.5 hold for this lane's scope, and if not, how should the doc say so?** The reviewer's own
-finding: §8.5 is written as a done criterion for the WHOLE spec and names, by name, four things
-that do not exist in this lane's scope:
-- "two compiles of the same scripts hash identically **in two processes**" - not implemented
-  (single-process only); no process-spawn primitive exists anywhere in this codebase yet
-  (`PlatformApi` has no `os.spawn`; `popen`/`fork` are neither portable nor sanctioned outside
-  `platform/`) - a genuine new platform capability, not a test-only gap.
-- "fx literal acceptance/rejection table" - fx-literal fields are a declared, `TL_FATAL`'d scope
-  cut (no Alloy schema exists to compile a real one against).
-- "reference resolution incl. forward refs" - handle/reference fields are the same declared cut.
-- "reload emits the sealed command" - script reload (`§10.8`) is a different lane's surface
-  entirely; this lane's `data_compile` has no reload path of its own yet.
-Correspondingly three error codes this lane's own header declares have no fixture anywhere:
-`ERR_DATA_BAD_FX_LITERAL`, `ERR_DATA_DANGLING_REF`, `ERR_DATA_VALIDATOR` - and cannot get one
-while the code behind them is a `TL_FATAL`, which round 1 and round 2 both independently judged
-the CORRECT choice over guessing a schema (`alloy-substrate` unlaunched - the Layr trap).
-**The scope cuts are not the failure; §8.5 stating one done criterion for a spec section three
-different lanes jointly own is.** Options, not yet chosen between - awaiting the ruling:
-(a) split §8.5 into the subset this lane owns (integer/bool fields, `default_row`, the named
-error codes this lane's code can actually raise, the single-process hash-identity form) and a
-second list explicitly deferred to `alloy-substrate`/`luau-bindings`/`render2d`'s reload work,
-each item tagged with which lane closes it; (b) leave §8.5 as one list but add a status column
-(`shipped` / `deferred - lane X`) per line rather than splitting into two lists; (c) something
-else Rafael prefers. Recommend (a) - a done criterion a future reader can check against code that
-actually exists, matching this doc's own "no speculative breadth" principle applied to spec
-prose rather than code. Not built against yet; `ASSETS-AND-DATA.md` is unedited pending the
-ruling, so a future reader is not told a criterion was met when four of its clauses were deferred.
+**§8.5 split, RULED** (top-of-file status block, "THREE RULINGS 2026-08-27" #2) - **this
+supersedes the original filing below and is not RR-22** (that number is already taken, line 187,
+by render2d's unrelated `tl_field_kind_TexHandle` finding; this lane's first draft of this entry
+collided with it by filing under the same number independently - retired here rather than
+renumbered, since the ruling arrived directly and there is no longer a live request to number).
+`ASSETS-AND-DATA.md` §8.5 is rewritten (this commit) into what `assets+data` owns and has built
+vs. what is deferred, each deferred clause naming its owning lane - see §8.5 itself for the full
+split; not restated here per "one fact, one home." One correction made against the original
+filing's own grouping while doing that split: `ERR_DATA_VALIDATOR` was grouped with
+`asset_load_font` under "render2d" below only because both are `TL_FATAL`'d stubs sharing one
+bullet - its own header comment (`data_tables.h`) ties it to "a cross-table validator (`ALLOY.md`
+§11.1 / a game's own)", which is `alloy-substrate`'s, not render2d's; §8.5 now attributes it
+there. One clause has no owning lane at all and is flagged rather than force-assigned per
+`CLAUDE.md`'s "unknown constraint - say so, never invent one": the "two compiles hash identically
+in two processes" test needs a process-spawn `PlatformApi` primitive that no `ROADMAP.md` lane
+currently builds - open, unowned, not blocking (both reviews already judged deferring it honest).
 
-**Orchestration note (2026-08-27):** the steward session (`session_01CnFUALGkrJNZa5jeVAce3W`,
-"Tidelock W3 orchestrator handoff") that relayed round 1/round 2's reviews and rulings is now
-archived (`status_bucket: COMPLETED`) - poking it for round 2's results failed with "session is
-archived; only active sessions can be bound to triggers". PR #14's body carries the same note.
-This lane continues driving the PR to green autonomously per the standing rules (`WORKFLOW.md`
-§1 R-6) rather than stalling on a poke target that no longer exists; a fresh steward session, or
-Rafael directly, can pick up review/ruling duties from the PR and this file's own record.
+**Orchestration correction (2026-08-27), replacing this lane's own prior note in the same
+spirit it was written:** the prior entry here (commit `4ef8b37`) asserted, after
+`session_01CnFUALGkrJNZa5jeVAce3W` came back archived from a trigger-bind attempt, that this lane
+was "driving the PR to green autonomously" with no steward. **That was wrong.** The archived
+session was the PREVIOUS steward window retiring at a scheduled phase boundary
+(`WORKFLOW.md` §6 R-10 - a committed-file handoff, not an end) - a successor window is live, sent
+this lane the round-2 work order and the three rulings this section implements, and remains the
+review/ruling channel for this PR. `main` at `eb648e5` (merged into this branch, `c1fedb8`)
+carries the round-2 verdicts and all three rulings in full; cited here, not restated. PR #14's
+body, which carried the same false claim, is corrected to match.
+
+*The original §8.5-scoping filing this entry replaces, kept struck through for the record rather
+than deleted (the ruling that superseded it is the point, not the erasure):*
+~~**RR-22 (ruling request)**: does `ASSETS-AND-DATA.md` §8.5 hold for this lane's scope, and if
+not, how should the doc say so? Four named clauses and three error-code fixtures do not exist in
+this lane's scope; recommended splitting §8.5 into an owned list and a per-lane-deferred list.
+Options (a)/(b)/(c) were offered, awaiting Rafael's choice - now moot; (a) is what the ruling
+above picked.~~
 
 ## Reserved (design complete, build on first consumer — `docs/RESERVED-SEAMS.md`)
 Audio · game UI (Luau) · spatial index · tilemap · nav/AI · frame animation · replay UI/cinematics ·
@@ -4200,3 +4202,8 @@ modding (Luau profiles) · game-logic substrate · streaming/cook · SDL_GPU pat
       foundry repo) and retire `FOUNDRY-ORE-GATE.md`.
 - [ ] After Gate 0: `FX-PALETTE.md` rev 2; after Hovel A: `NETCODE.md` §0 "assumptions carried"
       gets its first measured numbers.
+- [ ] `ASSETS-AND-DATA.md` §8.5 (`assets+data`, found while splitting §8.5 by owner,
+      2026-08-27): the decoder-path fuzz pass under ASan nightly it names is not wired into any
+      CI leg — real assets are loaded and refused-on-malformed today, just never fuzzed. Neither
+      review round flagged it; not blocking. Owner: `assets+data` (or CI-tooling for the nightly
+      wiring itself).

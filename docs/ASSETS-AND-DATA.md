@@ -247,11 +247,51 @@ kind mismatch → `ERR_SAVE_FIELD_KIND` (a versioned migration function may be r
 
 ### 8.5 Tests (`tests/core/assets/`, `tests/core/data/`, `tests/core/save/`)
 
-Assets: load/dedup/refcount/free/stale; missing file and malformed PNG → named errors (fuzz the
-decoder path under ASan nightly). Data: every error code has a fixture; two compiles of the same
-scripts hash identically in two processes; fx literal acceptance/rejection table; reference
-resolution incl. forward refs; reload emits the sealed command. Save: round-trip equality per
-arena; rename via alias; added field via default; kind change → refusal and → migration fn path;
-truncated/corrupt file refused; nightly cross-build load of the previous commit's fixture.
+**Split by owner — RULED 2026-08-27** (`TODO.md` "THREE RULINGS 2026-08-27" #2, PR #14 round 2).
+Rev 1 stated one done criterion for a spec section three lanes jointly own, naming tests and
+error-code fixtures that cannot exist while their prerequisite lane is unlaunched. Both round 1
+and round 2 judged every one of those gaps an honest deferral, not a defect (`CLAUDE.md`'s "no
+speculative breadth" — compiling against an Alloy schema, or a font pipeline, that does not exist
+yet is the Layr trap). Split below into what `assets+data` owns and has built, and what is
+deferred, each clause naming the lane that closes it.
 
-*Rev 1 — 2026-08-22.*
+**Owned by `assets+data`, built (PR #14):**
+- Assets: load/dedup/refcount/free/stale; missing file and malformed image → named errors;
+  bad-arg empty-name refusal; streaming texture create/release
+  (`tests/core/assets/assets.test.cpp`). Fuzzing the decoder path under ASan nightly is not yet
+  wired into a CI leg — open, this lane's own scope, filed in `TODO.md`'s doc debt.
+- Data: every error code `data_compile` can actually raise has a fixture (missing field,
+  out-of-range int, unknown table, duplicate name, syntax error, too-many-rows, too-many-schemas);
+  the single-process half of "two compiles hash identically" (source field order and Luau-table
+  walk order both proven not to reach the hash) (`tests/core/data/data_compile.test.cpp`).
+- Save: round-trip equality per arena (reflected singleton + `ECS_COLUMN`); rename via alias;
+  added field via default; kind change → refusal and → migration fn path; truncated/corrupt/
+  forged file refused (bad magic, CRC mismatch, header byte corruption, forged block `byte_len`,
+  kind mismatch, bogus name-table length, forged `arena_count`) (`tests/core/save/save.test.cpp`).
+  Nightly cross-build load of the previous commit's fixture is CI-tooling's mechanism to wire,
+  not built by this lane.
+
+**Deferred, each clause naming its owning lane:**
+- fx literal acceptance/rejection table; reference resolution incl. forward refs —
+  `ERR_DATA_BAD_FX_LITERAL` and `ERR_DATA_DANGLING_REF` are declared, `TL_FATAL`'d scope cuts with
+  no Alloy schema to compile a real fixture against. Owner: **alloy-substrate** (schema + the
+  fx/StrId/handle field kinds land there first).
+- reload emits the sealed command — `data_compile` has no reload path; §10.8's reload surface is
+  binding work this lane's header does not own. Owner: **luau-bindings**.
+- `asset_load_font` (`loaders/font.cpp`, a declared `TL_FATAL`'d stub) — the font-load half.
+  Owner: **render2d**'s text work (`render/text.cpp`, itself still a `RESERVED-SEAMS.md` §2 stub
+  with no glyph-atlas/layout code yet).
+- `ERR_DATA_VALIDATOR` — a cross-table validator fixture, per its own header comment
+  (`data_tables.h`: "a cross-table validator (`ALLOY.md` §11.1 / a game's own) rejected"). This
+  waits on Alloy the same as the fx/ref clauses above, not on render2d — attributed to
+  **alloy-substrate**, corrected from an earlier draft of this split that grouped it with
+  `asset_load_font` only because both are `TL_FATAL`'d stubs sharing one bullet.
+- "two compiles of the same scripts hash identically **in two processes**" — the single-process
+  half is built (above); the cross-process half needs a process-spawn `PlatformApi` primitive
+  that does not exist (`popen`/`fork` are neither portable nor sanctioned outside `platform/`).
+  **No `ROADMAP.md` lane currently owns this** — flagged rather than assigned, per `CLAUDE.md`'s
+  "unknown constraint → say so; never invent one." Not blocking: both reviews already judged
+  deferring it honest.
+
+*Rev 2 — 2026-08-27: split by owner, RULED (`TODO.md`, PR #14 round 2, ruling 2). Rev 1 —
+2026-08-22.*

@@ -252,7 +252,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 
 ## RESERVED-SEAMS.md
 - `ARCHITECTURE.md` -> §11
-- `ASSETS-AND-DATA.md` -> §10
+- `ASSETS-AND-DATA.md` -> §2, §10
 - `INPUT.md` -> §2
 - `RENDER2D.md` -> §2
 - `TOOLING.md` -> §2, §12
