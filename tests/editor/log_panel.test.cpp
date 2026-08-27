@@ -29,7 +29,7 @@
 TL_TEST(log_panel_draw_empty_ring_finds_window_no_crash, "editor,log_panel,fast") {
 #if TL_DEV
     tl_log_test_reset();
-    imgui_test_begin_frame();
+    imgui_test_begin_frame(t);
     log_panel_draw(nullptr, nullptr);
     TL_EXPECT_TRUE(ImGui::FindWindowByName("Log") != nullptr);
     imgui_test_end_frame();
@@ -53,7 +53,7 @@ TL_TEST(log_panel_draw_renders_every_level_newest_first, "editor,log_panel,fast"
     const u32 n = tl_log_ring_count();
     TL_ASSERT_TRUE(n >= 1u);
 
-    imgui_test_begin_frame();
+    imgui_test_begin_frame(t);
     log_panel_draw(nullptr, nullptr);
     ImGuiWindow* win = ImGui::FindWindowByName("Log");
     TL_ASSERT_TRUE(win != nullptr);
@@ -84,7 +84,7 @@ TL_TEST(log_panel_register_wires_into_editor_panel_table, "editor,log_panel,fast
 
     tl_log_test_reset();
     TL_LOG_ERR("through the table");
-    imgui_test_begin_frame();
+    imgui_test_begin_frame(t);
     ed.panels[0].draw_fn(&ed, nullptr);   // exactly what editor_frame will do for every open panel
     TL_EXPECT_TRUE(ImGui::FindWindowByName("Log") != nullptr);
     imgui_test_end_frame();
@@ -101,7 +101,7 @@ TL_TEST(log_panel_draw_many_records_no_crash, "editor,log_panel,fast") {
     for (u32 i = 0; i < 5000u; ++i) { TL_LOG_ERR("line %u", i); }
     TL_ASSERT_EQ(tl_log_ring_count(), 4096u);   // ring cap, docs/TOOLING.md §9.2
 
-    imgui_test_begin_frame();
+    imgui_test_begin_frame(t);
     log_panel_draw(nullptr, nullptr);
     TL_EXPECT_TRUE(ImGui::FindWindowByName("Log") != nullptr);
     imgui_test_end_frame();

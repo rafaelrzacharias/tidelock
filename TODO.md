@@ -4919,6 +4919,37 @@ case this reads differently to the steward than it did to me - it is a one-line,
 self-evident consistency fix, not a design decision, but `tools/audit/` is not confirmed as this
 lane's own file the way `TOOLING.md` is.
 
+**CI red on `17c5a45`, both sanitizer legs, fixed (2026-08-27) — a real defect, steward-diagnosed
+from source since the ASan runtime is absent in this container.** `imgui_test_util.h`'s first
+version called `ImGui::CreateContext()` without `vendor_glue_imgui_install()` first, so every
+allocation went through the default (malloc) allocator instead of `pool_vendor` and was never
+freed - a genuine LeakSanitizer hit, not a false positive (`MEMORY.md` §8.6's own invariant: the
+install "must run before the first `ImGui::CreateContext()` call"). Fixed, and per the steward's
+explicit ask for a real design pass on "when does it get destroyed" (a genuine fork, not decided
+in passing): considered (a) never destroy, betting that `pool_vendor`'s VMem backing
+(`mem_pool.cpp` → `vmem_arena_init`, never `malloc`) makes it invisible to a malloc-only leak
+sanitizer - unverifiable locally, a bet on an assumption CI had not confirmed; (b) an explicit
+shutdown some test file calls itself - order-dependent, fragile; (c) `atexit(ImGui::DestroyContext)`
+registered once alongside the install call - matches `imgui_glue.test.cpp`'s own proven
+create/destroy-returns-pool-to-baseline round trip, and costs nothing extra since this codebase
+bans destructors (no static-teardown-ordering hazard to reason about). Chose (c).
+
+**Second, deeper bug found only by reproducing CI's actual invocation shape locally, not by
+reasoning on paper**: `tl_tests --tag '!slow'` (the sanitizer job, no `--isolate`) runs the WHOLE
+suite in one process, and `tests/vendor_glue/imgui_glue.test.cpp`'s own pre-existing test creates
+a SECOND context later in the same run. Traced `ImGui::CreateContext`/`DestroyContext`'s real
+bodies (`vendor/imgui/imgui.cpp`): `CreateContext` only leaves the NEW context current when there
+was NO current context beforehand; if this header's context were still current from an earlier
+editor test, `CreateContext` silently restores THIS one as current instead, and
+`imgui_glue.test.cpp`'s own `ImGui::GetCurrentContext() == ctx` assertion fails - reproduced
+locally first (`./tl_tests --tag '!slow'`, matching the sanitizer job exactly), confirmed red,
+then fixed: `imgui_test_begin_frame` sets this header's context current explicitly and
+`imgui_test_end_frame` releases it back to `nullptr` afterward, rather than leaving it current
+between frames - order-independent regardless of which editor/vendor_glue test runs when. The
+teardown itself also had to capture the exact `ImGuiContext*` rather than destroy the ambient
+"current" one at exit, for the same reason. Reproduced clean after the fix (non-isolated, exact
+CI shape, all four tiers): 592-609 tests (tier-dependent) selected, 0 failed.
+
 ### `fmt_buf` implemented (2026-08-27, RULED — Rafael via the steward, narrow additive exception)
 
 Steward ruled the exception this lane flagged as blocked earlier: `foundation/fmt.h`'s `fmt_buf`
