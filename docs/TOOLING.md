@@ -460,8 +460,70 @@ with `write_atomic`.
 2. `core/cvar`, `core/crash_report.cpp` + `os_crash_*` → `crash_report_layout` (Windows dumper = `--dump` path in `app/`).
 3. `tl_prof.h` + `prof.cpp`, `trace_export.cpp` → `prof_zero_alloc_and_tree`, `trace_json_golden`; scheduler auto-scopes.
 4. `tl_probe.h` + `probe.cpp` + `--dump-probes` → `probe_tsv_golden`. (Steps 1–4 are what the Alloy harness needs; they precede any sim code.)
-5. `editor/shell.cpp` + `PlatformDevApi` wiring + capture mask; panels **Log**, **Console** (+ cvars), **Inspector** → `inspector_roundtrip_per_kind`, `console_parse`, `dotpath_resolve`; **Profiler**, **Probes**, **World**.
-   **v0 editor done:** those six panels exist; an edit in the inspector appears in the replay log; zero heap allocation per frame outside `pool_vendor` (ImGui's own); `imgui.ini` persists in `pref_path`.
+5. Panels **Log**, **Console** (+ cvars), **Inspector** → `inspector_roundtrip_per_kind`, `console_parse`, `dotpath_resolve`; **Profiler**, **Probes**, **World**; `editor/shell.cpp` + `PlatformDevApi` wiring + capture mask.
+   **RR-40 (2026-08-27): the original single "v0 editor done" bullet is SPLIT into two criteria,
+   because four of its own clauses turned out to need a running shell that cannot run yet**
+   (`struct PlatformDevApi` is defined nowhere in this tree; `editor_frame` is
+   `TL_FATAL("unimplemented")`; `editor/shell.cpp` itself does not exist; `PLATFORM.md` §9.7 step 5
+   — `imgui_backend.cpp` + `PlatformDevApi` — is not built and no lane is queued for it). Every
+   clause of the original criterion is assigned below; none is left unassigned.
+
+   **Panels v0** — reachable without a running shell; headless-testable; `w3-editor`'s own PR gate:
+   - All six panels exist and are registered (`editor_register_panel`), each callable and tested
+     directly against a null ImGui backend, with no `editor_frame`/`PlatformDevApi` involved —
+     **satisfied** (Log, Console, Inspector, Profiler, Probes, World all shipped).
+   - Zero heap allocation per frame outside `pool_vendor`, NARROWED to what a running shell is not
+     needed to prove: every existing panel's own `draw_fn`, called directly and repeatedly —
+     **satisfied and verified** (`tests/editor/no_stray_alloc.test.cpp`; see `TODO.md`). The
+     BROADER original reading — the whole live session, every frame, forever, including
+     `editor_frame`'s own `NewFrame`/dockspace/`Render` bracket once it exists — moves to shell v0
+     below, since there is no `editor_frame` body yet to test it against.
+   - Console's cvar `set <name> <value>` command path (`§9.3.5`: parse per kind, `FX_RAW` accepts
+     a decimal literal "quantized RNE", `SIM` → `CMD_SET_CVAR`, `ARCHIVE` → `pref_path/cvars.txt`
+     on shutdown) — text-driven, panel-local, no widget, no shell. **Not yet built; blocked only on
+     RR-38's quantizer** (filed, `TODO.md`) for the decimal-literal half — once that lands, this is
+     in scope for `w3-editor`'s own PR gate. `§9.3.5`/`§9.4` describe no SEPARATE cvar "browser"
+     widget beyond this text command — if a later reading disagrees, that is itself a doc gap to
+     raise, not an assumption to build past.
+   - Inspector's fx-field/handle-field editing (`§9.3.4`'s Invariants note: display-only pending an
+     RNE quantizer) — panel-local, no shell. **Not yet built; blocked only on RR-38** (same
+     quantizer) — the `1.5` → `0x60000` assertion in `inspector_roundtrip_per_kind` (RR-39,
+     amended above) is not satisfied until this lands, and per Rafael's own instruction this PR is
+     not "done" against panels v0 until it does.
+   - "An edit in the inspector appears in the replay log" — re-examined against the doc rather than
+     assumed shell-blocked: recording (`core/recorder.cpp`'s `recorder_tick`, already built by
+     `loop+input`) and re-sim (`engine_tick_once`, `core/loop.cpp`) both run headlessly today, no
+     shell required (`tests/core/loop.test.cpp`'s own precedent). **This clause is panels-v0-SHAPED,
+     not shell-blocked — but it is UNSATISFIABLE as literally written until a separate, deeper gap
+     is resolved:** `core/recorder.h`'s format records only `{frames, world_hash}`, never commands,
+     so an inspector edit (a command, `CMD_SET_FIELD`, never an `InputFrame`) cannot be reproduced
+     by the seek algorithm's input-only re-sim. Filed as its own ruling request (`TODO.md`,
+     "keyframes.cpp's seek algorithm cannot reproduce an inspector edit") — tracked there, not
+     re-filed here; this row exists so the clause has a home and isn't silently dropped by the
+     shell/no-shell split.
+
+   **Shell v0** — needs a running `editor_frame`/real `PlatformDevApi`; deferred; NOT this PR's
+   gate; tracked in `TODO.md` as a follow-up naming its blocker so it cannot be forgotten once this
+   PR merges:
+   - `editor/shell.cpp` itself (ImGui context creation, dockspace, `imgui.ini` load/save, the menu
+     that calls `editor_toggle_panel`).
+   - `PlatformDevApi` (`PLATFORM.md` §9.7 step 5: `imgui_backend.cpp` + the `imgui_init`/
+     `imgui_new_frame`/`imgui_render` hooks) — `platform/`'s file, out of `editor`'s cone regardless
+     of this split.
+   - `editor_frame`'s real (non-stub) implementation — the `NewFrame`/panel-draw-loop/`Render`
+     sequence over a REAL platform window.
+   - The capture-mask publish (`§9.3.7`): `input_set_capture_mask` called from inside a real
+     `editor_frame`, once per real frame, over a real `io.WantCaptureMouse`/`WantCaptureKeyboard`
+     — the algorithm is simple, but nothing calls it outside the stubbed `editor_frame` body today.
+   - `imgui.ini` persisting in `pref_path` — needs `PlatformDevApi`'s real OS pref-path mechanism
+     and a real ImGui context's own load/save lifecycle; no headless equivalent.
+   - Zero heap allocation per frame, the BROADER reading (above): the whole live session including
+     `editor_frame`'s own body, once built.
+   - Luau REPL hand-off (`§9.3.5`: `console.command(name, fn, usage)`) and the Console panel's
+     "Luau UI VM" data source (`§9.4`) — **NOT shell-blocked; blocked on a DIFFERENT unbuilt lane**
+     (`LUAU-LAYER.md`, `script`, not `editor`) — filed here anyway, explicitly, rather than left to
+     float on neither side of the split, per Rafael's own instruction. Post-v0 for this PR either
+     way; revisit once `script`'s Luau binding layer lands.
 6. `core/desync_diff.cpp` + `tl_driver --diff` → `desync_diff_known_pair` (lands with the determinism harness, before netcode).
 7. `keyframes.cpp` + **Replay** panel → `replay_scrub_exact`; **Scripts** panel with the Luau layer; **Sim** panel with Milestone 2 views; **Net** panel with Hovel.
 

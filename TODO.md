@@ -5579,3 +5579,54 @@ rediscovered-and-relitigated later as if it were new.
 — it needs RR-38's quantizer (filed separately) to exist before Inspector can wire fx editing at
 all. The Inspector is not "done" against this amended row until that lands and the test asserts
 it for real.
+
+### RR-40 (steward-allocated, ruled by Rafael): split the v0 editor done criterion into panels v0 / shell v0 (2026-08-27)
+
+Steward found this lane's own PR gate — `TOOLING.md` §9.6's "v0 editor done" bullet — could never
+be reached as written: `struct PlatformDevApi` is defined nowhere in this tree, `editor_frame` is
+`TL_FATAL("unimplemented")`, `editor/shell.cpp` doesn't exist, and `PLATFORM.md` §9.7 step 5 (the
+file that would build all three) has no lane queued for it. Four of the criterion's clauses
+therefore depend on infrastructure this lane cannot build and no other lane has started.
+
+**Ruling: split `§9.6`'s criterion into "panels v0" (this PR's real gate) and "shell v0"
+(deferred, blocked on `PLATFORM.md` §9.7 step 5, tracked here so it is not forgotten once this PR
+merges) — written into `TOOLING.md` §9.6 itself, not left in a chat message.** Went through every
+clause of the original criterion plus item 5's own text and assigned each one explicitly (full
+detail in `TOOLING.md`'s own amended §9.6 — this entry is the summary, not a duplicate; one fact,
+one home):
+
+- **Panels v0 (satisfied):** all six panels exist and are headless-tested; zero heap allocation
+  per frame, narrowed to what a shell-less test can prove (already-existing panels' `draw_fn`s) —
+  verified.
+- **Panels v0 (blocked on RR-38, not on the shell):** Console's `set <name> <value>` cvar command
+  (text-driven, no widget — `§9.3.5` describes no separate browser widget, a reading worth
+  sanity-checking further if it turns out wrong); Inspector's fx/handle field editing.
+- **Panels v0 (blocked on a SEPARATE, already-filed ruling, not the shell):** "an edit in the
+  inspector appears in the replay log" — re-examined rather than taken on trust: recording and
+  re-sim both run headlessly today (no shell needed), so this is NOT a shell-blocked clause the
+  way the steward's own preliminary read categorized it; it is blocked by the recorder-format gap
+  filed above ("keyframes.cpp's seek algorithm cannot reproduce an inspector edit"). Moved to its
+  correct blocker rather than left under "needs a shell."
+- **Shell v0 (deferred, blocked on `PLATFORM.md` §9.7 step 5 — `platform/`'s file, no lane
+  queued):** `editor/shell.cpp`, `PlatformDevApi` itself, `editor_frame`'s real implementation,
+  the capture-mask publish (`§9.3.7` — the algorithm is simple, but nothing calls it outside the
+  stubbed `editor_frame` body today), `imgui.ini` persisting in `pref_path`, and the BROADER
+  "zero heap allocation" reading (the whole live session including `editor_frame`'s own body,
+  once it exists).
+- **Post-v0, blocked on a DIFFERENT unbuilt lane (`script`'s Luau binding layer, `LUAU-LAYER.md`),
+  not the shell:** the Luau REPL hand-off and the Console panel's "Luau UI VM" data source.
+  Assigned explicitly rather than left floating on neither side of the split, per the ruling's own
+  instruction.
+
+**Corrected one clause against the steward's own preliminary categorization, per the ruling's own
+invitation to sanity-check rather than take it on trust:** "zero heap allocation per frame" and
+"an edit in the inspector appears in the replay log" were both listed as shell-blocked in the
+steward's first read. Neither actually needs a shell — the first is already verified headlessly
+(`no_stray_alloc.test.cpp`, pushed before this ruling arrived), and the second is blocked by a
+different, already-filed gap. Both corrections are written into `TOOLING.md`'s own amended text,
+not just here.
+
+**Tracked follow-up — shell v0, not this PR's gate, blocked on `PLATFORM.md` §9.7 step 5 (no lane
+queued as of this entry):** `editor/shell.cpp`, `PlatformDevApi`, `editor_frame`'s real body, the
+capture-mask publish, `imgui.ini`/`pref_path` persistence, and the broader zero-alloc reading.
+Whoever picks up `PLATFORM.md` §9.7 step 5 unblocks all of it at once.

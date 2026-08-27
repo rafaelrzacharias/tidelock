@@ -242,6 +242,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `RENDER2D.md` -> §0, §9.2, §9.3
 - `ROADMAP.md` -> §9
 - `TESTING.md` -> §9.1
+- `TOOLING.md` -> §9.7
 
 ## RENDER2D.md
 - `ASSETS-AND-DATA.md` -> §5, §9
