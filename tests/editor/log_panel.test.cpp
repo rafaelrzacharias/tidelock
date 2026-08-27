@@ -84,7 +84,11 @@ TL_TEST(log_panel_row_at_is_newest_first, "editor,log_panel,fast") {
 
 TL_TEST(log_panel_register_wires_into_editor_panel_table, "editor,log_panel,fast") {
 #if TL_DEV
-    static VMemApi api = test_vmem_api();
+    // B-9 (2026-08-27): a plain local, not `static` - `api` and `ed` both die at this body's
+    // closing brace (RR-41's own carve-out, vmem_arena.h: "a plain local inside one test body,
+    // whose arena dies at the same closing brace, is fine" - unlike the six make_editor()
+    // helpers, which correctly stay `static` because THEY return while the arena lives on).
+    VMemApi api = test_vmem_api();
     Editor ed;
     TL_ASSERT_EQ(editor_init(&ed, &api, 0u), ERR_OK);
     log_panel_register(&ed);

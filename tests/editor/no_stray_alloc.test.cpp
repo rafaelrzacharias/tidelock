@@ -78,7 +78,11 @@ TL_TEST(editor_panels_draw_repeatedly_with_no_vendor_heap_installed, "editor,all
     tl_prof_frame_end(1u);
     tl_probe_mark("seed"_id, "seed");
 
-    static VMemApi api = test_vmem_api();
+    // B-9 (2026-08-27): a plain local, not `static` - `api` and `ed` both die at this body's
+    // closing brace (RR-41's own carve-out, vmem_arena.h: "a plain local inside one test body,
+    // whose arena dies at the same closing brace, is fine" - unlike the six make_editor()
+    // helpers, which correctly stay `static` because THEY return while the arena lives on).
+    VMemApi api = test_vmem_api();
     Editor ed;
     TL_ASSERT_TRUE(editor_init(&ed, &api, 0u) == ERR_OK);
     log_panel_register(&ed);
