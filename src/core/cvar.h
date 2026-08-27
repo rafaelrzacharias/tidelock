@@ -206,9 +206,11 @@ u64 cvar_sim_fold_bits(const CvarTable* t, u64 h);
 u32 cvar_format(const CvarTable* t, NameHash key, char* out, u32 out_cap);
 
 // Parses `value` per `key`'s registered kind and calls cvar_set_raw (so READONLY/SIM refusal
-// applies identically to a console `set`): CVAR_FX_RAW accepts `raw:<i32>` only (the "or a
-// decimal literal quantized RNE" half of docs/TOOLING.md §9.3.5 needs FX-PALETTE.md's
-// quantizer, not available to this pure module - TODO.md notes the gap). ERR_CVAR_PARSE on a
-// malformed `value` (empty, trailing garbage, out-of-range integer, non-"0"/"1"/"true"/"false"
-// bool) - the underlying ERR_CVAR_NOT_FOUND/READONLY/SIM_UNROUTED still surface first.
+// applies identically to a console `set`): CVAR_FX_RAW accepts EITHER `raw:<i32>` (the raw bits,
+// unchanged) OR a bare decimal literal, RNE-quantized at `key`'s own registered `frac_bits` via
+// `fx::fx_parse_decimal_raw` (RR-38, `foundation/fx.h`, `docs/FX-PALETTE.md` §9 R-10) - the
+// gap this comment used to note here is closed. ERR_CVAR_PARSE on a malformed `value` (empty,
+// trailing garbage, out-of-range integer, non-"0"/"1"/"true"/"false" bool, or an fx literal
+// `fx_parse_decimal_raw` itself rejects) - the underlying ERR_CVAR_NOT_FOUND/READONLY/
+// SIM_UNROUTED still surface first.
 ErrCode cvar_parse_and_set(CvarTable* t, NameHash key, const char* value);

@@ -5724,3 +5724,37 @@ clean.
 **Still open:** Console's `CVAR_FX_RAW` decimal-literal branch (`core/cvar.cpp`) — the second of
 RR-38's two named callers — still needs wiring; tracked as the immediate next slice, not folded
 into this commit.
+
+### Console cvar `set`: the CVAR_FX_RAW decimal-literal branch wired (RR-38, 2026-08-27)
+
+The second, and last, of RR-38's two named callers. `core/cvar.cpp`'s `cvar_parse_and_set`'s
+`CVAR_FX_RAW` case now accepts a bare decimal literal (`"3.0"`, `"-1.5"`, ...) in addition to the
+pre-existing `"raw:<i32>"` form — `TOOLING.md` §9.3.5's own spec text ("`FX_RAW` accepts
+`raw:<i32>` or a decimal literal quantized RNE") is now fully implemented, not half of it. The
+literal is quantized via `fx::fx_parse_decimal_raw(StrView, key's own registered frac_bits)` —
+the exact same primitive the Inspector's fx edit widget calls, "one implementation, both
+callers" landing for real, not just as RR-38's own stated intent. `cvar.h`'s own contract comment
+(which used to name this exact gap, citing TODO.md) is updated in this same commit to say the gap
+is closed.
+
+Updated `tests/core/cvar.test.cpp`'s pre-existing `cvar_fx_raw_format_and_parse_round_trip` test,
+which had PINNED THE OLD, NOW-WRONG BEHAVIOR (`TL_EXPECT_EQ(cvar_parse_and_set(&tab, "cv_fx"_id,
+"3.0"), ERR_CVAR_PARSE); // "raw:" prefix required`) — removed that assertion from the round-trip
+test and gave it its own dedicated test, `cvar_fx_raw_accepts_bare_decimal_literal`: a successful
+positive literal, a successful negative one, and a malformed/out-of-range battery (empty, double
+dot, letters, an i32-overflowing magnitude) all correctly mapping to the SAME `ERR_CVAR_PARSE`
+every other kind's own malformed input already returns (`fx_parse_decimal_raw`'s own
+`ERR_FX_PARSE`/`ERR_FX_RANGE` distinction does not leak through `cvar_parse_and_set`'s single-
+error contract) — plus confirming the cvar's value is provably unchanged after every rejected
+attempt.
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`) runs, 0 failed in every combination. `includes.py`/`docaudit.py`
+clean. `[docs:none]` on this `core/` commit per the RR-34 addendum (`TODO.md`, filed earlier this
+lane) — `TOOLING.md` §9.3.5 already specifies this exact behavior and needed no edit; none of
+`MODULE_DOCS["core"]`'s own four docs (`ECS.md`/`FRAME-LOOP.md`/`INPUT.md`/`ASSETS-AND-DATA.md`)
+are the right home for a `TOOLING.md`-governed cvar-parsing change.
+
+**RR-38 is now fully landed end to end: the primitive (`fx.h`), both named callers (Inspector's
+fx-field edit widget, Console's `CVAR_FX_RAW` decimal-literal path), and the doc trail (`FX-
+PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**

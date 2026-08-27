@@ -192,7 +192,34 @@ TL_TEST(cvar_fx_raw_format_and_parse_round_trip, "core,editor,cvar,fast") {
     TL_EXPECT_EQ(strcmp(buf, "raw:196608"), 0);
     TL_ASSERT_EQ(cvar_parse_and_set(&tab, "cv_fx"_id, "raw:-4096"), ERR_OK);
     TL_EXPECT_EQ(cvar_get_fx_raw(&tab, "cv_fx"_id, &frac), (i32)-4096);
-    TL_EXPECT_EQ(cvar_parse_and_set(&tab, "cv_fx"_id, "3.0"), ERR_CVAR_PARSE);   // "raw:" prefix required
+}
+
+TL_TEST(cvar_fx_raw_accepts_bare_decimal_literal, "core,editor,cvar,fast") {
+    // RR-38 (docs/FX-PALETTE.md §9 R-10): CVAR_FX_RAW now accepts a bare decimal literal too,
+    // RNE-quantized at the cvar's own registered frac_bits via fx::fx_parse_decimal_raw -
+    // "raw:<i32>" (tested above) is no longer the only accepted form.
+    CvarTable tab;
+    cvar_table_init(&tab);
+    CvarDesc fx_desc = { "cv_fx"_id, "cv_fx", "an fx-raw cvar", (u32)196608 /*3.0 at FRAC=16*/, (u8)CVAR_FX_RAW, 0, 16, 0 };
+    cvar_register(&tab, &fx_desc);
+    u8 frac = 0;
+
+    TL_ASSERT_EQ(cvar_parse_and_set(&tab, "cv_fx"_id, "3.0"), ERR_OK);
+    TL_EXPECT_EQ(cvar_get_fx_raw(&tab, "cv_fx"_id, &frac), (i32)196608);
+
+    TL_ASSERT_EQ(cvar_parse_and_set(&tab, "cv_fx"_id, "-1.5"), ERR_OK);
+    TL_EXPECT_EQ(cvar_get_fx_raw(&tab, "cv_fx"_id, &frac), -(i32)(3 * 65536 / 2));   // -1.5 * 65536
+
+    // A malformed or out-of-range decimal literal is ERR_CVAR_PARSE, same as every other kind's
+    // own malformed-input row above - fx::fx_parse_decimal_raw's own ERR_FX_PARSE/ERR_FX_RANGE
+    // never leaks through as a different code (cvar_parse_and_set's own contract: one error for
+    // "value did not parse").
+    TL_EXPECT_EQ(cvar_parse_and_set(&tab, "cv_fx"_id, ""), ERR_CVAR_PARSE);
+    TL_EXPECT_EQ(cvar_parse_and_set(&tab, "cv_fx"_id, "1.2.3"), ERR_CVAR_PARSE);
+    TL_EXPECT_EQ(cvar_parse_and_set(&tab, "cv_fx"_id, "abc"), ERR_CVAR_PARSE);
+    TL_EXPECT_EQ(cvar_parse_and_set(&tab, "cv_fx"_id, "999999999"), ERR_CVAR_PARSE);   // out of i32 range
+    // Still refused after every malformed attempt above - unchanged from the last successful set.
+    TL_EXPECT_EQ(cvar_get_fx_raw(&tab, "cv_fx"_id, &frac), -(i32)(3 * 65536 / 2));
 }
 
 TL_TEST(cvar_register_grows_count_per_distinct_key, "core,editor,cvar,fast") {

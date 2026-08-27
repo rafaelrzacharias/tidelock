@@ -4,6 +4,8 @@
 // TL_FATAL today). Spec: docs/TOOLING.md §3, §9.1, §9.2, §9.3.5.
 #include "core/cvar.h"
 
+#include "foundation/fx.h"   // fx_parse_decimal_raw (RR-38) - the CVAR_FX_RAW decimal-literal half
+
 #include <string.h>   // memcpy - the sanctioned raw<->typed conversion (docs/CPP-SUBSET.md section 1)
 
 void cvar_table_init(CvarTable* t) {
@@ -329,14 +331,21 @@ ErrCode cvar_parse_and_set(CvarTable* t, NameHash key, const char* value) {
             return cvar_set_raw(t, key, bits);
         }
         case CVAR_FX_RAW: {
-            // "raw:<i32>" only (this header's contract block: the quantized-literal half needs
-            // FX-PALETTE.md's RNE quantizer, not available to this pure module - TODO.md).
-            if (value == nullptr || value[0] != 'r' || value[1] != 'a' || value[2] != 'w' || value[3] != ':') {
-                return ERR_CVAR_PARSE;
+            if (value == nullptr) { return ERR_CVAR_PARSE; }
+            // "raw:<i32>" - the raw bits, unchanged (docs/TOOLING.md §9.3.5).
+            if (value[0] == 'r' && value[1] == 'a' && value[2] == 'w' && value[3] == ':') {
+                i64 v;
+                if (!parse_decimal_i64(value + 4, -2147483648LL, 2147483647LL, &v)) { return ERR_CVAR_PARSE; }
+                u32 bits; i32 v32 = (i32)v; memcpy(&bits, &v32, sizeof(bits));
+                return cvar_set_raw(t, key, bits);
             }
-            i64 v;
-            if (!parse_decimal_i64(value + 4, -2147483648LL, 2147483647LL, &v)) { return ERR_CVAR_PARSE; }
-            u32 bits; i32 v32 = (i32)v; memcpy(&bits, &v32, sizeof(bits));
+            // A bare decimal literal, RNE-quantized at this cvar's own FRAC (RR-38, docs/
+            // FX-PALETTE.md §9 R-10) - integer-only, no float/double anywhere in the actual
+            // quantization; `value`'s length is `strlen` (already included for `memcpy`) since
+            // this door's own `const char*` parameter predates `StrView`.
+            const Result<i32> parsed = fx::fx_parse_decimal_raw(StrView{ value, (u32)strlen(value) }, d->frac_bits);
+            if (parsed.err != ERR_OK) { return ERR_CVAR_PARSE; }
+            u32 bits; memcpy(&bits, &parsed.value, sizeof(bits));
             return cvar_set_raw(t, key, bits);
         }
     }
