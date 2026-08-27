@@ -4703,7 +4703,8 @@ once `v0-integration` (W4) or a sibling lane starts depending on them.
 
 ### Ruling requests (ids are steward-allocated per `WORKFLOW.md`/the lane brief)
 
-- **RR-pending (d) — filed 2026-08-27: `RENDER2D.md` §6's backend-trigger table needs a second
+- **RR-37 (renamed from "RR-pending (d)", steward-allocated 2026-08-27, PR #16, "RR-37 allocated;
+  R-2 correction verified" message): `RENDER2D.md` §6's backend-trigger table needs a second
   "trigger" row.** Not this lane's file (render2d, PR #13, already merged — cone discipline bars
   a unilateral edit). Context: `docs/TOOLING.md` §10 R-2 (corrected this lane, same commit) found
   that ImGui multi-viewport (drag an editor panel out to its own OS window) cannot run on the v0
@@ -4717,6 +4718,14 @@ once `v0-integration` (W4) or a sibling lane starts depending on them.
   backend-migration decision needs the render2d lane's own input (render2d's sprite/batch path
   would move onto SDL_GPU too, not just ImGui), just the trigger-table addition editor is flagging
   now so the next lane that reopens `RENDER2D.md` doesn't rediscover this from scratch.
+  **Steward independently verified the underlying claim against the vendored backend sources
+  (not taken on my word) and it holds exactly**: `imgui_impl_sdlrenderer3.cpp` never sets
+  `RendererHasViewports`; `imgui_impl_sdl3.cpp` does set `PlatformHasViewports` (the platform half
+  is present, only the renderer half is the gap). The backends that DO set `RendererHasViewports`:
+  dx9, dx10, dx11, dx12, opengl2, opengl3, **sdlgpu3**, vulkan — so Rafael's stated SDL_GPU
+  preference is not merely taste, it is one of the backends that actually closes this gap, where
+  SDL_Renderer structurally cannot. Worth stating plainly whenever RR-37 is actually ruled: the
+  migration question is "the preferred backend already closes this" rather than an open trade.
 - **RR-34 (steward-allocated 2026-08-27, PR #16, "STOP: red head" message): `commit_docs.py`'s
   `MODULE_DOCS["core"]` omits `TOOLING.md`, even though `TOOLING.md` §9.1's own file table places
   `core/cvar.h` (and, by the same table, `core/dotpath.h`, `core/watch.h`, `core/desync_diff.h`,

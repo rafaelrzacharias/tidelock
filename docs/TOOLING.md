@@ -454,8 +454,10 @@ with `write_atomic`.
   whichever backend migration `RENDER2D.md` §6 eventually triggers; Rafael has since expressed a
   preference for SDL_GPU (`imgui_impl_sdlgpu3.cpp`) over raw OpenGL3 for that migration, discussed
   in full under `TODO.md`'s "Post-v0 render backend" note — not yet a ruling on `RENDER2D.md`'s
-  own backend-trigger table, which is render2d's file, not editor's; filed as a ruling request
-  there.
+  own backend-trigger table, which is render2d's file, not editor's; filed as **RR-37**
+  (`TODO.md`), steward-verified against the vendored backend sources: `imgui_impl_sdlgpu3.cpp` is
+  one of the backends that actually sets `RendererHasViewports`, so the SDL_GPU direction closes
+  this gap, not just a preference among equals.
 - **R-3 The driver has `--dump-probes`**: the probe TSV sink writes to a CI artifact path; same
   sink as the panel.
 
