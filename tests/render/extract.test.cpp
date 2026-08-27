@@ -101,11 +101,29 @@ TL_TEST(camera_state_is_not_hashed, "render") {
     ExtractFixture* f = et_fixture();
     TL_ASSERT_EQ(et_init(f), ERR_OK);
     World* w = &f->w;
+
+    // Positive control (review round 3 A-1): every assertion below - "the hash does not move" -
+    // holds trivially for ANY memory that is never hashed, including a plain BSS field never
+    // touching a registered arena. Without this, the test cannot distinguish "camera state is
+    // structurally excluded from registry_hash_all" from "registry_hash_all doesn't hash anything
+    // at all". Spawn a registered Transform and confirm the hash DOES move when ITS bytes change,
+    // proving the hash is live and reaches arena bytes, before relying on it staying still for
+    // camera state below.
+    Transform tr{}; tr.x = fx::fx_int<pos_t>(0); tr.y = fx::fx_int<pos_t>(0); tr.rot = fx::fx_int<angle_t>(0); tr.flags = 0;
+    const Entity e = world_spawn(w);
+    world_add<Transform>(w, e, tr);
+    world_flush(w);
     registry_seal(&f->reg);   // registry_hash_all requires it (foundation/arena_registry.h)
+
+    u64 per_arena[MAX_ARENAS];
+    const u64 h_before_control = registry_hash_all(&f->reg, per_arena);
+    Span<Transform> col = world_column<Transform>(w);
+    col.data[0].x = fx::fx_int<pos_t>(2);   // a real sim-state mutation, unlike the camera writes below
+    const u64 h_after_control = registry_hash_all(&f->reg, per_arena);
+    TL_EXPECT_TRUE(h_after_control != h_before_control);   // the hash IS live and reaches arena bytes
 
     render_camera_init(w, 0, Camera2D{ 0.0f, 0.0f, 1.0f, 0.0f, 16.0f, 0, {0, 0, 0} });
 
-    u64 per_arena[MAX_ARENAS];
     const u64 h0 = registry_hash_all(&f->reg, per_arena);
 
     f->rq.camera[0].cx = 1.0f;   // a camera pan - no sim value changed

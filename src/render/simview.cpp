@@ -21,8 +21,11 @@ void simview_texel_to_world(u16 cx, u16 cy, u16 tx, u16 ty, f32* wx, f32* wy) {
     *wy = -world_half + chunk_m * (f32)cy + chunk_m - ((f32)ty + 0.5f) * texel;
 }
 
-// v0: no view parameter yet (simview.h's CRITICAL DEPENDENCY note) - registered as an empty stub
-// so the RENDER phase's schedule shape is stable across the Milestone-2 landing.
+// v0: no view parameter yet (simview.h's CRITICAL DEPENDENCY note) - an empty stub, defined so the
+// symbol exists for Milestone 2 to fill in once sim/views.h lands. NOT currently registered in any
+// phase schedule (review round 3 A-4: neither is sys_extract or sys_sprite_render - wiring systems
+// into a schedule is app/wiring.cpp's job, W4, correctly out of scope for this lane); this comment
+// used to claim otherwise.
 void simview_update(World* w) {
     (void)w;
 }

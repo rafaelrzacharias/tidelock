@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------------------------
 // extract.cpp - sys_extract (PRE_RENDER, first system of the phase): fx -> f32, lerp by alpha,
 //   the render packet, camera interpolation + view matrices.
-// Spec: docs/RENDER2D.md §9.3.3. One of the two to_f32 call sites in the binary (the other is
-//   simview.cpp, docs/RENDER2D.md §9.5) - CI greps for exactly these two.
+// Spec: docs/RENDER2D.md §9.3.3. One of this module's three to_f32 call sites - the others are
+//   simview.cpp and sprite.cpp (docs/RENDER2D.md §9.5's allowlist, amended by RR-26 - not yet a
+//   live CI gate, RR-24).
 // ---------------------------------------------------------------------------------------------
 #include "render/render.h"
 #include "core/transform.h"

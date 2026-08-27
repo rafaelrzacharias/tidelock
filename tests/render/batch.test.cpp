@@ -165,6 +165,44 @@ TL_TEST(batch_boundaries, "render") {
     }
 }
 
+static u32 g_texsize_calls = 0;
+static void counting_texture_size(void* ctx, TexHandle h, u16* w, u16* hh) {
+    (void)ctx; (void)h; g_texsize_calls += 1; *w = 64; *hh = 64;
+}
+
+// Review round 1 M1 (verified discriminating in round 3, A-3): render_emit_geometry hoists the
+// per-batch texture_size query above the per-command loop (batch.cpp) - the batch key already
+// fixes the texture for every command in the run, so the query is loop-invariant. Installs a
+// counting shim over the fixture's own platform (RenderQueue.platform is a caller-settable
+// `const PlatformApi*`, render.h - no platform/impl_headless/ change needed) and submits 8
+// commands sharing one (tex, layer, blend, clip) run, which render_sort_and_batch collapses into
+// exactly 1 batch.
+TL_TEST(texture_size_called_once_per_batch_not_per_command, "render") {
+    static RenderTestFixture f;
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
+    World* w = &f.world;
+    RenderQueue* q = w->render;
+
+    static PlatformApi shim;
+    shim = *f.platform;
+    shim.draw.texture_size = &counting_texture_size;
+    q->platform = &shim;
+
+    const TexHandle tex{ 1u };
+    for (u32 i = 0; i < 8u; ++i) {
+        const u32 d = render_push_data(w, (f32)i, 0.0f, 0.0f, 1.0f, 1.0f, Rect_u16{ 0, 0, 16, 16 }, 0xFFFFFFFFu, tex, DRAWFLAG_SCREEN_SPACE);
+        render_submit(w, DrawCommand{ key_pack(LAYER_UI, 0, 0, tex.bits, 0), d, 0, 0 });
+    }
+    render_sort_and_batch(q, w->scratch);
+    TL_ASSERT_EQ(q->batches.count, 1u);   // all 8 share (tex, layer, blend, clip) - one batch
+
+    g_texsize_calls = 0;
+    render_emit_geometry(q);
+    TL_EXPECT_EQ(g_texsize_calls, 1u);   // per BATCH, not per command
+
+    render_test_shutdown(&f);
+}
+
 // render_resolve_view (render_internal.h) asserted directly - review round 2 N3: the module's
 // WORLD-space path (the one place this matters) had no test at all before this round.
 TL_TEST(render_resolve_view_maps_sentinel_only, "render") {
@@ -229,6 +267,26 @@ TL_TEST(pixel_snap_is_per_view_not_pres0, "render") {
         TL_EXPECT_TRUE(fabsf(q->verts.data[k].y - expected_y) < 1e-4f);
     }
 
+    render_test_shutdown(&f);
+}
+
+// Review round 2 N2 (verified discriminating in round 3, A-9): render_emit_geometry's own
+// TL_CHECK(view < MAX_VIEWS) had nothing pinning it - layer_view is public, caller-writable
+// RenderQueue state (render.h), and render_submit is the raw primitive that "never rejects,
+// validates nothing" (docs/RENDER2D.md §9.3.4), so an out-of-range (non-0xFF) layer_view value
+// reaches render_emit_geometry unguarded by rect_visible's own check.
+TL_TEST_EXPECT_FATAL(emit_out_of_range_view_fatals, "render,fatal") {
+    (void)t;
+    static RenderTestFixture f;
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
+    World* w = &f.world;
+    RenderQueue* q = w->render;
+
+    q->layer_view[LAYER_UI] = 9u;   // out of range, not the 0xFF screen-space sentinel
+    const u32 d = render_push_data(w, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, Rect_u16{ 0, 0, 16, 16 }, 0xFFFFFFFFu, TexHandle{}, 0);
+    render_submit(w, DrawCommand{ key_pack(LAYER_UI, 0, 0, 0, 0), d, 0, 0 });   // never rejects
+    render_sort_and_batch(q, w->scratch);
+    render_emit_geometry(q);   // view == 9 -> TL_FATAL
     render_test_shutdown(&f);
 }
 

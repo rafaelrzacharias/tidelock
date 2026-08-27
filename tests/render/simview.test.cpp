@@ -29,3 +29,16 @@ TL_TEST(simview_texel_to_world_half_texel_rule, "render") {
     simview_texel_to_world(0, 0, 0, 127, &wx127, &wy127);
     TL_EXPECT_TRUE(fabsf((wy0 - wy127) - 127.0f * texel) < 1e-3f);
 }
+
+// Review round 3 A-4: simview_update's body is `(void)w;` only (v0's stub, per its own contract
+// comment - not yet registered in any phase schedule, Milestone 2's job to fill in once
+// sim/views.h lands) - this call pins the symbol at LINK time, the same class of signal D6's own
+// record already relies on for simview_texel_to_world, so deleting the function body (not just
+// registering it somewhere) is still a build failure, not a silently-passing gap.
+TL_TEST(simview_update_stub_is_linkable, "render") {
+    simview_update(nullptr);   // never dereferences w - safe, and the point is only that it links
+    TL_EXPECT_TRUE(true);      // deliberately trivial - the signal is link-time (deleting the body
+                                // makes tl_tests fail to link, the same class of gate D6 relies on
+                                // for simview_texel_to_world); a runner with zero recorded checks
+                                // reports FAIL, not PASS, so this keeps the test from being vacuous
+}

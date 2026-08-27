@@ -154,6 +154,33 @@ TL_TEST(persistent_ring_replays_until_expiry, "render") {
     TL_EXPECT_EQ(f->rq.keys.count, 0u);   // 12 > 12 is false: expired
 }
 
+// Review round 1 D7 (verified discriminating in round 3, A-2): TL_DBG_LINE's call site leaves its
+// argument list UNEVALUATED outside TL_DEV (docs/CPP-SUBSET.md §7b), not merely "no command
+// submitted" - a runtime counter on the argument expression itself is what actually proves the
+// zero-cost claim; a diagnostic read (-Wunused-function on the never-called helper) is evidence
+// but not a test. The sanity call confirms the helper itself increments before relying on it.
+static u32 g_tl_dbg_line_evals = 0;
+static f32 tl_dbg_line_bump_and_zero() { g_tl_dbg_line_evals += 1; return 0.0f; }
+
+TL_TEST(tl_dbg_line_argument_list_evaluated_only_at_tl_dev, "render") {
+    DebugDrawFixture* f = dd_fixture();
+    TL_ASSERT_EQ(dd_init(f), ERR_OK);
+
+    g_tl_dbg_line_evals = 0;
+    (void)tl_dbg_line_bump_and_zero();
+    TL_ASSERT_EQ(g_tl_dbg_line_evals, 1u);   // the helper itself works before relying on it below
+
+    g_tl_dbg_line_evals = 0;
+    TL_DBG_LINE(&f->w, tl_dbg_line_bump_and_zero(), 0.0f, 10.0f, 0.0f, 1.0f, 0xFFFFFFFFu, RECT_SPACE_SCREEN);
+#if TL_DEV
+    TL_EXPECT_EQ(g_tl_dbg_line_evals, 1u);
+    TL_EXPECT_EQ(f->rq.keys.count, 1u);
+#else
+    TL_EXPECT_EQ(g_tl_dbg_line_evals, 0u);   // argument list unevaluated - the call site itself is elided
+    TL_EXPECT_EQ(f->rq.keys.count, 0u);
+#endif
+}
+
 TL_TEST(text_layout_is_unsupported, "render") {
     u32 count = 99u;
     const ErrCode e = text_layout(nullptr, StrView{}, nullptr, 0u, &count);

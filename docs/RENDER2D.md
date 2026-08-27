@@ -289,6 +289,12 @@ struct RenderQueue {
     Camera2D camera[MAX_VIEWS]; CameraPrev camera_prev[MAX_VIEWS]; CameraFollow camera_follow[MAX_VIEWS]; u8 camera_count;
     f32 alpha; u32 stats_submitted, stats_rejected, stats_draw_calls, stats_batches; };
 ```
+This is the spec-pinned minimum, not the exhaustive shipped shape (review round 3 A-11) - `render.h`
+carries two fields beyond it, each with its own contract-block note there rather than restated
+here (one fact, one home): `platform` (the `PlatformApi*` `render_present` needs; render.h's own
+SIGNATURE NOTE), and `dbg_ring`/`dbg_ring_count`/`dbg_ring_next` (the persistent debug-draw ring,
+§7/§9.3.8 - opaque here because its element type is `debugdraw.h`'s and `debugdraw.h` includes
+`render.h`, not the reverse). See `render.h` for the live, complete struct.
 
 ```cpp
 // sprite.h — 20 B: rgba@0 src@4 tex@12 depth_bias@14 layer@16 flags@17 _pad0@18; src = {x,y,w,h} texels (ECS §6 kinds: no Rect kind, so XA(u16,4))
@@ -495,6 +501,14 @@ whichever lane owns CI tooling. `-ffast-math` stays off (`CPP-SUBSET.md` §7).
 
 ### 9.6 Tests — `tests/render/` (in `tl_tests`, headless platform)
 
+This table is the spec-anchored subset — one row per algorithm/invariant this doc states, not the
+exhaustive shipped suite (review round 3 A-11: the tree has grown well past this table across
+review rounds' own discriminating-test additions, e.g. `emit_out_of_range_view_fatals`,
+`texture_size_called_once_per_batch_not_per_command`, `tl_dbg_line_argument_list_evaluated_only_at_tl_dev` -
+none restate a §9 algorithm this table already names, so they are not rows here). `tl_tests --tag
+render`'s own "N selected" line is the one live count (`TODO.md`'s own test-count entry, corrected
+the same round, is why this table does not restate a number either).
+
 | Test | Asserts |
 |---|---|
 | `key_pack_unpack` | every field round-trips at 0, max, and a random 10k sample; field masks do not overlap (`static_assert` set) |
@@ -508,7 +522,7 @@ whichever lane owns CI tooling. `-ffast-math` stays off (`CPP-SUBSET.md` §7).
 | `simview_texel_to_world_half_texel_rule` | the pure half of the row above, landed early (review round 2 N10 - no `sim/views.h` dependency): `simview_texel_to_world(cx, 37, 0).x == −4096 + 8cx + 37.5·TEXEL`; row 0 is the chunk's TOP, not bottom; row 0 and row 127 are 127 texels apart |
 | `present_descriptor` | headless `DrawApi` records calls: a 3-layer queue (WORLD with its internal target, UI/DEBUG to the window, per §9.4's own "Targets" paragraph) yields `set_target` ×5 (the step-4 top-level window clear's own call, world target, the WORLD blit's own call back to window, then window again for UI and for DEBUG - each layer transition calls `set_target` unconditionally, so two consecutive window-target layers are two calls, not a merged one), `clear` ×2 (the top-level window clear plus WORLD's own - UI/DEBUG have a null target, so step 4's `if target != null` guards their clear out), `draw_geometry` ×4 in the raw call log (one per batch, three, plus the WORLD blit's own quad) while `stats_draw_calls == stats_batches` (three, the per-batch count the blit is deliberately not part of), one blit, one `present`; every `draw_geometry` call (batches and the blit alike) carries 4 vertices |
 | `extract_snap_and_arc` | snap bit forces `a = 1`; rotation 0.9 → 0.1 turns lerps through 1.0, not 0.5 |
-| `camera_state_is_not_hashed` | `registry_hash_all` is invariant under `RenderQueue.camera`/`camera_follow` changes (a pan, `±0.0f`, a follow retarget) — the review round 1 D1 invariant §2's caption claims |
+| `camera_state_is_not_hashed` | positive control first (a registered `Transform`'s bytes DO move the hash, proving it is live — review round 3 A-1, closing the tautology round 2 flagged), then `registry_hash_all` is invariant under `RenderQueue.camera`/`camera_follow` changes (a pan, `±0.0f`, a follow retarget) — the review round 1 D1 invariant §2's caption claims |
 
 Pixel goldens (FLIP-compared, `--render=software`) are nightly, never PR-blocking (§8).
 

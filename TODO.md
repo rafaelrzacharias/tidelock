@@ -3017,12 +3017,14 @@ right; it is the template the others now follow.
         debugdraw}.test.cpp`, on BOTH a dev build and a `-DTL_TIER=netcode
         -DTL_STRICT_TOOLCHAIN=OFF` build (the CI-red fix above made this mandatory going forward,
         not just this once) - 0 failed on either tier. **Test-count history (review round 2 N6,
-        2026-08-27): this row has stated a wrong "counted directly" number twice - "20" originally,
-        then "15" replacing it, when the tree had 16 both times; it has since grown with each
-        review round (17 after D1, 22 after round 2's N1-N4 fixes and their own tests). A count is
-        stale the moment the next commit lands, by design - `tl_tests --tag render`'s own
-        "N selected" line is the one live source; this row stops repeating a point-in-time number
-        that inevitably drifts.**
+        2026-08-27; CORRECTED round 3 A-7 - the "fix" itself repeated the class of error it was
+        filed to close): this row has stated a wrong "counted directly" number multiple times -
+        "20" originally, then "15", when the tree had 16 both times; the fix for THAT wrote "17
+        after D1, 22 after round 2's N1-N4 fixes", when the commit that wrote "22" already had 33
+        (`git blame`: the number was wrong the moment it was written, not merely stale by the next
+        commit). A count is stale the moment the next commit lands, by design - `tl_tests --tag
+        render`'s own "N selected" line is the one live source; no number belongs in this row at
+        all, point-in-time or otherwise.**
       - `stats_draw_calls == batches`: asserted directly in `present_descriptor` (3 == 3).
       - Zero heap allocation per frame: `docs/MEMORY.md` §2's CRT-malloc counter was DROPPED by
         a 2026-08-26 ruling recorded in `foundation/alloc_shim.h`'s own contract block - the
@@ -3269,59 +3271,52 @@ right; it is the template the others now follow.
       `world_flush`) - both verified to fail when `render_camera_init`'s seeding is reverted
       (watched the whole suite fatal at `extract.cpp`'s `TL_CHECK(interp.ppu != 0.0f)` before
       restoring the fix).
-- [x] **Review round 2's discriminating-test sweep - three round-1 fixes recorded as NOT
-      practically unit-testable, per the steward's own allowance ("say so explicitly per item with
-      the reason rather than leaving a passing non-test").** All thirteen other round-1 fixes (D2-
-      D5, D10, M2, M4, M5 plus D1/N1's own N-round tests) now have a revert-verified discriminating
-      test; these three do not, for reasons intrinsic to what each fix actually is, not for lack of
-      trying:
-      - **D6 (`simview.cpp` did not exist).** The fix IS a file existing and its two declared
-        functions being defined - `simview_texel_to_world`/`simview_update` were forward-declared
-        in `simview.h` but had no `.cpp` TU, so the module only linked because nothing called them.
-        Reverting this fix means deleting the TU (or the function bodies) again, which does not
-        make a `TL_TEST` body FAIL - it makes `tl_tests` fail to LINK, so there is no green/red
-        test-runner state to discriminate between; the binary simply does not exist to run. N10's
-        `simview_texel_to_world_half_texel_rule` (`tests/render/simview.test.cpp`, landed this
-        round) is a real, passing test of the function's *correctness* once it exists, and would
-        catch a wrong implementation - but it cannot be the discriminating test for "the file
-        exists at all," because there is no revert of that specific fix that produces a test
-        failure instead of a build failure. The build-level signal (does `tl_tests` link) IS the
-        test for this one.
-      - **D7 (`debugdraw.cpp`'s `TL_DBG_*` tier-conditional compile-out).** The fix's entire
-        content is that `TL_DBG_LINE`/`TL_DBG_RECT`/etc. (`debugdraw.h` §7b) expand to a real call
-        at `TL_DEV=1` and to `((void)0)` (argument list unevaluated, call site elided) at
-        `TL_DEV=0`. This is a preprocessor-time property of ONE tier, checked against the SAME
-        source compiled under a DIFFERENT `-DTL_DEV` define - not a runtime condition any single
-        `tl_tests` binary (which is built for exactly one tier) can observe about itself. A dev-
-        tier test cannot prove netcode/ship elides the call; a netcode-tier test cannot even
-        reference the dev-only entry points to prove they exist. Round 2's reviewer verified this
-        the only way it can be verified - building the netcode-linux binary directly and reading
-        the compiler's own "unused function" diagnostic for the side-effecting helper the macro
-        would otherwise have called - which is exactly what this lane repeated (recorded in the
-        round-2 validation log, not as a `tl_tests` case). `tests/foundation/tl_probe.test.cpp`
-        (the cited precedent) confirms the pattern is inherent, not this lane's gap: its own
-        `#if TL_DEV` guarded assertions test DEV-tier behavior only and carry no runtime assertion
-        of the netcode-tier compile-out either - there is no house precedent that unit-tests this
-        class of property, because `TL_TEST` runs inside one tier's binary by construction.
-      - **M1 (`batch.cpp`'s `texture_size` hoisted from per-command to per-batch).** The fix is a
-        call-COUNT property - one `draw.texture_size` call per batch instead of one per command -
-        and `platform/impl_headless/draw.cpp`'s `hd_texture_size` (the only backend `tl_tests`
-        exercises) is a plain getter with no counter, log entry, or other observable side effect
-        (checked: `log_call`, the headless draw-log's writer, is called from `hd_texture_create`/
-        `_upload`/`_lock`/`_destroy`/`set_target`/`set_clip`/`clear`/`draw_geometry`/`present` -
-        every OTHER draw verb - but not from `hd_texture_size`, which returns cached width/height
-        with no side effect at all). Making this countable needs new platform-side test
-        instrumentation (a `HeadlessState` call counter plus a `headless_test_api.h` accessor,
-        mirroring `headless_draw_log`'s own pattern) that does not exist today and is not
-        `render2d`'s file to add unasked - `platform/impl_headless/` is a different module's
-        surface (`ARCHITECTURE.md` §1's DAG), and CLAUDE.md rule 8 ("large subsystem = stable
-        interface + ONE impl now, pulled in by a real consumer") argues against speculatively
-        widening a platform test API for one render-side call-count assertion nobody else needs
-        yet. The fix itself is trivially checked by reading `batch.cpp:58-62` (the
-        `texture_size` call sits above the per-command `for` loop, guarded once per batch, not
-        inside it) - correct and in the tree, just not exercised by a `tl_tests` case. Filed here
-        rather than left as a silent gap; a future platform-side call-counter (if another consumer
-        needs one) should close it then.
+- [x] **Review round 2's discriminating-test sweep, CORRECTED in round 3 (A-2, A-3, A-6): D7 and
+      M1 were wrongly recorded as not practically unit-testable - both are, and round 3's reviewer
+      wrote and ran both tests. M2 was wrongly recorded as verified - no test can verify it, for a
+      different reason than D6/D7/M1's class. Fifteen of sixteen round-1 fixes (D2-D5, D7, D10, M1,
+      M4, M5 plus D1/N1's own N-round tests) now have a revert-verified discriminating test; only
+      D6 (half) and M2 do not, for reasons intrinsic to what each actually is:**
+      - **D6 (`simview.cpp` did not exist) - still half-pinned, correctly.** The fix IS a file
+        existing and its two declared functions being defined - `simview_texel_to_world`/
+        `simview_update` were forward-declared in `simview.h` but had no `.cpp` TU, so the module
+        only linked because nothing called them. Deleting `simview.cpp` outright now fails at
+        LINK (round 3 confirmed: `ld.lld: undefined symbol: simview_texel_to_world(...)`, because
+        N10's test references it) - a real gate, just not a `tl_tests` green/red one. But round 3
+        found this only covers `simview_texel_to_world`'s half: deleting `simview_update`'s BODY
+        alone still builds and links green, because nothing in `src/` or `tests/` calls it (its own
+        comment claims it is "registered as an empty stub" in a schedule that does not exist on
+        this branch - `sys_extract`/`sys_sprite_render` aren't registered either, correctly out of
+        scope for W4, but the comment overstates what's actually wired). Filed as round 3's A-4 for
+        the doc/contract sweep below; not re-filing the already-accurate link-level half here.
+      - **M1 (`batch.cpp`'s `texture_size` hoisted from per-command to per-batch) - FIXED, was
+        wrongly filed here.** Round 2 argued this needed new `platform/impl_headless/` test
+        instrumentation outside this lane's cone. Round 3's reviewer found the actual seam:
+        `RenderQueue.platform` is a caller-settable `const PlatformApi*` (`render.h`), so a test
+        can install its OWN counting `texture_size` shim with no platform-module change at all -
+        `texture_size_called_once_per_batch_not_per_command` (`tests/render/batch.test.cpp`) does
+        exactly this, submits 8 commands sharing one batch, and asserts exactly 1 call. Verified
+        discriminating (moving the query back inside the per-command loop fails it at 8 calls).
+      - **D7 (`debugdraw.cpp`'s `TL_DBG_*` tier-conditional compile-out) - FIXED, was wrongly filed
+        here.** Round 2 argued no single-tier `tl_tests` binary could observe the compile-out.
+        Round 3's reviewer found the actual observable: whether the macro's ARGUMENT LIST was
+        evaluated, a plain runtime fact inside one binary, not a cross-tier one - a counter
+        function passed as `TL_DBG_LINE`'s first argument increments at `TL_DEV=1` and never runs
+        at `TL_DEV=0` (`tl_dbg_line_argument_list_evaluated_only_at_tl_dev`,
+        `tests/render/debugdraw.test.cpp`). Verified discriminating on netcode-linux specifically
+        (dev-tier's `#if TL_DEV` branch is a no-op revert target by construction) - making the
+        `#else` arm call the real function fails the test with the counter still at 0.
+      - **M2 (`sprite.cpp`'s `1.0f/16.0f` restated, now `fx::to_f32(fx::TEXEL)` after RR-26's
+        revert) - moved here from the verified column, where round 2 wrongly placed it.** This is
+        a DIFFERENT class than D6/D7/M1: not "no seam exists to observe it," but "there is no
+        behavioural delta to observe at all." `fx::to_f32(fx::TEXEL)` and a literal `1.0f/16.0f`
+        compile to the identical `f32` - `TEXEL` IS exactly 1/16 (`FX-PALETTE.md`), so any test
+        asserting the computed ratio passes under BOTH the fix and the pre-fix literal, which is
+        exactly `LESSONS.md`'s "a test that branches on the outcome passes under both the fix and
+        the defect" entry. M2 is a "one fact, one home" hygiene fix (deriving from the canonical
+        constant instead of restating it) with no runtime observable - correct to land, impossible
+        to discriminate, and the fact that round 2's fix pass claimed otherwise was itself a
+        measurement-claim error (round 3 A-6), now corrected.
 - [x] **RR-26 (BLOCKING, ruling request, RULED 2026-08-27 - Rafael, relayed by the steward): `audits` red on `734b2c0` - a self-inflicted repeat of
       RR-25's exact shape, and I cannot fix it forward for the same structural reason.**
       `commit_docs.py --base <PR base>` fails: "`src/foundation/ in 734b2c074 changed but none of
