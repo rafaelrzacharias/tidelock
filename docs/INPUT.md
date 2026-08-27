@@ -6,8 +6,9 @@
 > recorder.h/.cpp) — `input_set_producer` lives on `Engine` (`core/loop.h`), not `World*` as §4
 > literally spells it (the producer is never registered/hashed/snapshotted; see `core/input.h`'s
 > contract block). `MAX_PEERS`'s C++ symbol is defined in `core/input.h` rather than `net/`
-> (module-DAG reason and the handoff this leaves for `net/wire.h`: `TODO.md` RR-24).
-> Three non-blocking ruling requests filed: `TODO.md` `RR-24`..`RR-26`.
+> (module-DAG reason: `TODO.md` RR-24) — **RULED 2026-08-26 (Rafael)**: `net/wire.h` gets a
+> scoped exception, `#include "core/input.h"` for the constant, rather than carrying its own copy.
+> Two non-blocking ruling requests remain open: `TODO.md` `RR-25`..`RR-26`.
 > **Owns:** `src/core/input.h`, `action_map.h`, `producers/{live,script,replay}.h`
 > (`network` lives in `src/net/`).
 

@@ -14,31 +14,34 @@
 //   pin `net/wire.h`'s `WireFrame` geometry mirror shares (docs/NETCODE.md's RR-17 ruling names
 //   the eventual `#include "core/input.h"` handoff - filed in TODO.md, not done here: net/ is
 //   another lane's module, docs/WORKFLOW.md cone discipline). `MAX_PEERS`'s VALUE is decided by
-//   CANON.md ("owned by NETCODE" there), but the C++ symbol lives here: `tools/audit/includes.py`
-//   MODULE_DAG has net depend on core, never the reverse, so core cannot reach net's copy and
-//   must carry its own; net/wire.h's duplicate constant is filed in TODO.md for the same
-//   handoff commit that swaps in InputFrame. PeerSlots is a singleton component (docs/INPUT.md
-//   §8 R-2): registered like any other C++ component (world_register_component, elsewhere -
-//   wiring is app/wiring.cpp's job, docs/FRAME-LOOP.md §8.2 step 4), snapshotted/hashed/restored
-//   with the world (docs/FRAME-LOOP.md §7 R-1).
+//   CANON.md ("owned by NETCODE" there); the C++ symbol's home is RULED here (2026-08-26, Rafael,
+//   TODO.md RR-24): CANON.md names no header, so `core/input.h` is the owner as the seam's
+//   consumer-facing side, and `net/wire.h` includes this header for it (a scoped exception into
+//   `net/wire.h`, that one line plus the include, nothing else) rather than carrying its own copy
+//   - `tools/audit/includes.py` MODULE_DAG already has net depend on core, so this needs no new
+//   edge. PeerSlots is a singleton component (docs/INPUT.md §8 R-2): registered like any other
+//   C++ component (world_register_component, elsewhere - wiring is app/wiring.cpp's job,
+//   docs/FRAME-LOOP.md §8.2 step 4), snapshotted/hashed/restored with the world (docs/FRAME-LOOP.md
+//   §7 R-1).
 // Determinism: InputFrame is all-integer (docs/INPUT.md §1) - no float ever enters the sim
 //   through it. Per-tick frame storage lives on the Engine (core/loop.h), not World: it is
 //   recorded by the LAST-phase recorder but is not itself hashed state (only its EFFECTS, via the
 //   action map's edit commands, are).
 // Threading: single-threaded; input_set_producer and world_register_component(&PeerSlots_info)
 //   are init-only.
-// Includes: foundation/tl_types.h, foundation/tl_assert.h, foundation/net_limits.h (MAX_PEERS),
-//   core/reflect.h (PeerSlots' component door), <stddef.h> (offsetof).
+// Includes: foundation/tl_types.h, foundation/tl_assert.h, core/reflect.h (PeerSlots' component
+//   door), <stddef.h> (offsetof).
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
 #include "foundation/tl_assert.h"
-#include "foundation/net_limits.h"
 #include "core/reflect.h"
 #include <stddef.h>
 
-// docs/CANON.md "MAX_PEERS" (value 8, NETCODE-owned there); foundation/net_limits.h is the one
-// C++ home, shared with net/wire.h (module-DAG-forced: net depends on core, never the reverse, so
-// neither module's own header can be the other's source - see that header's contract block).
+// docs/CANON.md "MAX_PEERS" (value 8, NETCODE-owned there); this is the one C++ home (ruled
+// 2026-08-26, Rafael, TODO.md RR-24) - net/wire.h includes this header for it instead of carrying
+// its own copy.
+constexpr u32 MAX_PEERS = 8u;
+static_assert(MAX_PEERS <= 8u, "slot_mask/live_mask/hold bitmaps are one byte wide (docs/NETCODE.md section 20.2.2)");
 
 // docs/INPUT.md §1 R: compile-time; changing it is a wire-format version bump.
 enum : u32 { MAX_ACTIONS = 32u };

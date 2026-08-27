@@ -3175,18 +3175,19 @@ blocking (each has a working, documented interim resolution recorded in the touc
 contract blocks):
 
 - [x] **RR-24 (w3-loop-input): `MAX_PEERS`'s doc-home (`CANON.md`: "owned by NETCODE") and its
-      C++ symbol-home collided with the module DAG. RESOLVED in this lane (review round 1 finding
-      4).** `net/wire.h` (net-p1, merged) and `core/input.h` (this lane) each defined their own
-      `constexpr u32 MAX_PEERS = 8u;`; nothing in the merged tree included both headers in one TU,
-      so it compiled clean and the "harmless today" call below held only until a fresh-context
-      review actually included both and hit `error: redefinition of 'MAX_PEERS'`. Fixed at the
-      root rather than deferred to the RR-17 handoff commit: `foundation/net_limits.h` is now the
-      one C++ home (`foundation` sits below both `core` and `net` in `tools/audit/includes.py`'s
-      `MODULE_DAG`, so this needs no upward edge either module lacked); `core/input.h` and
-      `net/wire.h` both include it and neither declares the constant itself anymore. The `net/`
-      edit is a one-line, behavior-preserving substitution (same value, same symbol name) — not
-      the `WireFrame`->`InputFrame` handoff `net/wire.h`'s own comment still correctly defers to
-      Phase 2 (`NETCODE.md` §20.8's RR-17 ruling), which this leaves untouched.
+      C++ symbol-home collided with the module DAG. RULED 2026-08-26 (Rafael, relayed by the
+      steward).** `net/wire.h` (net-p1, merged) and `core/input.h` (this lane) each defined their
+      own `constexpr u32 MAX_PEERS = 8u;`; nothing in the merged tree included both headers in one
+      TU, so it compiled clean and the "harmless today" call below held only until a fresh-context
+      review actually included both and hit `error: redefinition of 'MAX_PEERS'` (review round 1
+      finding 4). Ruling: `CANON.md` names no header for the constant, so `core/input.h` is the
+      one C++ home (the seam's consumer-facing side); `net/wire.h` gets a scoped exception —
+      delete its own `MAX_PEERS` line, `#include "core/input.h"`, keep its own
+      `static_assert(MAX_PEERS <= 8u, ...)` — nothing else in `net/` changes, and the
+      `WireFrame`->`InputFrame` handoff `net/wire.h`'s own comment defers to Phase 2
+      (`NETCODE.md` §20.8's RR-17 ruling) stays exactly that deferred.
+      (An earlier attempt at this fix introduced a new shared `foundation/net_limits.h` header
+      instead — reverted once the ruling above named `core/input.h` as the actual home.)
       ~~Interim: `core/input.h` defines its own `constexpr u32 MAX_PEERS = 8u;`, cited from
       `CANON.md`, same value — a real, temporary duplicate, harmless today because `net/wire.h`
       does not yet include `core/input.h`. Resolution: at the same commit that lands the RR-17
@@ -3256,6 +3257,27 @@ deleted); producers leaving non-live `Engine::frames` slots un-zeroed into the r
   documented no-op alias for `DZ_AXIAL` — nothing pins even the alias), the ImGui capture mask
   (`INPUT.md` §5), pad connect/disconnect state zeroing, and a nonzero `pointer_x`/`pointer_y`
   through the recorder's LE round trip (every recorded frame in every shipped test is `(0, 0)`).
+
+**Cross-ISA follow-up and history rewrite (2026-08-26/27).** CI's arm64 legs caught a real
+cross-ISA divergence the review-fix commit introduced: `engine_frame`'s alpha fix computed
+`accumulator - whole_ticks * FIXED_DT_SECONDS`, an `a*b-c` shape a compiler is free to contract
+into one fused multiply-subtract under this codebase's default `-ffp-contract=on` (nothing in
+`CPP-SUBSET.md` §7's flag list disables contraction, only `-ffast-math` is banned); aarch64 has
+FMA at baseline, generic x86-64 does not, so the same source line rounded once on ARM and twice on
+x64 — every x64 leg was green, every arm64 leg (four `build-test` tiers + the sanitizer leg) was
+red. Fixed by replacing the division-and-multiply-back with repeated subtraction of
+`FIXED_DT_SECONDS` (no multiply in the expression at all, so nothing to fuse), plus an explicit
+`alpha >= 1.0f -> 0.0f` guard for a separate boundary case (the f64->f32 downcast can round a
+strictly-`< 1.0` f64 quotient up to exactly `1.0f` near the edge) — verified green on the real
+arm64 CI legs afterward, not just argued from the flag defaults. **RULED 2026-08-26 (Rafael,
+relayed by the steward):** commits after the reviewed anchor (`2be6e1c` for this lane) may be
+rewritten to cure per-commit gate misses (the `commit_docs.py` touch this lane's first fix-round
+commit missed by adding `foundation/net_limits.h`/editing `net/wire.h` without a doc touch);
+message-only where possible, the anchor and everything before it stay frozen — this generalizes
+`WORKFLOW.md` R-4's "before first review round" rule to also cover post-review fix commits that
+have not themselves been reviewed yet, and the steward records the general rule in `WORKFLOW.md`
+at wave closeout. This lane's fix-round history was squashed and force-pushed accordingly once
+both the ARM fix and the RR-24 ruling above landed.
 
 Recorded simplifications (implementation choices within this lane's own files, not ruling
 requests — revisit if a real consumer needs more): the RecordedInput header's exact byte offsets
