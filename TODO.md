@@ -5840,13 +5840,20 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 
 > **RR-43 (Rafael, 2026-08-27) — `TOOLING.md` §9.6 gains a THIRD bucket, amending RR-40.** RR-40 split
 > the v0 editor criterion into `panels v0` / `shell v0`. Review C found the two-bucket shape structurally
-> unsound: `shell v0` is defined as "needs a running `editor_frame`/real `PlatformDevApi`", and three of
-> its contents are not shell-blocked at all — the inspector-edit-in-replay-log clause (blocked on RR-42),
-> Console's `ARCHIVE` → `pref_path/cvars.txt` on shutdown (blocked on `pref_path`, the SAME dependency
-> `imgui.ini` is deferred for in the row four bullets down), and the Luau REPL hand-off plus Console's
-> "Luau UI VM" data source (blocked on the `script` lane). Consequences: `shell v0` can be denied
-> incorrectly by someone who lands the shell and finds it still unmet, and the `script` lane has no
-> reason to look in the editor doc's shell bucket. RULED: add **"Deferred — blocked on a ruling or
+> unsound: three clauses sat in a bucket whose name was false for them — **two of them in `panels v0`,
+> the PR's own merge gate**, and one in `shell v0`. In `panels v0`: the inspector-edit-in-replay-log
+> clause, which the doc ITSELF called unsatisfiable (blocked on RR-42), and Console's `ARCHIVE` →
+> `pref_path/cvars.txt` on shutdown, declared "blocked only on RR-38's quantizer" when RR-38 had already
+> landed in this very PR and its real blocker is `pref_path` — the SAME dependency `imgui.ini` is
+> deferred for four bullets down, treated as shell-blocking in one row and as no blocker in the other.
+> In `shell v0`: the Luau REPL hand-off plus Console's "Luau UI VM" data source (blocked on the `script`
+> lane, which the shell will never unblock). Consequences, in severity order: **the gate this PR was
+> about to be merged against was unmeetable and misdescribed** — that is why the verdict was `fix first`;
+> `shell v0` can additionally be denied incorrectly by someone who lands the shell and finds it still
+> unmet; and the `script` lane has no reason to look in the editor doc's shell bucket.
+> *(Corrected 2026-08-27 after Review C's fix-check caught this record misattributing two of the three
+> clauses to `shell v0` — the milder of the two failures. Verified against `c95fe92:docs/TOOLING.md`
+> before amending.)* RULED: add **"Deferred — blocked on a ruling or
 > another lane"**, each item naming its own blocker, so every bucket's name is a true predicate over its
 > contents. `panels v0` then reduces to a claimable gate. Executed by the `w3-editor` lane in PR #16.
 
@@ -5862,6 +5869,18 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > in criteria must carry a resolvable referent**, `[blocked-on: RR-nn]`, and `docaudit` errors when the
 > named ruling is recorded as ruled/landed — the condition is met, so the clause must be re-read. Rule (b)
 > would have fired automatically inside the very PR that landed RR-38.
+> **SCOPE — a "criteria row" is a bullet line INSIDE a bucket block, delimited by the `**<Bucket name>**`
+> headers.** Ruling prose above or between those blocks is out of scope by construction. This is the
+> whole definition and it is deliberately structural: RR-44's own text must quote the phrases it bans in
+> order to explain them, and rule (b)'s record must name the `[blocked-on:]` tag without being parsed as
+> a deferral. The alternative — scoping to "every line in §9.6" plus an exemption mechanism — is worse,
+> because an exemption mechanism is itself a hole: anything can be exempted, and the first inconvenient
+> flag is where it gets used. Likewise (b) applies to a TAG IN A CRITERION ROW, never to any prose
+> mention of an RR, so RR-43's text citing RR-42 is out of scope by construction rather than by pardon.
+> *(Scope added 2026-08-27: the steward had recorded self-reference as an implementation note for
+> whoever builds the gate; Review C's fix-check argued it is a scoping gap in the RULING, since the
+> implementer would otherwise settle it silently and an exemption mechanism would be the likely choice.
+> Correct, and taken.)*
 > **NOT BUILT — RECORD ONLY.** The enforcement lives in `tools/docaudit/docaudit.py`, a shared gate over
 > every doc in the repo and outside the `w3-editor` cone; enabling (a) also requires the §9.6 status-word
 > strip to land first (it did, in PR #16, under RR-43). Owner: unassigned. Whoever takes it should also
@@ -5889,10 +5908,14 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > correctly. Pre-existing infra, untouched by PR #16, and it only bites someone who deletes a test file —
 > which is exactly what an adversarial reviewer does after planting a probe test. Owner: unassigned.
 
-> **STEWARD NOTE (2026-08-27) — the merged-and-closed-lane ownership problem is at SEVEN instances, and
-> the seventh carried a live memory-corruption defect.** The recurring shape: work owned by a lane that
+> **STEWARD NOTE (2026-08-27) — the merged-and-closed-lane ownership problem is at SEVEN INSTANCES
+> ACROSS SIX FILES (`fmt_buf` twice), and the latest carried a live memory-corruption defect.** Stated
+> that way deliberately, per "measure, don't assert": a file needing TWO separate unowned interventions
+> is stronger evidence for the rule than a seventh distinct file would be. (Precision corrected
+> 2026-08-27 after Review C's fix-check flagged the bare "seven" as inviting a six-plus-one reading.)
+> The recurring shape: work owned by a lane that
 > merged and closed, so absent a steward ruling it belongs to nobody — `transform.h`, `asset_load_font`,
-> `CMD_SET_CVAR`, `fmt_buf`, `log.cpp`, `recorder.h`, and now `fmt_buf` again in its own right. Review A
+> `CMD_SET_CVAR`, `fmt_buf`, `log.cpp`, `recorder.h`, and `fmt_buf` a second time. Review A
 > found that `fmt_buf` writes a NUL at `buf[-1]` whenever `out.count == 0` (`stbsp_vsnprintf` takes its
 > `else` branch whenever `buf != NULL`, regardless of count), so `fmt.h`'s stated invariant "never
 > overflows `out`" had been false since it was written, at a boundary that is the ordinary end-state of

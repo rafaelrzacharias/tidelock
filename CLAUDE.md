@@ -80,6 +80,16 @@ narrow slice at a time. Two rules, one tool:
   `docs/XREF.md`. A commit touching `src/<module>/` must touch that module's doc or say `[docs:none]`
   in the message (CI checks). Docs say "best so far", never "final"; a doc's status line carries the
   date of its last reconciliation pass.
+- **Criteria rows state a CONDITION, never a status (RR-44, ruled 2026-08-27).** The stale-marker set
+  above does NOT grow — it structurally cannot catch the real class, a statement TRUE when written that
+  code later falsified (`TOOLING.md` §9.6's "blocked only on RR-38's quantizer", falsified by RR-38
+  landing in the same PR). Two rules replace growing it, **binding on every doc author now, while the
+  gate that will enforce them is unbuilt and unowned**: (1) no met/not-met status word in a criteria row
+  — whether a condition holds belongs to the PR gate and `TODO.md`, not to the criterion that judges the
+  work; name the witness instead. (2) A conditional deferral in a criterion carries a resolvable
+  referent, `[blocked-on: RR-nn]`, so the clause is re-read when that ruling lands. A "criteria row" is
+  a bullet inside a bucket block delimited by its `**<Bucket name>**` header; ruling prose is out of
+  scope by construction, not by exemption. Full record and rationale: `TODO.md`, RR-44.
 
 ### Working boundaries
 - **Single-hat rule.** Don't plan architecture, write code, and write tests in one turn. Stage:
