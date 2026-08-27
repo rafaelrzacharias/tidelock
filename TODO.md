@@ -5201,3 +5201,56 @@ every combination. `includes.py`/`docaudit.py` clean. Could not reproduce the Wi
 crash locally (no Windows host) — reasoned from source (the exact size computation, the exact
 `prof.cpp` precedent) per the steward's own constraint of one validated hypothesis per push
 rather than a guess-and-check loop; CI is the adjudicator here, same as the sanitizer-red case.
+
+### editor/inspector: the generic reflection walker (2026-08-27)
+
+Built `inspector_panel_register`/`inspector_panel_draw`/`inspector_set_scalar_field` in a new
+`editor/inspector.h`/`.cpp` pair (`TOOLING.md` §9.1's file table already gave it its own file,
+unlike Console). A background research pass against the real `reflect.h`/`column.h`/`handle.h`/
+`world.h`/`editor.h` found `TOOLING.md` §9.3.4's pseudocode predated several `ECS.md`
+reconciliations — `FK_*` naming that is really `K_*`, `world_get(World*,ComponentId,Entity)`/
+`world_singleton_ptr` under those signatures that do not exist, a `CMD_SET_FIELD` payload shape
+(`{u16 field;u16 elem;u32 size;u8 bytes[]}`) that isn't the real one (`{u32 field_index;
+bytes[field.size]}`, no element index — `ECS.md` §10.5, not §4), and a `custom_draw`/`debug_draw`
+hook pair that `ComponentInfo` doesn't carry and no registry implements. §9.3.4 is rewritten in
+the same commit to match the shipped code, folding this session's own `desync_diff.cpp`/
+`CONTAINERS.md` §8.6a precedent of "correct the doc in the same commit, not after."
+
+Scope, decided before writing any widget code: an edit is offered ONLY for a non-array
+(`FieldInfo::count == 1`) integer or `K_bool` field. The nine fx palette kinds and every
+handle/`K_StrId` kind are DISPLAY ONLY — an fx edit needs a decimal-to-raw RNE quantizer, and none
+exists anywhere in this tree yet (`core/cvar.cpp`'s own `CVAR_FX_RAW` case documents the identical
+gap in its own comment). Inventing one here, untested — nothing in this tree can simulate the
+keystrokes that would exercise it — would be an unreviewable correctness risk for something that
+writes into registered/hashed sim state through a real command, which `CLAUDE.md` asks to avoid.
+An array-element write is not representable in the real `CMD_SET_FIELD` shape at all (no element
+index), matching the same gap `editor/dotpath.cpp`'s `dotpath_set_raw` already guards
+(`TL_CHECK(f->count == 1u)`) — the walker guards identically, by never drawing a widget for
+`count > 1` rather than drawing one that would write the wrong bytes. Lockstep is hardcoded
+`false` at the one call site, matching Console's own note — no netcode/Hovel session exists yet to
+ask.
+
+Seven tests (`tests/editor/inspector.test.cpp`): panel registration, no-selection no-crash,
+COMP_HIDDEN skip + array-field display together, a selected entity exercising every FieldKind
+family at once (int, bool, the fx palette, a self-referencing `K_Entity` handle, `K_StrId` through
+a real interner), a singleton drawn with no selection, and `inspector_set_scalar_field`'s
+lockstep-refusal and successful-write paths called directly against a real `World` (write, flush,
+read back) — the same "call the write function directly, not through a simulated keystroke" shape
+`console_panel.test.cpp`/`dotpath.test.cpp` already established, since nothing in this tree can
+drive a real widget edit through the null ImGui backend.
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`) runs, 0 failed in every combination. `includes.py`/`docaudit.py`
+clean.
+
+Still open, not silently closed by this slice: Console's cvar UI and Luau REPL hand-off remain
+deferred (weighed at ship review); `desync_diff`'s Alloy `TL_POOL_ROW` half stays blocked (Alloy
+not landed); the fx/handle edit widgets above stay display-only until an RNE quantizer exists and
+is itself reviewed and tested — filed as a ruling request below, not assumed.
+
+**Ruling request (RR):** should `inspector.cpp` (or `cvar.cpp`, whichever lands the primitive
+first) own the decimal-to-fixed-point RNE quantizer `FX-PALETTE.md`/`cvar.cpp`'s own
+`CVAR_FX_RAW` gap both point at, or does `foundation/fx.h` gain it as a shared `fx::from_f64`
+helper both callers use? Either answer unblocks fx-field editing in the Inspector and `set
+<name> <f64>` in the Console cvar UI at once — currently two independent TODOs pointing at the
+same missing primitive.

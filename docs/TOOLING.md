@@ -157,7 +157,7 @@ mutation of sim state is a command (§0).
 | `core/desync_diff.cpp` | the reflection diff walker (§9.3.8); CLI via `tl_driver --diff` | all |
 | `editor/editor.h` | `Editor` (panel table, selection, capture mask, dev arena), `editor_init/frame/shutdown` | dev |
 | `editor/shell.cpp` | ImGui context, dockspace, panel registry, `imgui.ini` in `pref_path`, capture-mask publish | dev |
-| `editor/inspector.cpp` | the walker (§9.3.4), custom-draw hooks, `debug_draw` dispatch | dev |
+| `editor/inspector.cpp` | the walker (§9.3.4) | dev |
 | `editor/console.cpp` | registry, tokenizer, completion, history, cvar UI, Luau REPL hand-off | dev |
 | `editor/dotpath.cpp` + `watch.cpp` | path resolution (§9.3.6), watch overlay | dev |
 | `editor/log_panel.cpp` `profiler_panel.cpp` `trace_export.cpp` `probes_panel.cpp` `world_panel.cpp` `sim_panel.cpp` `net_panel.cpp` `scripts_panel.cpp` | one panel each; `net_panel` builds only when `tl_net` is linked | dev |
@@ -293,27 +293,41 @@ every call. `ASSERT`: if `raw < lo || raw > hi` → row + `TL_LOG_ERR`, and `TL_
 `probe_assert_fatal` (default 0 in dev, 1 in the driver). Tick-throttled only — never wall-clock.
 `--dump-probes <path>` (§10 R-3) sets `tsv_path`; the panel reads the same `ProbeKey` table.
 
-**9.3.4 Inspector walker** (`inspector.cpp`, per frame, single selection):
+**9.3.4 Inspector walker** (`inspector.cpp`, per frame, single selection; built W3 — this section
+was rewritten against the shipped code, not the other way around, once the earlier pseudocode's
+names/shapes were found to predate several `ECS.md` reconciliations):
 ```
-for c in 0..w->comp_count: p = world_get(w, c, sel); if !p: continue; info = comps[c].info
-  if !CollapsingHeader(name(info)): continue
-  if info.custom_draw: info.custom_draw(w, sel, p); continue                // the override; the walker is the mechanism
-  for fi in 0..info.field_count: f = info.fields[fi]; elems = f.count ? f.count : 1; esz = f.size / elems
-    for k in 0..elems: addr = p + f.offset + k*esz; PushID(fi*256+k); label = elems > 1 ? "name[k]" : name
+for c in 0..w->comp_count: info = w->comps[c].info; if info.flags & COMP_HIDDEN: continue
+  if info.flags & COMP_SINGLETON: row = w->comps[c].dense; entity = null
+  else: if sel is null: continue; row = column_get(&w->comps[c], sel); if !row: continue; entity = sel
+  if !CollapsingHeader(info.name): continue
+  for fi in 0..info.field_count: f = info.fields[fi]; elems = f.count (never 0); esz = kind_scalar_size(f.kind)
+    for k in 0..elems: addr = row + f.offset + k*esz; PushID(fi*256+k); label = elems > 1 ? "name[k]" : name
+      editable = (elems == 1) && (kind is an integer K_i8..K_u64, or K_bool)
       switch f.kind:
-        FK_I8..FK_I64, FK_U8..FK_U64: tmp = load; if InputScalar(ImGuiDataType per kind, &tmp) and deactivated-after-edit: set_field(tmp, esz)
-        FK_BOOL: Checkbox
-        FK_POS..FK_SCALAR (the nine rows): raw = load i32; shown = raw * 2^-FRAC(kind) as f64; InputDouble(&shown) + SameLine Text("0x%08x", raw)
-                 on edit: raw' = from_f64_quantized(kind, shown) (RNE; out of range → clamp + TL_LOG_WARN); set_field(raw', 4)
-        FK_H_ENTITY / FK_H_* : Text("%s #%u g%u", domain, idx, gen) (+ "null"); SmallButton("go") → selection = handle (entity) or sim panel focus (Alloy handles); no edit
-        FK_STRID: Text(interner_name(id)); read-only at v0
+        K_i8..K_u64: tmp = load; InputScalar(ImGuiDataType per kind, &tmp); if editable and deactivated-after-edit: inspector_set_scalar_field(w, lockstep, entity, c, fi, &tmp, esz)
+        K_bool: Checkbox; same deactivated-after-edit call, 1-byte value
+        K_pos..K_scalar (the nine palette rows): raw = load i32; shown = raw * 2^-FRAC(kind) as f64; Text("%.9g (0x%08x)", shown, raw) — DISPLAY ONLY, no edit widget (no RNE decimal→raw quantizer exists anywhere in the tree yet; `core/cvar.cpp`'s own `CVAR_FX_RAW` case documents the identical gap)
+        K_Entity / the other handle kinds: Text("%s #%u g%u", domain, idx, gen) (or "null"); K_Entity only also draws SmallButton("go") → ed->sel = that handle; DISPLAY ONLY, no edit widget
+        K_StrId: Text(interner_name(id)) when w->interner is set, else "#%u" — read-only
       PopID
-set_field(bytes, size) → world_set_field(w, sel, c, fi, k, bytes, size)   // ECS §4 command kind CMD_SET_FIELD: payload { u16 field; u16 elem; u32 size; u8 bytes[] }; applied at the barrier by memcpy at offset + elem*esz; recorded in the replay log; refused with ERR_EDITOR_LOCKSTEP in a lockstep session
-singletons: same loop with p = world_singleton_ptr(w, c), entity = null; Luau-declared components are identical (runtime FieldInfo)
-after the walk: for each registered system with debug_draw: debug_draw(w) → debugdraw.h (RENDER2D §9.3.8)
+after the component loop: no custom-draw hook and no per-system debug_draw registry exist — neither is built; the generic per-field walk above is the whole panel at v0
 ```
-`CMD_SET_FIELD` is expected from `core/commands.h` (add it there if absent; `ECS.md` §4 lists
-the shape). `TransformPrev`/`CameraPrev` carry `HIDDEN` and are skipped.
+`inspector_set_scalar_field(w, lockstep, e, comp, field_index, bytes, len)` (`inspector.h`) is the
+one write path: refuses with `ERR_EDITOR_LOCKSTEP` before recording anything when `lockstep` is
+true (hardcoded `false` at the only call site today — no netcode/Hovel session exists yet to ask,
+matching `console_panel_draw`'s own note), else calls `world_set_field_cmd` (`core/world.h`) —
+`core/commands.h`'s real `CMD_SET_FIELD` payload is `{ u32 field_index; bytes[field.size] }`, no
+element index (`ECS.md` §10.5, not §4), so a single array-element write is not representable — the
+same gap `editor/dotpath.cpp`'s `dotpath_set_raw` already documents and guards
+(`TL_CHECK(f->count == 1u)`); the walker guards the same way, by never drawing an editable widget
+for `count > 1` rather than drawing one that would write the wrong bytes. `world_set_field_cmd`
+itself carries no lockstep concept — refusing is the caller's job. `COMP_HIDDEN` components are
+skipped entirely (not shown, not drawn); `COMP_SINGLETON` components draw every frame regardless
+of selection, with `entity` null in the write path (an edit call there is unreached at v0 — no
+singleton test component in this tree currently declares an editable field, and nothing routes an
+edit to one; `world_singleton_set_cmd` remains the wholesale-swap door for singleton writes,
+untouched by this file).
 
 **9.3.5 Console.** Tokenizer: split on ASCII space/tab; a `"`-quoted token keeps spaces and
 honours `\"` and `\\`; `#` starts a comment; max 16 tokens (`ERR_CONSOLE_TOO_MANY_ARGS`);

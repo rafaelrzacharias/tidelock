@@ -120,7 +120,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `LUAU-LAYER.md` -> §3, §4, §6.1, §9
 - `MEMORY.md` -> §6, §10.4
 - `ROADMAP.md` -> §10.8
-- `TOOLING.md` -> §4
+- `TOOLING.md` -> §4, §10.5
 
 ## FRAME-LOOP.md
 - `ARCHITECTURE.md` -> §2, §8.4
