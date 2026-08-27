@@ -1,6 +1,7 @@
 // batch.test.cpp - docs/RENDER2D.md §9.6 radix_order, batch_boundaries.
 #include "runner/tl_test.h"
 #include "render/render_internal.h"
+#include "render_test_util.h"
 #include "foundation/sort.h"
 #include "foundation/vmem_test_api.h"
 #include "foundation/rng.h"
@@ -8,6 +9,7 @@
 #include "foundation/bitset.h"
 #include "foundation/hash.h"
 #include <time.h>
+#include <math.h>
 
 template <typename K>
 static void ref_stable_insertion_sort(K* keys, u32* vals, u32 n) {
@@ -161,4 +163,108 @@ TL_TEST(batch_boundaries, "render") {
         for (u32 i = 0; i < q.batches.count; ++i) { sum += q.batches.data[i].count; }
         TL_EXPECT_EQ(sum, n);
     }
+}
+
+// render_resolve_view (render_internal.h) asserted directly - review round 2 N3: the module's
+// WORLD-space path (the one place this matters) had no test at all before this round.
+TL_TEST(render_resolve_view_maps_sentinel_only, "render") {
+    RenderQueue q{};
+    q.layer_view[0] = 2u;
+    q.layer_view[1] = 0xFFu;
+    TL_EXPECT_EQ(render_resolve_view(&q, 0), (u8)2);
+    TL_EXPECT_EQ(render_resolve_view(&q, 1), (u8)0);   // only the sentinel maps to view 0
+}
+
+// Review round 2 N3: a WORLD-space command on a screen-composited layer (layer_view == 0xFF by
+// render_init default) is the module's main line per §7/§9.3.8, and round 1's D2 fix (the
+// TL_CHECK abort in rect_visible) had no test exercising it - every prior test used
+// RECT_SPACE_SCREEN. This reaches the queue at all only if render_resolve_view's 0xFF fallback
+// works; reverting it fatals here (round 2's own revert-test method).
+TL_TEST(world_space_ui_layer_reaches_the_queue, "render") {
+    static RenderTestFixture f;
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
+    World* w = &f.world;
+    w->render->view_world[0] = Rect_f32{ -1000.0f, -1000.0f, 2000.0f, 2000.0f };
+
+    render_draw_quad(w, LAYER_UI, 0, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, Rect_u16{ 0, 0, 16, 16 }, 0xFFFFFFFFu, TexHandle{}, 0);
+    TL_EXPECT_EQ(w->render->keys.count, 1u);
+    TL_EXPECT_EQ(w->render->stats_rejected, 0u);
+
+    render_test_shutdown(&f);
+}
+
+// Review round 1 M4 (verified discriminating in round 2): render_emit_geometry's pixel-snap check
+// reads q->pres[view], not q->pres[0] - Presentation is per-view (docs/RENDER2D.md §9.3.2,
+// MAX_VIEWS == 4). Routes LAYER_WORLD to view 1 with pres[1].pixel_snap = 1 while pres[0] (never
+// used by this command) stays at render_test_init's default 0 - if the emit code read pres[0] for
+// every view, this command would come out unsnapped.
+TL_TEST(pixel_snap_is_per_view_not_pres0, "render") {
+    static RenderTestFixture f;
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
+    World* w = &f.world;
+    RenderQueue* q = w->render;
+
+    q->layer_view[LAYER_WORLD] = 1u;
+    const Camera2D cam{ 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0, { 0, 0, 0 } };
+    q->view_mat[1] = view_matrix(cam, q->layout);
+    q->view_world[1] = Rect_f32{ -1000.0f, -1000.0f, 2000.0f, 2000.0f };
+    TL_ASSERT_EQ(q->pres[0].pixel_snap, (u8)0);   // render_test_init's default, restated for clarity
+    q->pres[1].pixel_snap = 1;
+
+    const f32 wx = 10.3f, wy = -4.7f;
+    render_draw_quad(w, LAYER_WORLD, 0, wx, wy, 0.0f, 0.0f, 0.0f, Rect_u16{ 0, 0, 16, 16 }, 0xFFFFFFFFu, TexHandle{}, 0);
+    TL_ASSERT_EQ(q->keys.count, 1u);
+
+    render_sort_and_batch(q, w->scratch);
+    render_emit_geometry(q);
+    TL_ASSERT_EQ(q->verts.count, 4u);
+
+    f32 ex, ey;
+    world_to_screen(q->view_mat[1], wx, wy, &ex, &ey);
+    const f32 expected_x = pixel_snap(ex);
+    const f32 expected_y = pixel_snap(ey);
+    TL_EXPECT_TRUE(expected_x != ex);   // the case is only meaningful if snapping actually moves it
+    for (u32 k = 0; k < 4u; ++k) {
+        TL_EXPECT_TRUE(fabsf(q->verts.data[k].x - expected_x) < 1e-4f);
+        TL_EXPECT_TRUE(fabsf(q->verts.data[k].y - expected_y) < 1e-4f);
+    }
+
+    render_test_shutdown(&f);
+}
+
+// Review round 2 N3: render_emit_geometry's world-space branch (batch.cpp) was equally untested -
+// round 1's D3 fix (the view_mat[255] OOB read) had no discriminating test either. Poisons views
+// 1-3 with NaN so a wrong index reads garbage, not a coincidentally-plausible zero matrix, then
+// checks the emitted quad's vertices against view_mat[0]'s own projection exactly (sx = sy = 0
+// collapses all four corners onto the centre, so no hand-rotated-corner math is needed).
+TL_TEST(world_space_debug_layer_uses_view0_not_poisoned_slots, "render") {
+    static RenderTestFixture f;
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
+    World* w = &f.world;
+    RenderQueue* q = w->render;
+
+    for (u32 v = 1; v < MAX_VIEWS; ++v) {
+        for (u32 i = 0; i < 9u; ++i) { q->view_mat[v].m[i] = NAN; }
+    }
+    const Camera2D cam{ 10.0f, -5.0f, 2.0f, 0.0f, 16.0f, 0, { 0, 0, 0 } };
+    q->view_mat[0] = view_matrix(cam, q->layout);
+    q->view_world[0] = Rect_f32{ -1000.0f, -1000.0f, 2000.0f, 2000.0f };
+
+    // LAYER_DEBUG's layer_view is 0xFF by render_init default - the fallback must resolve to
+    // view 0, never index into a poisoned slot.
+    render_draw_quad(w, LAYER_DEBUG, 0, 3.0f, 4.0f, 0.0f, 0.0f, 0.0f, Rect_u16{ 0, 0, 16, 16 }, 0xFFFFFFFFu, TexHandle{}, 0);
+    TL_ASSERT_EQ(q->keys.count, 1u);
+
+    render_sort_and_batch(q, w->scratch);
+    render_emit_geometry(q);
+    TL_ASSERT_EQ(q->verts.count, 4u);
+
+    f32 ex, ey;
+    world_to_screen(q->view_mat[0], 3.0f, 4.0f, &ex, &ey);
+    for (u32 k = 0; k < 4u; ++k) {
+        TL_EXPECT_TRUE(fabsf(q->verts.data[k].x - ex) < 1e-4f);
+        TL_EXPECT_TRUE(fabsf(q->verts.data[k].y - ey) < 1e-4f);
+    }
+
+    render_test_shutdown(&f);
 }

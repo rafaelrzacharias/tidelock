@@ -57,12 +57,19 @@ static_assert(__is_trivially_copyable(Camera2D), "");
 static_assert(sizeof(Camera2D) == 24, "docs/RENDER2D.md section 9.2");
 
 // 24 B, RenderQueue.camera_prev[view] - the previous-frame snapshot sys_extract interpolates
-// from. Advancing it (camera_prev[v] = camera[v], once per sim tick) is the future app/wiring.cpp
-// lane's job (docs/FRAME-LOOP.md's interp_pingpong hook, not yet built) - same as
-// Transform/TransformPrev's own ping-pong, which core's generic mechanism drives for registered
-// components only; camera left the ECS (D1 above), so it needs its own explicit copy there,
-// not core's. Not this lane's to build ahead of that consumer (CLAUDE.md rule 8: "large subsystem
-// = stable interface + ONE impl now, pulled in by a real consumer").
+// from. render_camera_init (render.h) seeds this to the same value as camera[view] on a view's
+// FIRST setup (ruled 2026-08-27, Rafael, relayed by the steward - docs/RENDER2D.md §2's full
+// account), so the first sys_extract() call never lerps from a zeroed (ppu = 0) prev - review
+// round 2 N1 found that a raw camera[v] write left camera_prev[v] at render_init's zero-fill and
+// sys_extract aborted (view_matrix's ppu = 0 makes the matrix singular, tripping D10's own
+// TL_CHECK(det != 0) in screen_to_world). ADVANCING it on later ticks (camera_prev[v] =
+// camera[v], once per sim tick, after the first) is still the future app/wiring.cpp lane's job
+// (docs/FRAME-LOOP.md's interp_pingpong hook, not yet built) - same as Transform/TransformPrev's
+// own ping-pong, which core's generic mechanism drives for registered components only; camera
+// left the ECS (D1 above), so it needs its own explicit copy there, not core's. Not this lane's
+// to build the ADVANCE half ahead of that consumer (CLAUDE.md rule 8: "large subsystem = stable
+// interface + ONE impl now, pulled in by a real consumer") - only the INIT half, which every
+// caller needs immediately to configure a camera safely at all.
 struct CameraPrev {
     f32 cx, cy;
     f32 zoom;

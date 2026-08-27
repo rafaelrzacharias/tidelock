@@ -62,9 +62,13 @@ struct RenderQueue {
     Presentation pres[MAX_VIEWS]; Layout layout; TexHandle target[MAX_LAYERS]; u32 clear_rgba[MAX_LAYERS];
     u8 layer_view[MAX_LAYERS];   // which view's matrix a world-space layer uses (UI/DEBUG: 0xFF = screen space)
     // Camera state (review round 1 D1: moved off the ECS - camera.h's Determinism note explains
-    // why). A caller configures view v's camera by writing camera[v]/camera_prev[v] directly (the
-    // same direct-field-write pattern pres[]/view_world[] already use) and setting camera_count >
-    // v; sys_extract only processes views [0, camera_count). camera_follow[v].target == Entity{}
+    // why). A view's FIRST configuration must go through render_camera_init (below) - review
+    // round 2 N1: a raw camera[v] write with camera_prev[v] left at render_init's zero-fill
+    // aborts sys_extract on the very next call (a zeroed CameraPrev.ppu makes the interpolated
+    // matrix singular). Per-tick updates after that first call are a direct `camera[v] = ...`
+    // write (matches pres[]/view_world[]'s own direct-field-write pattern) - advancing
+    // camera_prev is the future app/wiring.cpp barrier's job (camera.h's CameraPrev comment).
+    // sys_extract only processes views [0, camera_count). camera_follow[v].target == Entity{}
     // means "no follow" for that view.
     Camera2D camera[MAX_VIEWS]; CameraPrev camera_prev[MAX_VIEWS]; CameraFollow camera_follow[MAX_VIEWS];
     u8 camera_count;
@@ -112,7 +116,8 @@ void render_submit(World* w, DrawCommand c);
 // Pushes a clip rect (target px of the command's layer) and returns its id. TL_FATAL at 256
 // rects / stack depth 32.
 u16  render_clip_push(World* w, Rect_i32 r);
-// Pops the innermost clip pushed by render_clip_push. TL_ASSERT on underflow.
+// Pops the innermost clip pushed by render_clip_push. TL_CHECK on underflow (review round 1 D5:
+// a memory-safety precondition, live in every tier, not TL_ASSERT).
 void render_clip_pop(World* w);
 
 // True iff `r` overlaps the visible rect for `layer` in `space` (non-strict - touching edges
@@ -131,6 +136,14 @@ void render_draw_quad(World* w, u8 layer, u32 depth24, f32 x, f32 y, f32 rot, f3
 // present -> reset counts and publish stats. Implemented in backend_sdl.cpp (the only TU that
 // calls the platform DrawApi - docs/RENDER2D.md caption).
 void render_present(World* w);
+
+// The sanctioned way to bring up view `view`'s camera (docs/RENDER2D.md §2; review round 2 N1):
+// sets BOTH camera[view] and camera_prev[view] to `cam` - no first-frame interpolation artifact,
+// since prev == cur until the next real update - and bumps camera_count to cover `view` if it
+// does not already. TL_CHECK(view < MAX_VIEWS). Call once, before the first sys_extract() that
+// view participates in; a per-tick position update afterwards is a direct `camera[view] = ...`
+// write (RenderQueue's own comment).
+void render_camera_init(World* w, u8 view, const Camera2D& cam);
 
 // sys_extract (extract.cpp): the first system of PRE_RENDER (docs/RENDER2D.md §9.3.3). fx ->
 // f32, lerp by w->render->alpha, into w->render->packet; cameras interpolated the same way into

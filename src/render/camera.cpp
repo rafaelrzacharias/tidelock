@@ -3,6 +3,7 @@
 //   pixel_snap. Spec: docs/RENDER2D.md §9.3.1 (resolve_layout), §9.3.2 (projection).
 // ---------------------------------------------------------------------------------------------
 #include "render/camera.h"
+#include "render/render.h"
 #include "foundation/tl_assert.h"
 #include <math.h>
 
@@ -106,3 +107,11 @@ void target_to_window(const Layout& L, f32 tx, f32 ty, f32* wx, f32* wy) {
 }
 
 f32 pixel_snap(f32 px) { return floorf(px + 0.5f); }
+
+void render_camera_init(World* w, u8 view, const Camera2D& cam) {
+    RenderQueue* q = w->render;
+    TL_CHECK(view < MAX_VIEWS);
+    q->camera[view] = cam;
+    q->camera_prev[view] = CameraPrev{ cam.cx, cam.cy, cam.zoom, cam.rot_turns, cam.ppu, cam.pixel_snap, { 0, 0, 0 } };
+    if (view >= q->camera_count) { q->camera_count = (u8)(view + 1u); }
+}

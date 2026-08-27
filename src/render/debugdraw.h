@@ -67,13 +67,19 @@ static_assert(sizeof(DbgPersist) == 40, "docs/RENDER2D.md section 9.3.8");
 void debugdraw_init(World* w, VMemArena* arena);
 
 // dbg_line(a, b, width_px, rgba, space): d = normalize(b - a) in target px; n = (-d.y, d.x)*
-// width/2; quad a+n, b+n, b-n, a-n (docs/RENDER2D.md §9.3.8).
+// width/2; quad a+n, b+n, b-n, a-n (docs/RENDER2D.md §9.3.8). width_px is ALWAYS target px, even
+// when space == RECT_SPACE_WORLD (a and b are then world m, but the stroke weight is not - it
+// stays a fixed on-screen thickness regardless of zoom, converted to world m internally by the
+// LAYER_DEBUG view's effective ppu before being handed to render_draw_quad; review round 2 N4).
 void dbg_line(World* w, f32 ax, f32 ay, f32 bx, f32 by, f32 width_px, u32 rgba, RectSpace space);
 
 // dbg_rect = 4 dbg_line calls (docs/RENDER2D.md §9.3.8), corners of {x,y,w,h}.
 void dbg_rect(World* w, f32 x, f32 y, f32 width, f32 height, f32 line_width_px, u32 rgba, RectSpace space);
 
-// dbg_circle: N = clamp(ceil(r_px / 2), 8, 64) segments (docs/RENDER2D.md §9.3.8).
+// dbg_circle: N = clamp(ceil(r_px / 2), 8, 64) segments (docs/RENDER2D.md §9.3.8), keyed on r_px
+// itself (the on-screen radius) regardless of space - it already matches actual on-screen size by
+// construction (see dbg_line's comment: r_px is target px in WORLD space too, converted to world m
+// for the geometry only, never for the segment count; review round 2 N4).
 void dbg_circle(World* w, f32 cx, f32 cy, f32 r_px, f32 line_width_px, u32 rgba, RectSpace space);
 
 // Persistent line (docs/RENDER2D.md §7): pushes a DbgPersist row (until_tick = current tick +
@@ -86,6 +92,8 @@ void dbg_rect_persist(World* w, f32 x, f32 y, f32 width, f32 height, f32 line_wi
 // Persistent circle - same ring/lifetime contract as dbg_line_persist.
 void dbg_circle_persist(World* w, f32 cx, f32 cy, f32 r_px, f32 line_width_px, u32 rgba, RectSpace space, u64 ticks);
 
-// Re-emits every ring entry with until_tick > world.tick (docs/RENDER2D.md §7). Call once per
-// frame, RENDER phase, before any one-shot dbg_* calls the same frame would double-draw.
+// Re-emits every ring entry with until_tick > world.tick (docs/RENDER2D.md §7), in INSERTION
+// order (oldest first - review round 2 N11: matches §9.3.8's "depth = submission", since each
+// re-emit's depth24 is assigned fresh from the current stats_submitted). Call once per frame,
+// RENDER phase, before any one-shot dbg_* calls the same frame would double-draw.
 void debugdraw_replay_persistent(World* w);

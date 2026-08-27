@@ -122,3 +122,33 @@ TL_TEST(world_screen_roundtrip, "render") {
         TL_EXPECT_TRUE(fabsf(wy2 - wy) < 1e-3f);
     }
 }
+
+// Review round 1 D10 (verified discriminating in round 2): resolve_layout's internal_h == 0 guard
+// is TL_CHECK (live in every tier), not TL_ASSERT - internal_w != 0 but internal_h == 0 would
+// otherwise fall through to an integer divide-by-zero at `win_h / ih`.
+TL_TEST_EXPECT_FATAL(resolve_layout_zero_internal_h_fatal, "render,fatal") {
+    (void)t;
+    resolve_layout(1280, 720, 0, make_pres(320, 0, PRES_INTEGER_LETTERBOX));   // ih == 0 -> TL_FATAL
+}
+
+// Review round 1 D10 (verified discriminating in round 2): view_matrix's pixel_snap branch divides
+// by ppu = cam.ppu * cam.zoom to round the snapped centre - a zero ppu (here cam.ppu == 0) would
+// otherwise divide by zero. Only reachable when pixel_snap != 0 - the non-snap path never divides.
+TL_TEST_EXPECT_FATAL(view_matrix_zero_ppu_pixel_snap_fatal, "render,fatal") {
+    (void)t;
+    Layout L = resolve_layout(1280, 720, 0, make_pres(320, 180, PRES_INTEGER_LETTERBOX));
+    Camera2D cam{}; cam.cx = 0.0f; cam.cy = 0.0f; cam.zoom = 1.0f; cam.rot_turns = 0.0f;
+    cam.ppu = 0.0f; cam.pixel_snap = 1;
+    view_matrix(cam, L);   // ppu == 0 -> TL_FATAL
+}
+
+// Review round 1 D10 (verified discriminating in round 2): screen_to_world's det == 0 guard is the
+// second line of defense (view_matrix's own ppu != 0 guard is the first) for a matrix built some
+// other way - a degenerate Mat3 (m0=m1=m3=m4=0, det = 0*0 - 0*0 = 0) exercises it directly without
+// going through view_matrix at all.
+TL_TEST_EXPECT_FATAL(screen_to_world_zero_det_fatal, "render,fatal") {
+    (void)t;
+    Mat3 M{};   // all-zero: det = m0*m4 - m1*m3 = 0
+    f32 wx, wy;
+    screen_to_world(M, 1.0f, 1.0f, &wx, &wy);   // det == 0 -> TL_FATAL
+}

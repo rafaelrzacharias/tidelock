@@ -3014,9 +3014,15 @@ right; it is the template the others now follow.
 - [x] **v0 done-criterion verification (`docs/RENDER2D.md` §9.7 steps 1-4; `WORKFLOW.md` §6 R-11
       local validation).** All measured, not assumed:
       - Steps 1-4 green: `tests/render/{camera,queue,batch,backend_sdl,extract,sprite,
-        debugdraw}.test.cpp`, 15 tests (counted directly, review round 1 M3 - not 20), on BOTH a
-        dev build and a `-DTL_TIER=netcode -DTL_STRICT_TOOLCHAIN=OFF` build (the CI-red fix above made this mandatory going
-        forward, not just this once) - 0 failed on either tier.
+        debugdraw}.test.cpp`, on BOTH a dev build and a `-DTL_TIER=netcode
+        -DTL_STRICT_TOOLCHAIN=OFF` build (the CI-red fix above made this mandatory going forward,
+        not just this once) - 0 failed on either tier. **Test-count history (review round 2 N6,
+        2026-08-27): this row has stated a wrong "counted directly" number twice - "20" originally,
+        then "15" replacing it, when the tree had 16 both times; it has since grown with each
+        review round (17 after D1, 22 after round 2's N1-N4 fixes and their own tests). A count is
+        stale the moment the next commit lands, by design - `tl_tests --tag render`'s own
+        "N selected" line is the one live source; this row stops repeating a point-in-time number
+        that inevitably drifts.**
       - `stats_draw_calls == batches`: asserted directly in `present_descriptor` (3 == 3).
       - Zero heap allocation per frame: `docs/MEMORY.md` §2's CRT-malloc counter was DROPPED by
         a 2026-08-26 ruling recorded in `foundation/alloc_shim.h`'s own contract block - the
@@ -3099,6 +3105,19 @@ right; it is the template the others now follow.
       owner, or a new `tools/audit/` script) to decide: a dedicated grep step, or folded into
       `docaudit.py`'s existing pass. Not blocking render2d's v0 - the two call sites in scope
       today are exactly the allowlisted ones.
+      **AMENDED (review round 2 N5, 2026-08-27):** two new findings for whoever picks this up.
+      (1) Round 1's own M2 fix (`sprite.cpp`'s TEXEL ratio) briefly added a THIRD render-side
+      `to_f32` call site outside the allowlist, in the same commit series that filed this very RR -
+      caught in round 2, fixed by adding `fx::TEXEL_M` (`foundation/fx_float.h`, a compile-time
+      constant derived from `fx::TEXEL.v`, not a call site of its own) and pointing `sprite.cpp` at
+      it instead. A live grep gate would have caught this immediately instead of waiting for
+      review round 2 - strengthens the case for RR-24 itself. (2) The allowlist sentence in
+      `RENDER2D.md` §9.5 is not just unenforced, it does not currently HOLD on the tree:
+      `src/script/bind_fx.cpp` and `src/script/vm.h` call `to_f32`/`to_f64` too, neither `render/`
+      nor `editor/` - pre-existing on `main`, not this lane's to fix (`script/` is a different
+      module), but whoever implements the grep gate needs to either amend the allowlist to name
+      `script/`'s legitimate sites or relocate them; a gate written against the CURRENT wording
+      would fail on `main` from the day it lands.
 - [ ] **`sim/views.h` still not on `main`** (alloy-substrate, expected after 2026-09-01, per this
       lane's brief). `src/render/simview.h` forward-declares the five view structs opaque and
       `simview_update` is v0's stub (empty body) - Milestone 2 replaces the forward declarations
@@ -3227,6 +3246,78 @@ right; it is the template the others now follow.
       `app/wiring.cpp`/`interp_pingpong` (W4 v0-integration) needs to know this before wiring the
       real barrier. Flagging for the frame-loop/ECS lane or the steward's closeout sweep to fix
       §176/§201 in `FRAME-LOOP.md` itself.
+- [x] **RULED 2026-08-27 (Rafael, relayed by the steward) — review round 2 N1: `camera_prev` is
+      seeded from `camera` at set time.** The spec gap: `RENDER2D.md` §9.3.3 defines the camera
+      lerp but §2 only ever said advancing `camera_prev` is "not yet built" - silent on what
+      `sys_extract` should do with a never-populated one, which round 2 found was a reachable
+      `TL_CHECK` abort on the very first frame (a zero-filled `camera_prev` makes `ppu == 0`,
+      singular matrix, `camera.cpp:95`'s `TL_CHECK(det != 0)` fires). Ruling: `render_camera_init`
+      (already this lane's own fix, landed the same shape independently before the ruling arrived)
+      seeds BOTH `camera[view]` and `camera_prev[view]` on a view's first setup - the first frame
+      lerps prev against itself (the identity), so `sys_extract` stays an unconditional lerp with
+      no sentinel test and no branch; `ppu == 0` goes back to meaning simply "invalid," not
+      "unset." Landed at its home, `RENDER2D.md` §2 (a new paragraph, cited from `camera.h`'s
+      `CameraPrev` contract block) - the "not yet built" note there now says only the per-frame
+      ADVANCE is unbuilt, since initialization is defined. Tested discriminatingly per the
+      steward's standard: `camera_init_first_frame_is_alpha_independent` (alpha 0 and 0.5 give the
+      identical, correct result - not a fatal, not a degenerate one) and
+      `camera_extract_degenerate_cases` (`camera_count == 0`; a view configured after
+      `world_flush`) - both verified to fail when `render_camera_init`'s seeding is reverted
+      (watched the whole suite fatal at `extract.cpp`'s `TL_CHECK(interp.ppu != 0.0f)` before
+      restoring the fix).
+- [x] **Review round 2's discriminating-test sweep - three round-1 fixes recorded as NOT
+      practically unit-testable, per the steward's own allowance ("say so explicitly per item with
+      the reason rather than leaving a passing non-test").** All thirteen other round-1 fixes (D2-
+      D5, D10, M2, M4, M5 plus D1/N1's own N-round tests) now have a revert-verified discriminating
+      test; these three do not, for reasons intrinsic to what each fix actually is, not for lack of
+      trying:
+      - **D6 (`simview.cpp` did not exist).** The fix IS a file existing and its two declared
+        functions being defined - `simview_texel_to_world`/`simview_update` were forward-declared
+        in `simview.h` but had no `.cpp` TU, so the module only linked because nothing called them.
+        Reverting this fix means deleting the TU (or the function bodies) again, which does not
+        make a `TL_TEST` body FAIL - it makes `tl_tests` fail to LINK, so there is no green/red
+        test-runner state to discriminate between; the binary simply does not exist to run. N10's
+        `simview_texel_to_world_half_texel_rule` (`tests/render/simview.test.cpp`, landed this
+        round) is a real, passing test of the function's *correctness* once it exists, and would
+        catch a wrong implementation - but it cannot be the discriminating test for "the file
+        exists at all," because there is no revert of that specific fix that produces a test
+        failure instead of a build failure. The build-level signal (does `tl_tests` link) IS the
+        test for this one.
+      - **D7 (`debugdraw.cpp`'s `TL_DBG_*` tier-conditional compile-out).** The fix's entire
+        content is that `TL_DBG_LINE`/`TL_DBG_RECT`/etc. (`debugdraw.h` §7b) expand to a real call
+        at `TL_DEV=1` and to `((void)0)` (argument list unevaluated, call site elided) at
+        `TL_DEV=0`. This is a preprocessor-time property of ONE tier, checked against the SAME
+        source compiled under a DIFFERENT `-DTL_DEV` define - not a runtime condition any single
+        `tl_tests` binary (which is built for exactly one tier) can observe about itself. A dev-
+        tier test cannot prove netcode/ship elides the call; a netcode-tier test cannot even
+        reference the dev-only entry points to prove they exist. Round 2's reviewer verified this
+        the only way it can be verified - building the netcode-linux binary directly and reading
+        the compiler's own "unused function" diagnostic for the side-effecting helper the macro
+        would otherwise have called - which is exactly what this lane repeated (recorded in the
+        round-2 validation log, not as a `tl_tests` case). `tests/foundation/tl_probe.test.cpp`
+        (the cited precedent) confirms the pattern is inherent, not this lane's gap: its own
+        `#if TL_DEV` guarded assertions test DEV-tier behavior only and carry no runtime assertion
+        of the netcode-tier compile-out either - there is no house precedent that unit-tests this
+        class of property, because `TL_TEST` runs inside one tier's binary by construction.
+      - **M1 (`batch.cpp`'s `texture_size` hoisted from per-command to per-batch).** The fix is a
+        call-COUNT property - one `draw.texture_size` call per batch instead of one per command -
+        and `platform/impl_headless/draw.cpp`'s `hd_texture_size` (the only backend `tl_tests`
+        exercises) is a plain getter with no counter, log entry, or other observable side effect
+        (checked: `log_call`, the headless draw-log's writer, is called from `hd_texture_create`/
+        `_upload`/`_lock`/`_destroy`/`set_target`/`set_clip`/`clear`/`draw_geometry`/`present` -
+        every OTHER draw verb - but not from `hd_texture_size`, which returns cached width/height
+        with no side effect at all). Making this countable needs new platform-side test
+        instrumentation (a `HeadlessState` call counter plus a `headless_test_api.h` accessor,
+        mirroring `headless_draw_log`'s own pattern) that does not exist today and is not
+        `render2d`'s file to add unasked - `platform/impl_headless/` is a different module's
+        surface (`ARCHITECTURE.md` §1's DAG), and CLAUDE.md rule 8 ("large subsystem = stable
+        interface + ONE impl now, pulled in by a real consumer") argues against speculatively
+        widening a platform test API for one render-side call-count assertion nobody else needs
+        yet. The fix itself is trivially checked by reading `batch.cpp:58-62` (the
+        `texture_size` call sits above the per-command `for` loop, guarded once per batch, not
+        inside it) - correct and in the tree, just not exercised by a `tl_tests` case. Filed here
+        rather than left as a silent gap; a future platform-side call-counter (if another consumer
+        needs one) should close it then.
 
 ## Alloy (`docs/ALLOY.md` — headless-first; its own build queue in "Gates & rulings ledger")
 - [ ] **W3 alloy-liquids-gases OPENING task — the liquid design pass (the RR-10 ruling,

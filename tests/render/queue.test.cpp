@@ -78,6 +78,34 @@ TL_TEST_EXPECT_FATAL(clip_stack_depth_overflow, "render,fatal") {
     render_test_shutdown(&f);
 }
 
+// Review round 1 D5 (verified discriminating in round 2): render_clip_pop's underflow guard is
+// TL_CHECK (live in every tier), not TL_ASSERT (netcode/ship compiles it away) - a `depth` u8
+// underflow wraps to 255, and the next render_submit stamps garbage into a 32-entry stack.
+TL_TEST_EXPECT_FATAL(clip_pop_underflow, "render,fatal") {
+    (void)t;
+    static RenderTestFixture f;
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
+    World* w = &f.world;
+    TL_ASSERT_EQ(w->render->clips.depth, (u8)0);
+    render_clip_pop(w);   // depth == 0 -> TL_FATAL
+    render_test_shutdown(&f);
+}
+
+// Review round 1 M5 (verified discriminating in round 2): render_init sets w->render = q BEFORE
+// the one fallible step (texture_create), so a caller whose init fails can still safely call
+// render_shutdown - internal_w = 9000 exceeds the headless draw impl's 8192 texture-size limit
+// (platform/impl_headless/draw.cpp hd_texture_create), giving a real Result failure without going
+// through resolve_layout's own D10 guard (internal_h stays nonzero here).
+TL_TEST(render_init_failure_leaves_render_settable_for_shutdown, "render") {
+    static RenderTestFixture f;
+    const ErrCode e = render_test_init(&f, 9000, 100);
+    TL_ASSERT_EQ(e, (ErrCode)ERR_RENDER_INIT);
+    TL_ASSERT_TRUE(f.world.render != nullptr);   // set before the fallible step - not a stale/null w->render
+    TL_EXPECT_TRUE(handle_is_null(f.world.render->target[LAYER_WORLD]));   // the failed create never assigned it
+
+    render_test_shutdown(&f);   // must not crash: render_shutdown's destroy loop sees an all-null target[]
+}
+
 TL_TEST(reject, "render") {
     static RenderTestFixture f;
     TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);

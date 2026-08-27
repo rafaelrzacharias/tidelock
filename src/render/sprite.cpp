@@ -21,8 +21,11 @@ void sys_sprite_render(World* w) {
     const Transform* tbase = world_column<Transform>(w).data;
 
     // TEXEL is CANON.md's one home for this ratio (foundation/fx_palette.h) - derived, not
-    // restated (review round 1 M2).
-    const f32 texel_m = fx::to_f32(fx::TEXEL);
+    // restated (review round 1 M2). fx::TEXEL_M (foundation/fx_float.h), not fx::to_f32(fx::TEXEL)
+    // directly: a to_f32 CALL SITE here would be a third render-side site outside §9.5's allowlist
+    // (extract.cpp, simview.cpp, editor/ only) - review round 2 N5 caught M2's fix doing exactly
+    // that, in the same commit series that reasserted the allowlist for D11.
+    const f32 texel_m = fx::TEXEL_M;
 
     for (u32 i = 0; i < sprites.count; ++i) {
         const Sprite s = sprites.data[i];

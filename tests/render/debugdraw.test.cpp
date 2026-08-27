@@ -5,6 +5,7 @@
 #include "render/text.h"
 #include "foundation/vmem_test_api.h"
 #include <string.h>
+#include <math.h>
 
 struct DebugDrawFixture {
     VMemApi api;
@@ -22,7 +23,9 @@ static ErrCode dd_init(DebugDrawFixture* f) {
     if (e != ERR_OK) { return e; }
     memset(&f->w, 0, sizeof(f->w));
     memset(&f->rq, 0, sizeof(f->rq));
-    const u32 cap = 512u;
+    // > DBG_PERSIST_RING_CAP (4096) so a full-ring-wrap replay test can submit every live entry
+    // in one render_present-less draw-command batch (review round 2 N11).
+    const u32 cap = 8192u;
     array_init_fixed(&f->rq.keys, &f->render_arena, cap);
     array_init_fixed(&f->rq.data_index, &f->render_arena, cap);
     array_init_fixed(&f->rq.clip_id, &f->render_arena, cap);
@@ -64,6 +67,24 @@ TL_TEST(dbg_line_submits_one_command, "render") {
     TL_EXPECT_EQ(f->rq.keys.count, 1u);
 }
 
+// Review round 2 N4: §9.3.8's width/radius are ALWAYS target px, even for a WORLD-space command -
+// a WORLD-space quad's sx/sy otherwise share the command's own space (world m), so an unconverted
+// width_px comes out ppu_eff times too wide at emit and changes with zoom, which a debug overlay's
+// stroke weight must never do. Every debugdraw test before this round used RECT_SPACE_SCREEN only
+// (this file's own comment used to note it as untested).
+TL_TEST(dbg_line_world_space_width_is_target_px, "render") {
+    DebugDrawFixture* f = dd_fixture();
+    TL_ASSERT_EQ(dd_init(f), ERR_OK);
+    f->rq.view_world[0] = Rect_f32{ -1000.0f, -1000.0f, 2000.0f, 2000.0f };
+    Layout L{}; L.internal_w = 320; L.internal_h = 180;
+    f->rq.view_mat[0] = view_matrix(Camera2D{ 0.0f, 0.0f, 1.0f, 0.0f, 16.0f, 0, { 0, 0, 0 } }, L);   // ppu_eff = 16
+
+    dbg_line(&f->w, 0.0f, 0.0f, 10.0f, 0.0f, 2.0f, 0xFFFFFFFFu, RECT_SPACE_WORLD);   // width_px = 2
+    TL_ASSERT_EQ(f->rq.keys.count, 1u);
+    TL_EXPECT_TRUE(fabsf(f->rq.data.sx[0] - 10.0f) < 1e-5f);           // length: unconverted, already in world m
+    TL_EXPECT_TRUE(fabsf(f->rq.data.sy[0] - (2.0f / 16.0f)) < 1e-5f);  // width: 2 px / ppu_eff(16) = 0.125 world m
+}
+
 TL_TEST(dbg_rect_submits_four_lines, "render") {
     DebugDrawFixture* f = dd_fixture();
     TL_ASSERT_EQ(dd_init(f), ERR_OK);
@@ -86,6 +107,32 @@ TL_TEST(dbg_circle_segment_count_clamped, "render") {
     f->rq.keys.count = 0; f->rq.data.count = 0; f->rq.data_index.count = 0; f->rq.clip_id.count = 0;
     dbg_circle(&f->w, 500.0f, 500.0f, 300.0f, 1.0f, 0xFFFFFFFFu, RECT_SPACE_SCREEN);
     TL_EXPECT_EQ(f->rq.keys.count, 64u);
+}
+
+// Review round 2 N11: debugdraw_replay_persistent used to walk the ring in SLOT order, which only
+// matches insertion order before the first wrap - docs/RENDER2D.md §9.3.8 states "depth =
+// submission", and each replay's depth24 is assigned fresh (q->stats_submitted at THIS call),
+// so the replay LOOP's own visitation order is what "submission order" means here. Pushes
+// DBG_PERSIST_RING_CAP + 3 distinguishable entries (rgba = insertion index) so the last 3 wrap
+// over ring slots 0-2 (debugdraw.h's own overflow contract) and checks the replay reproduces
+// the surviving insertion order (3..DBG_PERSIST_RING_CAP+2), oldest first - not ring-slot order.
+TL_TEST(persistent_ring_replays_in_insertion_order_after_wrap, "render") {
+    DebugDrawFixture* f = dd_fixture();
+    TL_ASSERT_EQ(dd_init(f), ERR_OK);
+    f->w.state->tick = 0;
+
+    for (u32 i = 0; i < (u32)DBG_PERSIST_RING_CAP + 3u; ++i) {
+        dbg_line_persist(&f->w, 10.0f, 10.0f, 20.0f, 10.0f, 1.0f, i, RECT_SPACE_SCREEN, 1000000u);
+    }
+
+    f->rq.keys.count = 0; f->rq.data.count = 0; f->rq.data_index.count = 0; f->rq.clip_id.count = 0;
+    debugdraw_replay_persistent(&f->w);
+    TL_ASSERT_EQ(f->rq.keys.count, (u32)DBG_PERSIST_RING_CAP);
+
+    for (u32 k = 0; k < f->rq.keys.count; ++k) {
+        const u32 di = f->rq.data_index.data[k];
+        TL_EXPECT_EQ(f->rq.data.rgba[di], k + 3u);
+    }
 }
 
 TL_TEST(persistent_ring_replays_until_expiry, "render") {

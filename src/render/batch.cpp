@@ -4,6 +4,7 @@
 // ---------------------------------------------------------------------------------------------
 #include "render/render_internal.h"
 #include "foundation/sort.h"
+#include "foundation/tl_assert.h"
 #include <math.h>
 
 void render_sort_and_batch(RenderQueue* q, Scratch* scratch) {
@@ -45,6 +46,11 @@ void render_emit_geometry(RenderQueue* q) {
     for (u32 bi = 0; bi < nb; ++bi) {
         const Batch b = q->batches.data[bi];
         const u8 view = render_resolve_view(q, b.layer);
+        // render_resolve_view only maps the 0xFF sentinel to 0 - any OTHER out-of-range
+        // layer_view[layer] (a caller bug: layer_view is public, caller-writable state) passes
+        // straight through unguarded. rect_visible (queue.cpp) already TL_CHECKs this; this call
+        // site was missing the same guard (review round 2 N2, the other half of round 1 D3).
+        TL_CHECK(view < MAX_VIEWS);
 
         // Batch key already fixes the texture (key_material) for every command in this run, so the
         // size query is loop-invariant - hoisted here instead of once per command (review round 1

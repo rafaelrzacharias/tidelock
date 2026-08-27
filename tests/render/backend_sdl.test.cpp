@@ -57,12 +57,22 @@ TL_TEST(present_descriptor, "render") {
     // render_present's step-7 reset: one fresh submission, one full call, queue state clears.
     const u32 d3 = render_push_data(w, 5.0f, 5.0f, 0.0f, 2.0f, 2.0f, uv, 0xFFFFFFFFu, TexHandle{}, DRAWFLAG_SCREEN_SPACE);
     render_submit(w, DrawCommand{ key_pack(LAYER_UI, 0, 0, 0, 0), d3, 0, 0 });
+    // Review round 1 D4 (verified discriminating in round 2, N-item): the clip table is part of
+    // the per-frame reset too, not just the command buffers - an unpopped clip left over from
+    // this frame must not leak into the next one's stamping.
+    const u16 clip_id = render_clip_push(w, Rect_i32{ 0, 0, 10, 10 });
+    TL_ASSERT_EQ(clip_id, (u16)1);
+    TL_ASSERT_EQ(w->render->clips.depth, (u8)1);
     render_present(w);
     TL_EXPECT_EQ(w->render->keys.count, 0u);
     TL_EXPECT_EQ(w->render->verts.count, 0u);
     TL_EXPECT_EQ(w->render->batches.count, 0u);
     TL_EXPECT_EQ(w->render->stats_submitted, 0u);
     TL_EXPECT_EQ(w->render->stats_rejected, 0u);
+    TL_EXPECT_EQ(w->render->clips.count, (u16)1);   // slot 0 stays reserved for "no clip"
+    TL_EXPECT_EQ(w->render->clips.depth, (u8)0);    // the never-popped push does not survive the frame
+    const u16 clip_id2 = render_clip_push(w, Rect_i32{ 0, 0, 10, 10 });
+    TL_EXPECT_EQ(clip_id2, (u16)1);   // ids restart too - proof count actually reset, not just depth
 
     render_test_shutdown(&f);
 }

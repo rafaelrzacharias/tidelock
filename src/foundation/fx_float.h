@@ -30,6 +30,15 @@ namespace fx {
 template <typename A>
 constexpr f32 to_f32(A x) { return f32(x.v) * (1.0f / f32(A::ONE)); }
 
+// TEXEL (fx_palette.h) as a compile-time f32 ratio, for render-side code that needs it without a
+// to_f32 CALL SITE of its own (docs/RENDER2D.md §9.5's allowlist scopes to_f32/to_f64 call sites
+// to render/extract.cpp, render/simview.cpp, editor/ - review round 2 N5 found a third render-side
+// site, sprite.cpp, calling to_f32(TEXEL) directly). Same derivation to_f32<pos_t> uses, inlined
+// rather than called, so this definition is not itself a call site; still derived from TEXEL.v,
+// the one canonical fixed-point source, never a restated "1/16" literal.
+constexpr f32 TEXEL_M = f32(TEXEL.v) * (1.0f / f32(pos_t::ONE));
+static_assert(TEXEL_M == 1.0f / 16.0f, "TEXEL = 1/16 m (foundation/fx_palette.h)");
+
 // x as a double: exact for every 32-bit row (53-bit mantissa). Editor/tools.
 template <typename A>
 constexpr f64 to_f64(A x) { return f64(x.v) * (1.0 / f64(A::ONE)); }

@@ -100,10 +100,10 @@ TL_TEST(extract_snap_and_arc, "render") {
 TL_TEST(camera_state_is_not_hashed, "render") {
     ExtractFixture* f = et_fixture();
     TL_ASSERT_EQ(et_init(f), ERR_OK);
+    World* w = &f->w;
     registry_seal(&f->reg);   // registry_hash_all requires it (foundation/arena_registry.h)
 
-    f->rq.camera[0] = Camera2D{ 0.0f, 0.0f, 1.0f, 0.0f, 16.0f, 0, {0, 0, 0} };
-    f->rq.camera_count = 1;
+    render_camera_init(w, 0, Camera2D{ 0.0f, 0.0f, 1.0f, 0.0f, 16.0f, 0, {0, 0, 0} });
 
     u64 per_arena[MAX_ARENAS];
     const u64 h0 = registry_hash_all(&f->reg, per_arena);
@@ -125,4 +125,98 @@ TL_TEST(camera_state_is_not_hashed, "render") {
     f->rq.camera_follow[0].off_x = 5.0f;
     const u64 h4 = registry_hash_all(&f->reg, per_arena);
     TL_EXPECT_EQ(h4, h0);
+}
+
+// Review round 2 N1's exact repro, now fixed: render_init's own zero-fill leaves alpha == 0.0f by
+// default, and a raw camera[v] write (camera_prev[v] left zeroed) made the very first
+// sys_extract() call abort - interp.ppu lerped to 0 (p.ppu == 0, alpha == 0), so view_matrix built
+// a singular matrix and screen_to_world's TL_CHECK(det != 0) fired three calls deep. render_camera_init
+// seeds camera_prev[v] to camera[v] on first setup, so this must not abort, and the first frame's
+// view_mat must reflect the REAL camera, not a degenerate one.
+TL_TEST(camera_init_survives_first_frame_at_alpha_zero, "render") {
+    ExtractFixture* f = et_fixture();
+    TL_ASSERT_EQ(et_init(f), ERR_OK);
+    World* w = &f->w;
+
+    render_camera_init(w, 0, Camera2D{ 0.0f, 0.0f, 1.0f, 0.0f, 16.0f, 0, {0, 0, 0} });
+    TL_ASSERT_EQ(f->rq.alpha, 0.0f);   // render_init's own zero-fill default - not set here on purpose
+    world_flush(w);
+    sys_extract(w);   // must not abort
+
+    // ppu_eff = cam.ppu * cam.zoom = 16 * 1 = 16; m[0] = ppu_eff * cos(0) = 16, never 0.
+    TL_EXPECT_TRUE(fabsf(f->rq.view_mat[0].m[0] - 16.0f) < 1e-5f);
+}
+
+// Rafael's ruling on N1 (2026-08-27, relayed by the steward): render_camera_init seeds
+// camera_prev = camera at set time, so the first frame's lerp is prev == cur - the identity -
+// regardless of alpha, not just at alpha == 0. Checks alpha == 0.5 gives the SAME result as
+// alpha == 0 (proving no interpolation artifact on the seeded frame, the ruling's own reasoning),
+// then a real camera change on the NEXT frame (camera_prev now stale on purpose, camera_count
+// unchanged - a view "set after init" in the ruling's words) interpolates normally.
+TL_TEST(camera_init_first_frame_is_alpha_independent, "render") {
+    ExtractFixture* f = et_fixture();
+    TL_ASSERT_EQ(et_init(f), ERR_OK);
+    World* w = &f->w;
+
+    render_camera_init(w, 0, Camera2D{ 10.0f, -5.0f, 2.0f, 0.0f, 16.0f, 0, { 0, 0, 0 } });
+    world_flush(w);
+
+    f->rq.alpha = 0.5f;
+    sys_extract(w);   // must not abort, and must not lerp toward a zeroed prev
+    const f32 m0_at_half = f->rq.view_mat[0].m[0];   // ppu_eff = 16*2 = 32 if the seed held
+
+    f->rq.alpha = 0.0f;
+    sys_extract(w);
+    TL_EXPECT_TRUE(fabsf(f->rq.view_mat[0].m[0] - m0_at_half) < 1e-5f);   // identical: prev == cur
+    TL_EXPECT_TRUE(fabsf(m0_at_half - 32.0f) < 1e-4f);                    // and it is the REAL camera, not 0
+
+    // A genuine update on a later tick DOES interpolate (camera_prev is now stale, on purpose -
+    // this is what a per-tick `camera[view] = ...` write plus the future barrier's advance is
+    // for; render_camera_init is only ever the FIRST value). zoom stays 2.0 throughout (cur ==
+    // prev), so only ppu's own lerp moves: interp.ppu = lerp(16, 32, 0.5) = 24; ppu_eff =
+    // interp.ppu * interp.zoom = 24 * 2 = 48 - not 32 (no change) and not 64 (full change).
+    f->rq.camera[0].ppu = 32.0f;   // camera_prev[0].ppu stays 16 (unchanged) - a real delta now
+    f->rq.alpha = 0.5f;
+    sys_extract(w);
+    TL_EXPECT_TRUE(fabsf(f->rq.view_mat[0].m[0] - 48.0f) < 1e-3f);
+}
+
+// The degenerate cases the ruling names explicitly: camera_count == 0 (no camera configured at
+// all - must be a no-op, not a crash) and a view configured AFTER render_init/world_flush have
+// already run (render_camera_init has no ordering requirement relative to them).
+TL_TEST(camera_extract_degenerate_cases, "render") {
+    ExtractFixture* f = et_fixture();
+    TL_ASSERT_EQ(et_init(f), ERR_OK);
+    World* w = &f->w;
+
+    // camera_count == 0: sys_extract must not touch view_mat/view_world at all, let alone abort.
+    TL_ASSERT_EQ(f->rq.camera_count, (u8)0);
+    world_flush(w);
+    f->rq.alpha = 0.3f;
+    sys_extract(w);   // must not abort
+    TL_EXPECT_EQ(f->rq.camera_count, (u8)0);   // still nothing configured
+
+    // A view set AFTER world_flush - render_camera_init has no ordering dependency on the ECS
+    // barrier (camera is not an ECS component, review round 1 D1).
+    render_camera_init(w, 0, Camera2D{ 0.0f, 0.0f, 1.0f, 0.0f, 16.0f, 0, { 0, 0, 0 } });
+    sys_extract(w);   // must not abort
+    TL_EXPECT_TRUE(fabsf(f->rq.view_mat[0].m[0] - 16.0f) < 1e-5f);
+}
+
+// Review round 1 D5 (verified discriminating in round 2): sys_extract's Transform/TransformPrev
+// count-match guard is TL_CHECK (live in every tier), not TL_ASSERT (netcode/ship compiles it
+// away) - a mismatch (an entity with Transform but no TransformPrev, or the reverse) would
+// otherwise read out of bounds in the interpolation loop below it.
+TL_TEST_EXPECT_FATAL(extract_transform_prev_count_mismatch, "render,fatal") {
+    (void)t;
+    ExtractFixture* f = et_fixture();
+    TL_ASSERT_EQ(et_init(f), ERR_OK);
+    World* w = &f->w;
+
+    Transform tr{}; tr.x = fx::fx_int<pos_t>(0); tr.y = fx::fx_int<pos_t>(0); tr.rot = fx::fx_int<angle_t>(0); tr.flags = 0;
+    const Entity e = world_spawn(w);
+    world_add<Transform>(w, e, tr);   // no TransformPrev - cur.count (1) != prev.count (0)
+    world_flush(w);
+
+    sys_extract(w);   // TL_FATAL: prev.count == n
 }

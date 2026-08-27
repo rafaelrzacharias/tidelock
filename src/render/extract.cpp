@@ -61,6 +61,14 @@ void sys_extract(World* w) {
         interp.cy = p.cy + (c.cy - p.cy) * alpha;
         interp.zoom = p.zoom + (c.zoom - p.zoom) * alpha;
         interp.ppu = p.ppu + (c.ppu - p.ppu) * alpha;
+        // A camera whose EFFECTIVE ppu lerps to zero makes view_matrix build a singular matrix -
+        // D10's own TL_CHECK(det != 0) would catch it three calls deeper, in unrelated matrix
+        // math, with no clue which camera did it (review round 2 N1). render_camera_init
+        // (render.h) is the sanctioned way to configure a view precisely to avoid this - it seeds
+        // camera_prev[view] to camera[view] on first setup, so this only fires for a caller that
+        // bypassed it (a raw camera[view] write with camera_prev[view] left at render_init's
+        // zero-fill) or a genuinely degenerate camera (ppu == 0 by construction).
+        TL_CHECK(interp.ppu != 0.0f);
         interp.rot_turns = p.rot_turns + shortest_arc(p.rot_turns, c.rot_turns) * alpha;
         interp.pixel_snap = c.pixel_snap;
 

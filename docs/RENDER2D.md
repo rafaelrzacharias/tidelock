@@ -73,11 +73,22 @@ desynced. Fixed by removing the ECS registration entirely: camera state cannot e
 `registry_hash_all` if it never touches a registered arena, so "nothing in this module is hashed
 or snapshotted" (this doc's own caption) now holds by construction. `CameraFollow`'s
 `target == Entity{}` means "no follow" for that view — `world_get<Transform>(w, target)` resolves
-a never-issued generation to null on its own, so no separate has-follow flag is needed. Advancing
-`camera_prev` (the ping-pong Transform/TransformPrev get from core's generic barrier mechanism) is
-now render's own responsibility, since camera no longer rides that mechanism — not yet built
-(no consumer calls it before `app/wiring.cpp`, W4 v0-integration, exists), same status as
-`sys_extract`/`render_present`/`simview_update` today.
+a never-issued generation to null on its own, so no separate has-follow flag is needed.
+
+**`camera_prev` initialization vs. advance (ruled 2026-08-27, Rafael, relayed by the steward,
+review round 2 N1).** `render_camera_init(w, view, cam)` seeds BOTH `camera[view]` and
+`camera_prev[view]` to `cam` the first time a view is configured — the first frame's lerp is then
+`prev == cur`, the identity, for any `alpha`, so `sys_extract`'s per-view loop stays an
+unconditional lerp with no sentinel test and no branch. Before this ruling, a raw `camera[view]`
+write left `camera_prev[view]` at `render_init`'s zero-fill (`ppu == 0`), and the first
+`sys_extract()` call aborted (a singular `view_matrix`, tripping D10's `TL_CHECK(det != 0)` three
+calls deep) — this closes that spec silence rather than working around it. Advancing
+`camera_prev` on later ticks (the `camera_prev[v] = camera[v]` copy, once per sim tick, AFTER the
+first) is still the future `app/wiring.cpp` lane's job (no consumer calls it before W4
+v0-integration exists, same status as `sys_extract`/`render_present`/`simview_update` today) -
+camera left core's generic Transform/TransformPrev ping-pong mechanism when it left the ECS, so it
+needs its own explicit copy there, not core's; initialization is defined, only the per-frame
+ADVANCE is unbuilt.
 
 ---
 
@@ -376,7 +387,11 @@ for pass in 0..8:  shift = pass*8
   swap(src, dst)
 if src.k != keys: memcpy(keys, src.k, n*8); memcpy(order, src.v, n*4)
 ```
-O(8n) worst, stable, no comparisons; 1M keys ≈ 8 ms single-threaded (the test's upper bound is 30 ms).
+O(8n) worst, stable, no comparisons; 1M keys measured 89–144 ms on the CI container (review rounds
+1 and 2, `radix_order`) - the test's own bound is < 5000 ms, a generous non-strict smoke check for
+a gross algorithmic regression, not a perf grade (§9.6; `WORKFLOW.md` §4 owns real perf grading).
+This paragraph previously said "≈ 8 ms... the test's upper bound is 30 ms" - neither number held
+against a measurement (review round 2 N9); fixed to match §9.6's row, the one home for this bound.
 
 **9.3.6 Scan-batching** (after the sort; `order` gives sorted position → command):
 ```
@@ -457,15 +472,21 @@ resize event re-runs `resolve_layout` and recreates the target (old one destroye
 
 ### 9.5 Determinism note
 
-Nothing here is hashed; no sim TU reads render state. The fx→float conversions are confined to
-`extract.cpp` (§9.3.3) and `simview.cpp` (§9.3.7 body/particle/basin positions — the SDF
-raster is `i16` and compared as an integer). The intended allowlist (`FX-PALETTE.md` §6):
-`to_f32`/`to_f64` under `src/` only in `render/extract.cpp`, `render/simview.cpp`, `editor/`, and
-`from_f32_quantized` only in `core/producers/live.cpp` and `editor/`. **Not yet CI-enforced** —
-no grep step exists in `tools/` or `.github/workflows/` for this today (review round 1 D11); this
-paragraph states the intent other lanes are expected to honour, not a live gate. Filed in
-`TODO.md` as a ruling request for whichever lane owns CI tooling. `-ffast-math` stays off
-(`CPP-SUBSET.md` §7).
+Nothing here is hashed; no sim TU reads render state. **This module's own** fx→float conversions
+are confined to `extract.cpp` (§9.3.3) and `simview.cpp` (§9.3.7 body/particle/basin positions —
+the SDF raster is `i16` and compared as an integer); `sprite.cpp` derives its one fx-palette ratio
+via `fx::TEXEL_M` (`foundation/fx_float.h`, a compile-time constant, not a `to_f32` call site of
+its own — review round 2 N5, after round 1's M2 fix briefly introduced exactly that third
+render-side site). The intended allowlist (`FX-PALETTE.md` §6): `to_f32`/`to_f64` under `src/`
+only in `render/extract.cpp`, `render/simview.cpp`, `editor/`, and `from_f32_quantized` only in
+`core/producers/live.cpp` and `editor/`. **Known to not hold on the tree today** (review round 2
+N5's own audit): `src/script/bind_fx.cpp` and `src/script/vm.h` also call `to_f32`/`to_f64`,
+neither `render/` nor `editor/` — pre-existing on `main`, not this lane's to fix, but the allowlist
+sentence is inaccurate as written until amended or those sites are relocated. **Not yet
+CI-enforced** — no grep step exists in `tools/` or `.github/workflows/` for this today (review
+round 1 D11); this paragraph states the intent other lanes are expected to honour, not a live
+gate. Filed in `TODO.md` as RR-24, amended with the `script/` finding, for whichever lane owns CI
+tooling. `-ffast-math` stays off (`CPP-SUBSET.md` §7).
 
 ### 9.6 Tests — `tests/render/` (in `tl_tests`, headless platform)
 
@@ -478,7 +499,8 @@ paragraph states the intent other lanes are expected to honour, not a live gate.
 | `reject` | quads fully outside `view_world` increment `stats_rejected` and add no command; touching-edge quads are kept |
 | `resolve_layout_table` | table of (win, internal, mode) → expected viewport/scale: 1280×720/320×180 LETTERBOX → s=4 centred; 1279×719 → s=3, viewport 960×540 at (159,89); 300×100 → s=1 oversize; ASPECT_FIT 1000×1000/320×180 → 1000×562 at (0,219); dpi 2.0 |
 | `world_screen_roundtrip` | 10k random points, zoom ∈ {0.5,1,4}, rot ∈ {0,0.125,0.5}: `screen_to_world(world_to_screen(p))` within 1e-3 m; the Y flip: world +Y maps to decreasing screen Y; picking through `target_to_window` inverse |
-| `simview_half_texel` | a synthetic chunk with an SDF edge at texel column 37 (`sdf < 0` for `tx ≥ 37`), ppu = 32, camera at the chunk origin: the first opaque staging pixel is column 37 and the chunk quad's left edge lands on target px `W/2 − 128·2·…` exactly; `simview_texel_to_world(cx, 37, 0).x == −4096 + 8cx + 37.5·TEXEL` |
+| `simview_half_texel` | **Milestone 2** (needs the SDF-raster writer over `sim/views.h`, not yet on `main`): a synthetic chunk with an SDF edge at texel column 37 (`sdf < 0` for `tx ≥ 37`), ppu = 32, camera at the chunk origin: the first opaque staging pixel is column 37 and the chunk quad's left edge lands on target px `W/2 − 128·2·…` exactly |
+| `simview_texel_to_world_half_texel_rule` | the pure half of the row above, landed early (review round 2 N10 - no `sim/views.h` dependency): `simview_texel_to_world(cx, 37, 0).x == −4096 + 8cx + 37.5·TEXEL`; row 0 is the chunk's TOP, not bottom; row 0 and row 127 are 127 texels apart |
 | `present_descriptor` | headless `DrawApi` records calls: a 3-layer queue (WORLD with its internal target, UI/DEBUG to the window, per §9.4's own "Targets" paragraph) yields `set_target` ×5 (the step-4 top-level window clear's own call, world target, the WORLD blit's own call back to window, then window again for UI and for DEBUG - each layer transition calls `set_target` unconditionally, so two consecutive window-target layers are two calls, not a merged one), `clear` ×2 (the top-level window clear plus WORLD's own - UI/DEBUG have a null target, so step 4's `if target != null` guards their clear out), `draw_geometry` ×4 in the raw call log (one per batch, three, plus the WORLD blit's own quad) while `stats_draw_calls == stats_batches` (three, the per-batch count the blit is deliberately not part of), one blit, one `present`; every `draw_geometry` call (batches and the blit alike) carries 4 vertices |
 | `extract_snap_and_arc` | snap bit forces `a = 1`; rotation 0.9 → 0.1 turns lerps through 1.0, not 0.5 |
 | `camera_state_is_not_hashed` | `registry_hash_all` is invariant under `RenderQueue.camera`/`camera_follow` changes (a pan, `±0.0f`, a follow retarget) — the review round 1 D1 invariant §2's caption claims |

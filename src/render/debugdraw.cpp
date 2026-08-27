@@ -11,6 +11,7 @@
 // monotonic counter (docs/CPP-SUBSET.md §1 bans a static one).
 // ---------------------------------------------------------------------------------------------
 #include "render/debugdraw.h"
+#include "render/render_internal.h"
 #include <math.h>
 #include <string.h>
 
@@ -23,6 +24,19 @@ void debugdraw_init(World* w, VMemArena* arena) {
     q->dbg_ring_next = 0;
 }
 
+// The view LAYER_DEBUG's world-space commands project through (the D2/D3 0xFF fallback,
+// render_internal.h), and that view's effective scale (ppu * zoom, robust to rotation - the
+// magnitude of the matrix's first basis vector). §9.3.8's width/radius are ALWAYS target px
+// (review round 2 N4): a WORLD-space command's own sx/sy share ITS space (world m), so a target-px
+// width/radius must be converted to world metres here before being handed to render_draw_quad, or
+// it comes out `ppu_eff` times too wide/large at emit and changes with zoom - the one thing a
+// debug overlay's stroke weight must not do.
+static f32 debug_view_ppu_eff(RenderQueue* q) {
+    const u8 view = render_resolve_view(q, LAYER_DEBUG);
+    const Mat3& M = q->view_mat[view];
+    return sqrtf(M.m[0] * M.m[0] + M.m[3] * M.m[3]);
+}
+
 void dbg_line(World* w, f32 ax, f32 ay, f32 bx, f32 by, f32 width_px, u32 rgba, RectSpace space) {
     RenderQueue* q = w->render;
     const f32 dx = bx - ax, dy = by - ay;
@@ -32,7 +46,12 @@ void dbg_line(World* w, f32 ax, f32 ay, f32 bx, f32 by, f32 width_px, u32 rgba, 
     const f32 cx = (ax + bx) * 0.5f, cy = (ay + by) * 0.5f;
     const u32 depth24 = q->stats_submitted & 0xFFFFFFu;
     const u8 flags = space == RECT_SPACE_SCREEN ? DRAWFLAG_SCREEN_SPACE : 0u;
-    render_draw_quad(w, LAYER_DEBUG, depth24, cx, cy, rot, len, width_px, Rect_u16{ 0, 0, 0, 0 }, rgba, TexHandle{}, flags);
+    f32 width = width_px;
+    if (space == RECT_SPACE_WORLD) {
+        const f32 ppu_eff = debug_view_ppu_eff(q);
+        width = ppu_eff != 0.0f ? width_px / ppu_eff : 0.0f;
+    }
+    render_draw_quad(w, LAYER_DEBUG, depth24, cx, cy, rot, len, width, Rect_u16{ 0, 0, 0, 0 }, rgba, TexHandle{}, flags);
 }
 
 void dbg_rect(World* w, f32 x, f32 y, f32 width, f32 height, f32 line_width_px, u32 rgba, RectSpace space) {
@@ -43,13 +62,22 @@ void dbg_rect(World* w, f32 x, f32 y, f32 width, f32 height, f32 line_width_px, 
 }
 
 void dbg_circle(World* w, f32 cx, f32 cy, f32 r_px, f32 line_width_px, u32 rgba, RectSpace space) {
+    // The segment count is keyed on r_px itself (the ON-SCREEN radius, by §9.3.8's contract - see
+    // debug_view_ppu_eff's comment) regardless of space, so it already tracks actual on-screen
+    // size correctly. Only the GEOMETRY (the world-space centre offset) needs the px->world
+    // conversion, same as dbg_line's width (review round 2 N4) - r_px is never a world distance.
     u32 n = (u32)ceilf(r_px * 0.5f);
     if (n < 8u) { n = 8u; }
     if (n > 64u) { n = 64u; }
-    f32 prev_x = cx + r_px, prev_y = cy;
+    f32 r = r_px;
+    if (space == RECT_SPACE_WORLD) {
+        const f32 ppu_eff = debug_view_ppu_eff(w->render);
+        r = ppu_eff != 0.0f ? r_px / ppu_eff : 0.0f;
+    }
+    f32 prev_x = cx + r, prev_y = cy;
     for (u32 i = 1; i <= n; ++i) {
         const f32 t = (f32)i / (f32)n * 6.283185307f;
-        const f32 x = cx + r_px * cosf(t), y = cy + r_px * sinf(t);
+        const f32 x = cx + r * cosf(t), y = cy + r * sinf(t);
         dbg_line(w, prev_x, prev_y, x, y, line_width_px, rgba, space);
         prev_x = x; prev_y = y;
     }
@@ -91,7 +119,13 @@ void debugdraw_replay_persistent(World* w) {
     if (q->dbg_ring == nullptr) { return; }   // debugdraw_init never called - nothing to replay
     const DbgPersist* ring = (const DbgPersist*)q->dbg_ring;
     const u64 tick = w->state->tick;
-    for (u32 i = 0; i < DBG_PERSIST_RING_CAP; ++i) {
+    // Insertion order, not ring-slot order (docs/RENDER2D.md §9.3.8 "depth = submission" - review
+    // round 2 N11): before a wrap, slot order IS insertion order (entries fill 0, 1, 2, ...);
+    // once wrapped (dbg_ring_count == DBG_PERSIST_RING_CAP), the OLDEST live entry sits at
+    // dbg_ring_next - the slot the next push will overwrite - so that is where the walk starts.
+    const u32 start = q->dbg_ring_count < DBG_PERSIST_RING_CAP ? 0u : q->dbg_ring_next;
+    for (u32 k = 0; k < DBG_PERSIST_RING_CAP; ++k) {
+        const u32 i = (start + k) % DBG_PERSIST_RING_CAP;
         const DbgPersist e = ring[i];
         if (e.until_tick <= tick) { continue; }   // expired, or a never-written (zeroed) slot
         const RectSpace space = (RectSpace)e.space;
