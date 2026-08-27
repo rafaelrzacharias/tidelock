@@ -73,7 +73,7 @@ TL_TEST(world_screen_roundtrip, "render") {
         for (u32 ri = 0; ri < 3; ++ri) {
             Camera2D cam{};
             cam.cx = 0.0f; cam.cy = 0.0f; cam.zoom = zooms[zi]; cam.rot_turns = rots[ri];
-            cam.ppu = 16.0f; cam.pixel_snap = 0; cam.view = 0; cam._pad0 = 0;
+            cam.ppu = 16.0f; cam.pixel_snap = 0;
             Mat3 M = view_matrix(cam, L);
 
             for (u32 i = 0; i < 1111; ++i) {   // ~10k total across the 9 (zoom, rot) pairs
@@ -93,7 +93,7 @@ TL_TEST(world_screen_roundtrip, "render") {
     // The Y flip: world +Y maps to decreasing screen Y (docs/RENDER2D.md §0).
     {
         Camera2D cam{}; cam.cx = 0.0f; cam.cy = 0.0f; cam.zoom = 1.0f; cam.rot_turns = 0.0f;
-        cam.ppu = 16.0f; cam.pixel_snap = 0; cam.view = 0; cam._pad0 = 0;
+        cam.ppu = 16.0f; cam.pixel_snap = 0;
         Mat3 M = view_matrix(cam, L);
         f32 sx0, sy0, sx1, sy1;
         world_to_screen(M, 0.0f, 0.0f, &sx0, &sy0);
@@ -107,7 +107,7 @@ TL_TEST(world_screen_roundtrip, "render") {
     // world_to_screen/target_to_window.
     {
         Camera2D cam{}; cam.cx = 5.0f; cam.cy = -3.0f; cam.zoom = 2.0f; cam.rot_turns = 0.125f;
-        cam.ppu = 16.0f; cam.pixel_snap = 0; cam.view = 0; cam._pad0 = 0;
+        cam.ppu = 16.0f; cam.pixel_snap = 0;
         Mat3 M = view_matrix(cam, L);
         const f32 wx = 12.0f, wy = -4.0f;
         f32 tx, ty, winx, winy;

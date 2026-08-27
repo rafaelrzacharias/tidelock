@@ -9,9 +9,10 @@
 
 // A real (non-headless-platform) ECS World: sys_extract only touches w->render (a manually-
 // built RenderQueue - no PlatformApi/DrawApi call anywhere in extract.cpp) and the Transform/
-// TransformPrev/Camera2D/CameraPrev/CameraFollow columns, so the lighter tests/core-style
-// fixture (docs/ECS.md, mirrored from tests/core/world_test_util.h) is the right tool, not
-// tests/render/render_test_util.h's headless-platform-backed one.
+// TransformPrev columns (camera state lives on RenderQueue itself, not the ECS - review round 1
+// D1), so the lighter tests/core-style fixture (docs/ECS.md, mirrored from
+// tests/core/world_test_util.h) is the right tool, not tests/render/render_test_util.h's
+// headless-platform-backed one.
 struct ExtractFixture {
     VMemApi api;
     ArenaRegistry reg;
@@ -41,9 +42,6 @@ static ErrCode et_init(ExtractFixture* f) {
     if (e != ERR_OK) { return e; }
     world_register_component(&f->w, &Transform_info);
     world_register_component(&f->w, &TransformPrev_info);
-    world_register_component(&f->w, &Camera2D_info);
-    world_register_component(&f->w, &CameraPrev_info);
-    world_register_component(&f->w, &CameraFollow_info);
     world_build_schedule(&f->w);
 
     memset(&f->rq, 0, sizeof(f->rq));
@@ -89,4 +87,42 @@ TL_TEST(extract_snap_and_arc, "render") {
     // 0.9 + (0.1 - 0.9) * 0.5 = 0.5 (the naive direct lerp, going the wrong way).
     TL_EXPECT_TRUE(fabsf(f->rq.packet.rot_turns[1] - 1.0f) < 1e-5f);
     TL_EXPECT_TRUE(fabsf(f->rq.packet.rot_turns[1] - 0.5f) > 0.1f);   // not the naive answer
+}
+
+// Review round 1 D1's failing repro, now passing: a camera pan (or a follow retarget, or a
+// window resize feeding a different zoom) is not sim state, so it must not move
+// registry_hash_all - two peers with identical sim state but different camera positions must
+// still agree. Before the fix, Camera2D/CameraPrev/CameraFollow were registered ECS components
+// (an empty-field ComponentInfo workaround) and their raw f32 bytes were hashed regardless of the
+// empty field table (registry_hash_all is arena-level - it hashes bytes, never consults a field
+// table). Fixed by moving camera state onto RenderQueue (camera.h's Determinism note) - it never
+// touches a registered arena, so this invariant now holds by construction, not by convention.
+TL_TEST(camera_state_is_not_hashed, "render") {
+    ExtractFixture* f = et_fixture();
+    TL_ASSERT_EQ(et_init(f), ERR_OK);
+    registry_seal(&f->reg);   // registry_hash_all requires it (foundation/arena_registry.h)
+
+    f->rq.camera[0] = Camera2D{ 0.0f, 0.0f, 1.0f, 0.0f, 16.0f, 0, {0, 0, 0} };
+    f->rq.camera_count = 1;
+
+    u64 per_arena[MAX_ARENAS];
+    const u64 h0 = registry_hash_all(&f->reg, per_arena);
+
+    f->rq.camera[0].cx = 1.0f;   // a camera pan - no sim value changed
+    const u64 h1 = registry_hash_all(&f->reg, per_arena);
+    TL_EXPECT_EQ(h1, h0);
+
+    f->rq.camera[0].cx = 0.0f;
+    f->rq.camera[0].cy = 0.0f;
+    const u64 h2 = registry_hash_all(&f->reg, per_arena);
+    TL_EXPECT_EQ(h2, h0);
+
+    f->rq.camera[0].cy = -0.0f;   // +0.0f/-0.0f are byte-distinct but float-equal - still no move
+    const u64 h3 = registry_hash_all(&f->reg, per_arena);
+    TL_EXPECT_EQ(h3, h0);
+
+    f->rq.camera_follow[0] = CameraFollow{ Entity{}, 0.0f, 0.0f };   // a follow retarget too
+    f->rq.camera_follow[0].off_x = 5.0f;
+    const u64 h4 = registry_hash_all(&f->reg, per_arena);
+    TL_EXPECT_EQ(h4, h0);
 }

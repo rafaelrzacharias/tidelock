@@ -3064,6 +3064,13 @@ right; it is the template the others now follow.
       individually editable in the generic inspector (`docs/TOOLING.md` §2), which needs a real
       `K_f32` row from `core/reflect.h`'s owner (the ECS lane/steward), not another module's
       workaround. Not blocking: render2d's v0 does not need the inspector.
+      **MOOT for the camera specifically (2026-08-27, review round 1 D1's ruling):**
+      `Camera2D`/`CameraPrev`/`CameraFollow` came OFF the ECS entirely (`RENDER2D.md` §2 R-3) -
+      they are plain value structs on `RenderQueue` now, not registered components, so the
+      empty-field `ComponentInfo` workaround this entry describes no longer exists in
+      `src/render/camera.h` (deleted in the same commit). The underlying question - does
+      `core/reflect.h` need a `K_f32` row at all - is left open here for whichever future
+      reflected float struct hits it next; nothing currently in the tree needs it.
 - [ ] **RR-22 (not blocking, w3-render2d): no module can add `tl_field_kind_TexHandle` "beside
       the type definition" as `core/reflect.h`'s own comment instructs.** `TexHandle` is defined
       in `platform/platform.h`; `tools/audit/includes.py`'s `MODULE_DAG` has `platform` unable to
@@ -3206,6 +3213,20 @@ right; it is the template the others now follow.
       `src/render/`-touching commits now carry either `[docs:none]` or a `docs/RENDER2D.md` touch.
       D1 proceeds now as normal forward commits on the new head (fold-after-rewrite sequencing
       satisfied).
+- [ ] **Cross-lane doc note for `docs/FRAME-LOOP.md`'s owner (not this lane's file to edit,
+      `docs/ROADMAP.md` §0 rule 2 - D1's ruling scoped the doc reconciliation to `RENDER2D.md` and
+      `camera.h` only): §176 and §201's comment ("`interp_pingpong(w); // barrier step 3: prev <-
+      current for Transform/Camera2D`") are now stale.** Review round 1 D1 took `Camera2D` off the
+      ECS entirely (`RENDER2D.md` §2 R-3, 2026-08-27) - it is no longer one of the "engine
+      components" §176 lists, and `interp_pingpong`'s generic per-registered-component mechanism
+      no longer applies to it (not that this matters operationally yet: `interp_pingpong` and
+      `barrier_end_of_tick` are pure design, not yet implemented anywhere in `src/`, confirmed by
+      grep). `camera.h`'s own `CameraPrev` contract block now states explicitly that advancing
+      `camera_prev` (the `camera_prev[v] = camera[v]` copy, once per sim tick) is render's own
+      responsibility going forward, not core's generic ping-pong - whoever builds
+      `app/wiring.cpp`/`interp_pingpong` (W4 v0-integration) needs to know this before wiring the
+      real barrier. Flagging for the frame-loop/ECS lane or the steward's closeout sweep to fix
+      §176/§201 in `FRAME-LOOP.md` itself.
 
 ## Alloy (`docs/ALLOY.md` — headless-first; its own build queue in "Gates & rulings ledger")
 - [ ] **W3 alloy-liquids-gases OPENING task — the liquid design pass (the RR-10 ruling,

@@ -61,6 +61,13 @@ struct RenderQueue {
     RenderPacket packet; Rect_f32 view_world[MAX_VIEWS]; Mat3 view_mat[MAX_VIEWS];
     Presentation pres[MAX_VIEWS]; Layout layout; TexHandle target[MAX_LAYERS]; u32 clear_rgba[MAX_LAYERS];
     u8 layer_view[MAX_LAYERS];   // which view's matrix a world-space layer uses (UI/DEBUG: 0xFF = screen space)
+    // Camera state (review round 1 D1: moved off the ECS - camera.h's Determinism note explains
+    // why). A caller configures view v's camera by writing camera[v]/camera_prev[v] directly (the
+    // same direct-field-write pattern pres[]/view_world[] already use) and setting camera_count >
+    // v; sys_extract only processes views [0, camera_count). camera_follow[v].target == Entity{}
+    // means "no follow" for that view.
+    Camera2D camera[MAX_VIEWS]; CameraPrev camera_prev[MAX_VIEWS]; CameraFollow camera_follow[MAX_VIEWS];
+    u8 camera_count;
     f32 alpha; u32 stats_submitted, stats_rejected, stats_draw_calls, stats_batches;
     const PlatformApi* platform;
     // The persistent debug-draw ring (docs/RENDER2D.md §7, §9.3.8) - opaque here (an untyped

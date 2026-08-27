@@ -35,9 +35,6 @@ static ErrCode sp_init(SpriteFixture* f) {
     if (e != ERR_OK) { return e; }
     world_register_component(&f->w, &Transform_info);
     world_register_component(&f->w, &TransformPrev_info);
-    world_register_component(&f->w, &Camera2D_info);   // sys_extract touches this column unconditionally
-    world_register_component(&f->w, &CameraPrev_info);
-    world_register_component(&f->w, &CameraFollow_info);
     world_register_component(&f->w, &Sprite_info);
     world_build_schedule(&f->w);
 

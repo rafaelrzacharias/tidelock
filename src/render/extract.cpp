@@ -48,14 +48,14 @@ void sys_extract(World* w) {
         q->packet.sy[i] = 1.0f;
     }
 
-    const Span<Camera2D> cams = world_column<Camera2D>(w);
-    const Span<CameraPrev> cprev = world_column<CameraPrev>(w);
-    const Span<Entity> cam_ents = world_entities<Camera2D>(w);
-    TL_CHECK(cprev.count == cams.count);
-
-    for (u32 i = 0; i < cams.count; ++i) {
-        const Camera2D c = cams.data[i];
-        const CameraPrev p = cprev.data[i];
+    // Camera state lives on RenderQueue, not the ECS (review round 1 D1, camera.h's Determinism
+    // note) - only views [0, camera_count) are configured, matching the old design's "however
+    // many camera entities exist" (an unconfigured view is simply never processed, same as zero
+    // Camera2D entities meant zero loop iterations before).
+    TL_CHECK(q->camera_count <= MAX_VIEWS);
+    for (u32 view = 0; view < q->camera_count; ++view) {
+        const Camera2D c = q->camera[view];
+        const CameraPrev p = q->camera_prev[view];
         Camera2D interp{};
         interp.cx = p.cx + (c.cx - p.cx) * alpha;
         interp.cy = p.cy + (c.cy - p.cy) * alpha;
@@ -63,20 +63,17 @@ void sys_extract(World* w) {
         interp.ppu = p.ppu + (c.ppu - p.ppu) * alpha;
         interp.rot_turns = p.rot_turns + shortest_arc(p.rot_turns, c.rot_turns) * alpha;
         interp.pixel_snap = c.pixel_snap;
-        interp.view = c.view;
 
-        const CameraFollow* follow = world_get<CameraFollow>(w, cam_ents.data[i]);
-        if (follow != nullptr) {
-            const Transform* t = world_get<Transform>(w, follow->target);
-            if (t != nullptr) {
-                const u32 idx = (u32)(t - cur.data);
-                interp.cx = q->packet.x[idx] + follow->off_x;
-                interp.cy = q->packet.y[idx] + follow->off_y;
-            }
+        // camera_follow[view].target == Entity{} (never configured) resolves to null here, same
+        // as "no follow" - no separate has-follow flag needed (camera.h's CameraFollow comment).
+        const CameraFollow follow = q->camera_follow[view];
+        const Transform* t = world_get<Transform>(w, follow.target);
+        if (t != nullptr) {
+            const u32 idx = (u32)(t - cur.data);
+            interp.cx = q->packet.x[idx] + follow.off_x;
+            interp.cy = q->packet.y[idx] + follow.off_y;
         }
 
-        const u8 view = interp.view;
-        TL_CHECK(view < MAX_VIEWS);
         const Mat3 M = view_matrix(interp, q->layout);
         q->view_mat[view] = M;
 

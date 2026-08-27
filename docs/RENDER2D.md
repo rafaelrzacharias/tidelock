@@ -48,10 +48,10 @@ binary are in `extract.cpp` and the sim-view writer.
 
 ---
 
-## 2. Camera (DECIDED)
+## 2. Camera (DECIDED — amended review round 1 D1, 2026-08-27: off the ECS)
 
 ```cpp
-struct Camera2D { f32 cx, cy; f32 zoom; f32 rot_turns; f32 ppu; u8 pixel_snap; u8 view; };   // render-side component
+struct Camera2D { f32 cx, cy; f32 zoom; f32 rot_turns; f32 ppu; u8 pixel_snap; };   // plain value struct, RenderQueue.camera[view]
 ```
 
 Double-buffered + interpolated like any transform (the camera follows an entity by reading its
@@ -59,6 +59,25 @@ Double-buffered + interpolated like any transform (the camera follows an entity 
 scaling / filter / pixel-snap / integer-letterbox) is a value struct; `resolve_layout(window,
 presentation) → {internal_size, viewport, scale}` is the one function every pass asks — aspect
 math cannot drift. Default: integer letterbox for the pixel-art/sim view, aspect-fit otherwise.
+
+**Not an ECS component.** `Camera2D`/`CameraPrev`/`CameraFollow` live on `RenderQueue` — one slot
+per view (`camera`/`camera_prev`/`camera_follow`, indexed `[0, camera_count)`), the same place
+every other render-side field already lives — never as registered ECS components. The rev-1 text
+above called `Camera2D` a "render-side component," registered via a hand-rolled empty-field
+`ComponentInfo` (core's `FieldKind` enum has no float row). That empty field table hid the struct
+from `world_reflection_hash` (schema-level) but not from `registry_hash_all` (arena-level — hashes
+every `ARENA_HASHED` arena's raw bytes regardless of what its field table says), so a camera pan,
+a follow retarget, or a window resize feeding a different zoom — none of them sim state — moved
+the lockstep state hash. Two peers with identical sim state but different camera positions
+desynced. Fixed by removing the ECS registration entirely: camera state cannot enter
+`registry_hash_all` if it never touches a registered arena, so "nothing in this module is hashed
+or snapshotted" (this doc's own caption) now holds by construction. `CameraFollow`'s
+`target == Entity{}` means "no follow" for that view — `world_get<Transform>(w, target)` resolves
+a never-issued generation to null on its own, so no separate has-follow flag is needed. Advancing
+`camera_prev` (the ping-pong Transform/TransformPrev get from core's generic barrier mechanism) is
+now render's own responsibility, since camera no longer rides that mechanism — not yet built
+(no consumer calls it before `app/wiring.cpp`, W4 v0-integration, exists), same status as
+`sys_extract`/`render_present`/`simview_update` today.
 
 ---
 
@@ -202,9 +221,9 @@ failures are `Result<T>`/`ErrCode` in the `ERR_RENDER_*` range. Draw verbs are t
 struct Rect_f32 { f32 x, y, w, h; };  struct Rect_i32 { i32 x, y, w, h; };  struct Rect_u16 { u16 x, y, w, h; };
 // camera.h
 struct Mat3 { f32 m[9]; };                       // row-major affine: [m0 m1 m2; m3 m4 m5; 0 0 1]
-struct Camera2D   { f32 cx, cy; f32 zoom; f32 rot_turns; f32 ppu; u8 pixel_snap; u8 view; u16 _pad0; }; // 24 B, render-side component
-struct CameraPrev { f32 cx, cy; f32 zoom; f32 rot_turns; f32 ppu; u8 pixel_snap; u8 view; u16 _pad0; }; // 24 B, hidden column, ping-ponged at the barrier
-struct CameraFollow { Entity target; f32 off_x, off_y; };                                              // 12 B, optional
+struct Camera2D   { f32 cx, cy; f32 zoom; f32 rot_turns; f32 ppu; u8 pixel_snap; u8 _pad0[3]; };        // 24 B, RenderQueue.camera[view] - not an ECS component (§2)
+struct CameraPrev { f32 cx, cy; f32 zoom; f32 rot_turns; f32 ppu; u8 pixel_snap; u8 _pad0[3]; };        // 24 B, RenderQueue.camera_prev[view]
+struct CameraFollow { Entity target; f32 off_x, off_y; };                                              // 12 B, RenderQueue.camera_follow[view]; target == Entity{} = no follow
 struct Presentation { u16 internal_w, internal_h;   // 0,0 = render at window res (no internal target)
                       u8 mode;   /* PRES_INTEGER_LETTERBOX=0 | PRES_ASPECT_FIT=1 | PRES_STRETCH=2 */
                       u8 filter; /* FILTER_NEAREST=0 | FILTER_LINEAR=1 — the upscale blit only */
@@ -254,6 +273,9 @@ struct RenderQueue {
     RenderPacket packet; Rect_f32 view_world[MAX_VIEWS]; Mat3 view_mat[MAX_VIEWS];
     Presentation pres[MAX_VIEWS]; Layout layout; TexHandle target[MAX_LAYERS]; u32 clear_rgba[MAX_LAYERS];
     u8 layer_view[MAX_LAYERS];   // which view's matrix a world-space layer uses (UI/DEBUG: 0xFF = screen space)
+    // Camera state (§2, amended review round 1 D1) - not an ECS component; camera_count gates how
+    // many of the MAX_VIEWS slots sys_extract processes.
+    Camera2D camera[MAX_VIEWS]; CameraPrev camera_prev[MAX_VIEWS]; CameraFollow camera_follow[MAX_VIEWS]; u8 camera_count;
     f32 alpha; u32 stats_submitted, stats_rejected, stats_draw_calls, stats_batches; };
 ```
 
@@ -313,7 +335,7 @@ world position is texel-aligned lands on a pixel boundary — the §0 pixel-perf
 
 **9.3.3 Extract** (`sys_extract`, `PRE_RENDER`, the first system of the phase; `alpha` from the loop via `World.render->alpha`):
 ```
-cur = world_column<Transform>(w); prev = world_column<TransformPrev>(w); n = cur.count   (TL_ASSERT prev.count == n)
+cur = world_column<Transform>(w); prev = world_column<TransformPrev>(w); n = cur.count   (TL_CHECK prev.count == n)
 pk = packet_reserve(scratch_main, n)
 for i in 0..n (ascending dense index):
   a = (cur[i].flags & TRANSFORM_SNAP) ? 1.0f : alpha        // the bit is read, never written here; the barrier clears it (FRAME-LOOP §3 step 3)
@@ -321,9 +343,10 @@ for i in 0..n (ascending dense index):
   r0 = to_f32(prev[i].rot); r1 = to_f32(cur[i].rot)          // turns
   d = r1 - r0; d -= floorf(d + 0.5f)                           // shortest arc: d ∈ [-0.5, 0.5)
   pk.rot_turns[i] = r0 + d * a;  pk.sx[i] = pk.sy[i] = 1.0f    // scale columns exist for a future Scale component; v0 constant
-cameras: for each (Camera2D cur, CameraPrev prev) pair: lerp cx, cy, zoom, ppu linearly; rot_turns shortest-arc as above
-         if the entity has CameraFollow and target has Transform: cam.cx = pk.x[dense(target)] + off_x (same y)
-         view_world[view] = AABB of the 4 viewport corners through screen_to_world; view_mat[view] = view_matrix(cam, layout)
+cameras (§2, amended D1 - RenderQueue state, not ECS columns): TL_CHECK(camera_count <= MAX_VIEWS)
+  for view in 0..camera_count: lerp cx, cy, zoom, ppu linearly from camera_prev[view] -> camera[view]; rot_turns shortest-arc as above
+    if world_get<Transform>(w, camera_follow[view].target) resolves: cam.cx = pk.x[dense(target)] + off_x (same y) - target == Entity{} (no follow) resolves to null on its own
+    view_world[view] = AABB of the 4 viewport corners through screen_to_world; view_mat[view] = view_matrix(cam, layout)
 ```
 These two loops plus `simview.cpp` are the only `to_f32` call sites in the binary (CI grep; §9.5).
 
@@ -458,6 +481,7 @@ paragraph states the intent other lanes are expected to honour, not a live gate.
 | `simview_half_texel` | a synthetic chunk with an SDF edge at texel column 37 (`sdf < 0` for `tx ≥ 37`), ppu = 32, camera at the chunk origin: the first opaque staging pixel is column 37 and the chunk quad's left edge lands on target px `W/2 − 128·2·…` exactly; `simview_texel_to_world(cx, 37, 0).x == −4096 + 8cx + 37.5·TEXEL` |
 | `present_descriptor` | headless `DrawApi` records calls: a 3-layer queue (WORLD with its internal target, UI/DEBUG to the window, per §9.4's own "Targets" paragraph) yields `set_target` ×5 (the step-4 top-level window clear's own call, world target, the WORLD blit's own call back to window, then window again for UI and for DEBUG - each layer transition calls `set_target` unconditionally, so two consecutive window-target layers are two calls, not a merged one), `clear` ×2 (the top-level window clear plus WORLD's own - UI/DEBUG have a null target, so step 4's `if target != null` guards their clear out), `draw_geometry` ×4 in the raw call log (one per batch, three, plus the WORLD blit's own quad) while `stats_draw_calls == stats_batches` (three, the per-batch count the blit is deliberately not part of), one blit, one `present`; every `draw_geometry` call (batches and the blit alike) carries 4 vertices |
 | `extract_snap_and_arc` | snap bit forces `a = 1`; rotation 0.9 → 0.1 turns lerps through 1.0, not 0.5 |
+| `camera_state_is_not_hashed` | `registry_hash_all` is invariant under `RenderQueue.camera`/`camera_follow` changes (a pan, `±0.0f`, a follow retarget) — the review round 1 D1 invariant §2's caption claims |
 
 Pixel goldens (FLIP-compared, `--render=software`) are nightly, never PR-blocking (§8).
 
@@ -484,7 +508,7 @@ Pixel goldens (FLIP-compared, `--render=software`) are nightly, never PR-blockin
 
 ---
 
-## 10. Rulings (closed 2026-08-22 — nothing open)
+## 10. Rulings
 
 - **R-1 One streaming texture per chunk.** Dirty tracking is per chunk already; ~30–60 visible
   chunks is ~60 draws, far below any SDL_Render concern; an atlas would couple upload granularity
@@ -494,10 +518,24 @@ Pixel goldens (FLIP-compared, `--render=software`) are nightly, never PR-blockin
   (Noita-class); AA would blur the one thing the sim view must make legible — the carve edge.
   The edge tint colour and width (0 or 1 texel) come from the Luau material palette LUT per
   material, so "soft" materials can still read as such without an AA path.
+- **R-3 Camera comes off the ECS (Rafael, 2026-08-27, review round 1 D1).** `Camera2D`/
+  `CameraPrev`/`CameraFollow` were registered ECS components (a hand-rolled empty-field
+  `ComponentInfo`, working around `core/reflect.h`'s missing float `FieldKind` row); their raw f32
+  bytes still entered `registry_hash_all`'s per-arena byte hash despite the empty field table
+  (that hash reads bytes, never the field table), so a camera pan/follow/resize desynced two
+  lockstep peers with identical sim state. Fixed by moving camera state onto `RenderQueue` (§2)
+  instead of chasing a better field-table workaround — it is structurally impossible to hash once
+  it never touches a registered arena. See §2 for the full account and `camera_state_is_not_hashed`
+  (§9.6) for the passing regression.
 
 *Rev 1 — 2026-08-22, reconciled 2026-08-26 (w3-render2d): §9.6's `present_descriptor` row
 corrected to match §9.4's own step-4 pseudocode and "Targets" paragraph exactly (the row's
 "`set_target` ×3, one `clear` per layer" undercounted - the algorithm calls `set_target`
 unconditionally on every layer transition and clears only when the layer's own target is
 non-null; measured by building the actual sequence for the row's own 3-layer example, not
-guessed).*
+guessed). Reconciled 2026-08-27 (w3-render2d, review round 1 D1): §2/§9.1/§9.2/§9.3.3 amended for
+R-3 above - `Camera2D`/`CameraPrev` drop their `view` field (array-indexed now, not stored), the
+`RenderQueue` struct dump gains `camera`/`camera_prev`/`camera_follow`/`camera_count`, and §9.3.3's
+extract pseudocode reads from RenderQueue state instead of ECS columns (its stale `TL_ASSERT
+prev.count == n` also corrected to `TL_CHECK`, matching review round 1 D5's already-shipped code
+fix that this pass had missed).*

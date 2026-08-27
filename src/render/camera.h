@@ -7,29 +7,34 @@
 //   (struct shapes, pinned), §9.3.1 (resolve_layout algorithm), §9.3.2 (projection algorithm).
 // Purpose: the single source of truth for world<->screen projection, viewport/letterbox layout
 //   and picking math (docs/RENDER2D.md §0 - "mixing them up will silently invert your code").
-//   Camera2D/CameraPrev are the render-side, float, double-buffered camera (interpolated the
-//   same way as Transform/TransformPrev, docs/FRAME-LOOP.md §4); CameraFollow is optional.
+//   Camera2D/CameraPrev are the render-side, float, double-buffered camera state, held per view
+//   on RenderQueue.camera/camera_prev (render.h) - NOT an ECS component (review round 1 D1, this
+//   header's Determinism note below); interpolated the same way Transform/TransformPrev are
+//   (docs/FRAME-LOOP.md §4), just by render's own code, not core's generic mechanism. CameraFollow
+//   is optional per-view follow config, also plain RenderQueue state.
 // Invariants: the world-Y-up -> screen-Y-down flip is the sign of view_matrix's m[4], applied
 //   exactly once, here, and nowhere else in the module (§0). pixel_snap is display-only, applied
 //   AFTER interpolation, never to sim state.
-// Determinism: none - every field here is f32; this module is never hashed or snapshotted
-//   (docs/RENDER2D.md caption; §9.5). f32/<math.h> are legal in every TU under src/render/
-//   (docs/CANON.md "Types"; docs/CPP-SUBSET.md §1).
-// FIELD-KIND GAP (filed in TODO.md as a ruling request): Camera2D/CameraPrev/CameraFollow are
-//   "render-side components" per docs/FRAME-LOOP.md §8.2 step 4 (registered alongside Transform),
-//   but core/reflect.h's FieldKind enum (docs/ECS.md §10.2, core's own closed kind set) has no
-//   float row - by design, since reflection feeds the hash/inspector/wire doors and every other
-//   reflected struct in the tree is fx/int/handle. These three structs therefore hand-roll their
-//   ComponentInfo below (field_count = 0, fields = nullptr) instead of going through
-//   TL_COMPONENT/TL_FIELDS_Name - they are still valid world_register_component/world_column<T>
-//   subjects (registration only needs a correct size/align + tl_info_of(T*)), just opaque to the
-//   generic inspector and the reflection hash, which is accurate: nothing here is hashed
-//   (docs/RENDER2D.md §9.5). Not a workaround for a missing feature of THIS module - the kind
-//   set is core's (ECS lane, already merged), and adding a K_f32 row is that lane's call, not
-//   this one's (docs/ROADMAP.md §0 rule 2).
+// Determinism: none - every field here is f32, and none of it is an ECS component any more
+//   (this module is never hashed or snapshotted - docs/RENDER2D.md caption; §9.5). Review round 1
+//   D1: Camera2D/CameraPrev/CameraFollow used to be registered via a hand-rolled empty-field
+//   ComponentInfo (world_register_component only needs size/align + tl_info_of(T*), so an empty
+//   field table was still a valid door) to work around core/reflect.h's FieldKind enum having no
+//   float row. That empty field table hid the structs from `world_reflection_hash` (schema-level,
+//   consults the field table) but NOT from `registry_hash_all` (arena-level, hashes every
+//   ARENA_HASHED arena's raw bytes regardless of what its field table says) - registering these
+//   structs at all put their f32 bytes in the lockstep state hash, so a camera pan/follow/resize
+//   (none of them sim state) desynced two peers with identical sim state. Fixed by removing the
+//   ECS registration entirely rather than chasing a better field-table workaround - camera state
+//   now lives where every other render-side field already does (RenderQueue), never touching a
+//   registered arena. The underlying core/reflect.h gap (no K_f32 row) may still matter for some
+//   future reflected float struct; TODO.md's RR-23 entry is annotated moot for camera specifically
+//   but left open for that general question, per docs/ROADMAP.md §0 rule 2 (not this lane's call).
+//   f32/<math.h> are legal in every TU under src/render/ (docs/CANON.md "Types";
+//   docs/CPP-SUBSET.md §1).
 // Threading: none - value types; resolve_layout/view_matrix/world_to_screen/screen_to_world are
 //   pure functions.
-// Includes: core/reflect.h (ComponentInfo/Entity), foundation/rect.h.
+// Includes: core/reflect.h (Entity, for CameraFollow.target), foundation/rect.h.
 // ---------------------------------------------------------------------------------------------
 #include "core/reflect.h"
 #include "foundation/rect.h"
@@ -37,55 +42,48 @@
 // row-major affine: [m0 m1 m2; m3 m4 m5; 0 0 1] (docs/RENDER2D.md §9.2)
 struct Mat3 { f32 m[9]; };
 
-struct Camera2D {                                          // 24 B, render-side component
+// 24 B, plain value struct on RenderQueue.camera[view] (render.h) - not an ECS component (this
+// header's Determinism note above). No `view` field: which view a slot belongs to is its array
+// index, not stored data.
+struct Camera2D {
     f32 cx, cy;
     f32 zoom;
     f32 rot_turns;
     f32 ppu;
     u8  pixel_snap;
-    u8  view;
-    u16 _pad0;
+    u8  _pad0[3];
 };
-static_assert(__is_trivially_copyable(Camera2D), "reflected structs are POD (docs/ECS.md section 2)");
+static_assert(__is_trivially_copyable(Camera2D), "");
 static_assert(sizeof(Camera2D) == 24, "docs/RENDER2D.md section 9.2");
 
-struct CameraPrev {                                        // 24 B, hidden column, ping-ponged at the barrier
+// 24 B, RenderQueue.camera_prev[view] - the previous-frame snapshot sys_extract interpolates
+// from. Advancing it (camera_prev[v] = camera[v], once per sim tick) is the future app/wiring.cpp
+// lane's job (docs/FRAME-LOOP.md's interp_pingpong hook, not yet built) - same as
+// Transform/TransformPrev's own ping-pong, which core's generic mechanism drives for registered
+// components only; camera left the ECS (D1 above), so it needs its own explicit copy there,
+// not core's. Not this lane's to build ahead of that consumer (CLAUDE.md rule 8: "large subsystem
+// = stable interface + ONE impl now, pulled in by a real consumer").
+struct CameraPrev {
     f32 cx, cy;
     f32 zoom;
     f32 rot_turns;
     f32 ppu;
     u8  pixel_snap;
-    u8  view;
-    u16 _pad0;
+    u8  _pad0[3];
 };
-static_assert(__is_trivially_copyable(CameraPrev), "reflected structs are POD (docs/ECS.md section 2)");
+static_assert(__is_trivially_copyable(CameraPrev), "");
 static_assert(sizeof(CameraPrev) == 24, "docs/RENDER2D.md section 9.2");
 
-struct CameraFollow {                                       // 12 B, optional
+// 12 B, RenderQueue.camera_follow[view] - optional. `target == Entity{}` (the zero/never-issued-
+// generation sentinel, docs/CPP-SUBSET.md §3's absence axis) means "no follow"; sys_extract's
+// `world_get<Transform>(w, target)` naturally returns null for it, so no separate "has follow"
+// flag is needed.
+struct CameraFollow {
     Entity target;
     f32 off_x, off_y;
 };
-static_assert(__is_trivially_copyable(CameraFollow), "reflected structs are POD (docs/ECS.md section 2)");
+static_assert(__is_trivially_copyable(CameraFollow), "");
 static_assert(sizeof(CameraFollow) == 12, "docs/RENDER2D.md section 9.2");
-
-// Hand-rolled ComponentInfo doors (the FIELD-KIND GAP note above) - same shape TL_COMPONENT
-// would generate, minus the field table. world_register_component/world_column<T>/world_get<T>
-// resolve T through tl_info_of(const T*), same as any macro-declared component.
-inline constexpr ComponentInfo Camera2D_info = {
-    "Camera2D", fnv1a64("Camera2D", sizeof("Camera2D") - 1), (u32)sizeof(Camera2D), (u32)alignof(Camera2D), nullptr, 0, 0u, nullptr };
-// Camera2D's ComponentInfo (the FIELD-KIND GAP note above); the typed-API hook world_add<T>/
-// world_get<T>/world_column<T> resolve Camera2D through this, same as any TL_COMPONENT type.
-constexpr const ComponentInfo* tl_info_of(const Camera2D*) { return &Camera2D_info; }
-
-inline constexpr ComponentInfo CameraPrev_info = {
-    "CameraPrev", fnv1a64("CameraPrev", sizeof("CameraPrev") - 1), (u32)sizeof(CameraPrev), (u32)alignof(CameraPrev), nullptr, 0, COMP_HIDDEN, nullptr };
-// CameraPrev's ComponentInfo, COMP_HIDDEN (the ping-ponged prev column - docs/FRAME-LOOP.md §4).
-constexpr const ComponentInfo* tl_info_of(const CameraPrev*) { return &CameraPrev_info; }
-
-inline constexpr ComponentInfo CameraFollow_info = {
-    "CameraFollow", fnv1a64("CameraFollow", sizeof("CameraFollow") - 1), (u32)sizeof(CameraFollow), (u32)alignof(CameraFollow), nullptr, 0, 0u, nullptr };
-// CameraFollow's ComponentInfo (optional component: a camera entity may carry it or not).
-constexpr const ComponentInfo* tl_info_of(const CameraFollow*) { return &CameraFollow_info; }
 
 // Presentation/Layout (docs/RENDER2D.md §9.2) - plain value structs, never ECS components.
 enum : u8 { PRES_INTEGER_LETTERBOX = 0, PRES_ASPECT_FIT = 1, PRES_STRETCH = 2 };
