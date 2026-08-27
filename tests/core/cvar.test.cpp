@@ -8,6 +8,7 @@
 #include "runner/tl_test.h"
 #include "core/cvar.h"
 
+#include <math.h>   // NAN/INFINITY - constructing them for fmt_fixed_f32's UB-guard test (D8)
 #include <string.h>
 
 namespace {
@@ -18,6 +19,9 @@ TL_CVAR(bool, cv_b, true, 0, "a bool cvar");
 TL_CVAR(u32, cv_ro, 42u, CVAR_READONLY, "a readonly cvar");
 TL_CVAR(bool, cv_sim, false, CVAR_SIM, "a sim-fingerprinted cvar");
 TL_CVAR(bool, cv_sim2, true, CVAR_SIM, "another sim cvar");
+// D9: CVAR_F32|CVAR_SIM would put float bits in cvar_sim_fold_bits' cross-peer fingerprint -
+// cvar_register must TL_FATAL on this combination (cvar_register_f32_sim_combo_is_fatal below).
+TL_CVAR(f32, cv_f_sim_bad, 0.0f, CVAR_SIM, "a float cvar wrongly flagged CVAR_SIM");
 
 void build(CvarTable* tab) {
     cvar_table_init(tab);
@@ -137,6 +141,32 @@ TL_TEST(cvar_format_per_kind, "core,editor,cvar,fast") {
     TL_EXPECT_EQ(cvar_format(&tab, "nope"_id, buf, sizeof(buf)), 0u);   // unregistered
 }
 
+// D8: fmt_fixed_f32's `(i64)av` is UB ([conv.fpint]) for NaN/Inf/huge magnitude with no guard.
+// cvar_set_f32 accepts any f32 bit pattern, so this is reachable through the ordinary write
+// path, not just a hypothetical default_bits. Exercises the guard rather than reading it.
+TL_TEST(cvar_format_f32_nan_inf_named_not_ub, "core,editor,cvar,fast") {
+    CvarTable tab;
+    build(&tab);
+    char buf[32];
+
+    TL_ASSERT_EQ(cvar_set_f32(&tab, "cv_f"_id, NAN), ERR_OK);
+    TL_ASSERT_TRUE(cvar_format(&tab, "cv_f"_id, buf, sizeof(buf)) > 0);
+    TL_EXPECT_EQ(strcmp(buf, "nan"), 0);
+
+    TL_ASSERT_EQ(cvar_set_f32(&tab, "cv_f"_id, (f32)INFINITY), ERR_OK);
+    TL_ASSERT_TRUE(cvar_format(&tab, "cv_f"_id, buf, sizeof(buf)) > 0);
+    TL_EXPECT_EQ(strcmp(buf, "inf"), 0);
+
+    TL_ASSERT_EQ(cvar_set_f32(&tab, "cv_f"_id, -(f32)INFINITY), ERR_OK);
+    TL_ASSERT_TRUE(cvar_format(&tab, "cv_f"_id, buf, sizeof(buf)) > 0);
+    TL_EXPECT_EQ(strcmp(buf, "-inf"), 0);
+
+    // A magnitude too large to convert to i64 safely, but neither NaN nor Inf.
+    TL_ASSERT_EQ(cvar_set_f32(&tab, "cv_f"_id, 1.0e30f), ERR_OK);
+    TL_ASSERT_TRUE(cvar_format(&tab, "cv_f"_id, buf, sizeof(buf)) > 0);
+    TL_EXPECT_EQ(strcmp(buf, "inf"), 0);
+}
+
 TL_TEST(cvar_format_truncation_reports_zero, "core,editor,cvar,fast") {
     CvarTable tab;
     build(&tab);
@@ -234,4 +264,11 @@ TL_TEST(cvar_register_grows_count_per_distinct_key, "core,editor,cvar,fast") {
     TL_EXPECT_EQ(tab.count, 1u);
     cvar_register(&tab, &CVAR_cv_u);
     TL_EXPECT_EQ(tab.count, 2u);
+}
+
+TL_TEST_EXPECT_FATAL(cvar_register_f32_sim_combo_is_fatal, "core,editor,cvar,fatal") {
+    ++t->checks;   // the child never returns normally; touches `t` (avoids -Wunused-parameter)
+    CvarTable tab;
+    cvar_table_init(&tab);
+    cvar_register(&tab, &CVAR_cv_f_sim_bad);   // CVAR_F32 | CVAR_SIM - must TL_FATAL (D9)
 }
