@@ -321,6 +321,23 @@ too: `pos2_wide_t = fx<i64,36>`, `den_wide_t = fx<i64,30>`.
   code: it quantises a unit-mass correction to 4 `pos_t` quanta and creeps a resting box 12
   quanta/tick (measured, both bindings; `tests/gate0/results/…/G01_s8_l0.csv`). `ALLOY.md`
   §14.4.3 carries the spelling.
+- **R-8 The angular constraint terms stay wide; `omega_t` is retuned to its structural cap
+  (ruled 2026-08-25, Gate 0 RR-9).** (a) A body's denominator share `inv_I·(r×n)²` is computed
+  and kept as the i64 frac-30 local (`w_ang30`), never narrowed into `invmass_t` — a 4096:1 plank
+  with a 1.25 m lever has `inv_I·(r×n)² ≈ 12,000`, outside ±8,192. (b) `inv_I` itself is stored
+  in `invmass_t`, which bounds CONTENT: the validator rejects a body whose `inv_I` exceeds the
+  row (the smallest legal 4096:1 body is 2.5 m × 0.25 m); a lighter/smaller body is a new ruling,
+  not a quiet clamp. (c) `omega_t` becomes `fx<i32,22>` (±512 turn/s): the implicit encoding
+  `pθ = θ − ω·h` caps |ω| at `inv_h/2` = 240 turn/s by construction, so range above the cap was
+  unreachable; ±512 keeps 2× margin and the 4 reclaimed bits go to resolution. Consequence:
+  `vel_t` and `omega_t` are
+  distinct C++ types from rev 2 — the op table instantiates the omega triples explicitly.
+- **R-9 Wide-local, narrow-storage is the palette-wide principle (ruled 2026-08-25, Gate 0
+  RR-8/RR-9/RR-11).** Kernels compute in i64 frac-30 locals; palette rows are what SoA columns
+  store, written once per substep at the single rounding point. Third instance: the PBF density
+  ratio ρ/ρ₀ stays an i64 frac-30 local through the constraint (it exceeds `q_t`'s ±2 under
+  impact — measured, G-03/G-04); `q_t` clamps only the stored metric copy. A future kernel that
+  narrows mid-sweep is a bug by this ruling, not a style choice.
 - **R-10 The decimal-literal quantizer is integer-only, in `fx.h`, additive (RR-38, ruled
   2026-08-27).** `editor/inspector.cpp`'s fx-field edit widget and `core/cvar.cpp`'s `CVAR_FX_RAW`
   `set <name> <f64>` path both needed to turn a user-typed base-10 literal into a row's raw
@@ -344,23 +361,6 @@ too: `pos2_wide_t = fx<i64,36>`, `den_wide_t = fx<i64,30>`.
   itself never needed to be bit-exact ACROSS PEERS (only within one process, which integer
   arithmetic already guarantees), so this ruling did not have to weigh a cross-ISA determinism
   cost against the float ban either.
-- **R-8 The angular constraint terms stay wide; `omega_t` is retuned to its structural cap
-  (ruled 2026-08-25, Gate 0 RR-9).** (a) A body's denominator share `inv_I·(r×n)²` is computed
-  and kept as the i64 frac-30 local (`w_ang30`), never narrowed into `invmass_t` — a 4096:1 plank
-  with a 1.25 m lever has `inv_I·(r×n)² ≈ 12,000`, outside ±8,192. (b) `inv_I` itself is stored
-  in `invmass_t`, which bounds CONTENT: the validator rejects a body whose `inv_I` exceeds the
-  row (the smallest legal 4096:1 body is 2.5 m × 0.25 m); a lighter/smaller body is a new ruling,
-  not a quiet clamp. (c) `omega_t` becomes `fx<i32,22>` (±512 turn/s): the implicit encoding
-  `pθ = θ − ω·h` caps |ω| at `inv_h/2` = 240 turn/s by construction, so range above the cap was
-  unreachable; ±512 keeps 2× margin and the 4 reclaimed bits go to resolution. Consequence:
-  `vel_t` and `omega_t` are
-  distinct C++ types from rev 2 — the op table instantiates the omega triples explicitly.
-- **R-9 Wide-local, narrow-storage is the palette-wide principle (ruled 2026-08-25, Gate 0
-  RR-8/RR-9/RR-11).** Kernels compute in i64 frac-30 locals; palette rows are what SoA columns
-  store, written once per substep at the single rounding point. Third instance: the PBF density
-  ratio ρ/ρ₀ stays an i64 frac-30 local through the constraint (it exceeds `q_t`'s ±2 under
-  impact — measured, G-03/G-04); `q_t` clamps only the stored metric copy. A future kernel that
-  narrows mid-sweep is a bug by this ruling, not a style choice.
 
 ## 10. Implementation specification
 

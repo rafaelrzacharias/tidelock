@@ -182,6 +182,12 @@ Determinism bugs are silent until a player desyncs. Make them fail a test. Run c
    tick. (This is why static state is banned.)
 2. **Record → replay:** record the `InputFrame` stream + per-tick hashes; replay; assert the hash
    trace is identical. The `Replay` input producer (`INPUT.md` §4) is built for this, at v0.
+   **Caveat (RR-42, `TODO.md`):** this assumes input-only re-sim reproduces the recording. Any
+   external-chunk command (`core/commands.h`'s "for recorders outside any system" chunk - editor/
+   app, e.g. `CMD_SET_FIELD`, `CMD_SET_CVAR`) applied during a recording breaks that assumption,
+   and today's harness has no way to detect it. RR-42 rules a taint flag on the recording (the
+   harness refuses/ignores a tainted trace) plus forced keyframes at every external-chunk apply -
+   ruled, not yet built (`TOOLING.md` §9.6 build order item 7).
 3. **Worker-count invariance:** 1 / 2 / 8 / 16 workers → identical trace. Blocking release gate
    (T-F-02), plus one mixed-pair run (A at 4, B at 16) once transport exists.
 4. **Long-run / fuzz:** seeded random input streams over long horizons (slow drift).
@@ -250,6 +256,12 @@ Header (WIRE_STRUCT, 128 B): magic "TLRI", format_version u32, build_id[32], ses
 Body: frame_count × { InputFrame[peer_count] (76 B each, tick = low 32 bits) ; u64 world_hash ; [u64 arena_hash[arena_count] if HAS_ARENA_HASHES] }
 Trailer: crc32 over body
 ```
+
+**Caveat (RR-42, `TODO.md`):** this format records inputs and hashes only, never commands - so it
+is reproducible via input-only re-sim ONLY IF nothing outside the sealed command stream mutated
+state while it was taken. An external-chunk command (`CMD_SET_FIELD`, `CMD_SET_CVAR`, editor/app
+sources) applied mid-recording is invisible to this format today; RR-42 rules a taint flag on the
+recording plus forced keyframes at every external-chunk apply to close the gap - not yet built.
 
 Written by the recorder every tick in `dev` (ring-bounded in memory, flushed on "save replay"),
 and by the driver unconditionally when `--record` is given. The Replay producer refuses a file

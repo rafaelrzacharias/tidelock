@@ -104,7 +104,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `NETCODE.md` -> §4, §8
 - `ROADMAP.md` -> §9.5
 - `TESTING.md` -> §1, §6
-- `TOOLING.md` -> §7
+- `TOOLING.md` -> §6, §7
 
 ## ECS.md
 - `ALLOY.md` -> §7
@@ -278,7 +278,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `CANON.md` -> §3
 - `CONTAINERS.md` -> §9.3.2
 - `CPP-SUBSET.md` -> §6, §9, §9.3.9
-- `DETERMINISM.md` -> §5
+- `DETERMINISM.md` -> §5, §9.6
 - `ECS.md` -> §2
 - `LUAU-LAYER.md` -> §1, §7
 - `PLATFORM.md` -> §9.3.9
