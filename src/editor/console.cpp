@@ -4,6 +4,9 @@
 #include "editor/console.h"
 #include "editor/editor.h"
 
+#include "core/cvar.h"
+#include "foundation/hash.h"
+
 #include <imgui.h>
 
 #include <string.h>
@@ -11,6 +14,51 @@
 namespace {
 
 int name_cmp(const char* a, const char* b) { return strcmp(a, b); }
+
+// The `set <name> <value>` built-in (console_register_cvar_set below). `w`'s cvar table is read
+// at CALL time, not captured at registration - `ConsoleFn` is a bare function pointer.
+Result<u32> cmd_set(World* w, u32 argc, const StrView* argv, Span<char> reply) {
+    TL_CHECK(argc == 2u);   // console_exec already enforced argc_min == argc_max == 2
+    if (w == nullptr || w->cvars == nullptr) { return Result<u32>{ 0u, ERR_CVAR_NOT_FOUND }; }
+
+    const NameHash key = fnv1a64(argv[0].ptr, argv[0].len);
+    const CvarDesc* d = cvar_find(w->cvars, key);
+    if (d == nullptr) { return Result<u32>{ 0u, ERR_CVAR_NOT_FOUND }; }
+
+    // cvar_parse_raw needs a NUL-terminated C string; argv[1] is a StrView into console_exec's
+    // own tokenize buffers, not necessarily NUL-terminated at exactly argv[1].len.
+    char value_buf[CONSOLE_TOKEN_CAP];
+    if (argv[1].len >= sizeof(value_buf)) { return Result<u32>{ 0u, ERR_CVAR_PARSE }; }
+    memcpy(value_buf, argv[1].ptr, argv[1].len);
+    value_buf[argv[1].len] = '\0';
+
+    u32 bits;
+    const ErrCode perr = cvar_parse_raw(w->cvars, key, value_buf, &bits);
+    if (perr != ERR_OK) { return Result<u32>{ 0u, perr }; }
+
+    // READONLY checked here, before either write door - cvar_set_raw checks it for the non-SIM
+    // path itself, but world_set_cvar_cmd's applier (cvar_apply_sim_raw, at the barrier) TL_CHECK-
+    // fatals a malformed command rather than returning an error (world.h's own contract on
+    // world_set_cvar_cmd: "a malformed command reaching apply is a wiring bug"), so a READONLY+
+    // SIM cvar must never reach that door at all.
+    if (d->flags & CVAR_READONLY) { return Result<u32>{ 0u, ERR_CVAR_READONLY }; }
+
+    ErrCode serr = ERR_OK;
+    if (d->flags & CVAR_SIM) {
+        world_set_cvar_cmd(w, key, bits);   // sealed CMD_SET_CVAR - applies at the next barrier
+    } else {
+        serr = cvar_set_raw(w->cvars, key, bits);
+        if (serr != ERR_OK) { return Result<u32>{ 0u, serr }; }
+    }
+
+    // Echo the new value back (cvar_format - display only, reused rather than re-derived) for a
+    // SIM cvar this has not applied yet, so the echoed value is the CURRENT one, not the pending
+    // write; the console's own history/reply convention elsewhere in this file makes no promise
+    // beyond "some confirmation text," so pre-barrier staleness for the rare SIM case is not a
+    // contract violation.
+    const u32 n = cvar_format(w->cvars, key, reply.data, reply.count);
+    return Result<u32>{ n, ERR_OK };
+}
 
 }  // namespace
 
@@ -166,6 +214,17 @@ const char* console_history_at(const ConsoleState* s, u32 i) {
     // wrapped, exactly hist_head itself - the standard ring "oldest = head - count" identity).
     const u32 idx = (s->hist_head + CONSOLE_HISTORY_CAP - s->hist_count + i) % CONSOLE_HISTORY_CAP;
     return s->history[idx];
+}
+
+void console_register_cvar_set(ConsoleState* s) {
+    ConsoleCmd c{};
+    c.name = "set";
+    c.usage = "set <name> <value>";
+    c.fn = cmd_set;
+    c.flags = CONSOLE_SIM_AFFECTING;
+    c.argc_min = 2;
+    c.argc_max = 2;
+    console_register(s, &c);
 }
 
 void console_panel_register(Editor* ed) { editor_register_panel(ed, "Console", console_panel_draw, true); }

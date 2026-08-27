@@ -163,6 +163,22 @@ Result<u32> console_exec(ConsoleState* s, World* w, bool lockstep, const char* l
 // not further registered into).
 u32 console_complete(const ConsoleState* s, StrView prefix, const ConsoleCmd** out, u32 out_cap);
 
+// Registers the built-in `set <name> <value>` cvar command (docs/TOOLING.md §9.3.5's Cvars
+// clause; Review C's D1(b), 2026-08-27) - NOT called by `console_panel_register` (whose own
+// contract stays accurate: it registers nothing of its own). The caller assembling the real
+// command set (`app/`, not built) calls this alongside any other `console_register` call. Reads
+// `w->cvars` at CALL time (via the `World* w` every `ConsoleFn` already receives) rather than
+// capturing a `CvarTable*` at registration - `ConsoleFn` is a bare function pointer, no closure
+// state. Parses `value` per the cvar's registered kind through the SHARED `core/cvar.cpp` parser
+// (`cvar_parse_raw` - never a second one); a `CVAR_SIM`-flagged cvar routes through
+// `world_set_cvar_cmd`'s sealed `CMD_SET_CVAR` door (checked for `CVAR_READONLY` first, since
+// `cvar_apply_sim_raw` TL_CHECK-fatals a malformed command reaching the barrier - `world.h`'s own
+// contract on `world_set_cvar_cmd`), never a direct write; a non-SIM cvar goes through the
+// ordinary `cvar_set_raw` door. Registered with `CONSOLE_SIM_AFFECTING` - the target cvar is not
+// known until dispatch, so lockstep refusal is command-level (this header's own dispatch note),
+// covering every `set` call rather than only the ones that turn out to touch a SIM cvar.
+void console_register_cvar_set(ConsoleState* s);
+
 // history[i] in OLDEST-to-newest order (i=0 is the oldest live line, i=hist_count-1 the most
 // recent - matching tl_log.h's tl_log_ring_at "write order" convention). Fatal if
 // i >= s->hist_count.
