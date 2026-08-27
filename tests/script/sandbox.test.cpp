@@ -145,7 +145,26 @@ TL_TEST(sandbox_data_vm_removals, "script") {
         "assert(getfenv == nil and setfenv == nil)\n"));
     // It keeps the stock set otherwise - a data file is arithmetic and tables, and its OUTPUT is
     // what is hashed (docs/ASSETS-AND-DATA.md §3), not the VM it was built in.
-    TL_EXPECT_TRUE(script_ok(f.vm, "assert(math ~= nil and pairs ~= nil and type(fx.pos) == 'function')"));
+    TL_EXPECT_TRUE(script_ok(f.vm, "assert(math ~= nil and type(fx.pos) == 'function')"));
+
+    // ...EXCEPT pairs/next/table.foreach/table.foreachi (RULED 2026-08-27, amending RR-21): Luau
+    // places a table by KEY HASH, a function of insertion history and the implementation, not of
+    // the key set's content, so raw iteration order over a hash-keyed table is not a pure function
+    // of the source text - the same peer-divergence class as math.random, through a different
+    // door. Authors use arrays and ipairs (deterministic integer order) instead.
+    TL_EXPECT_TRUE(script_ok(f.vm,
+        "assert(pairs == nil, 'pairs survived in the data VM')\n"
+        "assert(next == nil, 'next survived in the data VM')\n"
+        "assert(table.foreach == nil, 'table.foreach survived in the data VM')\n"
+        "assert(table.foreachi == nil, 'table.foreachi survived in the data VM')\n"
+        "assert(ipairs ~= nil, 'ipairs must remain - it is the deterministic replacement')\n"
+        "local sum = 0 for _, v in ipairs({10, 20, 30}) do sum = sum + v end\n"
+        "assert(sum == 60, sum)\n"));
+
+    // A data script calling pairs must fail CLEANLY (an error naming the mistake), never silently
+    // work and never crash the VM - the removal is a global going nil, not a trap.
+    TL_EXPECT_FALSE(script_ok(f.vm, "for _ in pairs({a=1}) do end"));
+    TL_EXPECT_TRUE(script_ok(f.vm, "assert(1 + 1 == 2)"));   // the VM is still usable afterward
 
     // ...EXCEPT the two that are seeded from an address and the wall clock (ruled 2026-08-26,
     // review round 1's D4). This assertion previously read `assert(math ~= nil)` and nothing
