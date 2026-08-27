@@ -1,10 +1,12 @@
 // inspector.test.cpp - the generic reflection walker across every FieldKind family: integer/bool
-// (editable), the fx palette (display-only), Entity handles (display + "go" reselect), StrId
-// (display, interner-backed), a fixed-array field (display-only, count > 1), and a singleton
-// component (shown regardless of selection). Also inspector_set_scalar_field's lockstep refusal
-// and successful-write path, called directly rather than through a simulated widget edit - the
-// same reason console_panel.test.cpp/dotpath.test.cpp drive their write paths directly: nothing
-// in this tree can simulate a keystroke against the null ImGui backend.
+// (editable), the fx palette (editable since RR-38 - see inspector_fx_field_edit_widget_writes_
+// through_parse_and_command below; the %.9g text beside the edit box stays a read-only display),
+// Entity handles (display + "go" reselect), StrId (display, interner-backed), a fixed-array field
+// (display-only, count > 1 - no kind is editable there, per CMD_SET_FIELD's own shape), and a
+// singleton component (shown regardless of selection). Also inspector_set_scalar_field's lockstep
+// refusal and successful-write path, called directly rather than through a simulated widget edit -
+// the same reason console_panel.test.cpp/dotpath.test.cpp drive their write paths directly:
+// nothing in this tree can simulate a keystroke against the null ImGui backend.
 // Spec: docs/TOOLING.md §9.3.4 (corrected in the same commit as inspector.cpp/inspector.h),
 // §9.6 build order item 5. Rubric: docs/TESTING.md §7.
 //

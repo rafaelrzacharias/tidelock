@@ -5482,6 +5482,57 @@ than guessing past a determinism-relevant correctness gap. `core/recorder.cpp`/`
 `foundation/ring.h` all read directly (file:line) to confirm this, not inferred from `TOOLING.md`'s
 own pseudocode, which is known (this session, repeatedly) to predate several reconciliations.
 
+#### RR-42 (steward-allocated, ruled by Rafael, 2026-08-27): the ruling above — RECORDED FOR WHOEVER BUILDS ITEM 7, NOT BUILT IN THIS PR
+
+**The finding is bigger than the filing above framed it.** `core/commands.h`'s own comment says
+the external chunk is "for recorders outside any system (editor, app)" — so every external-chunk
+command shares this property, not just the Inspector's `CMD_SET_FIELD`: the console's
+`CMD_SET_CVAR`, dotpath writes, and (once wired) script/data reload and asset-ready all reach sim
+state the same way, outside any `InputFrame`. Combined with `recorder.h`'s own claim that
+replaying and comparing the hash trace IS the determinism test, the real statement is: **any
+external-chunk command applied during a recording makes that recording non-reproducible, and the
+determinism harness has no way to know.** This is a harness-soundness bug, not a Replay-panel
+scoping choice — found from the editor's end, but never only the editor's problem.
+
+**Ruling: a taint flag on the recording, plus forced keyframes at every external-chunk apply —
+not a command log.** Splits the two use cases `TOOLING.md` currently conflates:
+- **(a) Harness integrity** — the recording carries a TAINT FLAG, set the moment any
+  external-chunk command applies. The determinism harness refuses or ignores a tainted recording,
+  so the hash-trace test keeps meaning exactly what it claims to mean.
+- **(b) Dev scrubbing** — `keyframes.cpp` forces a keyframe at every external-chunk apply. A seek
+  to any tick at or after such an edit then RESTORES from a keyframe that already contains it,
+  rather than trying to re-derive it via input-only re-sim, so scrubbing across an edit reproduces
+  the session faithfully.
+
+Why this beats a command-log schema change (the "strong reading" option this filing offered):
+(a) keeps the determinism test honest without teaching the recorder a command format at all, (b)
+gives the Replay panel the behaviour a developer actually wants, and neither requires touching
+`RecordedInputRow`'s own wire shape in the general case.
+
+**Cost caveat, already resolved by the steward — do not re-investigate:** forced keyframes could
+be expensive if `CMD_ASSET_READY` fires often during streaming, but this is moot today —
+`commands.h`'s own text states `CMD_ALLOY`/`CMD_SCRIPT_RELOAD`/`CMD_DATA_RELOAD`/
+`CMD_ASSET_READY` have no producer yet and "an applier meeting one today is `TL_FATAL`
+('unwired')". The only LIVE external-chunk sources today are `CMD_SET_FIELD` and `CMD_SET_CVAR`,
+both human-driven and rare, so forced keyframes cost one snapshot per human action at v0.
+**Whoever lands the asset-streaming lanes MUST re-evaluate this ruling when `CMD_ASSET_READY`
+gets a real producer** — a per-asset-ready keyframe would not be cheap.
+
+**Cone condition on the taint flag, binding on whoever implements it:** `core/recorder.h`/`.cpp`
+belongs to `loop+input`, merged and closed — the SIXTH instance this wave of work landing on a
+closed lane's file. A narrow additive exception is granted IN PRINCIPLE, on one condition that
+must be checked FIRST: `Recorder` carries `build_id[32]`, a seed, and a base_tick, and
+`RecordedInput` is an on-disk file format. If adding the taint flag changes that on-disk format or
+its version in any way, STOP and file a fresh ruling request rather than proceeding — a
+wire-format break is not something a narrow exception covers. Only if the flag is genuinely
+additive and format-compatible does this exception apply.
+
+**Scope — binding on this PR: RECORD ONLY, DO NOT BUILD.** `keyframes.cpp` + the Replay panel are
+`TOOLING.md` §9.6 build-order **item 7**, not v0, not PR #16's gate (`RR-40`'s split above).
+`w3-editor` did not start `keyframes.cpp`, the Replay panel, or the recorder taint flag in this
+PR — this entry is the standing ruling for whoever picks up item 7 next, so the research and the
+decision are on the record before that code gets written, not so this lane builds it now.
+
 ### editor: closing the third v0 done-criterion clause — "zero heap allocation per frame outside `pool_vendor`" (2026-08-27)
 
 With the `keyframes.cpp`/Replay clause blocked on a ruling (above), looked for other unblocked
@@ -5518,6 +5569,16 @@ asserted before and after. Ran clean on all four tiers, both isolated and non-is
 **`TOOLING.md` §9's v0 done criterion is now met on two of its three clauses: all six panels
 exist, and zero heap allocation per frame outside `pool_vendor` is verified.** Only "an edit in
 the inspector appears in the replay log" remains open, pending the ruling filed above.
+
+**Correction (steward, 2026-08-27, same day): the paragraph above overclaims.** The verified
+allocation property is the PANELS' own half only — the six `draw_fn`s, called directly, headless,
+with no `editor_frame` involved. `editor_frame`'s own per-frame work (`NewFrame`, the dockspace,
+`Render`) does not exist yet and is entirely unmeasured, so this clause does not sit wholly on the
+"done" side — it SPLITS across the panels-v0/shell-v0 line RR-40 draws below, the same as the
+inspector-edit-in-replay-log clause this entry already (correctly) left open. See RR-40's own
+entry for the precise, corrected split of all three original clauses — that entry is the accurate
+record; read this paragraph as the narrower, panels-only claim its own evidence actually supports,
+not as "two of three clauses fully closed."
 
 ### RR-41 (steward-allocated, ruled by Rafael): document the `VMemApi` lifetime-capture contract (2026-08-27)
 
