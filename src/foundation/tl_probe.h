@@ -89,6 +89,7 @@ void tl_probe_test_reset(void);
 // (this header's Determinism note) - tests use this to exercise the throttle algorithm today.
 void tl_probe_test_set_tick(u64 tick);
 // Registers `key` if new, then sets its enabled flag. The real toggle is console/cvar-routed
-// (`TOOLING.md` §3, `core/console.cpp`, not built yet) - tests use this directly until then.
+// (`TOOLING.md` §3, `editor/console.cpp` + `core/cvar.h` - built, but not yet wired to a probe
+// toggle command) - tests use this directly until that wiring lands.
 void tl_probe_test_set_enabled(u64 key, const char* name, u8 enabled);
 #endif

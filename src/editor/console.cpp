@@ -1,6 +1,6 @@
 // console.h - tokenizer, registration (name-sorted index, linear-scan dispatch lookup),
 // completion, history. Spec: docs/TOOLING.md §3, §9.2, §9.3.5.
-#include "core/console.h"
+#include "editor/console.h"
 
 #include <string.h>
 

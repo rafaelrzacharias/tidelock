@@ -4668,8 +4668,10 @@ Probes/World panels). Two commits shipped this session, each validated on **both
   push, from here on.** Fixed with an in-place `memset`; `LESSONS.md` entry filed.
 
 **Not started this session** (parked cleanly, not half-built — the remaining `TOOLING.md` §9.6
-build-order items for whoever continues this lane): `core/console.h`/`.cpp` (§9.3.5), `core/
-dotpath.h` + `watch.cpp` (§9.3.6), `editor/trace_export.cpp` (the Chrome-trace JSON half of
+build-order items for whoever continues this lane; `editor/console.h`/`.cpp` §9.3.5's tokenizer/
+dispatch/completion/history WAS built later this same session, see below - moved here from an
+initial, wrong `core/` placement): `core/dotpath.h` + `watch.cpp` (§9.3.6), `editor/trace_export.cpp`
+(the Chrome-trace JSON half of
 build order item 3 — `prof.cpp`'s ring/counters are ready for it), `core/crash_report.cpp`
 (blocked, see ruling request below), `editor/shell.cpp` + the six v0 panels (Log, Console,
 Inspector, Profiler, Probes, World) over ImGui's headless null backend (`vendor/imgui` is
@@ -4703,8 +4705,11 @@ once `v0-integration` (W4) or a sibling lane starts depending on them.
 
 - **RR-34 (steward-allocated 2026-08-27, PR #16, "STOP: red head" message): `commit_docs.py`'s
   `MODULE_DOCS["core"]` omits `TOOLING.md`, even though `TOOLING.md` §9.1's own file table places
-  `core/cvar.h` (and, by the same table, `core/console.h`, `core/dotpath.h`, `core/watch.h`,
-  `core/desync_diff.h`, `core/crash_report.cpp`) under `core/`.** The two facts side by side:
+  `core/cvar.h` (and, by the same table, `core/dotpath.h`, `core/watch.h`, `core/desync_diff.h`,
+  `core/crash_report.cpp`) under `core/`.** (`console.h`/`.cpp` was originally built under
+  `core/` too but has since moved to `editor/console.h`/`.cpp` where the file table actually
+  places it - dev-tier only, unlike `cvar.h`, which is genuinely all-tier; this ruling request's
+  remaining `core/*` examples still stand.) The two facts side by side:
   `tools/audit/commit_docs.py`'s `MODULE_DOCS = {"core": ["docs/ECS.md", "docs/FRAME-LOOP.md",
   "docs/INPUT.md", "docs/ASSETS-AND-DATA.md"], ..., "editor": ["docs/TOOLING.md"], ...}` credits
   `TOOLING.md` only for commits touching `src/editor/`, never `src/core/` — so every past and

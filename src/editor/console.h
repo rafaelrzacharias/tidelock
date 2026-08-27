@@ -28,6 +28,12 @@
 //   implementation must honour (docs/TOOLING.md §0 "tools never poke sim state").
 // Threading: none - a ConsoleState is caller-owned, single-threaded (dev console input is
 //   render-rate, not tick-rate).
+// Tier: dev only (docs/TOOLING.md §9.1 file table: `editor/console.cpp`) - moved here from
+// core/console.h/.cpp, where it was first built (w3-editor's own mistake: cvar.h is legitimately
+// all-tier, this is not - the console UI/REPL has no reason to exist in netcode/ship, unlike a
+// CVAR_SIM cvar's own storage). `src/editor/` compiles only on debug/dev tiers (its CMakeLists.txt
+// is empty on netcode/ship), so this file's tier gating is structural (by directory), not a
+// `#if TL_DEV` inside it.
 // Includes: foundation/tl_types.h, foundation/tl_assert.h, foundation/hash.h, foundation/strview.h,
 //   core/world.h (ConsoleFn's World* parameter only - no World field is added by this header).
 // ---------------------------------------------------------------------------------------------
