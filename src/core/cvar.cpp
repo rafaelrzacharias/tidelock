@@ -318,7 +318,7 @@ u32 cvar_format(const CvarTable* t, NameHash key, char* out, u32 out_cap) {
     TL_FATAL("cvar_format: unreachable kind");
 }
 
-ErrCode cvar_parse_and_set(CvarTable* t, NameHash key, const char* value) {
+ErrCode cvar_parse_raw(const CvarTable* t, NameHash key, const char* value, u32* out_bits) {
     const u32 idx = cvar_find_index(t, key);
     if (idx >= t->count) { return ERR_CVAR_NOT_FOUND; }
     const CvarDesc* d = t->desc[idx];
@@ -326,26 +326,25 @@ ErrCode cvar_parse_and_set(CvarTable* t, NameHash key, const char* value) {
         case CVAR_I32: {
             i64 v;
             if (!parse_decimal_i64(value, -2147483648LL, 2147483647LL, &v)) { return ERR_CVAR_PARSE; }
-            u32 bits; i32 v32 = (i32)v; memcpy(&bits, &v32, sizeof(bits));
-            return cvar_set_raw(t, key, bits);
+            i32 v32 = (i32)v; memcpy(out_bits, &v32, sizeof(*out_bits));
+            return ERR_OK;
         }
         case CVAR_U32: {
             i64 v;
             if (!parse_decimal_i64(value, 0, (i64)0xFFFFFFFFULL, &v)) { return ERR_CVAR_PARSE; }
-            return cvar_set_raw(t, key, (u32)v);
+            *out_bits = (u32)v;
+            return ERR_OK;
         }
         case CVAR_BOOL: {
-            u32 b;
-            if (value != nullptr && (strcmp(value, "1") == 0 || strcmp(value, "true") == 0)) { b = 1u; }
-            else if (value != nullptr && (strcmp(value, "0") == 0 || strcmp(value, "false") == 0)) { b = 0u; }
-            else { return ERR_CVAR_PARSE; }
-            return cvar_set_raw(t, key, b);
+            if (value != nullptr && (strcmp(value, "1") == 0 || strcmp(value, "true") == 0)) { *out_bits = 1u; return ERR_OK; }
+            if (value != nullptr && (strcmp(value, "0") == 0 || strcmp(value, "false") == 0)) { *out_bits = 0u; return ERR_OK; }
+            return ERR_CVAR_PARSE;
         }
         case CVAR_F32: {
             f32 v;
             if (!parse_fixed_f32(value, &v)) { return ERR_CVAR_PARSE; }
-            u32 bits; memcpy(&bits, &v, sizeof(bits));
-            return cvar_set_raw(t, key, bits);
+            memcpy(out_bits, &v, sizeof(*out_bits));
+            return ERR_OK;
         }
         case CVAR_FX_RAW: {
             if (value == nullptr) { return ERR_CVAR_PARSE; }
@@ -353,8 +352,8 @@ ErrCode cvar_parse_and_set(CvarTable* t, NameHash key, const char* value) {
             if (value[0] == 'r' && value[1] == 'a' && value[2] == 'w' && value[3] == ':') {
                 i64 v;
                 if (!parse_decimal_i64(value + 4, -2147483648LL, 2147483647LL, &v)) { return ERR_CVAR_PARSE; }
-                u32 bits; i32 v32 = (i32)v; memcpy(&bits, &v32, sizeof(bits));
-                return cvar_set_raw(t, key, bits);
+                i32 v32 = (i32)v; memcpy(out_bits, &v32, sizeof(*out_bits));
+                return ERR_OK;
             }
             // A bare decimal literal, RNE-quantized at this cvar's own FRAC (RR-38, docs/
             // FX-PALETTE.md §9 R-10) - integer-only, no float/double anywhere in the actual
@@ -362,9 +361,16 @@ ErrCode cvar_parse_and_set(CvarTable* t, NameHash key, const char* value) {
             // this door's own `const char*` parameter predates `StrView`.
             const Result<i32> parsed = fx::fx_parse_decimal_raw(StrView{ value, (u32)strlen(value) }, d->frac_bits);
             if (parsed.err != ERR_OK) { return ERR_CVAR_PARSE; }
-            u32 bits; memcpy(&bits, &parsed.value, sizeof(bits));
-            return cvar_set_raw(t, key, bits);
+            memcpy(out_bits, &parsed.value, sizeof(*out_bits));
+            return ERR_OK;
         }
     }
-    TL_FATAL("cvar_parse_and_set: unreachable kind");
+    TL_FATAL("cvar_parse_raw: unreachable kind");
+}
+
+ErrCode cvar_parse_and_set(CvarTable* t, NameHash key, const char* value) {
+    u32 bits;
+    const ErrCode err = cvar_parse_raw(t, key, value, &bits);
+    if (err != ERR_OK) { return err; }
+    return cvar_set_raw(t, key, bits);
 }

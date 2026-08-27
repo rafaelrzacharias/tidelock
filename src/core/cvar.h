@@ -206,12 +206,23 @@ u64 cvar_sim_fold_bits(const CvarTable* t, u64 h);
 // - `TL_CHECK(out_cap > 0)`) or `key` is unregistered.
 u32 cvar_format(const CvarTable* t, NameHash key, char* out, u32 out_cap);
 
-// Parses `value` per `key`'s registered kind and calls cvar_set_raw (so READONLY/SIM refusal
-// applies identically to a console `set`): CVAR_FX_RAW accepts EITHER `raw:<i32>` (the raw bits,
-// unchanged) OR a bare decimal literal, RNE-quantized at `key`'s own registered `frac_bits` via
-// `fx::fx_parse_decimal_raw` (RR-38, `foundation/fx.h`, `docs/FX-PALETTE.md` §9 R-10) - the
-// gap this comment used to note here is closed. ERR_CVAR_PARSE on a malformed `value` (empty,
-// trailing garbage, out-of-range integer, non-"0"/"1"/"true"/"false" bool, or an fx literal
-// `fx_parse_decimal_raw` itself rejects) - the underlying ERR_CVAR_NOT_FOUND/READONLY/
-// SIM_UNROUTED still surface first.
+// Parses `value` per `key`'s registered kind into `*out_bits` - the PARSE half of
+// cvar_parse_and_set below, factored out (2026-08-27, `editor/console.cpp`'s cvar `set` command)
+// so a SIM-flagged cvar's caller can get the parsed bits WITHOUT going through cvar_set_raw
+// (which refuses SIM outright) - it routes through `world_set_cvar_cmd`'s sealed-command door
+// instead, using the exact same parse this function runs. Same grammar as cvar_parse_and_set:
+// CVAR_FX_RAW accepts EITHER `raw:<i32>` (the raw bits, unchanged) OR a bare decimal literal,
+// RNE-quantized at `key`'s own registered `frac_bits` via `fx::fx_parse_decimal_raw` (RR-38,
+// `foundation/fx.h`, `docs/FX-PALETTE.md` §9 R-10). ERR_CVAR_NOT_FOUND if `key` is unregistered;
+// ERR_CVAR_PARSE on a malformed `value` (empty, trailing garbage, out-of-range integer, non-
+// "0"/"1"/"true"/"false" bool, or an fx literal `fx_parse_decimal_raw` itself rejects). Does NOT
+// check READONLY/SIM - this is parse-only, no write of any kind.
+ErrCode cvar_parse_raw(const CvarTable* t, NameHash key, const char* value, u32* out_bits);
+
+// Parses `value` per `key`'s registered kind (cvar_parse_raw above) and calls cvar_set_raw (so
+// READONLY/SIM refusal applies identically to every ordinary write door). Check order:
+// ERR_CVAR_NOT_FOUND surfaces before parsing even starts (cvar_parse_raw's own lookup); a
+// malformed `value` returns ERR_CVAR_PARSE regardless of READONLY/SIM, since parsing happens
+// before cvar_set_raw's write-permission check ever runs; only a WELL-FORMED value on a
+// READONLY/SIM-flagged key reaches ERR_CVAR_READONLY/ERR_CVAR_SIM_UNROUTED.
 ErrCode cvar_parse_and_set(CvarTable* t, NameHash key, const char* value);
