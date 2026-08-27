@@ -25,6 +25,8 @@ u32 desync_diff(const ArenaRegistry* reg, const Snapshot* a, const Snapshot* b, 
     TL_CHECK(reg->sealed != 0u);
     TL_CHECK(a->count == reg->count && b->count == reg->count);
 
+    if (max_n == 0u) { return 0u; }   // header's "out is called at most max_n times" - 0 means never
+
     if (memcmp(a->session_fingerprint, b->session_fingerprint, 32u) != 0) {
         DesyncEntry e{};
         e.kind = DIFF_FINGERPRINT_MISMATCH;
@@ -56,6 +58,7 @@ u32 desync_diff(const ArenaRegistry* reg, const Snapshot* a, const Snapshot* b, 
 
         off_a = align_up_64b(off_a);
         off_b = align_up_64b(off_b);
+        TL_CHECK(off_a + ua <= a->blob_cap && off_b + ub <= b->blob_cap);
         const u8* seg_a = a->blob + off_a;
         const u8* seg_b = b->blob + off_b;
         if (memcmp(seg_a, seg_b, ua) != 0) {
