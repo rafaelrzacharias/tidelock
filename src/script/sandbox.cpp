@@ -42,9 +42,20 @@ const char* const SIM_REMOVE[] = {
 // fail at the call. The rest of `math` stays: it is pure and its output is a function of its
 // input. The `time()`/`clock()` reads inside luaopen_math's seeding are inert once `random` is
 // unreachable - they touch only `rngstate`, which nothing can then read.
+// `pairs`/`next`/`table.foreach`/`table.foreachi` join the list by RULING (2026-08-27, Rafael,
+// relayed by the steward - an amendment to RR-21, closing the condition it attached rather than a
+// new RR): the exact precedent as `math.random` above, through a different door - Luau places a
+// table by KEY HASH, which is a function of insertion history and the implementation, not of the
+// key set's CONTENT, so raw iteration order over a hash-keyed table is not a pure function of the
+// source text either. A data script that flattens a keyed staging table via `pairs()` before
+// returning it is peer-divergent the same way a `math.random()` draw is, and removing rather than
+// merely documenting makes the breach UNREPRESENTABLE instead of untested - a convention can be
+// broken silently by a future data file, surfacing as a fingerprint mismatch on handshake, not as
+// an error at the line. Authors use arrays and `ipairs` (deterministic integer order) instead.
 const char* const DATA_REMOVE[] = {
     "os", "io", "loadstring", "getfenv", "setfenv",
     "math.random", "math.randomseed",
+    "pairs", "next", "table.foreach", "table.foreachi",
     nullptr,
 };
 

@@ -110,6 +110,27 @@ init, `getfenv`/`setfenv`, `rawequal`/`rawget`/`rawset` (the proxies forbid raw 
 `table.foreach`/`table.foreachi` (they call `next`). Provided: `ipairs`, `sortedpairs`, `fx.*`,
 engine binding tables, pure `string`/`table` functions.
 
+## Luau data VM — the exact removal list (`LUAU-LAYER.md` §1, §10.2 step 4)
+
+Given a home here 2026-08-27 (round 2 review of PR #14, R4): the list had been stated in full in
+two places in `LUAU-LAYER.md` itself (§1's table row and §10.2 step 4), which is exactly the
+"one fact, one home" violation this doc exists to prevent — §10.2 step 4 had already drifted from
+§1 once (missing `math.random`/`math.randomseed`) before this round found and fixed it. `CANON.md`
+owed the data VM nothing before this ruling: this section's SIM list above never claimed to cover
+it, and the data VM's own line under "Luau VMs" said only "throwaway per compile" — checked
+against the code, not assumed, before this section existed.
+
+Removed globals: `os`, `io`, `loadstring`, `getfenv`, `setfenv`, `math.random`, `math.randomseed`
+(ruled 2026-08-26 — Luau seeds its PCG from `uintptr_t(L) ^ time(NULL) ^ clock()`, and this VM's
+output is hashed), `pairs`, `next`, `table.foreach`, `table.foreachi` (ruled 2026-08-27, amending
+RR-21 — Luau places a table by key hash, a function of insertion history and the implementation,
+not of the key set's content, so raw iteration order is not a pure function of the source text
+either; `ipairs` remains, deterministic by integer order). `tostring`/`string.format` of a
+reference raise rather than substitute a type name (ruled 2026-08-26, `LUAU-LAYER.md` §10.2 step
+5 — value types keep the stock conversion). Provided otherwise: the stock library set minus the
+above, `ipairs`, `sortedpairs`, `fx.*` (every op, not a kind-gated subset — `to_f64` is the one
+exception, UI-VM-only).
+
 **The address channel is closed by replacement, not removal** (`LUAU-LAYER.md` §10.2 step 5):
 `tostring` and `string.format` are replaced, and **both** conversions that can reach
 `luaL_tolstring` — `%s` **and Luau's `%*` extension** — are routed through the replacement. `%*`

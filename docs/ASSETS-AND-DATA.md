@@ -1,8 +1,17 @@
 # Assets, game data tables, saves (tidelock, rev 1)
 
-> **Status:** design rev 1, 2026-08-22. **DECIDED** except §7. Carries D14 / C3-runtime; the data
+> **Status:** design rev 1, 2026-08-22; **v0 IMPLEMENTED AND MERGED 2026-08-27** (`w3-assets-data`, PR #14 — three adversarial review rounds; §8.5's criterion split by ruling into this lane's part, which is met, and clauses owned elsewhere or flagged as unowned, listed at §8.5). Last reconciled against the tree 2026-08-27. **DECIDED** except §7. Carries D14 / C3-runtime; the data
 > path is new (Luau-authored tables → compiled POD); saves are the reflection encoder (PIVOT §6).
 > **Owns:** `src/core/assets.h`, `data_tables.h`, `save.h`; `tools/cook` later.
+> **Build (2026-08-26, w3-assets-data):** §8.2/§8.3/§8.4's pseudocode-level structs got real
+> construction signatures over the spec (the `slotmap_init`/`world_init` precedent - registry
+> init, loader function shapes not threaded through `World`, `data_compile`'s explicit schema-list
+> and `compile_pool` parameters, `SaveArenaDesc`/`SaveDesc`); the reconciliation is recorded in
+> `TODO.md`'s W3 assets+data lane notes, not restated here. RR-21 (`TODO.md`, RULED) granted this
+> lane a scoped exception to add a generic C++-side Luau table reader to `src/script/script.h`;
+> `data_compile`'s body (integer/bool field kinds, scope noted at its RULED entry) now lives in
+> `src/script/data_compile.cpp` - the module DAG (`ARCHITECTURE.md` §1) puts the only module that
+> can drive both `core/`'s types and the Luau VM downstream of `core`, not inside it.
 
 ---
 
@@ -213,12 +222,24 @@ ArenaBlock × arena_count (registry order):
     reflected payload: { u32 field_count; field_count × { NameHash name; u8 kind; u8 _pad; u16 count; u32 size } ; u32 row_count; rows (packed per the field list, little-endian) }
     ECS column payload: reflected payload + entity list (u32 bits per row)
     chunk store payload (Alloy terrain): { u32 dirty_chunk_count; per chunk { i32 cx, cy; i16 sdf[128*128]; u8 material[128*128] } }
-Trailer: crc32 over everything after the header
+Trailer: crc32 over the whole file (header included; everything but the trailer's own 4 bytes)
 ```
+
+Reconciled 2026-08-27 (round 1 review D6): this used to read "crc32 over everything after the
+header", which is what `save_write`/`save_read` shipped — the 160-byte `SaveHeader` (`seed`,
+`tick`, `format_version`, `origin`, `name_table_len`, `arena_count`) sat outside the integrity
+check, so a single-bit flip in any of those fields loaded as `ERR_OK` with silently wrong values
+(measured: a corrupted `tick` byte loaded successfully with the wrong tick). This was a design
+defect in the format, not a code/doc mismatch — the doc and the code agreed, on the wrong window.
+Both are fixed to the wording above in the same commit.
 
 Reader: header checks (magic, version ≤ known, `build_id` differences allowed, `session_fingerprint`
 differences allowed — this is the cross-build path; data-script hash must match after recompiling
-the tables, else `ERR_SAVE_DATA_MISMATCH`); per block, decode by name: for each stored field find
+the tables, else `ERR_SAVE_DATA_MISMATCH`; the header's own `arena_count` checked against
+`MAX_ARENAS`, `ERR_SAVE_TOO_MANY_ARENAS` on excess — added 2026-08-27, round 2 review R1: this
+file-supplied count drives the per-block decode loop into a fixed `MAX_ARENAS`-sized scratch
+array, and the bound guarding it had only ever been enforced on the WRITER's `arena_descs.count`,
+never on the reader's own file-supplied field); per block, decode by name: for each stored field find
 the live field by `name` (then by alias table `{old_hash → new_hash}` registered per component);
 kind mismatch → `ERR_SAVE_FIELD_KIND` (a versioned migration function may be registered for
 `(component, format_version)` and runs instead); missing live field → skipped; missing stored field
@@ -226,11 +247,57 @@ kind mismatch → `ERR_SAVE_FIELD_KIND` (a versioned migration function may be r
 
 ### 8.5 Tests (`tests/core/assets/`, `tests/core/data/`, `tests/core/save/`)
 
-Assets: load/dedup/refcount/free/stale; missing file and malformed PNG → named errors (fuzz the
-decoder path under ASan nightly). Data: every error code has a fixture; two compiles of the same
-scripts hash identically in two processes; fx literal acceptance/rejection table; reference
-resolution incl. forward refs; reload emits the sealed command. Save: round-trip equality per
-arena; rename via alias; added field via default; kind change → refusal and → migration fn path;
-truncated/corrupt file refused; nightly cross-build load of the previous commit's fixture.
+**Split by owner — RULED 2026-08-27** (`TODO.md` "THREE RULINGS 2026-08-27" #2, PR #14 round 2).
+Rev 1 stated one done criterion for a spec section three lanes jointly own, naming tests and
+error-code fixtures that cannot exist while their prerequisite lane is unlaunched. Both round 1
+and round 2 judged every one of those gaps an honest deferral, not a defect (`CLAUDE.md`'s "no
+speculative breadth" — compiling against an Alloy schema, or a font pipeline, that does not exist
+yet is the Layr trap). Split below into what `assets+data` owns and has built, and what is
+deferred, each clause naming the lane that closes it.
 
-*Rev 1 — 2026-08-22.*
+**Owned by `assets+data`, built (PR #14):**
+- Assets: load/dedup/refcount/free/stale; missing file and malformed image → named errors;
+  bad-arg empty-name refusal; streaming texture create/release
+  (`tests/core/assets/assets.test.cpp`). Fuzzing the decoder path under ASan nightly is not yet
+  wired into a CI leg — open, this lane's own scope, filed in `TODO.md`'s doc debt.
+- Data: every error code `data_compile` can actually raise has a fixture (missing field,
+  out-of-range int, unknown table, duplicate name, syntax error, too-many-rows, too-many-schemas);
+  the single-process half of "two compiles hash identically" (source field order and Luau-table
+  walk order both proven not to reach the hash) (`tests/core/data/data_compile.test.cpp`).
+- Save: round-trip equality per arena (reflected singleton + `ECS_COLUMN`); rename via alias;
+  added field via default; kind change → refusal and → migration fn path; truncated/corrupt/
+  forged file refused (bad magic, CRC mismatch, header byte corruption, forged block `byte_len`,
+  kind mismatch, bogus name-table length, forged `arena_count`) (`tests/core/save/save.test.cpp`).
+  Nightly cross-build load of the previous commit's fixture is CI-tooling's mechanism to wire,
+  not built by this lane.
+
+**Deferred, each clause naming its owning lane:**
+- fx literal acceptance/rejection table; reference resolution incl. forward refs —
+  `ERR_DATA_BAD_FX_LITERAL` and `ERR_DATA_DANGLING_REF` are declared, `TL_FATAL`'d scope cuts with
+  no Alloy schema to compile a real fixture against. Owner: **alloy-substrate** (schema + the
+  fx/StrId/handle field kinds land there first).
+- reload emits the sealed command — `data_compile` has no reload path; §10.8's reload surface is
+  binding work this lane's header does not own. Owner: **luau-bindings**.
+- `asset_load_font` (`loaders/font.cpp`, a declared `TL_FATAL`'d stub) — the font-load half.
+  **No `ROADMAP.md` lane currently owns this** — render2d (PR #13) is merged and closed, never
+  had font/text/glyph work in its Builds column, and shipped `render/text.cpp` as a deliberate
+  reserved stub by its own done criterion (`RENDER2D.md` §9). §8.1 above already keeps
+  `core/loaders/font.cpp` (the face-handle load) in this lane's own file table; only the glyph
+  atlas is `render/text.cpp`'s. The deferral itself stands — `tl_core` links `stb`, not the
+  vendored `sdl_ttf`, a build change outside this lane's slice (`src/core/CMakeLists.txt`) — but
+  flagged rather than assigned, per `CLAUDE.md`'s "unknown constraint → say so; never invent
+  one," same as the two-process clause below.
+- `ERR_DATA_VALIDATOR` — a cross-table validator fixture, per its own header comment
+  (`data_tables.h`: "a cross-table validator (`ALLOY.md` §11.1 / a game's own) rejected"). This
+  waits on Alloy the same as the fx/ref clauses above, not on render2d — attributed to
+  **alloy-substrate**, corrected from an earlier draft of this split that grouped it with
+  `asset_load_font` only because both are `TL_FATAL`'d stubs sharing one bullet.
+- "two compiles of the same scripts hash identically **in two processes**" — the single-process
+  half is built (above); the cross-process half needs a process-spawn `PlatformApi` primitive
+  that does not exist (`popen`/`fork` are neither portable nor sanctioned outside `platform/`).
+  **No `ROADMAP.md` lane currently owns this** — flagged rather than assigned, per `CLAUDE.md`'s
+  "unknown constraint → say so; never invent one." Not blocking: both reviews already judged
+  deferring it honest.
+
+*Rev 2 — 2026-08-27: split by owner, RULED (`TODO.md`, PR #14 round 2, ruling 2). Rev 1 —
+2026-08-22.*

@@ -1,9 +1,13 @@
 # The Luau layer — data, meaning, iteration (tidelock, rev 1)
 
-> **Status:** rev 1 (2026-08-22), amended through 2026-08-26 — the W2 luau-vm lane built the
+> **Status:** rev 1 (2026-08-22), amended through 2026-08-27 — the W2 luau-vm lane built the
 > §10.12 VM half and folded in the rulings RR-18/19/20 (compiler heap pooled on `pool_vendor`,
 > atoms live, CodeGen out) and the data-VM determinism rules (`math.random` removed; reference
-> stringification raises). **DECIDED** except §9. Expands `PIVOT-DESIGN.md` §7.
+> stringification raises); RR-21 (2026-08-26, W3 assets+data) extends §1's "output is hashed" rule
+> to the C++-side table reader `script.h` gained for the data-table compiler, amended 2026-08-27
+> (round 1 review of PR #14, ruled by Rafael) to also remove `pairs`/`next`/`table.foreach`/
+> `table.foreachi` from the data VM itself, closing the Luau-side door the C++-side condition alone
+> left open. **DECIDED** except §9. Expands `PIVOT-DESIGN.md` §7.
 > §10 is the implementation specification (file layout, VM construction, binding signatures,
 > proxies, reload, bytecode pipeline, tests); it is placed before the rulings by convention.
 > **Owns:** `src/script/` (VM setup, bindings, reload, trampolines), `script/` (the game).
@@ -40,10 +44,41 @@ Persistent script state = a component (Luau-declared, `ECS.md` §6.1) or a singl
 |---|---|---|---|---|
 | **sim** | `ipairs`, `sortedpairs` (ours), `table` (array ops), `string` (pure fns only), `fx` (det math bindings), engine bindings (§3). **Removed:** `math` (stock), `os`, `io`, `debug`, `pairs`/`next`, `coroutine`, `string.rep`, `require` beyond the init phase, `loadstring` | inside the lockstep contract; bytecode in the fingerprint | own `mem_pool`, budgeted | **interpreter only** (native codegen is another codegen surface) |
 | **ui/editor** | stock Luau + ImGui/draw/text bindings + read-only world access; `pairs` allowed | free | own pool | NCG allowed |
-| **data** | stock Luau minus `os`/`io` **and minus `math.random`/`math.randomseed`** (ruled 2026-08-26 — Luau seeds its PCG from `uintptr_t(L) ^ time(NULL) ^ clock()`, and this VM's output is hashed, so a single draw makes a peer-divergent table that surfaces as a fingerprint mismatch instead of an error at the mistake), **and with `tostring`/`string.format` of a reference raising** rather than printing an address (ruled 2026-08-26, same reasoning through a different door — §10.2 step 5); used once per table compile then destroyed (`ASSETS-AND-DATA.md` §3) | its *output* is hashed | throwaway | — |
+| **data** | stock Luau minus the exact removal list in `CANON.md` "Luau data VM" (reconciled here 2026-08-27, round 2 review of PR #14, R4 — this row and §10.2 step 4 had drifted into two homes for one fact; `CANON.md` is now the home, cited from both), **and with `tostring`/`string.format` of a reference raising** rather than printing an address (ruled 2026-08-26, same reasoning through a different door — §10.2 step 5); used once per table compile then destroyed (`ASSETS-AND-DATA.md` §3) | its *output* is hashed | throwaway | — |
 
 The sim VM and the UI VM never share a `lua_State`; the UI VM reads the world through the same
 read bindings the inspector uses and can only *write* by issuing commands (which are sealed).
+
+**RR-21 (ruled 2026-08-26, `TODO.md`) extends this row's "output is hashed" rule to `script.h`'s
+C++-side table reader** (`script_eval`/`script_table_get`/`script_table_geti`/`script_table_len`/
+`script_table_next`, added for `ASSETS-AND-DATA.md` §8.3's data-table compiler). `script_table_next`
+walks a table via `lua_next` — Luau's internal hash-table order, the same order-fragile hazard
+§1.1 already rejected `pairs` over, now reachable from C++ too. Its own contract comment states
+the binding condition: that order is **not part of the deterministic surface** and must never
+feed a compiled table, a hash, or any other output two peers must agree on bit-for-bit. The
+data-table compiler's own answer is to never call it: it walks SCHEMA-ORDERED, by name
+(`script_table_get`) and by array position (`script_table_len`/`script_table_geti`), pinned by
+`tests/core/data/data_compile.test.cpp`'s `data_compile_fields_are_name_keyed_not_walk_order_keyed`
+(reconciled 2026-08-27, round 1 review D2: the original pin cited here,
+`data_compile_two_field_orders_hash_identically`, did not discriminate - its two sources walked in
+identical order, since Luau places a small string-keyed table by key hash, not insertion order -
+and is kept, renamed, for the narrower, still-true claim that literal source field order does not
+affect the hash. The current pin witnesses Luau's real walk order directly and checks compiled
+field values against it, so it fails under a compiler mutated to assign fields positionally).
+
+**The C++-side discipline above bounds `data_compile` itself, not a data SCRIPT.** Round 1 review
+D1 (2026-08-27, amending RR-21) found the door still open one level up: a data script can build a
+keyed staging table and flatten it via `pairs()` before ever returning it to `data_compile`, and
+the resulting row ARRAY order (which `data_compile` walks positionally, correctly, per the
+paragraph above) is then a function of Luau's internal hash layout for that staging table — two
+peers with byte-identical row content but a script that built it in different insertion order can
+compile to different bytes and different `hash` (measured in review: `13341534662545686718` vs
+`16529001401375034206` for the same rows). `data_compile`'s own discipline cannot see this; it
+never runs the script, only reads what it returns. Fixed by removing the channel at its source
+(this section's data-VM row, above): `pairs`/`next`/`table.foreach`/`table.foreachi` are gone from
+the data VM, so a staging table can no longer be flattened in an order-dependent way at all —
+authors use arrays and `ipairs` instead, whose order is a pure function of construction, not of
+Luau's hash layout.
 
 ### 1.1 Why `pairs` is removed from the sim VM (alternatives recorded)
 
@@ -237,8 +272,11 @@ returns `Result<ScriptVm*>` with `ERR_SCRIPT_*` codes; no partial VM survives.
    The "asserted absent afterwards" check runs in `script_sandbox_open` itself, not only in the
    test: a removal that silently did nothing is a hole in the sandbox, and a hole found by a test
    nobody ran is not a gate (`LESSONS.md`). VM creation fails with `ERR_SCRIPT_SANDBOX`. `_G.require` is installed
-   in step 7 and removed at the end of init (§10.9). Data VM removes `os`, `io`, `loadstring`,
-   `getfenv`, `setfenv`. UI VM removes nothing.
+   in step 7 and removed at the end of init (§10.9). Data VM removes the exact list in `CANON.md`
+   "Luau data VM" (**reconciled 2026-08-27, round 2 review of PR #14, R4** — this line and §1's
+   data-VM row had drifted into two homes for one fact, the same class `CANON.md`'s own sim list
+   drifted before it; `CANON.md` is now the one home, cited here and from §1). UI VM removes
+   nothing.
 5. **Replacements (sim and data VMs):** neither may see an address — the sim VM because a script
    could branch on one, the data VM because its *output* is hashed (§1) — but they answer it
    differently:

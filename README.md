@@ -43,9 +43,11 @@ ruled (`FX-PALETTE.md` rev 2, 2026-08-25); the W2 ECS and netcode Phase 1 merges
 luau-vm and vendor merges (2026-08-26 — Luau 0.696, SDL3, SDL_ttf + FreeType, ImGui, ENet,
 Monocypher and stb, every allocator pooled and gated); four-leg hosted CI ({Windows, Linux} ×
 {x86-64, arm64}) green on `main`; and the W3 **render2d** lane (merged 2026-08-27, PR #13 —
-camera, extract, queue/sort/batch, sprite and debug draw, the SDL present path). In flight: the
-W3 slack lanes loop+input and assets+data (launched early on the spare non-Fable budget, ruled
-2026-08-26); editor chains after render2d; alloy-substrate launches at the weekly reset.
+camera, extract, queue/sort/batch, sprite and debug draw, the SDL present path) and the W3
+**assets+data** lane (merged 2026-08-27, PR #14 — asset registry, the Luau-authored data-table
+compiler, save v1). In flight: the W3 **loop+input** lane (launched early on the spare non-Fable
+budget, ruled 2026-08-26), in its round-3 fix round. `editor` and the sandbox removal-list audit
+both hold until loop+input merges; alloy-substrate launches at the weekly reset.
 Next: W3 — alloy-solver ★ and the v0 lanes.
 
 ## Lineage

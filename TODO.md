@@ -174,6 +174,47 @@
 > `src/script/sandbox.cpp`; `luau-bindings` is the likely one. **PR #14 does not act on
 > `gcinfo` in its fix round** — it files the RR and proceeds.
 
+> **W3 assets+data MERGED 2026-08-27 — `26c9c5f` (PR #14), closeout sweep done (R-7 + R-12).**
+> Three adversarial review rounds. Round 1 measured RR-21's determinism condition NOT holding
+> (staging-table insertion order reaching compiled bytes and the hash) and found the pin that
+> should have caught it did not discriminate; round 2 found two blockers in code round 1's own
+> fix set had touched — a `pend_count` bound deleted in passing by the D5/D7 hunk, and an audit
+> note stating as "Conclusion, not a guess" that `script_table_next` could not raise, when it
+> can; round 3 verified both fixes under its own reverts, rebuilt round 2's actual forged save
+> file rather than trusting the lane's weaker fixture, and re-established RR-21 independently
+> (six key insertion orders through the real `data_compile`, one hash).
+>
+> **`WORKFLOW.md` §2 POST-REVIEW-EDIT VALVE USED — recorded here as §2 requires, never assumed.**
+> Round 3 returned *fix first* on a single defect: §8.5's `asset_load_font` deferral named
+> **render2d** as owner — a lane merged and closed, never holding font/text work in `ROADMAP.md`
+> §2's Builds column, which shipped `render/text.cpp` as a reserved stub by its own done
+> criterion, and which §8.1 of the same doc contradicts by keeping `core/loaders/font.cpp` in
+> this lane. The fix is a one-sentence doc edit implementing an already-recorded ruling (ruling
+> 2's operative words, "each deferred clause naming its owning lane"), which is precisely what
+> the valve exists for. The steward verified the diff itself — `docs/` plus one test comment,
+> **no code change** — with CI 23/23 green on a real `pull_request` event run and
+> `mergeable_state: clean`, and merged without a round 4, on the round-3 reviewer's own
+> recommendation. **The deferred review of commits `1a14424`/`3b428e3` goes to the
+> wave-boundary sweep (§3).**
+>
+> **Filings triaged (R-7).** (i) The `SIM_REMOVE`/`DATA_REMOVE` audit slice stays **QUEUED and
+> HELD** — it was ruled to hold until #14 *and* #15 merge, and #15 has not; owner remains the
+> next lane to touch `src/script/sandbox.cpp`. (ii) **`asset_load_font` and the two-process
+> compile check have no owning lane in `ROADMAP.md`** and now say so rather than naming a closed
+> one. That is correct as a record but it is not a plan: both need a home when a lane is scoped
+> for text/fonts, and `tl_core` links `stb` rather than the vendored `sdl_ttf`, so the font half
+> needs a build change nobody currently owns. **Held for the wave-boundary sweep as a scoping
+> item.** (iii) Nothing else the lane filed is unrouted.
+>
+> **R-12 pass:** `ASSETS-AND-DATA.md`'s status line moved from design-only to v0-implemented-and
+> -merged and carries its reconciliation date; `README.md` and `CLAUDE.md` status prose moved
+> off "assets+data in review".
+>
+> **RR numbering:** `RR-29`, `RR-30`, `RR-31` are allocated to `w3-loop-input` (steward-allocated
+> 2026-08-27, replacing its RR-24/25/26 after the `main` merge collided them with render2d's
+> merged numbers). `LESSONS.md`'s rule now binds in practice: **the steward allocates RR ids**,
+> lanes do not self-allocate from the shared counter. Next free id is RR-32.
+
 > **W3 render2d MERGED 2026-08-27 — `31da431` (PR #13), closeout sweep done (R-7 + R-12).**
 > Five adversarial review rounds to *ship*. Two rulings landed in it: **D1** (camera off the
 > ECS onto `RenderQueue` — as registered components its f32 bytes reached `registry_hash_all`,
@@ -3713,6 +3754,507 @@ guard without a double retire (measured); main-always-waits deadlocks as three T
 a hang (measured). dev-win 254/250/0 isolate + 274/265/0 serial; netcode-win 254/229/0;
 tl_audit 113 selftest checks green on both tiers.
 
+## W3 assets+data — lane notes and ruling requests (2026-08-26, w3-assets-data)
+
+Filed at lane start from the slice brief's big-picture check (`CLAUDE.md` doc-integrity protocol,
+step 6), before the data-table compiler's `.cpp` was written.
+
+- [x] **RR-21 (ruling request) `ASSETS-AND-DATA.md` §8.3's data-table compiler needs to read a
+      Luau table from C++, and `src/script/script.h` exposes no such call.** §8.3 step 1: "run
+      each script; each returns a table `{ <table_name> = { {name=...}, ... }, ... }`"; step 3
+      walks each row's named fields against the schema. The shipped data-VM surface
+      (`script_create_data`/`script_run_source`/`script_eval_int`/`script_seal`/`script_destroy`,
+      W2 luau-vm, merged PR #11) lets a script run (`script_run_source` discards the result) or
+      evaluates ONE expression to an `i64` (`script_eval_int`) — nothing reads back a table.
+      `LUAU-LAYER.md` §10.12's build order step 5 (`bind_data.cpp`) is the OPPOSITE direction —
+      exposing already-compiled POD rows TO further Luau code (`data.table(name)`) — not a
+      C++-side reader of a script's raw return value. The raw Luau C API is walled off by design
+      ("A `lua_State*` or a Luau header may appear ONLY under `src/script`" — script.h's own
+      contract block, enforced by `tools/audit/symbols.py --wrap-lib` and `includes.py`'s
+      `BACKEND_HEADERS`), and `src/script/` is not this lane's module (cone discipline) — this
+      lane cannot add the missing call without crossing a firewall a different, already-merged
+      and closed-out lane owns.
+      **Options:** (a) **a small generic table-read surface added to `script.h`/`vm.cpp`**:
+      `Result<ScriptValue> script_eval(ScriptVm*, StrView expr)` returning a tagged union
+      (nil/bool/int/string/table-ref), plus `script_table_get`/`script_table_next`/
+      `script_table_len` over a table-ref, walking the Luau stack the same way
+      `script_eval_int` already does. Smallest new surface; the firewall holds (only `script/`
+      touches `lua_State*`); does not change the already-DECIDED data-script authoring shape
+      (§3: "the same language as the game", a script still just returns a table). Cost: touches
+      a module this lane does not own — needs a ruling-granted exception for this lane (or
+      whichever lane) to build it, precedented by `core/encoder.h/.cpp`, which the W2 ecs lane
+      built ahead of this lane's own turn because `save.h` cannot exist without it (`TODO.md`'s
+      W2 ecs notes: "`save.h`'s file format/migrations stay W3 assets+data"). (b) **a callback
+      shape**: `data_compile` registers a C closure the data script calls once per row
+      (`emit(table_name, row)`) instead of returning a table for the compiler to walk — no
+      generic "read a table from outside" primitive needed, only a way to register a plain C
+      closure into the VM (still `script/`-only, since `lua_pushcfunction` is Luau API too; same
+      ownership problem as (a), smaller surface). Changes the authoring contract §3/§8.3 already
+      fixed: scripts return tables today, not `emit()` calls — a bigger doc/behavior delta for a
+      false economy. (c) **defer the compiler's `.cpp` body** until a `script/`-owning session
+      ships (a) or (b), shipping only `data_tables.h`'s public header this lane's own doc §8.3
+      already fully specifies (`TableSchema`/`DataTable`/`DataTables`/`data_compile`,
+      `TL_FATAL("unimplemented")` stub body) plus the parts of this lane that do not depend on
+      the gap (asset registry + loaders, `save.h/.cpp` over the already-shipped `encoder.h`).
+      Blocks §8.5's data-table tests and this lane's own done criterion until resolved.
+      **Recommend (a), built under a ruling-granted exception the same shape as `encoder.h`'s
+      precedent** — smallest surface, no authoring-contract change, and a lane precedent already
+      on `main` for exactly this "one small piece of another module's contract, built by the
+      lane that needs it, ahead of that other module's own next turn" case. Meanwhile this lane
+      proceeds on (c)'s unblocked verticals so nothing stalls waiting on the ruling: asset
+      registry + loaders and `save.h/.cpp` land first; `data_tables.h` lands header-first per
+      `ROADMAP.md` §0 rule 1 with a `TL_FATAL("unimplemented — RR-21")` compile body until this
+      ruling resolves one way or the other.
+      **RULED 2026-08-26 (Rafael, relayed by the steward, as recommended): option (a).** This
+      lane is granted a scoped exception (the `encoder.h` precedent) to add the generic table-
+      read surface to `src/script/`: `Result<ScriptValue> script_eval(ScriptVm*, StrView)`
+      returning a tagged union (nil/bool/int/string/table-ref), plus `script_table_get`/
+      `script_table_geti`/`script_table_len`/`script_table_next` over a table-ref. The firewall
+      holds - `lua_State*` and Luau headers stay strictly under `src/script/`.
+      **ONE BINDING CONDITION:** the data VM's output is hashed (`LUAU-LAYER.md` §1), so raw Luau
+      table-iteration order must never reach a compiled table or any other hashed output. The
+      data-table compiler walks SCHEMA-ORDERED via named lookups (`script_table_get`) and array-
+      ordered via `script_table_geti`/`script_table_len` - never `script_table_next`.
+      `script_table_next`'s own contract comment (`script.h`) and `LUAU-LAYER.md` §1 both state
+      explicitly that its iteration order is not part of the deterministic surface and must never
+      feed sim state or hashed output; pinned by `table_reader.test.cpp`'s
+      `script_table_next_walks_every_pair_exactly_once` (a runaway/duplicate walk would fail the
+      `seen <= 3` assert) and, for the compiler's own path, `data_compile.test.cpp`'s
+      `data_compile_two_field_orders_hash_identically` (two source scripts with the SAME rows but
+      swapped field-key order inside each row hash identically - proof the compiler's own walk
+      never touches Luau's hash-table order at all).
+      **Shipped:** `script.h`/`vm.cpp` (the reader surface, `src/script/`); `core/data_tables.h`'s
+      `data_compile` now takes `MemPool* compile_pool` (script.h's `ScriptVmDesc::compile_pool`
+      is required, `RR-18`/D2 - a signature addition over §8.3's parameter list, the caller
+      supplies a `pool_init`-built pool or its own `pool_vendor()`) and `Span<const StrView>
+      script_sources` (already-loaded TEXT, not paths - `data_compile` has no `PlatformApi` to
+      read a file with; the caller reads via its own `platform->file.read_all` first).
+      `TableSchema.table_name` is a `StrView`, not a bare `NameHash` (the compiler needs the
+      actual bytes for the lookup - the same StrView-not-NameHash reasoning `assets.h`'s loaders
+      already settled). Data scripts this pass compiles are authored as a bare table-literal
+      EXPRESSION (`{ materials = {...} }`, no leading `return`) - `script_eval`'s own expression-
+      only shape; a `return {...}` statement chunk needs a separate exec-and-capture primitive
+      nothing yet needs, refining §3's "each returns a table" phrasing into the mechanism
+      actually built. **data_compile's implementation lives in `src/script/data_compile.cpp`, not
+      `core/data_tables.cpp`** - the module DAG (`ARCHITECTURE.md` §1: `"script": (script, core,
+      ...)`) only lets a module downstream of BOTH core and script drive the VM the compiler
+      needs, and core itself cannot include `script/`; `core/data_tables.h` still owns the public
+      declaration and `core/data_tables.cpp` keeps the pure `data_find_row`/`data_row` lookups
+      that need no script.h access. Field-kind scope this pass ships: integer/bool, with
+      `ComponentInfo::default_row` as the missing-field fallback (§8.3's own "per-field default
+      table" is more granular than anything built yet). fx-literal fields (§7 R-2), `K_StrId`
+      fields, handle/reference fields (§8.3 pass 2) and cross-table validators `TL_FATAL`, named -
+      no Alloy schema exists anywhere in the tree yet (`alloy-substrate` is still queued,
+      `ROADMAP.md` §2) to compile a real one against; building any of them against a guessed
+      shape would be the Layr trap. Tests: `tests/script/table_reader.test.cpp` (the new script.h
+      surface directly), `tests/core/data/data_compile.test.cpp` (round-trip, the determinism
+      pin, missing-field/out-of-range/unknown-table/duplicate-name named errors).
+
+## W3 assets+data — header-first commit notes (2026-08-26, w3-assets-data)
+
+Signatures added over `ASSETS-AND-DATA.md` §8.2/§8.3/§8.4's pseudocode-level structs, same
+"signature added over spec, reconciled in the same commit" shape `slotmap_init`/`world_init`/
+`interner_init` already set (no ruling needed - none of these cross another lane's module or
+change a DECIDED design, `CLAUDE.md` rule 8).
+
+- **Loaders are not threaded through `World`.** §8.2's `asset_load_texture(World*, NameHash)`
+  pseudocode names `World*`, but `World` (`core/world.h`) carries no `AssetRegistry`/`PlatformApi`
+  member and this lane does not touch `world.h` (not its module, `ASSETS-AND-DATA.md` §8.1's file
+  list). The registry is not sim state (§1: "not a registered arena... the sim never touches" its
+  contents) and does not need `World` to reach it - shipped as
+  `asset_load_texture(AssetRegistry*, const PlatformApi*, VMemArena* scratch, StrView name)`, the
+  same "engine-side facility, passed explicitly" shape `ScriptVm*` callers already use.
+- **`asset_load_texture`/`asset_load_font` take `StrView name` (a path), not a pre-hashed
+  `NameHash`** (revised from this note's first cut, same commit family): §8.2's own pseudocode
+  step ("path = resolve(name) // content root + interned name -> StrView") only makes sense if
+  something can turn the identity back into bytes to open a file, and `NameHash` (FNV-1a) is
+  one-way by construction - a `NameHash`-only loader would need a reverse lookup through a process
+  `Interner` this header has no reason to depend on. §1's "the name hash is the cross-machine
+  identity... never paths" is about SAVE FILES and the WIRE, which this call is neither - it is
+  the one door a path string legitimately crosses (asset loading is a startup-time, non-sim, non-
+  fingerprinted call). `sv_hash(name)` is computed internally as the dedup key and the returned
+  record's identity; `resolve()` is `name` handed straight to `platform->file.read_all` (the
+  shipped `FileApi` has no separate "content root" concept to prepend - a caller wanting one
+  prefixes it into `name` itself).
+- **`asset_registry_init` takes no caller-supplied id** (revised from this note's first cut):
+  one process ever has one `AssetRegistry`, so a caller prefix buys nothing eight fixed literals
+  ("assets.tex.slots" etc.) don't already give, and deriving eight distinct `SlotMap` column ids
+  from one caller value is exactly what `CONTAINERS.md` §8.6's "four distinct ids, not derived"
+  warns against.
+- **`AssetRec.kind_specific` is the platform DrawApi's own `TexHandle` bits, not this registry's.**
+  `docs/CANON.md` "the asset registry holds them, never a second [handle] id" reads as: don't
+  invent a THIRD C++ handle type for "an asset reference" - reuse the `TexHandle` SHAPE
+  (`Handle<TexTag,12,4>`) for both the registry's own `SlotMap`-minted handle (what callers hold)
+  and the platform's real device handle (what `kind_specific` carries so the registry can call
+  `draw.texture_destroy`/etc.) - two VALUES in one TYPE, never a second type.
+- **`data_compile` takes its schema list as an explicit parameter** (`Span<const TableSchema>`),
+  not a separate stateful pre-registration API on `DataTables` - `DataTables` does not exist
+  until `data_compile` returns it, so nothing could be registered onto it beforehand; the caller
+  already holds the ordered list (Alloy's C++ schemas + a game's Luau-declared ones) and handing
+  it straight to the one function that walks it needs no extra state.
+- **`DataHandle` (the CANON `Handle<_,12,4>` resource-handle shape for K_Data fields) and
+  `DataTable.by_name`'s dense id (a plain `u16`, `§8.3`'s own struct spelling) are two views of
+  one value**, not two mechanisms: `data_find_row`/`data_row` convert at the public boundary
+  (`handle_make<DataHandle>(dense_id, 1)` - generation is always 1, since a compiled table never
+  reuses a row slot independently; the whole table set replaces atomically on reload, so there is
+  no staleness concept `Handle`'s generation exists to catch here). `by_name` itself stays the
+  doc's literal `SortedMap<NameHash, u16>`.
+- **`save.h` adds `SaveArenaDesc`/`SaveDesc`** (arena id -> encoder kind + `ComponentInfo`/
+  `max_rows`/`ComponentId` mapping, plus the alias/migration tables, the `World*` needed for
+  `SAVE_ENC_ECS_COLUMN`'s load-side re-add, and the data-script name/hash pass-through) - the doc
+  gives the FILE format, not how a caller's registered arenas map onto it, and only the caller
+  (the app/game, or a future `tools/cook`) knows that mapping.
+- **Scope cut, recorded rather than built speculatively (`CLAUDE.md` "no speculative breadth"):**
+  `SAVE_ENC_RAW_POOL` and `SAVE_ENC_CHUNK_STORE` are declared (the byte layout names all four
+  kinds) but `TL_FATAL("not yet built")` in `save.cpp` - no Alloy pool or terrain chunk store
+  exists anywhere in the tree yet (`alloy-substrate` is still queued, `ROADMAP.md` §2) to write a
+  real encoder against; building one now would be guessing a layout with no consumer to test it
+  against. `SAVE_ENC_REFLECTED`/`SAVE_ENC_ECS_COLUMN` (the two kinds every registered arena in
+  the tree today actually needs) are the ones this lane implements and tests.
+- **RR-21 RULED, superseding this note** - see the "W3 assets+data — header-first commit notes"
+  section's own RR-21 entry above for the full record (option (a), the script.h table-reader
+  surface, the binding determinism condition, and where `data_compile`'s real body landed).
+
+## W3 assets+data — save v1 + gate allowlist note (2026-08-26, w3-assets-data)
+
+- **`tools/audit/includes.py`'s `SYS_ALLOW_DIRS` gained `"src/core": {"stb_image.h"}`** (cone
+  discipline: "your OWN entries in the shared gate files... tools/audit allowlists"), completing
+  a grant `BACKEND_HEADERS`'s `"stb_"` token already named `src/core` for but `SYS_ALLOW_DIRS`
+  never matched (the two gates check independently - `LESSONS.md`'s "a vendored lib needs BOTH"
+  class, here half already wired and half not). `core/loaders/image.cpp` needs it for
+  `stbi_load_from_memory` (declaration-only; the one real implementation TU is
+  `vendor/stb/stb_impl.c`, linked via the `stb` CMake target). Paired negative fixture added to
+  `tools/audit/selftest.py` (`src/render` still refused); `tools/audit/selftest.py` and
+  `tools/audit/includes.py --root .` both green.
+- **`save.h`/`save.cpp`'s write loop iterates `SaveDesc::arena_descs` directly, not the
+  `ArenaRegistry`** (revised after building it once the wrong way): an ECS column is THREE
+  registered arenas (dense/entity/pages, `docs/ECS.md` §10.3) but exactly one
+  `encoder_write_column` call and one save block, so a registry-driven loop triple-encoded it
+  the first time. `arena_descs` is the save's actual membership list (pages arenas are derived,
+  never saved).
+- **The NameTable ships empty (`name_table_len` 0)** - `save_write` `TL_CHECK`s no stored
+  component has a `K_StrId` field rather than encode one it cannot correctly decode: no shipped
+  component has one yet, and the real mechanism needs a decode-side StrId REMAP (the writer's and
+  reader's interners can assign one string different ids), which a scan-and-write half-measure
+  would silently get wrong. Deferred with the same "no real consumer yet" reasoning as
+  `SAVE_ENC_RAW_POOL`/`SAVE_ENC_CHUNK_STORE`.
+- **v1's `SAVE_ENC_ECS_COLUMN` restore assumes the caller's entities already exist** (`world_add_raw`
+  TL_CHECKs the target live and the component absent, `docs/ECS.md` §4) - an in-session save/
+  reload (add, save, remove, reload), not cross-session entity identity remapping, which has no
+  consumer yet either. `world_add_raw` only RECORDS; the caller must `world_flush` after
+  `save_read` before the restored rows are visible.
+
+## W3 assets+data — round 1 fresh-context review fixes (2026-08-27, w3-assets-data, PR #14 @ a7a18dc)
+
+Fresh-context adversarial review round 1, verdict FIX FIRST: 4 blocking, 4 should-fix, 2 nits (PR
+#14 comment). Fixed below, D1's actual code change excepted (HELD for ruling, per the review's own
+instruction). Every item validated: `dev-linux`/`netcode-linux` both green, `tl_tests --isolate
+--tag !slow` full pass both tiers, `includes.py`/`docaudit.py`/`commit_docs.py`/symbol audit all
+clean, `selftest.py` green except the same pre-existing container-only windows-msvc layout-dump
+failures already noted in the prior entry (not a regression).
+
+- **D1, RULED 2026-08-27** (Rafael, relayed by the steward, amending RR-21 rather than a new RR,
+  since it closes the condition RR-21 already attached): **`pairs`/`next`/`table.foreach`/
+  `table.foreachi` are removed from the data VM** (`sandbox.cpp`'s `DATA_REMOVE`) - the exact
+  precedent as the W2 luau-vm lane's D4 `math.random` removal on this same VM for this same
+  reason, through a different door: Luau places a table by KEY HASH, a function of insertion
+  history and the implementation, not of the key set's content, so a data script that flattens a
+  keyed staging table via `pairs()` before returning it is peer-divergent the same way a
+  `math.random()` draw is. Removing rather than documenting makes the breach UNREPRESENTABLE
+  instead of merely untested. `ipairs` verified still present and working (deterministic integer
+  order - the authors' replacement).
+  - Code: `DATA_REMOVE` in `sandbox.cpp` gained the four names, with the ruling's reasoning inline.
+  - Grepped the tree (`src/script`, `tests/`, no `.lua` fixture files exist yet anywhere in the
+    repo) for `pairs(`/`next(` reachable by the data VM before pushing, per the ruling's caution:
+    found one, `tests/script/sandbox.test.cpp`'s `sandbox_data_vm_removals`, which asserted
+    `pairs ~= nil` in the data VM - fixed to assert the four names are `nil`, `ipairs` still works
+    (a 3-element `ipairs` sum), and that calling `pairs` fails CLEANLY (`script_ok` false) without
+    taking the VM down (a follow-up call still succeeds).
+  - Verified BOTH required mutations, per the ruling's "make both mutations yourself, watch both
+    fail" instruction:
+    (a) D2's own pin (see D2 above) - already verified when D2 was written, unaffected by this
+    change (it exercises `data_compile`'s C++ walk, not the VM's library set); re-confirmed still
+    green after this change (`tl_tests --tag data --isolate`: 11/11 pass).
+    (b) the removal itself - reverted `DATA_REMOVE`'s four new names locally (kept
+    `math.random`/`math.randomseed`), rebuilt `dev-linux`, ran
+    `./out/dev-linux/bin/tl_tests --tag script --isolate`: **`sandbox_data_vm_removals` FAILED**,
+    both new assertion blocks (`tests/script/sandbox.test.cpp:162` - `pairs == nil` etc - and
+    `:166` - `!(script_ok(..., "for _ in pairs(...) do end"))`) - `32 passed, 1 failed`. Restored
+    `DATA_REMOVE`, rebuilt, reran: `33 passed, 0 failed`.
+  - Docs, at their homes (one fact, one home): `LUAU-LAYER.md`'s status line, §1's data-VM table
+    row, §1's RR-21 paragraph (a new paragraph explains the Luau-side channel D1 closes, distinct
+    from the C++-side channel D2's paragraph already covered), and §10.2 step 4's "Data VM
+    removes" sentence (which had ALSO drifted from §1 even before this ruling - it never carried
+    `math.random`/`math.randomseed` either - fixed to carry the full, current list, same drift
+    class `CANON.md`'s F-2 finding named). `CANON.md` checked, not assumed: its "Luau sim VM - the
+    exact removal list" section is titled and scoped to the SIM VM only (verified name-for-name
+    against `SIM_REMOVE` - no drift) and makes no claim about the data VM's list at all, so there
+    was nothing there to fix.
+
+**CI-caught, post-push (2026-08-27): a pre-existing heap-buffer-overflow in `load_chunk`'s Luau
+compile-error path**, found by the `sanitizers` legs on commit `76461d6` (D2-D10) - `data_compile_
+syntax_error_named_error` (D9) was the first path in the whole tree to ever hand `load_chunk` a
+genuine Luau SYNTAX error (an unterminated table literal), which it had never been exercised
+against before. `luau_compile` encodes a compile error as a leading `0` byte followed by the
+message, sized exactly by `bc_size` with **no trailing NUL** - `script_set_error`'s NUL-scan loop
+(its own documented contract requires a NUL-terminated `msg`) read one byte past the malloc'd
+buffer looking for a terminator that was never there. ASan: `READ of size 1` one byte past a
+57-byte region, inside `script_set_error`, called from `load_chunk`'s compile-error branch. Fixed
+at the call site that violated the contract (not by loosening `script_set_error`'s contract for
+every other, already-NUL-terminated caller): the message is now copied into a bounded, explicitly
+NUL-terminated stack buffer before being handed to `script_set_error`. Reproduced and fixed
+locally under `sanitize-linux` (the sandbox lacked the ASan/UBSan runtime; installed
+`libclang-rt-18-dev` to get it) - full suite green under sanitizers afterward (`463 selected, 459
+passed, 0 failed`), both non-sanitized tiers rebuilt clean and green too.
+- **D2 - the RR-21 pin didn't discriminate.** Its own two proofs: (a) the original test's two
+  source strings walked in IDENTICAL `script_table_next` order (Luau places a small string-keyed
+  table by key HASH, not insertion order, so varying literal field order in source text can never
+  vary the real layout - the premise was false); (b) `compile_table`'s field loop mutated to
+  assign positionally from a raw `script_table_next` walk still passed all six data tests.
+  Fixed: `tests/core/data/data_compile.test.cpp`'s `data_compile_fields_are_name_keyed_not_walk_
+  order_keyed` - a six-field row with pairwise-distinct values (so any non-identity assignment is
+  directly observable per field) plus a witness (a throwaway VM) that walks the identical row
+  table with `script_table_next` and asserts the real order is not simply the schema's declared
+  field order, so the pin cannot silently degrade the way the original did. Verified against the
+  exact defect: reproduced the reviewer's mutation locally -
+  `for (u32 f = 0; f < schema->row->field_count && script_table_next(...); ) { ...store
+  positionally...; ++f; }` in `compile_table`'s field loop (temporary, `(void)&compile_field;` to
+  silence the resulting unused-function warning) - rebuilt `dev-linux`, ran
+  `./out/dev-linux/bin/tl_tests --tag data --isolate`: `data_compile_fields_are_name_keyed_not_
+  walk_order_keyed` FAILED (`row->v2`/`v3`/`v5` mismatched their expected 22/33/55), while the
+  renamed original (`data_compile_source_field_order_does_not_affect_hash`, kept for its narrower,
+  still-true claim) kept passing under the same mutation - exactly the review's own finding.
+  Reverted the mutation; `tl_tests: 7 selected, 7 passed` restored. `docs/LUAU-LAYER.md` §1's
+  citation updated to the new test name. The "two compiles hash identically in two processes"
+  half of §8.5's wording is NOT implemented (still single-process): it would need a process-spawn
+  primitive this codebase has no platform seam for yet (`PlatformApi` has no `os.spawn`, and
+  `popen`/`fork` aren't portable/sanctioned outside `platform/`) - a genuine new capability, not a
+  test-only gap, so left as a follow-up rather than adding ad hoc, ungated process spawning under
+  review pressure. Filed here rather than silently dropped.
+- **D3 - `script_table_get` used `lua_gettable`** (metamethod-aware: a data row table with
+  `__index` could raise, unprotected -> `TL_FATAL`, or answer an absent key with a synthesized
+  value instead of `SCRIPT_VAL_NIL`). Fixed to `lua_rawget`, matching `script_table_geti`'s
+  existing `lua_rawgeti` choice. Audited the reader's other three Luau entry points as asked
+  (`vm.cpp`, inline comment on `script_table_next`): `lua_getref`/`lua_next` are both raw (no
+  metamethod call, confirmed against `vendor/luau/VM/src/lapi.cpp`/`lvm.cpp`) and `lua_next`'s
+  only own error path ("invalid key to next") is unreachable here since the key it continues from
+  is always one it itself returned; `lua_pushlstring` can only fail on allocator OOM, the same
+  class every other alloc in this VM already treats as fatal, not a new door. Test:
+  `tests/script/table_reader.test.cpp`'s `script_table_get_ignores_metamethods` (an `__index` that
+  `error()`s; the test completing at all is half the proof, `SCRIPT_VAL_NIL` the other half).
+- **D4 - data scripts capped at ~1014 bytes.** `script_eval`/`script_eval_int` staged `"return
+  (<expr>)"` into `char buf[SCRIPT_ERR_MAX]` - 1024, the ERROR-MESSAGE bound (`script.h`), reused
+  by accident as a SOURCE bound (measured failure: 21 two-field rows). Fixed at the one root for
+  both functions (`docs/CLAUDE.md` "how many sites share the bug class") via a new
+  `load_wrapped_expr` helper in `vm.cpp`. First attempt called `pool_alloc`/`pool_free` on the
+  VM's `compile_pool` directly from `vm.cpp` and failed `includes.py`'s `POOL_VERBS` gate
+  (`docs/MEMORY.md` §1.5/§8.6: "ENGINE AND SIM CODE NEVER CALL [pool_alloc/free]... only
+  mem_pool.cpp/.h and vendor_glue/" - `src/script` is engine code by that rule same as anything
+  else). Fixed properly by reusing `tl_luau_alloc` (`vendor_glue/luau_alloc.h`, already included
+  in `vm.cpp` for the VM's own Luau allocator hook) - its `ptr==nullptr`/`nsize==0` cases are
+  exactly `pool_alloc`/`pool_free` with the clean null-on-budget-refusal contract this needed, and
+  the actual `pool_*` calls live inside `luau_alloc.cpp` (`vendor_glue/`, already gate-allowed),
+  so no new surface was added. `includes.py`/symbol audit both clean afterward. Test:
+  `data_compile_source_larger_than_the_old_1024_byte_cap` (40 rows, source > 1024 B, asserted).
+- **D5 - `save_read` trusted a block's file-supplied `byte_len` against nothing.** `ByteReader` is
+  bounds-safe only WITHIN the length it is handed, so an inflated `byte_len` authorised
+  `block_r`'s reads past the real payload (measured: a 252 B file declaring `byte_len` = 64 KiB
+  and `row_count` = 48 decoded 48 rows from ~16 real bytes, `err = ERR_OK`). Fixed: bound checked
+  against `(total - 4u) - block_start` before `br_init`, `ERR_SAVE_TRUNCATED` on violation - the
+  code the doc already named for this (`save.h`: "file shorter than its own header/block lengths
+  claim"). Test: `save_read_forged_block_byte_len_refused` (CRC-corrected first, isolating this
+  check from D6's).
+- **D6 - the 160 B `SaveHeader` sat outside the crc32 window.** `seed`/`tick`/`format_version`/
+  `origin`/`name_table_len`/`arena_count` were unprotected (measured: a corrupted `tick` byte,
+  offset 80, loaded `ERR_OK` with the wrong tick). Fixed: crc32 now covers the whole file
+  (`crc32(buf, len-4)`), both `save_write` and `save_read`. `docs/ASSETS-AND-DATA.md` §8.4 (the
+  format's home doc) and `save.h`'s own comment both reconciled to the new wording in the same
+  commit (doc integrity protocol - the code and the old doc agreed, on the wrong window). Test:
+  `save_read_header_byte_corruption_is_crc_protected` (the reviewer's own repro, byte 80).
+- **D7 - a block's stored `kind` byte drove decode dispatch unchecked against the caller's
+  registered `SaveArenaDesc::kind`.** A mismatch (or a byte outside `SaveEncoderKind`'s own range,
+  previously reaching `TL_FATAL` from file content) could decode via the wrong encoder and, on
+  apply, target the wrong component through `ad->comp` (set for `ECS_COLUMN` entries only). Fixed:
+  one check, `(SaveEncoderKind)kind != ad->kind -> ERR_SAVE_KIND_MISMATCH` (new code, `save.h`
+  0x0359), right after `find_arena_desc` and before anything about the block is trusted - this
+  subsumes the out-of-range-byte case too (any byte differing from the caller's own registered
+  value is refused the same way), so the `RAW_POOL`/`CHUNK_STORE` `TL_FATAL` is now reachable only
+  by a caller registering an unimplemented kind (a real engineering bug, save_write's own existing
+  class), never file content. Test: `save_read_kind_mismatch_refused` (both the valid-but-wrong
+  and the out-of-range case).
+- **D8 - `hdr.name_table_len`'s skip loop never checked `br_ok`.** A hostile `0xFFFFFFFF` spun
+  ~4G no-op iterations (bounds-safe per-read, but each iteration still cost a loop turn) before
+  the block loop finally reported `ERR_SAVE_TRUNCATED`. Fixed: `if (!br_ok(&r)) break;` inside the
+  loop, plus an explicit post-loop check. Test: `save_read_bogus_name_table_len_refused` (pins the
+  outcome - a unit test cannot portably time-bound the stall itself, but the hostile count must
+  still end up refused).
+- **D9 - coverage gaps, `docs/ASSETS-AND-DATA.md` §8.5.** Added: `SaveDesc::aliases` (rename via
+  alias - `save_read_field_rename_via_alias_round_trip`, two same-layout-different-name
+  components), `SaveDesc::migrations` both halves (kind-change refusal with no migration -
+  `save_read_kind_change_without_migration_is_refused`; the migration fn path -
+  `save_read_kind_change_via_migration_fn`, two same-name-different-width components + a
+  hand-written `migrate_kind_widen`). **Self-found while writing the migration test, not one of
+  the reviewer's items**: `save_write` never stamped `hdr.format_version` at all - `SaveHeader{}`
+  zero-inits it and nothing set it to `SAVE_FORMAT_VERSION`, so every save this lane had written
+  was version-stamped 0 regardless of the real format. `save_read`'s `format_version >
+  SAVE_FORMAT_VERSION` check never caught it (0 is never "newer"), so no existing test saw it, but
+  `SaveComponentMigration` dispatch is keyed by this exact field and would never have seen the
+  real number - fixed in `save.cpp` in the same commit (root cause, same file, blocked this
+  coverage). Also added: `ERR_DATA_SCRIPT`/`ERR_DATA_TOO_MANY_ROWS`/`ERR_DATA_TABLE_LIMIT` direct
+  tests (`data_compile_syntax_error_named_error`/`_too_many_rows_named_error`/`_too_many_schemas_
+  named_error` - each had live code, no direct test before), `SCRIPT_VALUE_STR_MAX` overflow
+  (`script_eval_string_exceeding_str_max_is_runtime_error`), and `script_table_next`'s table-key
+  refusal + its hand-written unref-on-refuse path (`script_table_next_table_key_is_refused` - the
+  refuse path's own ref release is proven by `script_fixture_down`'s teardown NOT tripping
+  `script_destroy`'s `live_bytes == 0` assert, not a separate leak-counter read). The "two
+  processes" hash-stability form stays deferred, per D2 above.
+- **D10 - `compile_field` broadcast one Luau scalar across every element of a `count > 1`
+  integer field** (a silent wrong value - an array field wants `count` distinct values, not one
+  repeated - in a file otherwise scrupulously fail-loud). Fixed: `TL_FATAL` for `count > 1`,
+  alongside the other unsupported-kind fatals in the same function; no shipped schema has an
+  array-valued integer field yet to build the real read against (this file's own scope note).
+  No dedicated crash test added (a NIT, and the file's sibling untested-kind `TL_FATAL`s - fx-
+  literal, `StrId`, handle/reference fields - carry none either for the same "no real consumer to
+  test against yet" reason; adding the env-var-gated relaunch harness `tl_assert.test.cpp` uses
+  for exactly one more `TL_FATAL` path would be new infra for a nit, not proportionate).
+
+## W3 assets+data — round 2 fresh-context review fixes (2026-08-27, w3-assets-data, PR #14 @ c12bfac)
+
+Fresh-context adversarial review round 2 (delta + full re-read), verdict FIX FIRST: round 1's ten
+findings genuinely landed (nine of ten discriminate under the reviewer's own reverts; D8/D10 are
+honest non-discriminations the lane itself declared, which the reviewer credited as worth more
+than a "verified" it would have had to re-check). Two new BLOCKING findings, both in code round 1
+touched; one NIT (doc homes); one SHOULD-FIX (`gcinfo`) held for ruling alongside the §8.5 scoping
+question, per the steward's explicit instruction not to act on either.
+
+- **R1 - `save_read` trusted `hdr.arena_count`.** The `TL_CHECK(pend_count < MAX_PENDING)` guard
+  present at the round-1 anchor (`a7a18dc`) was deleted by the D5/D7 hunk in `76461d6` - a
+  file-supplied `arena_count` drove the block loop, writing one `Pending` record per block into a
+  fixed `MAX_PENDING` (== `MAX_ARENAS` == 4096)-sized array with no bound left anywhere. Measured
+  by the reviewer: a forged file (a valid block replicated 5000 times, `arena_count = 5000`,
+  re-CRC'd) loaded with `ERR_OK`, writing 904 records past the array's end into memory the same
+  scratch arena had reserved for `out_rows`/`out_entities` - invisible to ASan because the
+  overflow lands inside that arena's own reservation. Fixed: `hdr.arena_count > MAX_ARENAS` is
+  checked up front, right after the header decodes, returning the already-declared
+  `ERR_SAVE_TOO_MANY_ARENAS` (0x0358, previously only reachable from `save_write`'s caller-side
+  `arena_descs.count` check) - a named code, not a restored `TL_CHECK`, per the reviewer's own
+  instruction ("a fatal on file content is exactly what D7's own fix argues against"). Test:
+  `save_read_forged_arena_count_refused` (a valid single-block file with only its `arena_count`
+  header field inflated past `MAX_ARENAS` - no real replicated blocks needed, since the bound is
+  checked before the block loop ever runs). Verified against the exact defect: reverted the check
+  locally, rebuilt, ran `./out/dev-linux/bin/tl_tests --tag save --isolate`:
+  `save_read_forged_arena_count_refused` FAILED (`(save_read(...)) == (ERR_SAVE_TOO_MANY_ARENAS)`,
+  actual `ERR_OK`), `12 passed, 1 failed`. Restored, rebuilt, reran: `13 passed, 0 failed`.
+- **R2 - `script_table_next` still fataled the process, and the D3 follow-up audit note (`vm.cpp`)
+  asserted it could not.** The note reasoned about the CALLER ("the key it is ever asked to
+  continue from is always a key IT ITSELF returned on a prior call"), but `script_table_next` is
+  public surface in `script.h` with nothing in the signature tying `ScriptValue* key` to the
+  `ScriptTableRef t` it came from - `lua_next` raises "invalid key to 'next'"
+  (`vendor/luau/VM/src/ltable.cpp`) whenever the continuation key is not actually present in the
+  table, reached two ways the reviewer measured directly: (a) an ordinary foreign or reused key;
+  (b) the exact interleaving `script.h`'s own design rationale names as the reason the cursor is a
+  value rather than a parked stack slot - remove the yielded key AND force a rehash between two
+  calls (removal alone, or a rehash alone, each survive; both together do not). Fixed: a raw
+  `lua_rawget` existence check on the non-nil cursor key before calling `lua_next`, returning
+  `false` + `ERR_SCRIPT_RUNTIME` ("cursor key is not in the table") when absent - the
+  false-return-with-`last_error` shape the function already had for a refused table-kind key. The
+  wrong audit note (stated as "Conclusion, not a guess") is replaced, not merely appended to, per
+  the reviewer's instruction that a wrong conclusion is worse than no note. `script.h`'s own
+  contract comment for `script_table_next` updated to document the new refusal case. This is not
+  an RR-21 breach (the reviewer grepped `src/`: `data_compile` never calls
+  `script_table_next` - only comments mention it). Tests:
+  `script_table_next_foreign_key_is_refused` (two independent tables, a key from one continued
+  against the other) and `script_table_next_key_removed_and_rehashed_between_calls_is_refused`
+  (the reviewer's own repro shape - all eight original keys cleared, guaranteed to include
+  whichever was yielded first since the order is Luau's own hash layout, then 64 new keys
+  inserted to force a rehash). Verified against the exact defect: reverted the existence check
+  locally, rebuilt, ran `--tag script --isolate`: both new tests **crashed the test process**
+  exactly as the reviewer's own repro did - `TL_FATAL origin=TL_FATAL .../vm.cpp:63: unprotected
+  Luau error - every call into a VM must be protected`, preceded by `ERR .../vm.cpp:61: script:
+  unprotected Luau error: invalid key to 'next'` - reported by the isolated runner as
+  `FAIL script.script_table_next_foreign_key_is_refused` /
+  `FAIL script.script_table_next_key_removed_and_rehashed_between_calls_is_refused`,
+  `33 passed, 2 failed` (isolation kept the crash from taking down the rest of the suite).
+  Restored, rebuilt, reran: `35 passed, 0 failed`.
+- **R3, RULED (not acted on this round)** - `gcinfo` is present in the data VM (`SIM_REMOVE` has
+  it, `DATA_REMOVE` did not), returning the VM heap's size in KB: host state reaching a hashed
+  output, the same shape as the `math.random`/`pairs` rulings, one door further. The reviewer
+  could not demonstrate actual divergence (three fresh data VMs running an identical script gave
+  identical readings every time, in-container) and stated High confidence it is an unaudited
+  asymmetry but only Medium confidence it is a real cross-ISA channel. **Ruled** (top-of-file
+  status block, "THREE RULINGS 2026-08-27" #3): not a one-name patch - the full
+  `SIM_REMOVE`/`DATA_REMOVE` diff becomes its own reviewed slice, QUEUED and held until #14 and
+  #15 both merge, owner the next lane to touch `src/script/sandbox.cpp` (`luau-bindings` likely).
+  This lane does not touch `sandbox.cpp` or `DATA_REMOVE` this round - it files and proceeds, per
+  the ruling's own last line.
+- **R4 - the data VM's removal list had two homes**, `LUAU-LAYER.md` §1's table row and §10.2 step
+  4 - and §10.2 step 4 having drifted from §1 once already (missing `math.random`/
+  `math.randomseed` until round 1 caught it) is exactly what "one fact, one home" exists to
+  prevent. The reviewer confirmed round 1's own check was right (`CANON.md`'s existing "Luau sim
+  VM" section is titled and scoped to the sim VM only and owed the data VM nothing) but filed the
+  fix as crossing into `CANON.md`, not something to build unilaterally. Fixed: a new `CANON.md`
+  section, "Luau data VM — the exact removal list", beside the existing sim one, carrying the full
+  list once; `LUAU-LAYER.md` §1's table row and §10.2 step 4 both now cite it instead of
+  restating it. `docaudit.py` clean afterward.
+
+**§8.5 split, RULED** (top-of-file status block, "THREE RULINGS 2026-08-27" #2) - **this
+supersedes the original filing below and is not RR-22** (that number is already taken, line 187,
+by render2d's unrelated `tl_field_kind_TexHandle` finding; this lane's first draft of this entry
+collided with it by filing under the same number independently - retired here rather than
+renumbered, since the ruling arrived directly and there is no longer a live request to number).
+`ASSETS-AND-DATA.md` §8.5 is rewritten (this commit) into what `assets+data` owns and has built
+vs. what is deferred, each deferred clause naming its owning lane - see §8.5 itself for the full
+split; not restated here per "one fact, one home." One correction made against the original
+filing's own grouping while doing that split: `ERR_DATA_VALIDATOR` was grouped with
+`asset_load_font` under "render2d" below only because both are `TL_FATAL`'d stubs sharing one
+bullet - its own header comment (`data_tables.h`) ties it to "a cross-table validator (`ALLOY.md`
+§11.1 / a game's own)", which is `alloy-substrate`'s, not render2d's; §8.5 now attributes it
+there. One clause has no owning lane at all and is flagged rather than force-assigned per
+`CLAUDE.md`'s "unknown constraint - say so, never invent one": the "two compiles hash identically
+in two processes" test needs a process-spawn `PlatformApi` primitive that no `ROADMAP.md` lane
+currently builds - open, unowned, not blocking (both reviews already judged deferring it honest).
+
+**Round 3 (ship-verdict), D1 BLOCKING - fixed.** The §8.5 split above named `asset_load_font`'s
+deferral owner as `render2d`; the reviewer measured that wrong on four independent facts:
+render2d (PR #13) is merged and closed, so a closed lane cannot be a future owner; it never had
+font/text/glyph work in its own `ROADMAP.md` §2 Builds column; it shipped `render/text.cpp` as a
+deliberate reserved stub by its own done criterion (`RENDER2D.md` §9); and `ASSETS-AND-DATA.md`
+§8.1 already keeps `core/loaders/font.cpp` (the face-handle load) in THIS lane's own file table,
+contradicting §8.5's attribution in the same doc. Exactly ruling 2's own failure mode, milder
+form - a clause of this lane's module parked in a merged lane's column where nothing picks it
+up. Fixed the same way the two-process clause already models: no owning lane exists, flagged per
+`CLAUDE.md`'s "unknown constraint - say so, never invent one," not force-assigned. The deferral
+itself stands (`tl_core` links `stb`, not the vendored `sdl_ttf` - a build change outside this
+lane's slice, `src/core/CMakeLists.txt`); only the owner line was wrong. Round 3's two nits also
+landed in this commit: N1, `TODO.md`'s "Orchestration correction" entry above named the archived
+session by its `session_01...` id, orchestration metadata that serves no reader of this
+world-readable repo (`CLAUDE.md`'s public-repo rule) - removed, sentence kept, referred to as
+"the previous steward window" per the reviewer's own wording. N2, the `r3_forged_arena_count`
+test's comment in `tests/core/save/save.test.cpp` mislabeled its finding "Round 2 review R2" -
+it implements R1; corrected. Per round 3's verdict (fix first, one blocking, doc/comment-only,
+no round 4 expected - `WORKFLOW.md` §2's post-review-edit valve applies to an already-recorded
+ruling's one-sentence correction), this lands in one commit and this lane stops here per the
+steward's explicit instruction; the steward verifies and merges under the valve.
+
+**Orchestration correction (2026-08-27), replacing this lane's own prior note in the same
+spirit it was written:** the prior entry here (commit `4ef8b37`) asserted, after the previous
+steward window came back archived from a trigger-bind attempt, that this lane was "driving the
+PR to green autonomously" with no steward. **That was wrong.** The archived session was that
+PREVIOUS steward window retiring at a scheduled phase boundary
+(`WORKFLOW.md` §6 R-10 - a committed-file handoff, not an end) - a successor window is live, sent
+this lane the round-2 work order and the three rulings this section implements, and remains the
+review/ruling channel for this PR. `main` at `eb648e5` (merged into this branch, `c1fedb8`)
+carries the round-2 verdicts and all three rulings in full; cited here, not restated. PR #14's
+body, which carried the same false claim, is corrected to match.
+
+*The original §8.5-scoping filing this entry replaces, kept struck through for the record rather
+than deleted (the ruling that superseded it is the point, not the erasure):*
+~~**RR-22 (ruling request)**: does `ASSETS-AND-DATA.md` §8.5 hold for this lane's scope, and if
+not, how should the doc say so? Four named clauses and three error-code fixtures do not exist in
+this lane's scope; recommended splitting §8.5 into an owned list and a per-lane-deferred list.
+Options (a)/(b)/(c) were offered, awaiting Rafael's choice - now moot; (a) is what the ruling
+above picked.~~
+
 ## Reserved (design complete, build on first consumer — `docs/RESERVED-SEAMS.md`)
 Audio · game UI (Luau) · spatial index · tilemap · nav/AI · frame animation · replay UI/cinematics ·
 modding (Luau profiles) · game-logic substrate · streaming/cook · SDL_GPU path · editor shell.
@@ -3723,6 +4265,11 @@ modding (Luau profiles) · game-logic substrate · streaming/cook · SDL_GPU pat
       foundry repo) and retire `FOUNDRY-ORE-GATE.md`.
 - [ ] After Gate 0: `FX-PALETTE.md` rev 2; after Hovel A: `NETCODE.md` §0 "assumptions carried"
       gets its first measured numbers.
+- [ ] `ASSETS-AND-DATA.md` §8.5 (`assets+data`, found while splitting §8.5 by owner,
+      2026-08-27): the decoder-path fuzz pass under ASan nightly it names is not wired into any
+      CI leg — real assets are loaded and refused-on-malformed today, just never fuzzed. Neither
+      review round flagged it; not blocking. Owner: `assets+data` (or CI-tooling for the nightly
+      wiring itself).
 
 ## W3 loop+input — lane notes and ruling requests (2026-08-26/27, w3-loop-input)
 `FRAME-LOOP.md`/`INPUT.md` done criteria (§8.4/§9.6): loop/time/phases/interp, the InputFrame
@@ -3848,6 +4395,20 @@ contract blocks):
       merging `main` (`eb648e5`); both already state the dense-order/pointer-swap claim as fact, no
       wording change is owed there (filed for the render2d lane's own scrutiny if that reading is
       ever wrong, not edited here — cone discipline).
+
+- [ ] **RR-32 (steward-allocated, filed 2026-08-27 while resolving the `main` merge conflict
+      against `98d29ba`): `src/core/CMakeLists.txt` now carries two different idioms for the same
+      problem (a `.cpp` subdirectory `tl_module()`'s flat, non-recursive glob can't see) — pick
+      one.** This lane's `producers/` (`core/producers/{live,script,replay}.cpp`) uses
+      `file(GLOB ... CONFIGURE_DEPENDS "producers/*.cpp")`; `w3-assets-data`'s `loaders/`
+      (`core/loaders/{image,font}.cpp`) names each file explicitly in `target_sources`. Both
+      landed independently in the same file and neither is wrong on its own, but the inconsistency
+      is a real trap for the next lane that adds a subdirectory and has to guess which precedent to
+      follow. Not this merge's to settle (steward's instruction: file, don't fix, mid-conflict).
+      Ruling requested: pick one idiom (glob-with-CONFIGURE_DEPENDS re-runs cmake automatically on
+      a new file but is slightly more "magic"; explicit `target_sources` is grep-able but needs a
+      manual edit per new file) and migrate the other side to match, or bless both as acceptable
+      per-subdirectory and say so in `docs/BUILD.md`.
 
 - [ ] **RR-27 (w3-loop-input, filed 2026-08-27, review round 1 finding 11): `FRAME-LOOP.md` §6's
       "the loop runs as fast as the CPU allows (`accumulator` is forced to `FIXED_DT` per
