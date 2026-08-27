@@ -172,6 +172,18 @@ Developed on two PCs synced via git; per-machine auto-memory does not sync.
   cloud/agent sessions too (ruled 2026-08-25): commits pushed from them carry Rafael's
   author+committer identity and GitHub's "Unverified" badge is accepted — never a bot identity
   for a green badge.
+  **MERGE A PR WITH A LOCAL `git merge --no-ff` AND A PUSH. NEVER the GitHub merge API, never the
+  green merge button (ruled 2026-08-27, Rafael, after it happened — R-16).** Both create the merge
+  commit server-side under the API TOKEN's identity and GitHub signs it, so the result is
+  `author: <something>[bot]`, `committer: GitHub`, `verified: true` — a bot identity wearing a green
+  badge, which is the exact thing the line above forbids. Nothing warns you: the merge is otherwise
+  perfect (real merge commit, two parents, branch auto-deleted) and every commit *inside* the PR
+  keeps Rafael's identity, so only the merge commit is wrong and only `git log -1 --format=%an` on
+  `main` shows it. **The rule generalizes past merging: whenever a TOOL creates a commit on your
+  behalf, the identity rule is not self-enforcing — check the commit it actually created.** Verify
+  after every merge: `git log -1 --format='%an <%ae> | %cn'` on `main` must read Rafael, twice. If it
+  does not, rebuilding the merge locally from the same two parents reproduces a bit-identical tree,
+  but fixing it means force-pushing `main` — **Rafael's call, never an agent's**.
 - Line endings: `.gitattributes` is the authority (`*.bat`/`*.cmd` CRLF, else LF);
   `git config --local core.autocrlf false` per clone.
 

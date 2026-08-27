@@ -5971,3 +5971,38 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > merged combination of loop+input and assets+data has had no adversarial read from anyone), the
 > merged-and-closed-lane ownership rule (seven instances across six files), and the one-tap hardening of
 > `allow_squash_merge` — still `true` in repo settings, so the merge-commit rule remains convention.
+
+> **RR-45 (Rafael, 2026-08-27, direct — recorded with that provenance per `WORKFLOW.md` R-14) — a
+> commit or merge must NEVER land under an agent/bot identity; make it unmissable, not merely
+> lessoned.** Trigger: PR #16 was merged through the GitHub merge API, which builds the merge commit
+> server-side under the API token's identity and signs it. Result on `main`:
+> `author: claude[bot] <209825114+claude[bot]@users.noreply.github.com>`, `committer: GitHub`,
+> `verified: true` — a bot identity wearing a green badge, which `CLAUDE.md`'s public-repo protocol
+> names as the one outcome never to produce. PRs #13/#14/#15 were clean because they were merged with
+> a local `git merge` and a push; nothing recorded that, so the steward inherited "merge commit, never
+> squash or rebase", verified the METHOD scrupulously, and never checked the IDENTITY the method would
+> produce. Every other property of the merge was correct — real merge commit, two parents, not
+> squashed, branch auto-deleted, and all 72 commits inside the PR correctly authored — which is
+> precisely why nothing caught it.
+> RULED, and now recorded in three places by design rather than by drift:
+> - **`CLAUDE.md` public-repo protocol** — the operative rule, beside the identity line it protects:
+>   merge with a local `git merge --no-ff` and a push, never the API or the button; the failure is
+>   invisible except in `git log -1 --format='%an <%ae> | %cn'` on `main`; and the general form —
+>   **when a TOOL creates a commit on your behalf, the identity rule is not self-enforcing, so check
+>   the commit it actually created.**
+> - **`WORKFLOW.md` §1** — the mechanism at the point of use, because §1's merge bullet is what a
+>   session actually reads at merge time and it previously said nothing about identity. It cites
+>   `CLAUDE.md` rather than restating the rule.
+> - **`WORKFLOW.md` §5 R-16** — the numbered process rule, so it appears in the rulings list every
+>   session scans.
+> `LESSONS.md` also carries the incident, but a lesson is advisory and read before build work; it was
+> the wrong and only home, which is what this ruling corrects.
+> **Remediation performed (Rafael's explicit call, not the steward's):** the merge was rebuilt locally
+> from the same two parents, the resulting tree confirmed bit-identical to the API merge's
+> (`1cb6290…`), and `main` force-pushed with a lease. All four lane merges now carry Rafael's identity.
+> **FOLLOW-UP, unowned — detection, since prevention here is procedural.** A PR gate cannot catch this:
+> the offending commit does not exist until the merge happens. A push-to-`main` workflow CAN, by
+> failing when any commit reachable from `main` carries an author or committer that is not Rafael's
+> identity. That is detection after the fact rather than prevention, and it should be stated as such
+> rather than sold as a gate. It belongs with RR-44's enforcement slice in `tools/`, outside any
+> current lane's cone. Owner: unassigned.

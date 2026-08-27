@@ -79,6 +79,11 @@
   is the project's record (`git log` is where history lives, `README.md` doc map), and rebases
   invalidate the other machines' and sessions' checkouts. The merged branch auto-deletes; a
   branch pointer whose commits are all in `main` is clutter, not history.
+- **Merge MECHANISM: a local `git merge --no-ff` and a push — never the merge API or the merge
+  button (R-16).** This bullet is the one a session reads at merge time, so it says so here: the
+  method above (a merge commit) is satisfied by both routes, and only the local route satisfies the
+  *identity* rule, whose home and full reasoning are `CLAUDE.md`'s public-repo protocol. Verify
+  `git log -1 --format='%an <%ae> | %cn'` on `main` after every merge.
 
 ## 2. Review: adversarial, fresh-context, to a *ship* verdict
 
@@ -179,6 +184,15 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
   notification — the child's push or PR comment is the only signal it is done; the steward
   watches branch heads and PR comments and treats a wake as an instruction; a blocked or
   waiting child pushes or comments rather than going silent (§1).
+- **R-16 Merges are performed LOCALLY (ruled 2026-08-27, Rafael, on seeing it happen):** a PR is
+  merged with `git merge --no-ff` and a push, never through the GitHub merge API or the merge
+  button — both build the merge commit server-side under the API token's identity and sign it,
+  producing a bot identity with a green Verified badge, which the public-repo protocol forbids
+  outright. The merge is otherwise indistinguishable from a correct one, so the check is explicit:
+  `git log -1 --format='%an <%ae> | %cn'` on `main` after every merge. Rule and reasoning live in
+  `CLAUDE.md`'s public-repo protocol; §1 carries the mechanism at the point of use. Filed after
+  PR #16 merged as `claude[bot] <…> | GitHub` — every other property of that merge was correct,
+  which is why nothing caught it (§1).
 - **R-12 Doc-relevancy pass (ruled 2026-08-26, Rafael):** staleness in a status line is drift
   like any other. Every lane closeout sweep (R-7) also checks the lane's own doc — its status
   line and its claims — against what actually shipped; every wave boundary adds the pass over
