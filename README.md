@@ -34,8 +34,8 @@ contributions are not accepted: issues and pull requests from outside will be cl
 
 ## Status
 
-**Building — W2/W3 of the wave plan (status re-dated 2026-08-27; `TODO.md` and `docs/ROADMAP.md`
-are the live truth, this paragraph is only a pointer).** The design corpus is complete
+**Building — W2/W3 of the wave plan (status re-dated 2026-08-27 evening; `TODO.md` and
+`docs/ROADMAP.md` are the live truth, this paragraph is only a pointer).** The design corpus is complete
 (`docs/PIVOT-DESIGN.md` is the founding ruling; `docs/README.md` is the map). Shipped: the W0
 skeleton and audits; the full W1 foundation (fx palette + det math, arenas/registry,
 containers, RNG/hash, headless platform, test runner, tooling runtimes, jobs); Gate 0 run and
@@ -47,10 +47,14 @@ camera, extract, queue/sort/batch, sprite and debug draw, the SDL present path) 
 **assets+data** lane (merged 2026-08-27, PR #14 — asset registry, the Luau-authored data-table
 compiler, save v1) and the W3 **loop+input** lane (merged 2026-08-27, PR #15 — the frame loop and
 its barrier, the `InputFrame` airlock and action map, the Live/Script/Replay producers behind one
-seam, and the record→replay recorder). All three W3 slack lanes launched early on the spare
-non-Fable budget (ruled 2026-08-26) have now shipped. Not yet launched: `editor` and the sandbox
-removal-list audit; alloy-substrate launches at the weekly reset.
-Next: W3 — alloy-solver ★ and the v0 lanes.
+seam, and the record→replay recorder) and the W3 **editor** lane (merged 2026-08-27, PR #16 —
+all six v0 panels, the reflection walker and dotpath resolver, cvars and the Console `set`
+command; `shell v0` and the Replay panel deferred with their blockers named). All three W3 slack
+lanes launched early on the spare non-Fable budget (ruled 2026-08-26) have shipped, and `editor`
+after them. Not yet launched: the sandbox removal-list audit, and **`alloy-substrate`** — a W2
+lane, the critical path, blocking five of the seven remaining W3 lanes, scheduled for the weekly
+reset. Next: `alloy-substrate` → W3's ★ **alloy-solver** → v0. No wave is closed: W3's ★ is
+unreachable until substrate ships, so `WORKFLOW.md` §3's artifacts run mid-wave under R-18.
 
 ## Lineage
 

@@ -239,6 +239,8 @@ this paragraph). W0–W1 shipped and reviewed; Gate 0 run and ruled (`FX-PALETTE
 `8b10b58`)** on `TOOLING.md` §9.6's `panels v0` criterion — all six v0 panels, the Console `set`
 command, and RR-38..RR-44; `shell v0` and build-order item 7 (Replay) remain deferred with their
 blockers named. The `SIM_REMOVE`/`DATA_REMOVE` audit slice is released but still
-unlaunched, pending Rafael's word; alloy-substrate launches at the weekly reset. Next: W3
-(alloy-solver ★ → v0).
+unlaunched, pending Rafael's word. **`alloy-substrate` — a W2 lane, never launched — is the
+critical path and blocks five of the seven remaining W3 lanes**; it is scheduled for the weekly
+reset (R-8). Next: `alloy-substrate` → W3's ★ `alloy-solver` → v0. No wave is closed: W3's ★ is
+unreachable until substrate ships, so §3's artifacts run mid-wave under R-18.
 This paragraph is checked at every wave boundary (`WORKFLOW.md` §3 artifact 4, R-12).

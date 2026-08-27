@@ -1,8 +1,10 @@
 # tidelock — design docs (the map)
 
 > One home per concern. Every doc is **best so far — not final**: born rev 1 (2026-08-22,
-> pre-code), amended by rulings as waves ship — each doc's own status line carries its last
-> reconciliation date (`FX-PALETTE.md` is at rev 2, 2026-08-25).
+> pre-code — a fact about when the docs were written, not a claim about the program, which has
+> been building since W1), amended by rulings as waves ship. **A doc's own status line, not this
+> header, is authoritative on that doc's state**; several have moved past rev 1 (`FX-PALETTE.md`
+> is at rev 2). *Header re-read against the tree 2026-08-27 (`WORKFLOW.md` §3 artifact 4, R-12).*
 > `PIVOT-DESIGN.md` is the founding ruling; where any doc conflicts with it, PIVOT wins and the
 > conflict is a bug to file. **Nothing is open** (second veto pass, 2026-08-22): every former
 > open item is a ruling in its doc's closing "Rulings" section; items a measurement verifies
