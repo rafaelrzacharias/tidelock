@@ -4967,16 +4967,23 @@ from `src/sim/`/the det half of `foundation/`. Replaced `strview_interner_fmt.te
 `fmt_buf_truncation` SKIP stub with a real test (fits, truncated-but-NUL-terminated with the
 untruncated length still reported, `count == 0` writes nothing).
 
-**Second `tools/audit/includes.py` touch this lane, cited for the same reason as the first:**
-`fmt.cpp` needs `<stb_sprintf.h>` (declaration-only, the real implementation TU stays
-`vendor/stb/stb_impl.c`) and `<stdarg.h>` for the varargs forward. `BACKEND_HEADERS`'s `"stb_"`
-row already named `src/core`/`src/vendor_glue`/`src/platform/impl_sdl3` — added `src/foundation`
-to the same tuple. `SYS_ALLOW_DIRS` needed both headers too, but `fmt` is deliberately NOT in
-`CMakeLists.txt`'s `TL_FOUNDATION_TOOLING` stem list (it is NONDET but not TOOLING, so it gets no
-automatic `stdio.h`/`stdlib.h`/`stdarg.h` grant the way `log.cpp`/`prof.cpp`/`probe.cpp` do) —
-scoped the grant to a `"src/foundation/fmt"` prefix rather than widening all of
-`"src/foundation"`, matching `src/core/loaders`' own narrowest-prefix precedent for
-`stb_image.h`. Both edits cited inline at their change sites.
+**Second `tools/audit/includes.py` touch this lane.** `fmt.cpp` needs `<stb_sprintf.h>`
+(declaration-only, the real implementation TU stays `vendor/stb/stb_impl.c`) and `<stdarg.h>` for
+the varargs forward. `SYS_ALLOW_DIRS` needed both headers, but `fmt` is deliberately NOT in
+`CMakeLists.txt`'s `TL_FOUNDATION_TOOLING` stem list (NONDET but not TOOLING, so it gets none of
+`log.cpp`/`prof.cpp`/`probe.cpp`'s automatic `stdio.h`/`stdlib.h`/`stdarg.h` grant) — scoped to a
+`"src/foundation/fmt"` prefix rather than widening all of `"src/foundation"`, matching
+`src/core/loaders`' own narrowest-prefix precedent for `stb_image.h`.
+
+**Steward review caught a real inconsistency here, corrected same-day (2026-08-27):**
+`BACKEND_HEADERS`'s `"stb_"` row was widened to grant all of `"src/foundation"`, not scoped to
+`"src/foundation/fmt"` the way `SYS_ALLOW_DIRS`'s matching entry was — asymmetric, and this
+lane's own commit message claimed "the same reason as" the earlier `imgui.h`/`src/editor` fix
+(which *completed* an existing grant) when this one *created* a new, wider-than-needed one. Fixed
+by narrowing `BACKEND_HEADERS["stb_"]` to `"src/foundation/fmt"` too — both gates now agree on
+the same narrow scope. The steward's own distinction, worth keeping: completing an existing grant
+on a second gate is mechanical and fine in-cone; creating a new grant should be scoped as
+narrowly as the work in front of it, not the module it happens to live in.
 
 Validated on all four tiers, broad regression sweep (`--isolate --tag '!runner' --tag '!slow'`,
 589 tests) 0 failed on all four, `includes.py`/`docaudit.py`/`commit_docs.py` clean.

@@ -108,7 +108,10 @@ BACKEND_HEADERS = {                       # token in the include path -> allowed
     "monocypher": ("src/net",),
     # fmt.cpp joins this grant the same way core/loaders/image.cpp's stb_image.h row did
     # (docs/CONTAINERS.md §8.6b): declaration-only, the real implementation TU stays vendor/.
-    "stb_": ("src/platform/impl_sdl3", "src/core", "src/vendor_glue", "src/foundation"),
+    # Scoped to "src/foundation/fmt", not all of "src/foundation" - steward review caught the
+    # first version widening this grant past what fmt.cpp needs, asymmetric with the matching
+    # SYS_ALLOW_DIRS entry below, which was already scoped this narrowly.
+    "stb_": ("src/platform/impl_sdl3", "src/core", "src/vendor_glue", "src/foundation/fmt"),
     "rapidhash": ("src/foundation",),
 }
 
