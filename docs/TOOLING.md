@@ -231,7 +231,13 @@ enum CvarKind : u8 { CVAR_I32, CVAR_U32, CVAR_F32, CVAR_BOOL, CVAR_FX_RAW };
 enum : u8 { CVAR_ARCHIVE = 1, CVAR_CHEAT = 2, CVAR_READONLY = 4, CVAR_SIM = 8 };
 struct CvarDesc  { NameHash key; const char* name; const char* help; u32 default_bits; u8 kind; u8 flags; u8 frac_bits; u8 _pad0; };  // 32 B, constexpr
 struct CvarTable { const CvarDesc* desc[256]; u32 bits[256]; u16 sorted[256] /*by key, built at init*/; u32 count; u32 _pad0; };   // in World (non-registered arena)
-#define TL_CVAR(type, name, def, help) constexpr CvarDesc CVAR_##name = { #name##_id, #name, help, cvar_bits_of<type>(def), cvar_kind_of<type>(), 0, 0, 0 };
+// `flags` is a parameter (amended 2026-08-27, w3-editor lane): the rev-1 expansion below hard-coded
+// every cvar's flags to 0, silently contradicting this doc's own §3 ("with flags ARCHIVE | CHEAT |
+// READONLY | SIM") and docs/CPP-SUBSET.md §7b's catalogue row, which already specified
+// `TL_CVAR(type, name, default, flags, help)` - a doc-contradicts-doc bug the docs/CPP-SUBSET.md
+// side was, in hindsight, the correct one; this section now matches it (docs/TODO.md carries the
+// finding).
+#define TL_CVAR(type, name, def, flags, help) constexpr CvarDesc CVAR_##name = { #name##_id, #name, help, cvar_bits_of<type>(def), cvar_kind_of<type>(), (flags), 0, 0 };
 // modules list their CvarDesc* in a constexpr array; app/ registers the arrays in wiring order; lookup = binary search on key
 // console.cpp
 typedef Result<u32> (*ConsoleFn)(World*, u32 argc, const StrView* argv, Span<char> reply);   // value = bytes written to reply

@@ -87,7 +87,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `PLATFORM.md` -> §1, §4
 - `RENDER2D.md` -> §1, §7
 - `TESTING.md` -> §4, §6
-- `TOOLING.md` -> §1, §9
+- `TOOLING.md` -> §1, §7, §9
 
 ## DETERMINISM.md
 - `ARCHITECTURE.md` -> §9.5
