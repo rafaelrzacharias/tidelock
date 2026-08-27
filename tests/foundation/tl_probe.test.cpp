@@ -27,8 +27,10 @@ TL_TEST(probe_log_throttles_by_tick_count, "foundation") {
     TL_EXPECT_EQ((u32)k->changes, 1u);    // 10 -> 30 is one change; the baseline is not a change
     tl_probe_test_reset();
 #else
-    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
-    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // The probe runtime and its introspection functions (tl_probe_key_* - renamed from
+    // tl_probe_test_* when promoted to a real production API, tl_probe.h; tl_probe_test_reset/
+    // _set_tick/_set_enabled/_staging stay test-scoped under the old prefix) are TL_DEV-only
+    // symbols (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
     // evaluation included). A visible SKIP, never a vacuous pass.
     TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
 #endif
@@ -43,8 +45,10 @@ TL_TEST(probe_log_fx_scales_by_frac_bits, "foundation") {
     TL_EXPECT_TRUE(strstr(s, "0\tk.fx\t3\n") != nullptr);
     tl_probe_test_reset();
 #else
-    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
-    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // The probe runtime and its introspection functions (tl_probe_key_* - renamed from
+    // tl_probe_test_* when promoted to a real production API, tl_probe.h; tl_probe_test_reset/
+    // _set_tick/_set_enabled/_staging stay test-scoped under the old prefix) are TL_DEV-only
+    // symbols (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
     // evaluation included). A visible SKIP, never a vacuous pass.
     TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
 #endif
@@ -62,8 +66,10 @@ TL_TEST(probe_on_change_rows_only_past_eps, "foundation") {
     TL_EXPECT_TRUE(strstr(s, "\tk.chg\t200\n") != nullptr);
     tl_probe_test_reset();
 #else
-    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
-    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // The probe runtime and its introspection functions (tl_probe_key_* - renamed from
+    // tl_probe_test_* when promoted to a real production API, tl_probe.h; tl_probe_test_reset/
+    // _set_tick/_set_enabled/_staging stay test-scoped under the old prefix) are TL_DEV-only
+    // symbols (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
     // evaluation included). A visible SKIP, never a vacuous pass.
     TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
 #endif
@@ -83,8 +89,10 @@ TL_TEST(probe_mark_rows_every_call, "foundation") {
     TL_EXPECT_EQ((u32)tl_probe_key_at(0)->count, 3u);
     tl_probe_test_reset();
 #else
-    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
-    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // The probe runtime and its introspection functions (tl_probe_key_* - renamed from
+    // tl_probe_test_* when promoted to a real production API, tl_probe.h; tl_probe_test_reset/
+    // _set_tick/_set_enabled/_staging stay test-scoped under the old prefix) are TL_DEV-only
+    // symbols (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
     // evaluation included). A visible SKIP, never a vacuous pass.
     TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
 #endif
@@ -102,8 +110,10 @@ TL_TEST(probe_assert_out_of_range_rows_and_logs, "foundation") {
     TL_EXPECT_TRUE(strstr(s, "k.assert") == nullptr);
     tl_probe_test_reset();
 #else
-    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
-    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // The probe runtime and its introspection functions (tl_probe_key_* - renamed from
+    // tl_probe_test_* when promoted to a real production API, tl_probe.h; tl_probe_test_reset/
+    // _set_tick/_set_enabled/_staging stay test-scoped under the old prefix) are TL_DEV-only
+    // symbols (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
     // evaluation included). A visible SKIP, never a vacuous pass.
     TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
 #endif
@@ -120,8 +130,10 @@ TL_TEST(probe_disabled_key_emits_nothing, "foundation") {
     TL_EXPECT_EQ((u32)tl_probe_key_at(0)->count, 0u);   // no stats update either
     tl_probe_test_reset();
 #else
-    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
-    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // The probe runtime and its introspection functions (tl_probe_key_* - renamed from
+    // tl_probe_test_* when promoted to a real production API, tl_probe.h; tl_probe_test_reset/
+    // _set_tick/_set_enabled/_staging stay test-scoped under the old prefix) are TL_DEV-only
+    // symbols (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
     // evaluation included). A visible SKIP, never a vacuous pass.
     TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
 #endif
@@ -149,8 +161,10 @@ TL_TEST(probe_summary_line_matches_registration_order, "foundation") {
     TL_EXPECT_TRUE(a_pos < b_pos);   // registration order: "a" (key 10) before "b" (key 11)
     tl_probe_test_reset();
 #else
-    // The probe runtime and its tl_probe_test_* hooks are TL_DEV-only symbols
-    // (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
+    // The probe runtime and its introspection functions (tl_probe_key_* - renamed from
+    // tl_probe_test_* when promoted to a real production API, tl_probe.h; tl_probe_test_reset/
+    // _set_tick/_set_enabled/_staging stay test-scoped under the old prefix) are TL_DEV-only
+    // symbols (docs/TOOLING.md section 9: probes are compiled out of netcode/ship, argument
     // evaluation included). A visible SKIP, never a vacuous pass.
     TL_SKIP("probes are dev-only (TOOLING.md section 9); no symbol in this tier");
 #endif
