@@ -5819,3 +5819,21 @@ are the right home for a `TOOLING.md`-governed cvar-parsing change.
 **RR-38 is now fully landed end to end: the primitive (`fx.h`), both named callers (Inspector's
 fx-field edit widget, Console's `CVAR_FX_RAW` decimal-literal path), and the doc trail (`FX-
 PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
+> **FINDING (steward, 2026-08-27, measured not estimated) — the `X = Type{}` stack-temporary class is
+> unswept in `tests/` and `tools/`.** It has bitten three times in `src/` this wave (`prof.cpp` ~53 MB,
+> `log.cpp` 0.969 MB, `probe.cpp` ~160 KB — each fixed, each recorded in `LESSONS.md`), but nobody has
+> looked outside `src/`. An UNANCHORED sweep finds five more sites at non-trivial size:
+> `git grep -nE '=\s*[A-Za-z_][A-Za-z0-9_]*\s*\{\s*\}\s*;' -- tests/ tools/`
+> Sizes measured with clang (`template<int N> struct Sz; Sz<(int)sizeof(T)> x;`, then read the error),
+> not estimated: `sizeof(World)` = 263152 B (257 KB); `sizeof(ArenaRegistry)` = 98344 B (96 KB, =
+> 4096*24+32+8); `sizeof(WorldTickState)` = 16 B.
+> - `tests/render/render_test_util.h:36` — `f->world = World{};` — a 257 KB temporary in a HEADER, so
+>   every render test TU that includes it. Largest of the five; fix first.
+> - `tests/foundation/registry.test.cpp:38, 289, 290, 298` — `ArenaRegistry{}` at 96 KB each; lines 289
+>   and 290 put TWO in one function (~192 KB).
+> Small ones deliberately listed so a later sweep does not re-flag them: `ProbeKey`, `TexHandle`, `SmH`,
+> `MemPoolStats`, `RecordedInputRow`, a single `LogRecord`, `WorldTickState`.
+> None is individually fatal TODAY on Windows' 1 MB stack — which is precisely what was true of
+> `log.cpp` until an unrelated struct grew 53 KB nearby and tipped it. Sweep and kill the class rather
+> than triaging case by case. Owner: unassigned — `tests/render` and `tests/foundation` are outside the
+> editor lane's cone and this blocks nothing, so it is filed with the reproducer rather than dispatched.
