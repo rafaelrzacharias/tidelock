@@ -6358,3 +6358,58 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > `LESSONS.md`'s "a ruling that amends four docs can still miss the header that IS the contract",
 > and `CPP-SUBSET.md` §6 makes a contract block the first thing a downstream lane reads. **D6** is
 > latent enforcement. All three land in closed lanes' cones — the ownership problem again.
+
+> **AREA A COMPLETE and archived; B on its second partial (2026-08-28 ~00:10 local). Full text on
+> the branches — this routes and allocates.**
+>
+> **A's closing sentence is the sweep's own justification and belongs on the record verbatim:**
+> *"What the valve deferred, and what this sweep found, is that the EVIDENCE behind two of these
+> changes is weaker than their commit messages claim."* Both W2 commits were validly inside §2's
+> valve, both shipped correct behaviour — and the guards around that behaviour were not what the
+> messages said. That is the argument for §3's sweep being mandatory rather than ceremonial,
+> restated from a second independent instance (the first was the W1 sweep, 2026-08-25).
+>
+> **Two more steward-briefed hypotheses DISPROVED by measurement, both recorded because a refuted
+> lead is evidence too.** Hypothesis 4 (`TL_ASSERT` vs `TL_CHECK` — that a new bound might vanish
+> on netcode/ship): every one of the new encoder bounds is `TL_CHECK`, unconditional in all tiers;
+> nothing added vanishes. Hypothesis 6 (that the `MAX_ARENAS` raise perturbs the world hash):
+> `registry_hash_all` folds `r->count`, never `MAX_ARENAS`, so **the hash value is bit-identical
+> across the raise** and its cost is O(count); `CANON.md`'s "Registration order = lockstep
+> contract" is untouched. A then measured what DID grow — two tail-zeroing loops — at **0.002 % of
+> a tick on the shipping tiers**, replacing E-2's "both trivial", which was a judgement about
+> memory that never discussed per-tick cost.
+>
+> **A's ranked fix order** (D1 the archive row that pins nothing → D2 the Windows stack margin →
+> D3 = RR-50 → the low-severity D4–D8). Two additions from its addendum: **D7**, a comment that now
+> describes deleted code in the row guarding the rule 99c9248 replaced — and A measured that the
+> row itself SURVIVED the format change and now pins the replacement rule correctly, which is the
+> opposite of D1 and is the honest half of hypothesis 3; and **D8**, that all three ENCODER bounds
+> are untested — `grep -rn "TL_TEST_EXPECT_FATAL" tests/net/` returns nothing, so the ruled wording
+> "enforced in encoder AND decoder" is half-evidenced. A pre-existing file-wide gap that 99c9248
+> extended rather than created.
+>
+> **B's second partial — three more, one of which changes RR-48's shape.**
+> **B-1(b), folded into RR-48:** `save_read` writes the decoded tick/seed to out-params and
+> **nothing writes them back into `w->state`**, which lives in the `ARENA_HASHED`
+> `world.singletons` arena — so a restored world hashes a stale tick. Worse, there is no
+> `ComponentInfo` for `WorldTickState` anywhere, so the singleton arena **cannot even be listed**
+> in `SaveDesc::arena_descs`: the save path has no route to it at all. Measured
+> (`out_tick=456` while `w->state->tick` stayed 0, both arena and world hashes diverging). This
+> means RR-48 is not only "which fix direction" but "does the save path reach every hashed arena",
+> and it strengthens the case for ruling it before `alloy-substrate` adds nineteen more.
+> **B-3 (measured with a probe, and this one is a live build hazard):** `src/core/CMakeLists.txt`
+> globs `producers/*.cpp` but hand-lists `loaders/`. B dropped a file referencing an undefined
+> symbol into each: `producers/zz_probe.cpp` compiled; `loaders/zz_probe.cpp` **was not compiled,
+> not mentioned, and absent from `compile_commands.json` — a clean, green build of a file that is
+> not in the build.** The tree today is correct (all five files are present), and B ranked it
+> medium with its reasoning on the record: a referenced symbol fails LOUD at link, and
+> `CPP-SUBSET.md` §1's static ban closes the silent-self-registration path. The genuinely silent
+> case is a new loader nothing calls yet — **which is exactly what `ASSETS-AND-DATA.md` §8.5 has
+> scheduled** (`asset_load_font`'s real body, today a `TL_FATAL` stub). This upgrades RR-32 from
+> "two idioms coexist" to "the two idioms are not equivalent, and the explicit half drops files".
+> **B-4 (REASONED, not verified — and correctly labelled so, with its falsifier stated):**
+> `save.test.cpp:185`'s "column order is not part of the contract" was true when `assets+data` was
+> reviewed alone and is false in the merged tree, because the dense arena is `ARENA_HASHED` and
+> `recorder_tick` folds it into the per-tick hash. B checked the code is NOT order-nondeterministic
+> today — so this is "a contract that permits the bug", not a bug. A future batched or parallel
+> apply loop would be legal by that comment and would silently desync.
