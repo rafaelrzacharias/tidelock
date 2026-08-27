@@ -4968,13 +4968,41 @@ one directory is not evidence the symbol does not exist.
 
 §9.3.8's algorithm has two halves: the **registry-order walk** over per-arena `used[]`/`blob`
 (`Snapshot`'s own layout: segments in registry order, each 64-byte aligned) against a real
-`ArenaRegistry` and `Snapshot` — buildable now — and the **`TL_POOL_ROW`/Alloy pool-table walk**,
-genuinely blocked (Alloy has not landed). The ECS-column case (`table = component info`) also
-needs cross-referencing `ArenaRegistry`'s per-arena `NameHash` ids against `World`'s registered
+`ArenaRegistry` and `Snapshot`, and the **`TL_POOL_ROW`/Alloy pool-table walk**, genuinely
+blocked (Alloy has not landed). **Built (2026-08-27): the registry-order walk, scoped to
+`DIFF_FINGERPRINT_MISMATCH`/`DIFF_USED`/`DIFF_BYTES`** (`core/desync_diff.h`/`.cpp`,
+`tests/core/desync_diff.test.cpp`). The ECS-column case (`table = component info`) needs
+cross-referencing `ArenaRegistry`'s per-arena `NameHash` ids against `World`'s registered
 `ComponentInfo` table for per-field formatting (`fmt(kind, a)`/`fmt(kind, b)`) — real work, not
-yet scoped or started. **Not built this session** (context ran out after `fmt_buf` and
-`log_panel`); the byte-level fallback case (`table = null`, raw `memcmp` + hex dump) needs neither
-Alloy nor the component lookup and is the smallest real first slice — next up.
+yet scoped or started, still deferred alongside the Alloy pool case; both report `DIFF_BYTES` (the
+honest fallback) until they land.
+
+**Read `registry_snapshot`/`registry_restore` (`foundation/arena_registry.cpp`) before writing a
+reader against the blob layout, and found the pseudocode's signature was missing a parameter**:
+only `ARENA_SNAPSHOT`-flagged arenas occupy blob space — `Snapshot::used[i]` is recorded for
+EVERY registered arena (diagnostic), but the write-side offset only advances for the flagged
+ones — so `desync_diff` cannot know which arenas are flagged without the registry itself. Added
+`const ArenaRegistry* reg` as the real first parameter and folded the completed signature (plus
+the `DiffKind`/`DesyncEntry`/`DiffFn` shapes, similarly undescribed beyond the pseudocode's loose
+field names) into `TOOLING.md` §9.3.8 in the same commit — `CONTAINERS.md` §8.6a's own precedent
+for this class of gap.
+
+Five tests: fingerprint mismatch short-circuits (returns 1, one call); identical snapshots report
+nothing; a `used[]` mismatch reports `DIFF_USED` and never *also* reports `DIFF_BYTES` for the
+SAME arena (continue-after-report); a same-size content difference (a byte poked directly in a
+live arena buffer between two snapshots) reports `DIFF_BYTES` at the correct offset; `max_n`
+stops the walk after exactly that many reports. One test bug found and fixed before it was a
+bug: `world.entities.live` is a fixed-capacity bitset (`used[]` constant, content changes as
+slots go live), so a real `DIFF_BYTES` alongside the `DIFF_USED` arenas from a single entity spawn
+is CORRECT behaviour, not a defect — the first version of `desync_diff_used_mismatch_skips_
+byte_compare` asserted no `DIFF_BYTES` anywhere in the result set at all, which is stricter than
+the actual contract (no `DIFF_BYTES` for the SAME arena that already reported `DIFF_USED`);
+confirmed empirically (a temporary debug log naming the arena index) before narrowing the
+assertion, not assumed.
+
+Validated on all four tiers, broad regression sweep (`--isolate --tag '!runner' --tag '!slow'`,
+594 tests) 0 failed on all four, `includes.py` clean with no further audit-script changes needed
+this time.
 
 Rafael asked in-session (2026-08-27) for this to be recorded as a planned post-v0 feature, not
 decided now. `vendor/imgui` is the **docking branch** (`IMGUI_HAS_DOCK`/`IMGUI_HAS_VIEWPORT`

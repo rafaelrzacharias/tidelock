@@ -70,6 +70,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `MEMORY.md` -> §2, §3, §5, §8.1, §8.3
 - `RENDER2D.md` -> §1, §4
 - `ROADMAP.md` -> §8.7
+- `TOOLING.md` -> §8.6
 
 ## CPP-SUBSET.md
 - `ALLOY.md` -> §4, §5, §6

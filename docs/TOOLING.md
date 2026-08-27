@@ -358,6 +358,19 @@ for i in registry order:   // the lockstep contract order
   else: out({arena, BYTES, first differing offset, 16-byte hex of each}); n++
 return n
 ```
+**Signature completed over spec (w3-editor, 2026-08-27, `CONTAINERS.md` §8.6a's own precedent for
+this class of gap):** the pseudocode's signature has no way to know which arenas are
+`ARENA_SNAPSHOT`-flagged — only flagged arenas occupy blob space (`arena_registry.cpp`'s
+`registry_snapshot`/`registry_restore`, both of which take the registry for exactly that reason)
+— so the real signature is `desync_diff(const ArenaRegistry* reg, const Snapshot* a, const
+Snapshot* b, u32 max_n, DiffFn out, void* ctx) → u32` (`core/desync_diff.h`). `DiffKind` /
+`DesyncEntry` / `DiffFn` (also undescribed beyond the pseudocode's loose field names) are
+scoped, for now, to the three cases a plain byte-level walk can report without a component/pool
+table: `DIFF_FINGERPRINT_MISMATCH`, `DIFF_USED`, `DIFF_BYTES` (the `table` branch's per-field
+ECS-column case and the Alloy pool-table case both stay `DIFF_BYTES` — the honest fallback —
+until each lands; extending `DesyncEntry` then, not speculatively now). "`b` may be the live
+registry wrapped as a snapshot view" is not yet built — every caller today diffs two real
+`Snapshot`s.
 Order: registry order → row → field, so the first report is the earliest difference in the
 contract order. CLI: `tl_driver --diff a.snap b.snap [--max 50]` prints TSV
 `arena\trow\tcomponent\tfield\ta\tb`; the Net/World panel calls the same function.
