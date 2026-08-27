@@ -5547,3 +5547,35 @@ from the local lives on in the caller," not "every `VMemApi` local" — blanket-
 rest would be a wrong, over-broad fix for a narrower bug class, exactly what this ruling warned
 against. Not this lane's files to touch either way (`tests/foundation/`, `tests/core/` — outside
 `editor`'s cone).
+
+### RR-39 (steward-allocated, ruled by Rafael): `inspector_roundtrip_per_kind` amended (2026-08-27)
+
+Steward found the Inspector's own done criterion (`TOOLING.md` §9.5's test-row table) was
+unmeetable as written: "driven through the headless ImGui test engine" names a dependency that is
+not vendored (`vendor/VERSIONS` pins imgui core-only; `IMGUI_ENABLE_TEST_ENGINE` commented out in
+`imconfig.h`; no `vendor/imgui_test_engine` directory; vendoring one is a ruling of its own, not
+this lane's to do unilaterally). This session's own `inspector.test.cpp` already used the
+direct-call driving method (matching `console_exec`'s precedent) and said so honestly in its
+header comment — but the doc row itself still claimed the unmet method, which is a different
+problem from a documented scope choice: an unmet done criterion, recorded as met.
+
+**Ruling: amend the row, same precedent as the §9.3.4 correction.** Dropped the test-engine
+clause; kept every substantive assertion (one `CMD_SET_FIELD` per edit, barrier applies it, `1.5`
+into `pos_t` → raw `0x60000`, handle kinds produce no command); the direct-call driving method is
+now the accepted one, in the doc, not just in a test file's own comment. `TOOLING.md` §9.5
+amended in this commit, citing RR-39.
+
+**Residual gap, tracked explicitly per the ruling (not to pass silently):** with no ImGui Test
+Engine vendored, nothing in this tree proves a real widget click actually reaches
+`inspector_set_scalar_field` — the setter is tested directly and thoroughly (this lane's own
+`inspector.test.cpp`), but the WIDGET-TO-SETTER EDGE (does `ImGui::InputScalar`'s
+`IsItemDeactivatedAfterEdit()` branch in `inspector.cpp`'s `draw_field` actually call the setter
+with the right arguments when a real user interaction happens) has zero test coverage and cannot
+get any until either the Test Engine is vendored (its own ruling) or some other simulated-input
+mechanism exists. Known, accepted post-v0 gap — not blocking this PR, but not to be
+rediscovered-and-relitigated later as if it were new.
+
+**Still outstanding on this row: the fx-edit assertion (`1.5` → `0x60000`) is not yet satisfied**
+— it needs RR-38's quantizer (filed separately) to exist before Inspector can wire fx editing at
+all. The Inspector is not "done" against this amended row until that lands and the test asserts
+it for real.
