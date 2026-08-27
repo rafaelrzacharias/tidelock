@@ -44,6 +44,9 @@ struct AlloyWorld;    // docs/ALLOY.md (W2/W3 alloy lanes)
 struct RenderQueue;   // docs/RENDER2D.md (W3 render2d)
 struct Editor;        // docs/TOOLING.md (W3 editor)
 struct Interner;      // foundation/interner.h (forward: only luacomp needs it resolved)
+struct CvarTable;     // core/cvar.h (W3 editor) - added under the same ruled exception as
+                       // CMD_SET_CVAR (commands.h); precedent-identical to Editor*/AlloyWorld*/
+                       // RenderQueue* above, each added by the lane that needed it.
 
 // Per-entity record (docs/ECS.md §10.3): the component count and nothing else - no per-entity
 // bitset (D6). Zeroed at spawn; hashed via the entity slotmap's slots arena.
@@ -110,6 +113,8 @@ struct World {
     RenderQueue* render;
     Editor* editor;
     Interner* interner;         // nullable; luacomp interns names here when present
+    CvarTable* cvars;           // nullable; caller-owned (core/cvar.h) - world_set_cvar_cmd's
+                                 // applier and console's future `set` builtin both reach it here
 
     VMemArena meta;             // permanent, NON-registered: schedule/map/luau-table storage
     VMemArena sing_arena;       // registered "world.singletons": WorldTickState
@@ -237,6 +242,15 @@ void world_set_field_cmd(World* w, Entity e, ComponentId comp, u32 field_index,
 
 // Records CMD_SINGLETON_SET: a wholesale singleton swap applied at the barrier.
 void world_singleton_set_cmd(World* w, ComponentId comp, const void* value);
+
+// Records CMD_SET_CVAR (core/cvar.h, docs/TOOLING.md §3's sealed-command routing for a
+// CVAR_SIM-flagged cvar - added under the ruled exception commands.h's CMD_SET_CVAR documents).
+// TL_CHECK: w->cvars != nullptr (a table is wired), key is registered in it, and its flags
+// include CVAR_SIM (a non-SIM cvar is written directly through cvar_set_raw, never a command -
+// core/cvar.h's own ERR_CVAR_SIM_UNROUTED refusal is what routes a caller here in the first
+// place). Applying calls cvar_apply_sim_raw and TL_CHECKs it returns ERR_OK (a malformed command
+// reaching apply is a wiring bug, matching CMD_SET_FIELD's own applier-side checks).
+void world_set_cvar_cmd(World* w, NameHash key, u32 bits);
 
 // Explicit mid-phase flush - the single-threaded escape hatch (docs/ECS.md §4).
 void world_flush(World* w);
