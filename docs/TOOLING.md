@@ -300,15 +300,15 @@ names/shapes were found to predate several `ECS.md` reconciliations):
 for c in 0..w->comp_count: info = w->comps[c].info; if info.flags & COMP_HIDDEN: continue
   if info.flags & COMP_SINGLETON: row = w->comps[c].dense; entity = null
   else: if sel is null: continue; row = column_get(&w->comps[c], sel); if !row: continue; entity = sel
-  if !CollapsingHeader(info.name): continue
+  if !CollapsingHeader(info.name, ImGuiTreeNodeFlags_DefaultOpen): continue
   for fi in 0..info.field_count: f = info.fields[fi]; elems = f.count (never 0); esz = kind_scalar_size(f.kind)
     for k in 0..elems: addr = row + f.offset + k*esz; PushID(fi*256+k); label = elems > 1 ? "name[k]" : name
-      editable = (elems == 1) && (kind is an integer K_i8..K_u64, or K_bool)
+      editable = (elems == 1) && (kind is an integer K_i8..K_u64, K_bool, or a K_pos..K_scalar palette row)
       switch f.kind:
         K_i8..K_u64: tmp = load; InputScalar(ImGuiDataType per kind, &tmp); if editable and deactivated-after-edit: inspector_set_scalar_field(w, lockstep, entity, c, fi, &tmp, esz)
         K_bool: Checkbox; same deactivated-after-edit call, 1-byte value
-        K_pos..K_scalar (the nine palette rows): raw = load i32; shown = raw * 2^-FRAC(kind) as f64; Text("%.9g (0x%08x)", shown, raw) — DISPLAY ONLY, no edit widget (no RNE decimal→raw quantizer exists anywhere in the tree yet; `core/cvar.cpp`'s own `CVAR_FX_RAW` case documents the identical gap)
-        K_Entity / the other handle kinds: Text("%s #%u g%u", domain, idx, gen) (or "null"); K_Entity only also draws SmallButton("go") → ed->sel = that handle; DISPLAY ONLY, no edit widget
+        K_pos..K_scalar (the nine palette rows): raw = load i32; shown = raw * 2^-FRAC(kind) as f64; Text("%.9g (0x%08x)", shown, raw) (read-only, dev-UI f64, unrelated to the parse-back path below); SameLine InputTextWithHint("new value") — RR-38/RR-39 (2026-08-27): if editable and deactivated-after-edit, parsed = fx::fx_parse_decimal_raw(buf, FRAC(kind)); if parsed.err == ERR_OK: inspector_set_scalar_field(w, lockstep, entity, c, fi, &parsed.value, esz) — a parse failure is a silent no-op (empty/malformed/out-of-range text), matching the console's "a rejected command doesn't mutate state" shape; the error text itself is not surfaced yet (no toast/status-line mechanism in this panel — known post-v0 gap, `TODO.md`)
+        K_Entity / the other handle kinds: Text("%s #%u g%u", domain, idx, gen) (or "null"); K_Entity only also draws SmallButton("go") → ed->sel = that handle; DISPLAY ONLY, no edit widget (a handle edit needs its own resolution UI - "type an entity name" or "pick from the interner" - a different, unscoped feature, not a data-representability gap)
         K_StrId: Text(interner_name(id)) when w->interner is set, else "#%u" — read-only
       PopID
 after the component loop: no custom-draw hook and no per-system debug_draw registry exist — neither is built; the generic per-field walk above is the whole panel at v0
@@ -485,11 +485,13 @@ with `write_atomic`.
      in scope for `w3-editor`'s own PR gate. `§9.3.5`/`§9.4` describe no SEPARATE cvar "browser"
      widget beyond this text command — if a later reading disagrees, that is itself a doc gap to
      raise, not an assumption to build past.
-   - Inspector's fx-field/handle-field editing (`§9.3.4`'s Invariants note: display-only pending an
-     RNE quantizer) — panel-local, no shell. **Not yet built; blocked only on RR-38** (same
-     quantizer) — the `1.5` → `0x60000` assertion in `inspector_roundtrip_per_kind` (RR-39,
-     amended above) is not satisfied until this lands, and per Rafael's own instruction this PR is
-     not "done" against panels v0 until it does.
+   - Inspector's fx-field editing — **DONE (RR-38 landed, wired in the same wave)**: the
+     `1.5` → `0x60000` assertion in `inspector_roundtrip_per_kind` (RR-39, amended above) is
+     satisfied (`tests/editor/inspector.test.cpp`'s
+     `inspector_fx_field_edit_widget_writes_through_parse_and_command`). Handle-field editing
+     stays display-only at v0 — not an RR-38 dependency at all, `§9.3.4`'s own updated text notes
+     it needs its own resolution UI ("type an entity name"/"pick from the interner"), a different,
+     unscoped feature.
    - "An edit in the inspector appears in the replay log" — re-examined against the doc rather than
      assumed shell-blocked: recording (`core/recorder.cpp`'s `recorder_tick`, already built by
      `loop+input`) and re-sim (`engine_tick_once`, `core/loop.cpp`) both run headlessly today, no

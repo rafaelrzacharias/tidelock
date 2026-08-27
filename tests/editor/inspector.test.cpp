@@ -154,11 +154,11 @@ TL_TEST(inspector_panel_draw_selected_entity_every_kind_family_no_crash, "editor
     inspector_panel_draw(&ed, &f.w);
     ImGuiWindow* win = ImGui::FindWindowByName("Inspector");
     TL_ASSERT_TRUE(win != nullptr);
-    // Every CollapsingHeader defaults closed - open every component header via SetNextItemOpen
-    // is not reachable from outside inspector.cpp, so this test proves the row/header draw
-    // itself (the window exists, at least the header labels drew) rather than the field rows
-    // inside a closed section - matching console_panel.test.cpp's own "renders something" bar
-    // for state this test file cannot reach into.
+    // Every CollapsingHeader defaults OPEN (ImGuiTreeNodeFlags_DefaultOpen, added alongside the
+    // fx edit widget so a real test could exercise draw_field's own field rows, not just the
+    // header labels, without needing to fake a click on a header ImGui itself would otherwise
+    // default closed) - this draws every field row for every component on InsPos, including the
+    // fx edit box's own InputTextWithHint call, at least once for real.
     TL_EXPECT_TRUE(win->DrawList->VtxBuffer.Size > 0);
     imgui_test_end_frame();
     editor_shutdown(&ed);
@@ -242,6 +242,42 @@ TL_TEST(inspector_set_scalar_field_writes_through_command, "editor,inspector,fas
     row = world_get<InsStats>(&f.w, e);
     TL_ASSERT_TRUE(row != nullptr);
     TL_EXPECT_TRUE(!row->alive);
+#else
+    TL_INSPECTOR_SKIP;
+#endif
+}
+
+TL_TEST(inspector_fx_field_edit_widget_writes_through_parse_and_command, "editor,inspector,fast") {
+#if TL_DEV
+    // RR-39's amended inspector_roundtrip_per_kind criterion, driven directly (this file's own
+    // header note explains why - nothing in this tree can simulate the keystrokes a real edit
+    // widget needs): the exact pipeline `draw_field`'s fx branch runs on
+    // IsItemDeactivatedAfterEdit - fx::fx_parse_decimal_raw, then inspector_set_scalar_field - for
+    // the ruling's own pinned case, 1.5 into pos_t (InsPos's field kind) yields raw 0x60000, and
+    // that raw value reaches the column through the same CMD_SET_FIELD door as every other kind.
+    WorldFixture& f = ins_fixture(3u);
+    Entity e = world_spawn(&f.w);
+    InsPos pos{ fx::fx_raw<pos_t>(0) };
+    world_add<InsPos>(&f.w, e, pos);
+    world_flush(&f.w);
+
+    const Result<i32> parsed = fx::fx_parse_decimal_raw(sv_lit("1.5"), 18u);
+    TL_ASSERT_EQ(parsed.err, ERR_OK);
+    TL_EXPECT_EQ(parsed.value, (i32)0x60000);
+
+    const ComponentId comp = world_component_id<InsPos>(&f.w);
+    TL_ASSERT_EQ(inspector_set_scalar_field(&f.w, false, e, comp, 0u, &parsed.value, sizeof(i32)), ERR_OK);
+    world_flush(&f.w);
+
+    InsPos* row = world_get<InsPos>(&f.w, e);
+    TL_ASSERT_TRUE(row != nullptr);
+    TL_EXPECT_EQ(row->x.v, (i32)0x60000);
+
+    // A malformed edit (what an empty or garbled text box leaves behind) never reaches the setter
+    // at all - draw_field's own guard is `parsed.err == ERR_OK` before calling it, so the column
+    // is provably unchanged by construction, not by a redundant assertion here.
+    const Result<i32> bad = fx::fx_parse_decimal_raw(sv_lit(""), 18u);
+    TL_EXPECT_EQ(bad.err, fx::ERR_FX_PARSE);
 #else
     TL_INSPECTOR_SKIP;
 #endif

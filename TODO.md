@@ -5672,3 +5672,55 @@ fx-field/handle-field editing (`inspector.cpp`) and Console's `CVAR_FX_RAW` deci
 (`core/cvar.cpp`) both still need wiring to call it — tracked as this lane's own immediate next
 work, not folded into this commit (one feature per commit; the primitive and its two call sites
 are three separable, independently-testable slices).
+
+### Return to the Inspector: fx-field editing wired (RR-38/RR-39, 2026-08-27)
+
+Per the steward's explicit instruction ("the Inspector is not done until [the fx edit] lands"):
+`inspector.cpp`'s fx-kind branch (`K_pos`..`K_scalar`) now edits, not just displays. A second
+`InputTextWithHint("##wfx", "new value", ...)` box sits beside the existing read-only `%.9g`
+display; on `IsItemDeactivatedAfterEdit`, the typed text goes through
+`fx::fx_parse_decimal_raw(StrView, frac)` (RR-38) and, only on `ERR_OK`, through the same
+`inspector_set_scalar_field` door every other kind already uses. A parse failure (empty box,
+malformed text, out of range) is a silent no-op — no command recorded, matching the console's own
+"a rejected command doesn't mutate state" shape; the failure reason itself is not surfaced to the
+user yet (no toast/status-line mechanism exists in this panel) — a real, small, filed post-v0 UX
+gap, not a silently accepted one.
+
+The box always starts empty rather than pre-filled with the current value ("type a NEW value",
+not "click to edit the current one") — this needed no new per-field persistent state: a fresh,
+local, zero-length `buf` every frame is exactly what `ImGui::InputText`'s own per-ID state
+machinery expects (it only reads the caller's buffer content on the very first activation frame,
+then syncs its own internal edit state back out every subsequent frame regardless of what the
+caller wrote), so the box "starts empty and shows the live typed value while active" for free.
+
+**Also changed `ImGui::CollapsingHeader` to default OPEN** (`ImGuiTreeNodeFlags_DefaultOpen`) —
+a real, independently-justifiable UX choice (most inspector tools default their sections
+expanded) that also closes a real testing gap: every prior Inspector test that populated a
+component left its header closed (nothing in this tree can simulate the click to open one), so
+`draw_field`'s own field-row code — including, now, the fx edit widget's actual
+`InputTextWithHint` call — had never executed even once under test. It now runs for real in
+`inspector_panel_draw_selected_entity_every_kind_family_no_crash`.
+
+New test `inspector_fx_field_edit_widget_writes_through_parse_and_command`
+(`tests/editor/inspector.test.cpp`): the ruling's own pinned criterion end to end, driven
+directly (`fx::fx_parse_decimal_raw(sv_lit("1.5"), 18u)` → confirmed raw `0x60000` →
+`inspector_set_scalar_field` → `world_flush` → the column holds it), plus confirms a malformed
+parse (`""`) returns `ERR_FX_PARSE` and therefore never reaches the setter. **This satisfies
+`inspector_roundtrip_per_kind`'s amended (RR-39) fx-edit assertion** — the walker-to-setter
+pipeline is now real and tested; the RR-39-recorded residual gap (a real widget CLICK reaching
+the setter) is unchanged and still open, since the Test Engine gap that caused it is unrelated to
+this slice.
+
+`inspector.h`'s Invariants and `TOOLING.md` §9.3.4/RR-40's split both updated in this commit to
+match — fx fields are no longer "display only"; only handle/`K_StrId` kinds remain so, and
+`§9.3.4`'s own updated text now gives handle editing its own, unscoped reason (a resolution UI, not
+a data-representability gap) rather than leaving it implicitly grouped with the now-resolved fx
+gap.
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`) runs, 0 failed in every combination. `includes.py`/`docaudit.py`
+clean.
+
+**Still open:** Console's `CVAR_FX_RAW` decimal-literal branch (`core/cvar.cpp`) — the second of
+RR-38's two named callers — still needs wiring; tracked as the immediate next slice, not folded
+into this commit.

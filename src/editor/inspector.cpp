@@ -3,8 +3,10 @@
 
 #include "core/column.h"
 #include "core/reflect.h"
+#include "foundation/fx.h"
 #include "foundation/handle.h"
 #include "foundation/interner.h"
+#include "foundation/strview.h"
 #include "foundation/tl_assert.h"
 
 #include <imgui.h>
@@ -14,8 +16,8 @@
 namespace {
 
 // The nine fx palette rows' FRAC bit counts (foundation/fx_palette.h's own row constants,
-// docs/FX-PALETTE.md) - display only (this file's Invariants note: no RNE quantizer exists yet
-// to accept an edited value back).
+// docs/FX-PALETTE.md). Editable since RR-38 (`fx::fx_parse_decimal_raw`, `foundation/fx.h`) - see
+// this file's Invariants note for how the edit path stays float-free end to end.
 u8 fx_frac_bits(FieldKind k) {
     switch (k) {
         case K_pos:     return 18u;
@@ -101,7 +103,7 @@ void draw_field(Editor* ed, World* w, Entity sel, ComponentId comp, const Compon
     const FieldInfo& f = info->fields[fi];
     const u32 esz = kind_scalar_size(f.kind);
     const u32 elems = f.count;   // reflect.h: "1, or the array length" - never 0
-    const bool editable = (elems == 1u) && (is_int_kind(f.kind) || f.kind == K_bool);
+    const bool editable = (elems == 1u) && (is_int_kind(f.kind) || f.kind == K_bool || is_fx_kind(f.kind));
 
     for (u32 k = 0; k < elems; ++k) {
         u8* addr = (u8*)row + f.offset + (u64)k * esz;
@@ -136,6 +138,33 @@ void draw_field(Editor* ed, World* w, Entity sel, ComponentId comp, const Compon
             f64 shown = (f64)raw;
             for (u8 b = 0; b < frac; ++b) { shown *= 0.5; }
             ImGui::Text("%.9g (0x%08x)", shown, (u32)raw);
+            if (editable) {
+                // A separate "type a new value, Enter/blur commits" box, not a "click the
+                // current value to edit it" one: the box always starts empty (ImGui's own
+                // per-ID InputText state resets whenever a fresh, local, zero-length `buf` is
+                // the content at the frame this item is first activated - this file's Invariants
+                // note explains why that needs no persistent state of its own here). Parsing goes
+                // through `fx::fx_parse_decimal_raw` (RR-38) - integer-only, no float/double
+                // anywhere in the actual quantization; `shown` above is display-only and was
+                // already an f64 before RR-38 (dev UI, `TOOLING.md` §0's exemption - unrelated to
+                // the parse-back path RR-38 needed to keep float-free).
+                ImGui::SameLine();
+                char buf[32] = {};
+                ImGui::SetNextItemWidth(120.0f);
+                ImGui::InputTextWithHint("##wfx", "new value", buf, sizeof(buf));
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    const Result<i32> parsed = fx::fx_parse_decimal_raw(StrView{ buf, (u32)strlen(buf) }, frac);
+                    if (parsed.err == ERR_OK) {
+                        (void)inspector_set_scalar_field(w, /*lockstep=*/false, sel, comp, fi, &parsed.value, esz);
+                    }
+                    // A parse failure (empty box, malformed text, out of range) is silently a
+                    // no-op - no command recorded, no crash, matching the console's own "a
+                    // rejected command doesn't mutate state" shape. Nothing here surfaces the
+                    // error message text to the user yet (no toast/status-line mechanism exists
+                    // in this panel) - filed in TODO.md as a real, small post-v0 UX gap, not
+                    // silently accepted.
+                }
+            }
         } else if (is_handle_kind(f.kind)) {
             const u32 bits = load_handle_bits(addr, esz);
             if (bits == 0u) {
@@ -199,7 +228,7 @@ void inspector_panel_draw(Editor* ed, World* w) {
         }
 
         ImGui::PushID((int)c);
-        if (ImGui::CollapsingHeader(info->name)) {
+        if (ImGui::CollapsingHeader(info->name, ImGuiTreeNodeFlags_DefaultOpen)) {
             for (u32 fi = 0; fi < info->field_count; ++fi) {
                 draw_field(ed, w, row_entity, (ComponentId)c, info, fi, row);
             }

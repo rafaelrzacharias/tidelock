@@ -8,24 +8,29 @@
 //   ECS.md §10.5 not §4 has the real CMD_SET_FIELD shape, `world_get`/`world_singleton_ptr`
 //   under those names do not exist - see §9.3.4's own updated text for what actually exists and
 //   what this file uses instead).
-// Purpose: read every component; edit only the two kinds a command can carry losslessly today
-//   (see Invariants). Everything else the spec's algorithm describes is display-only at v0.
-// Invariants: an edit is offered ONLY for a non-array field (`FieldInfo::count == 1`) of an
-//   integer or bool kind - `core/commands.h`'s real `CMD_SET_FIELD` payload is `{u32 field_index;
-//   bytes[field.size]}`, no element index, so a single array-element write is not representable
-//   (the same gap `editor/dotpath.cpp`'s `dotpath_set_raw` already documents and guards with
-//   `TL_CHECK(f->count == 1u)` - this file guards the same way, by simply not drawing an editable
-//   widget for `count > 1`, rather than drawing one that would silently fail or write the wrong
-//   bytes). The nine fx palette kinds (`K_pos`..`K_scalar`) and every handle/`K_StrId` kind are
-//   DISPLAY ONLY: an fx edit needs a decimal-to-raw RNE quantizer that does not exist anywhere in
-//   this tree yet (`core/cvar.cpp`'s own `CVAR_FX_RAW` case already documents the identical gap -
-//   "raw:<i32> only... needs FX-PALETTE.md's RNE quantizer, not available to this pure module");
-//   inventing one here, untested (nothing in this tree can simulate the keystrokes that would
-//   exercise it), is exactly the kind of unreviewable correctness risk `CLAUDE.md` asks to avoid
-//   for anything that can write into registered/hashed state through a real command. `ComponentInfo`
-//   has no `custom_draw` member and no per-system `debug_draw` registry exists (both named in
-//   TOOLING.md §9.3.4's pseudocode) - neither hook is built; the generic per-field walker is the
-//   only path.  Lockstep is hardcoded `false` in the edit path (`inspector_set_scalar_field`),
+// Purpose: read every component; edit the kinds a command can carry losslessly (see Invariants).
+//   Handle and `K_StrId` kinds stay display-only at v0 (a handle/StrId edit needs its own
+//   resolution UI - "type an entity name" or "pick from the interner" - a different, unscoped
+//   feature, not a data-representability gap the way the array-element case is).
+// Invariants: an edit is offered ONLY for a non-array field (`FieldInfo::count == 1`) - `core/
+//   commands.h`'s real `CMD_SET_FIELD` payload is `{u32 field_index; bytes[field.size]}`, no
+//   element index, so a single array-element write is not representable (the same gap `editor/
+//   dotpath.cpp`'s `dotpath_set_raw` already documents and guards with `TL_CHECK(f->count == 1u)`
+//   - this file guards the same way, by simply not drawing an editable widget for `count > 1`,
+//   rather than drawing one that would silently fail or write the wrong bytes). Integer and bool
+//   kinds edit via `ImGui::InputScalar`/`Checkbox`, read back on `IsItemDeactivatedAfterEdit`.
+//   The nine fx palette kinds (`K_pos`..`K_scalar`) edit via a second, separate "type a new
+//   value" text box (RR-38/RR-39, 2026-08-27): parsed through `fx::fx_parse_decimal_raw`
+//   (`foundation/fx.h`) - integer-only, no float/double anywhere in the actual quantization; the
+//   read-only `%.9g` display next to it was already an f64 before RR-38 and stays one (dev UI,
+//   `TOOLING.md` §0's exemption - unrelated to the parse-back path RR-38 needed float-free). A
+//   parse failure (empty box, malformed text, out of range) is a silent no-op, matching the
+//   console's "a rejected command doesn't mutate state" shape - the error text itself is not
+//   surfaced to the user yet (no toast/status-line mechanism exists in this panel), a known,
+//   filed (`TODO.md`) post-v0 UX gap, not a silently accepted one. `ComponentInfo` has no
+//   `custom_draw` member and no per-system `debug_draw` registry exists (both named in
+//   `TOOLING.md` §9.3.4's pseudocode) - neither hook is built; the generic per-field walker is the
+//   only path. Lockstep is hardcoded `false` in the edit path (`inspector_set_scalar_field`),
 //   matching `console_panel_draw`'s own note - no netcode/Hovel session exists yet to ask.
 // Determinism: dev UI only (`TOOLING.md` §0). Every edit reaches sim state through
 //   `world_set_field_cmd` (`core/commands.h`'s `CMD_SET_FIELD`), never a direct write - this file
@@ -43,8 +48,9 @@ void inspector_panel_register(Editor* ed);
 // selection - `handle_is_null(ed->sel)`), then every singleton (shown regardless of selection).
 void inspector_panel_draw(Editor* ed, World* w);
 
-// What an integer/bool field's edit widget calls on "deactivated after edit" (this header's
-// Invariants note: only ever reached for a non-array field). Exposed and testable directly,
+// What an integer/bool/fx field's edit widget calls on "deactivated after edit" (this header's
+// Invariants note: only ever reached for a non-array field, and only after a successful parse on
+// the fx path). Exposed and testable directly,
 // the same way `console_panel_draw`'s submit branch is tested via `console_exec` directly rather
 // than a simulated keystroke - nothing in this tree can simulate one. `bytes`/`len` are the raw
 // replacement value (`len` must equal the field's own `FieldInfo::size`, matching
