@@ -95,6 +95,85 @@
 > `InputProducer` seam; `alloy-solver` ★, `luau-bindings` and the three alloy pass lanes still
 > wait on **alloy-substrate** at the Fable reset (Tue 2026-09-01, R-8).
 
+> **ROUND 2 IS IN ON BOTH PRs, 2026-08-27 ~10:16Z — both *fix first*, both fresh-context Opus,
+> both re-ran every revert themselves.** Verdicts are the PR comments (the durable record);
+> reviewer sessions archived at verdict time per `LESSONS.md`. Neither round-1 fix set was
+> found wanting on the evidence standard this program imposed — round 2's finding in each case
+> is a NEW defect in code the fix round itself touched, which is the argument for the standard,
+> not against it.
+>
+> **PR #15 `w3-loop-input` @ `17c45c1` — 11 defects, 4 ship-blocking.** The headline: the
+> done-criterion record→replay test **passes with the input→sim wire cut**. Severing
+> `w->input = frames` (`loop.cpp:40`) leaves the whole suite green, because `WorldTickState`
+> sits in an `ARENA_HASHED` arena, so row *i*'s hash is a function of `tick == i` alone and the
+> "input really moved state" guard cannot fail. Round 1's own words for that guard — *"without
+> it the trace comparison passes on a world the input never touched"* — were right about the
+> need and wrong about the mechanism. Also: the `PRODUCE_WAIT` alpha fix bounded the symptom
+> and kept the defect (`pending` CYCLES during a stall → a full 0→1 sawtooth at ~60 Hz with the
+> sim frozen), and it is NOT latent — merged render2d's `extract.cpp` lerps every entity and
+> the camera by that alpha. The branch is 33 commits behind `main`, and two of the lane's own
+> ruling requests (RR-25(c), RR-26) rest on premises that expired when render2d merged.
+>
+> **PR #14 `w3-assets-data` @ `c12bfac` — nine of ten round-1 fixes discriminate under the
+> reviewer's own reverts; 2 new blockers.** (i) `save_read` trusts `hdr.arena_count`: the
+> `TL_CHECK(pend_count < MAX_PENDING)` guard existed at the round-1 anchor and was **deleted by
+> the D5/D7 fix hunk**; a forged file declaring 5000 blocks against `MAX_ARENAS = 4096` returns
+> `ERR_OK` while writing past the array, and ASan cannot see it because `pend` is `arena_push`'d
+> from the caller's scratch arena. The fix is D8's shape — validate up front, named `ERR_SAVE_*`
+> — NOT restoring the `TL_CHECK`, which was loud rather than correct (`CPP-SUBSET.md` §3:
+> malformed input is an `ErrCode`, never a fatal). (ii) `script_table_next` still fatals the
+> process, and `vm.cpp:561`'s audit note asserts it cannot — the note reasons about the caller,
+> but the function is public surface. Reached two ways, both measured; honestly bounded (a
+> mid-walk `nil` alone survives, a rehash alone survives — it takes both). **A wrong conclusion
+> stated as "Conclusion, not a guess" is worse than no note**, and is deleted with the fix.
+
+> **THREE RULINGS 2026-08-27 (Rafael, to the steward), on round 2's findings.**
+>
+> **1. The interp-pair contract is DENSE-ORDER PARITY** (PR #15 defect 3). `interp_pingpong`
+> pairs by entity; merged `render/extract.cpp` pairs by dense index and guards only on equal
+> counts; `column_remove` is swap-remove, so dense order is a function of add/remove history
+> per column. The reviewer built the divergence — counts equal, index parity broken,
+> `interp_pingpong` reporting success, `sys_extract` lerping entity A's current pose against
+> entity B's previous one, silently, with no test in either lane catching it. **Ruled: the
+> pair's dense orders must agree, and `interp_pingpong` `TL_CHECK`s it.** This makes the
+> shipped renderer's assumption TRUE rather than lucky, and keeps `FRAME-LOOP.md` §3's
+> pointer-swap O(1) reachable; the present per-entity copy stays a recorded deviation.
+> Consumers: `RENDER2D.md`'s `extract.cpp`, `core/transform.h`'s contract block, `FRAME-LOOP.md`
+> §3, and v0-integration, which is the lane that would otherwise have found this the expensive
+> way.
+>
+> **2. `ASSETS-AND-DATA.md` §8.5 SPLITS BY OWNER** (PR #14). The criterion as written does not
+> hold — it names four tests that do not exist ("two processes", the fx-literal
+> acceptance/rejection table, reference resolution incl. forward refs, reload emits the sealed
+> command) and three error codes with no fixture (`ERR_DATA_BAD_FX_LITERAL`,
+> `ERR_DATA_DANGLING_REF`, `ERR_DATA_VALIDATOR`). It is unmet, and the lane is **not** at fault:
+> both reviews independently judged its deferrals honest, and building against schemas that do
+> not exist while `alloy-substrate` is unlaunched is the Layr trap. **Ruled: rewrite §8.5 into
+> the part assets+data owns — which it has built — and the part landing with alloy-substrate /
+> luau-bindings / render2d's text work, each deferred clause naming its owning lane** in
+> `ASSETS-AND-DATA.md` and here. #14 then ships against a criterion that is actually its own.
+> The alternative — holding a complete, green, reviewed lane for a week behind an unlaunched
+> one — was rejected, as was merging under `WORKFLOW.md` §2's valve (that valve is for small
+> edits implementing a recorded ruling, never for certifying unmet clauses of a done criterion).
+>
+> **3. The FULL `SIM_REMOVE` / `DATA_REMOVE` ASYMMETRY IS AUDITED — `gcinfo` is one symptom,
+> not the finding** (PR #14 R3). `gcinfo` is live in the data VM, whose output is hashed, while
+> `SIM_REMOVE` strips it — host heap size reaching a hashed output, the same shape as the
+> `math.random` (2026-08-26) and `pairs`/`next` (2026-08-27) rulings. The reviewer could NOT
+> demonstrate divergence (three fresh VMs, identical readings) and rated it High confidence as
+> an unaudited asymmetry, Medium as a live cross-ISA channel. **Ruled: not a one-name patch.
+> The whole diff between the two removal lists becomes its own reviewed slice, with a ruling
+> per name.** This is broader than the steward recommended (which was to remove `gcinfo` on the
+> two precedents) — the reasoning that carried it is that three instances of one class in two
+> days is evidence the lists drifted, and patching the third symptom leaves the fourth.
+> **QUEUED, NOT LAUNCHED**: ruling 2026-08-27 holds new lanes until #14 and #15 merge, and
+> steward attention is the binding constraint. Scope when launched: the full `SIM_REMOVE` ∖
+> `DATA_REMOVE` set and its converse, each name ruled keep/remove with its reason, the data-VM
+> list given a home in `CANON.md` beside the sim list (§1 and §10.2 then cite it — see below),
+> and the sandbox's own `name_is_absent` sweep gating the result. Owner: the next lane to touch
+> `src/script/sandbox.cpp`; `luau-bindings` is the likely one. **PR #14 does not act on
+> `gcinfo` in its fix round** — it files the RR and proceeds.
+
 > **W3 render2d MERGED 2026-08-27 — `31da431` (PR #13), closeout sweep done (R-7 + R-12).**
 > Five adversarial review rounds to *ship*. Two rulings landed in it: **D1** (camera off the
 > ECS onto `RenderQueue` — as registered components its f32 bytes reached `registry_hash_all`,
