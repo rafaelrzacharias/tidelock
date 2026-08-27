@@ -218,6 +218,18 @@
 > rewriting — permitted pre-review under R-4, forbidden once review begins (`WORKFLOW.md` §1).
 > Auto-allowing the bare wildcard removes the prompt that would otherwise surface an amend on a
 > frozen branch. Recommendation on the record: narrow it to the message-bearing forms.
+>
+> **HOME OF THIS RULE — reconcile at PR #16's merge closeout.** Rafael instructed the `editor`
+> lane directly to record the settings ownership ruling and the allowlist "somewhere durable and
+> all in the same section of the doc"; it added **`WORKFLOW.md` §7** on `w3-editor` (`7518ab6`),
+> which is the right home — process rules live in `WORKFLOW.md`, not `TODO.md`, and §7 already
+> gets the hard part right: it lists granted *categories* and names `.claude/settings.json`
+> itself as authoritative on the literal patterns, so the doc cannot drift into a stale copy of
+> the file. **At #16's merge closeout, trim the entries above to an episode record — what
+> happened and the R-14 verification — and cite `WORKFLOW.md` §7 for the rule itself.** The
+> citation is deliberately NOT added yet: §7 does not exist on `main` until #16 merges, and
+> `docaudit` would fail the dangling reference. The lane flagged this overlap itself rather than
+> letting the fact live in two places.
 
 > **W3 `editor` LAUNCHED 2026-08-27 (Rafael's word, after both holds expired by their own terms).**
 > Branch `w3-editor`, **Sonnet 5** per `ROADMAP.md` §2, reviewed by Opus throughout; the lane
