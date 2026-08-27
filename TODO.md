@@ -6245,3 +6245,22 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > `rng_systems.h` as created but it already exists" — as stated that was wrong; §14.1 specifies a
 > *sim* header distinct from foundation's. Reading §14.1 turned a wrong flag into RR-46, which is
 > the real defect underneath it.
+
+## W3 wave-boundary sweep — area C verdict (fresh-context reviewer, 2026-08-27)
+
+**Status: IN PROGRESS — this section is appended as work proceeds, per the brief's push-early
+rule. The verdict line is at the end of the section and is authoritative only once the section
+says COMPLETE.**
+
+Area: the three §2-valve merges whose lane review was deferred — (C1) `07e9768` /
+`de5d0ab` (PR #4, merge-autonomy); (C2) `1a14424` + `3b428e3` (PR #14 round 3); (C3)
+`3061af2` + base merge `dd11b38` (PR #15 round 3). Disjoint from the two sibling reviewers'
+areas by the brief's partition.
+
+**Range discipline.** This container cloned shallow (`git rev-parse --is-shallow-repository` →
+`true`); `git fetch --unshallow` first, after which `git log --oneline | wc -l` reports 422.
+Local `refs/heads/main` was stale at `07e9768` — the C1 merge itself — and is NOT `origin/main`;
+one docaudit run was wasted on it before that was caught. Every claim below is measured against
+`origin/main` at `de268f7`, re-fetched mid-review (it advanced `1280d1a` → `de268f7` during this
+session; `git diff --stat 1280d1a origin/main` is `TODO.md` only, so the docs read at session
+start are still current).
