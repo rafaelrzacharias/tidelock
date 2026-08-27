@@ -3274,15 +3274,17 @@ right; it is the template the others now follow.
 - [x] **Review round 2's discriminating-test sweep, CORRECTED in round 3 (A-2, A-3, A-6): D7 and
       M1 were wrongly recorded as not practically unit-testable - both are, and round 3's reviewer
       wrote and ran both tests. M2 was wrongly recorded as verified - no test can verify it, for a
-      different reason than D6/D7/M1's class. **CORRECTED again in round 4 (R4-1): the sentence
-      this same commit wrote to fix the round-2 test-count error stated a new, differently wrong
-      count** - "fifteen ... only [two] do not" is arithmetically seventeen against sixteen total,
-      its own parenthetical lists ten items not fifteen, and it silently swept D8/D9/D11 (doc-route
-      fixes) and M3 (a record fix) - none of which ever had or could have a discriminating test -
-      into "have one". Ten of the sixteen round-1 findings have a revert-verified discriminating
-      test (D1-D5, D7, D10, M1, M4, M5). D8, D9, D11 and M3 were doc- or record-route fixes with no
-      runtime observable to test. D6 is pinned at link only; M2 has no behavioural delta to observe
-      at all - two different reasons, detailed below:**
+      different reason than D6/D7/M1's class. **CORRECTED again in round 4 (R4-1) and then a
+      fourth time on the same sentence (round 4's own standing rule, below): a maintained count of
+      "how many of sixteen" is the class of thing that goes stale or is simply wrong when written -
+      this section restated one three times running (20, then 15, then 22 against a tree that
+      already had 33, then an arithmetically-impossible "fifteen ... only two do not") and is not
+      trying a fourth number. Categorically, not by count: every round-1 finding with a runtime
+      observable (D1-D5, D7, D10, M1, M4, M5) has a revert-verified discriminating test - run
+      `tl_tests --tag render` for the live list, never a number copied into this file. D8, D9 and
+      D11 were doc-route fixes and M3 was a record fix; none of the four has a runtime observable a
+      test could check. D6 and M2 are their own two distinct reasons, detailed immediately below -
+      neither "has a test" nor "lacks one for the same reason as the other":**
       - **D6 (`simview.cpp` did not exist) - still half-pinned, correctly.** The fix IS a file
         existing and its two declared functions being defined - `simview_texel_to_world`/
         `simview_update` were forward-declared in `simview.h` but had no `.cpp` TU, so the module
