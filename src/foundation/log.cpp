@@ -65,5 +65,14 @@ const LogRecord* tl_log_ring_at(u32 slot) {
     const u32 base = (g_log.count == 4096u) ? g_log.head : 0u;
     return &g_log.slot[(base + slot) % 4096u];
 }
-void tl_log_test_reset(void) { g_log = LogRing{}; }
+// `g_log = LogRing{}` would value-initialize a ~0.97 MB temporary (LogRecord is 248 B * 4096
+// slots) before assigning it - the exact prof.cpp anti-pattern LESSONS.md already documents
+// (`g_prof = ProfState{}`, a ~53 MB temporary that segfaulted on Linux debug's -O0, un-elided).
+// This one is smaller, so Linux's 8 MB default stack absorbed it silently on every tier - it took
+// Windows' 1 MB default thread stack, combined with a caller frame carrying a since-grown local
+// (editor/console's Editor gained a ~53 KB ConsoleState, tipping an already-marginal case over),
+// to actually crash it: CI red on Windows debug only, zero test output (a stack overflow segfaults
+// before any assertion runs), console_panel's near-identical twin test passing because it never
+// calls this function. memset zeroes the existing static in place, no temporary of any size.
+void tl_log_test_reset(void) { memset(&g_log, 0, sizeof(g_log)); }
 #endif

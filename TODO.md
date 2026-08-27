@@ -5166,3 +5166,38 @@ non-isolated (`--tag '!slow'`, matching the sanitizer job's own invocation shape
 practice for this lane after the earlier CI-red fix taught the same lesson from the other
 direction) — 598/616 selected (tier-dependent), 0 failed in every combination.
 `includes.py`/`docaudit.py` clean.
+
+### CI red on `88edf34` (Windows debug only) — the ODR fix above was correct; the real bug was elsewhere
+
+Steward dispatched a full diagnosis (regression window narrowed to `e51966a` by CI run history,
+zero-output/fastest-of-its-siblings failure shape flagged, four concrete deltas between the
+failing `log_panel_register_wires_into_editor_panel_table` and its passing `console_panel` twin
+named exactly). Traced from there rather than re-deriving: the shared difference is that only the
+`log_panel` test calls `tl_log_test_reset()` — and `foundation/log.cpp`'s `tl_log_test_reset()`
+turned out to have the **exact same bug this file already documents for `prof.cpp`**:
+`g_log = LogRing{}` value-initializes a temporary (`LogRecord` 248 B × `slot[4096]` ≈ 0.97 MB)
+before assigning it. An order of magnitude smaller than `prof.cpp`'s ~53 MB, so it fit inside
+Linux's 8 MB default stack on every tier this lane validated (including `debug`/`-O0`, where
+`prof.cpp`'s version did NOT fit) — but Windows' default thread stack is 1 MB, and the same
+commit's `Editor` struct had just grown by a ~53 KB `ConsoleState`, which was enough to tip a
+test constructing `Editor ed;` and then calling `tl_log_test_reset()` over that smaller budget.
+Zero test output, fastest of its siblings - a stack overflow crashes before any assertion runs,
+matching `prof.cpp`'s own documented signature exactly. Fixed the same way:
+`memset(&g_log, 0, sizeof(g_log))`. Grepped `src/` for the same literal pattern
+(`g_\w+ = \w+{};`) once this second instance was found — no third exists today. Full lesson
+(the size-vs-stack-budget corollary this instance adds) in `LESSONS.md`.
+
+**The ODR fix recorded above was NOT the bug** — it was real (found and fixed correctly, holds up
+under review, worth keeping) but it was not what CI's Windows legs were reporting; the actual
+regression was a latent, pre-existing bug in a sibling file that this commit's unrelated struct
+growth happened to trip for the first time. Recorded plainly since the steward's own dispatch
+explicitly asked for "a dead end is a reportable outcome too" if a hypothesis was wrong — here it
+wasn't a dead end exactly (the ODR concern was genuine and the fix stands), but the REGRESSION's
+actual cause was one level removed from where the diff pointed, which is worth being honest about
+rather than letting the two fixes blur together as if they were the same finding.
+
+Validated on all four tiers, both isolated and non-isolated `--tag '!slow'` runs, 0 failed in
+every combination. `includes.py`/`docaudit.py` clean. Could not reproduce the Windows-specific
+crash locally (no Windows host) — reasoned from source (the exact size computation, the exact
+`prof.cpp` precedent) per the steward's own constraint of one validated hypothesis per push
+rather than a guess-and-check loop; CI is the adjudicator here, same as the sanitizer-red case.
