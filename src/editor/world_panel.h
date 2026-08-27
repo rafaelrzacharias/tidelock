@@ -60,10 +60,12 @@ void world_panel_draw(Editor* ed, World* w);
 
 // What the "rehash arenas" button calls - exposed and testable directly, the same way
 // `inspector_set_scalar_field`/`console_exec` are: nothing in this tree can simulate a real
-// button click against the null ImGui backend. Lazily allocates `ed->world_arena_hash_cur`/
-// `_prev` from `ed->dev_arena` on first call; on every later call, copies the previous result
-// into `_prev` (so the panel can flag "changed since last rehash") before recomputing `_cur` via
-// `registry_hash_all`.
+// button click against the null ImGui backend. No-ops on `w == nullptr` (B-10, 2026-08-27 -
+// matching `world_panel_draw`'s own null guard, since this entry point is reachable independent
+// of the button `world_panel_draw` guards it behind) or an unsealed registry. Lazily allocates
+// `ed->world_arena_hash_cur`/`_prev` from `ed->dev_arena` on first call; on every later call,
+// copies the previous result into `_prev` (so the panel can flag "changed since last rehash")
+// before recomputing `_cur` via `registry_hash_all`.
 void world_panel_rehash_arenas(Editor* ed, World* w);
 
 // The live entity slot indices `draw_entities` (this file's own row-producing loop) walks and

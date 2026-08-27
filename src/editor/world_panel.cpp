@@ -103,6 +103,11 @@ u32 world_panel_visible_slots(const World* w, u32* out, u32 cap) {
 }
 
 void world_panel_rehash_arenas(Editor* ed, World* w) {
+    // B-10 (2026-08-27): world_panel_draw guards w == nullptr before ever reaching the button
+    // that calls this; this exported entry point (world_panel.h: "exposed and testable directly")
+    // did not, so a caller other than draw's own button - any future one - could crash on the
+    // very first dereference below.
+    if (w == nullptr) { return; }
     if (w->registry->sealed == 0u) { return; }   // registry_hash_all is TL_CHECK-fatal until
                                                    // registry_seal runs (app/'s job, not built)
     ensure_hash_buffers(ed);

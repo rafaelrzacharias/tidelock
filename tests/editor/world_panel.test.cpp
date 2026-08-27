@@ -222,3 +222,18 @@ TL_TEST(world_panel_rehash_arenas_noops_on_unsealed_registry, "editor,world_pane
     TL_WORLD_PANEL_SKIP;
 #endif
 }
+
+TL_TEST(world_panel_rehash_arenas_null_world_no_crash, "editor,world_panel,fast") {
+#if TL_DEV
+    // B-10: world_panel_draw guards w == nullptr before reaching the button that calls this, but
+    // world_panel_rehash_arenas is exposed and testable independent of that button - must not
+    // dereference w unguarded.
+    Editor ed;
+    TL_ASSERT_TRUE(make_editor(&ed));
+    world_panel_rehash_arenas(&ed, nullptr);   // must return quietly, not crash
+    TL_EXPECT_TRUE(!ed.world_arena_hash_valid);
+    editor_shutdown(&ed);
+#else
+    TL_WORLD_PANEL_SKIP;
+#endif
+}
