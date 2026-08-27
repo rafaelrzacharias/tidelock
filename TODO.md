@@ -174,6 +174,22 @@
 > `src/script/sandbox.cpp`; `luau-bindings` is the likely one. **PR #14 does not act on
 > `gcinfo` in its fix round** — it files the RR and proceeds.
 
+> **W3 `editor` LAUNCHED 2026-08-27 (Rafael's word, after both holds expired by their own terms).**
+> Branch `w3-editor`, **Sonnet 5** per `ROADMAP.md` §2, reviewed by Opus throughout; the lane
+> spends no Fable, which matters while the weekly budget is out until the Tue 2026-09-01 reset
+> (R-8). Its inputs — `ecs`, `render2d`, `vendor` — are all merged; done criterion is
+> `TOOLING.md` §9's v0 panels. It is off the critical path but is a required input to W4's
+> v0-integration, so it advances that lane's start.
+> **The `SIM_REMOVE`/`DATA_REMOVE` audit slice stays QUEUED, not launched** — it blocks nothing,
+> and its named owner is the next lane to touch `src/script/sandbox.cpp` (luau-bindings, itself
+> behind alloy-substrate). Considered and rejected: launching it now as a standalone slice, since
+> steward attention is the binding constraint and a second concurrent review chain is what went
+> wrong earlier in this wave.
+> **Still not launched, and not to be without Rafael's word:** `alloy-substrate` (the W2 keystone
+> and critical path, scheduled for the Fable reset, blocking five of seven remaining W3 lanes),
+> `net-p2`, `alloy-solver` ★, `luau-bindings`, and the three alloy pass lanes.
+> **Next free ruling-request id: RR-33.** The steward allocates; lanes do not self-allocate.
+
 > **W3 loop+input MERGED 2026-08-27 — `7e0088e` (PR #15), closeout sweep done (R-7 + R-12).
 > All three early-launched W3 slack lanes have now shipped.** Three adversarial review rounds.
 > The lane's headline defect was found by round 2 and is the reason this module's tests are worth
