@@ -123,8 +123,17 @@ struct Editor {
     u8    world_arena_hash_valid;     // world_arena_hash_cur holds a real computed set
     u8    world_arena_hash_have_prev; // world_arena_hash_prev holds a real previous set to diff
     u8    initialized;
-    u8    _pad0[4];
+    u8    _pad0[5];   // measured trailing space, B-8 2026-08-27: [4] left one byte of implicit
+                       // tail padding unnamed (`sizeof(Editor)` doesn't shrink from naming it -
+                       // the byte is already there - but a struct that declares `_pad0` at all
+                       // asserts it accounts for every trailing byte, and this one didn't).
 };
+// Editor is a 55 KB stack local in 30 test bodies (mostly ConsoleState's own CONSOLE_TABLE_CAP *
+// sizeof(ConsoleCmd) = 512 * 72). This lane has already paid for three stack-overflow defects
+// from an oversized stack local (LESSONS.md) - a size guard is the cheap insurance the day
+// CONSOLE_TABLE_CAP/CONSOLE_LINE_CAP grows and all 30 grow silently with it (B-8, 2026-08-27).
+static_assert(sizeof(Editor) == 55704, "editor.h B-8: Editor grew/shrank - re-measure and update, "
+              "or switch to a <= bound if pinning the exact size stops being worth it");
 
 // Zero-initializes `ed`, reserves `dev_arena_reserve` bytes (0 = a documented default, TODO.md -
 // no consumer has sized one yet) for the dev arena. Does NOT create an ImGui context (that is
