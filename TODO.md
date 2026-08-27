@@ -4173,11 +4173,33 @@ there. One clause has no owning lane at all and is flagged rather than force-ass
 in two processes" test needs a process-spawn `PlatformApi` primitive that no `ROADMAP.md` lane
 currently builds - open, unowned, not blocking (both reviews already judged deferring it honest).
 
+**Round 3 (ship-verdict), D1 BLOCKING - fixed.** The §8.5 split above named `asset_load_font`'s
+deferral owner as `render2d`; the reviewer measured that wrong on four independent facts:
+render2d (PR #13) is merged and closed, so a closed lane cannot be a future owner; it never had
+font/text/glyph work in its own `ROADMAP.md` §2 Builds column; it shipped `render/text.cpp` as a
+deliberate reserved stub by its own done criterion (`RENDER2D.md` §9); and `ASSETS-AND-DATA.md`
+§8.1 already keeps `core/loaders/font.cpp` (the face-handle load) in THIS lane's own file table,
+contradicting §8.5's attribution in the same doc. Exactly ruling 2's own failure mode, milder
+form - a clause of this lane's module parked in a merged lane's column where nothing picks it
+up. Fixed the same way the two-process clause already models: no owning lane exists, flagged per
+`CLAUDE.md`'s "unknown constraint - say so, never invent one," not force-assigned. The deferral
+itself stands (`tl_core` links `stb`, not the vendored `sdl_ttf` - a build change outside this
+lane's slice, `src/core/CMakeLists.txt`); only the owner line was wrong. Round 3's two nits also
+landed in this commit: N1, `TODO.md`'s "Orchestration correction" entry above named the archived
+session by its `session_01...` id, orchestration metadata that serves no reader of this
+world-readable repo (`CLAUDE.md`'s public-repo rule) - removed, sentence kept, referred to as
+"the previous steward window" per the reviewer's own wording. N2, the `r3_forged_arena_count`
+test's comment in `tests/core/save/save.test.cpp` mislabeled its finding "Round 2 review R2" -
+it implements R1; corrected. Per round 3's verdict (fix first, one blocking, doc/comment-only,
+no round 4 expected - `WORKFLOW.md` §2's post-review-edit valve applies to an already-recorded
+ruling's one-sentence correction), this lands in one commit and this lane stops here per the
+steward's explicit instruction; the steward verifies and merges under the valve.
+
 **Orchestration correction (2026-08-27), replacing this lane's own prior note in the same
-spirit it was written:** the prior entry here (commit `4ef8b37`) asserted, after
-`session_01CnFUALGkrJNZa5jeVAce3W` came back archived from a trigger-bind attempt, that this lane
-was "driving the PR to green autonomously" with no steward. **That was wrong.** The archived
-session was the PREVIOUS steward window retiring at a scheduled phase boundary
+spirit it was written:** the prior entry here (commit `4ef8b37`) asserted, after the previous
+steward window came back archived from a trigger-bind attempt, that this lane was "driving the
+PR to green autonomously" with no steward. **That was wrong.** The archived session was that
+PREVIOUS steward window retiring at a scheduled phase boundary
 (`WORKFLOW.md` §6 R-10 - a committed-file handoff, not an end) - a successor window is live, sent
 this lane the round-2 work order and the three rulings this section implements, and remains the
 review/ruling channel for this PR. `main` at `eb648e5` (merged into this branch, `c1fedb8`)

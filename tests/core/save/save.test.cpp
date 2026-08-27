@@ -578,7 +578,7 @@ TL_TEST(save_read_kind_change_via_migration_fn, "core,save") {
     platform_test_shutdown(platform);
 }
 
-// Round 2 review R2: hdr.arena_count is a file-supplied u32 that drives the block loop, which
+// Round 2 review R1: hdr.arena_count is a file-supplied u32 that drives the block loop, which
 // writes one Pending record per block into a fixed MAX_PENDING (== MAX_ARENAS)-sized array. The
 // TL_CHECK that used to guard this (present at the round-1 anchor a7a18dc) was deleted by the
 // D5/D7 hunk in 76461d6 - no real replicated blocks are needed to prove the gap: a valid

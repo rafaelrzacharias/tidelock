@@ -279,8 +279,14 @@ deferred, each clause naming the lane that closes it.
 - reload emits the sealed command — `data_compile` has no reload path; §10.8's reload surface is
   binding work this lane's header does not own. Owner: **luau-bindings**.
 - `asset_load_font` (`loaders/font.cpp`, a declared `TL_FATAL`'d stub) — the font-load half.
-  Owner: **render2d**'s text work (`render/text.cpp`, itself still a `RESERVED-SEAMS.md` §2 stub
-  with no glyph-atlas/layout code yet).
+  **No `ROADMAP.md` lane currently owns this** — render2d (PR #13) is merged and closed, never
+  had font/text/glyph work in its Builds column, and shipped `render/text.cpp` as a deliberate
+  reserved stub by its own done criterion (`RENDER2D.md` §9). §8.1 above already keeps
+  `core/loaders/font.cpp` (the face-handle load) in this lane's own file table; only the glyph
+  atlas is `render/text.cpp`'s. The deferral itself stands — `tl_core` links `stb`, not the
+  vendored `sdl_ttf`, a build change outside this lane's slice (`src/core/CMakeLists.txt`) — but
+  flagged rather than assigned, per `CLAUDE.md`'s "unknown constraint → say so; never invent
+  one," same as the two-process clause below.
 - `ERR_DATA_VALIDATOR` — a cross-table validator fixture, per its own header comment
   (`data_tables.h`: "a cross-table validator (`ALLOY.md` §11.1 / a game's own) rejected"). This
   waits on Alloy the same as the fx/ref clauses above, not on render2d — attributed to
