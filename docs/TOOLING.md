@@ -305,8 +305,8 @@ for c in 0..w->comp_count: info = w->comps[c].info; if info.flags & COMP_HIDDEN:
     for k in 0..elems: addr = row + f.offset + k*esz; PushID(fi*256+k); label = elems > 1 ? "name[k]" : name
       editable = (elems == 1) && (kind is an integer K_i8..K_u64, K_bool, or a K_pos..K_scalar palette row)
       switch f.kind:
-        K_i8..K_u64: tmp = load; InputScalar(ImGuiDataType per kind, &tmp); if editable and deactivated-after-edit: inspector_set_scalar_field(w, lockstep, entity, c, fi, &tmp, esz)
-        K_bool: Checkbox; same deactivated-after-edit call, 1-byte value
+        K_i8..K_u64: if editable: tmp = load; InputScalar(ImGuiDataType per kind, &tmp); if deactivated-after-edit: inspector_set_scalar_field(w, lockstep, entity, c, fi, &tmp, esz); else (count > 1): draw_int_readonly(addr, kind) — a plain read-only Text at the field's own signed/sized type (B-6, 2026-08-27: the widget itself is gated, not only the write — an earlier revision drew InputScalar unconditionally and gated only inspector_set_scalar_field's call, so editing an array element gave a live, typeable widget whose value silently reverted next frame)
+        K_bool: if editable: Checkbox; same deactivated-after-edit call, 1-byte value; else: Text("true"/"false") — same B-6 gating
         K_pos..K_scalar (the nine palette rows): raw = load i32; shown = raw * 2^-FRAC(kind) as f64; Text("%.9g (0x%08x)", shown, raw) (read-only, dev-UI f64, unrelated to the parse-back path below); SameLine InputTextWithHint("new value") — RR-38/RR-39 (2026-08-27): if editable and deactivated-after-edit, parsed = fx::fx_parse_decimal_raw(buf, FRAC(kind)); if parsed.err == ERR_OK: inspector_set_scalar_field(w, lockstep, entity, c, fi, &parsed.value, esz) — a parse failure is a silent no-op (empty/malformed/out-of-range text), matching the console's "a rejected command doesn't mutate state" shape; the error text itself is not surfaced yet (no toast/status-line mechanism in this panel — known post-v0 gap, `TODO.md`)
         K_Entity / the other handle kinds: Text("%s #%u g%u", domain, idx, gen) (or "null"); K_Entity only also draws SmallButton("go") → ed->sel = that handle; DISPLAY ONLY, no edit widget (a handle edit needs its own resolution UI - "type an entity name" or "pick from the interner" - a different, unscoped feature, not a data-representability gap)
         K_StrId: Text(interner_name(id)) when w->interner is set, else "#%u" — read-only
@@ -331,8 +331,14 @@ untouched by this file).
 
 **9.3.5 Console.** Tokenizer: split on ASCII space/tab; a `"`-quoted token keeps spaces and
 honours `\"` and `\\`; `#` starts a comment; max 16 tokens (`ERR_CONSOLE_TOO_MANY_ARGS`);
-unterminated quote → `ERR_CONSOLE_SYNTAX`. Dispatch: `key = hash(argv[0])` → `SortedMap` lookup;
-`argc` checked against `argc_min/max`; `SIM_AFFECTING` commands in a lockstep session → refused;
+unterminated quote → `ERR_CONSOLE_SYNTAX`. Dispatch (deviation from this section's original text,
+recorded 2026-08-27, B-5): a bytewise binary search over `sorted` (the same name-ascending index
+completion below already walks) resolves `argv[0]` by NAME - not `key = hash(argv[0])` into a
+`SortedMap`, which this section originally specified and nothing ever built; the binary search is
+strictly better (no hash, no collision class, no second index to keep in sync with `cmds`), so the
+CODE is right and this text is corrected to match it, not the other way around. `ConsoleCmd::key`
+still exists (`console.h`, computed from `name` at registration) but neither dispatch nor
+completion reads it. `argc` checked against `argc_min/max`; `SIM_AFFECTING` commands in a lockstep session → refused;
 otherwise `fn(w, argc−1, argv+1, reply)`; reply and `ERR_NAME(err)` go to the console log.
 Completion: the name-sorted `u16` index, `lower_bound` on the typed prefix (bytewise), walk
 while prefix matches (≤ 32 shown); for argument `i`, `arg_hints[i]` selects a source:
