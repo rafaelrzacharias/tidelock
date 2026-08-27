@@ -224,6 +224,8 @@ void console_register_cvar_set(ConsoleState* s) {
     c.flags = CONSOLE_SIM_AFFECTING;
     c.argc_min = 2;
     c.argc_max = 2;
+    c.arg_hints[0] = "cvar";   // TOOLING.md §9.3.5's own arg_hints source list names "cvar"; `set`
+                                // is its canonical consumer (closes the day Tab completion lands).
     console_register(s, &c);
 }
 

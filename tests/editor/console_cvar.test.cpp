@@ -21,7 +21,14 @@
 namespace {
 TL_CVAR(i32, cc_plain, 7, 0, "a non-sim cvar - the ordinary cvar_set_raw door");
 TL_CVAR(bool, cc_sim, false, CVAR_SIM, "a sim-fingerprinted cvar - the CMD_SET_CVAR door");
-TL_CVAR(u32, cc_ro, 42u, CVAR_READONLY, "a readonly cvar - must refuse both doors");
+TL_CVAR(u32, cc_ro, 42u, CVAR_READONLY, "a readonly cvar - the non-SIM door only");
+// NEW-1 (Review B, 2026-08-27): cvar_register permits CVAR_READONLY|CVAR_SIM (only
+// CVAR_F32|CVAR_SIM is TL_FATAL) - cmd_set's READONLY-before-SIM ordering exists specifically so
+// this combination never reaches world_set_cvar_cmd, since cvar_apply_sim_raw returns
+// ERR_CVAR_READONLY for it and commands.cpp's applier TL_CHECK-fatals a non-ERR_OK result at the
+// barrier. cc_ro (above) alone cannot exercise this - it is READONLY without SIM, so it is
+// already refused by cvar_set_raw's own READONLY check regardless of cmd_set's check order.
+TL_CVAR(u32, cc_ro_sim, 1u, CVAR_READONLY | CVAR_SIM, "READONLY *and* SIM - must never reach the barrier");
 
 // A dedicated CvarTable per fixture slot, never on the stack (world_test_util.h's own
 // WorldFixture precedent - World alone is ~256 KB and a Windows child gets a 1 MB stack).
@@ -41,6 +48,7 @@ SetFixture make_set_fixture(u32 slot) {
     cvar_register(&g_test_cvars[slot], &CVAR_cc_plain);
     cvar_register(&g_test_cvars[slot], &CVAR_cc_sim);
     cvar_register(&g_test_cvars[slot], &CVAR_cc_ro);
+    cvar_register(&g_test_cvars[slot], &CVAR_cc_ro_sim);
     f.w.cvars = &g_test_cvars[slot];
 
     SetFixture sf;
@@ -63,6 +71,8 @@ TL_TEST(console_set_registers_findable_command, "editor,console,cvar,fast") {
     TL_EXPECT_EQ(cmd->argc_min, (u8)2u);
     TL_EXPECT_EQ(cmd->argc_max, (u8)2u);
     TL_EXPECT_EQ(cmd->flags, (u8)CONSOLE_SIM_AFFECTING);
+    TL_ASSERT_NOT_NULL(cmd->arg_hints[0]);
+    TL_EXPECT_EQ(strcmp(cmd->arg_hints[0], "cvar"), 0);
 #else
     TL_CONSOLE_CVAR_SKIP;
 #endif
@@ -122,14 +132,41 @@ TL_TEST(console_set_refused_under_lockstep_even_for_a_non_sim_cvar, "editor,cons
 #endif
 }
 
-TL_TEST(console_set_readonly_cvar_refused_both_doors, "editor,console,cvar,fast") {
+TL_TEST(console_set_readonly_non_sim_cvar_refused, "editor,console,cvar,fast") {
 #if TL_DEV
+    // Named for the one door this actually walks: cc_ro is READONLY without SIM, so this exercises
+    // cvar_set_raw's own READONLY check (cvar.cpp) - NOT cmd_set's READONLY-before-SIM ordering,
+    // which console_set_readonly_sim_cvar_never_reaches_the_barrier below covers separately.
     SetFixture sf = make_set_fixture(0u);   // slot reuse across tests: safe, see dotpath.test.cpp's note
     char reply[64];
     const Result<u32> r = console_exec(&sf.cs, &sf.wf->w, /*lockstep=*/false, "set cc_ro 1",
                                         Span<char>{ reply, sizeof(reply) });
     TL_EXPECT_EQ(r.err, ERR_CVAR_READONLY);
     TL_EXPECT_EQ(cvar_get_u32(sf.wf->w.cvars, "cc_ro"_id), 42u);   // default, unchanged
+#else
+    TL_CONSOLE_CVAR_SKIP;
+#endif
+}
+
+// NEW-1 (Review B, 2026-08-27): the safety property cmd_set's own comment names - a READONLY+SIM
+// cvar must never reach world_set_cvar_cmd, because cvar_apply_sim_raw returns ERR_CVAR_READONLY
+// for it and commands.cpp's CMD_SET_CVAR applier TL_CHECK-fatals a non-ERR_OK result at the
+// barrier (a whole dev session dies). The assertion that matters is the world_flush AFTER the
+// refusal completing without fatal - not just the return code, which cc_ro's own non-SIM test
+// above already exercises through a different door.
+TL_TEST(console_set_readonly_sim_cvar_never_reaches_the_barrier, "editor,console,cvar,fast") {
+#if TL_DEV
+    SetFixture sf = make_set_fixture(1u);
+    char reply[64];
+    const Result<u32> r = console_exec(&sf.cs, &sf.wf->w, /*lockstep=*/false, "set cc_ro_sim 2",
+                                        Span<char>{ reply, sizeof(reply) });
+    TL_EXPECT_EQ(r.err, ERR_CVAR_READONLY);
+    TL_EXPECT_EQ(cvar_get_u32(sf.wf->w.cvars, "cc_ro_sim"_id), 1u);   // default, unchanged
+
+    // The real assertion: nothing was recorded, so this must complete rather than TL_FATAL at
+    // commands.cpp's CMD_SET_CVAR applier.
+    world_flush(&sf.wf->w);
+    TL_EXPECT_EQ(cvar_get_u32(sf.wf->w.cvars, "cc_ro_sim"_id), 1u);   // still unchanged after flush
 #else
     TL_CONSOLE_CVAR_SKIP;
 #endif
