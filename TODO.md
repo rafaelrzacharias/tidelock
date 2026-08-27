@@ -174,6 +174,47 @@
 > `src/script/sandbox.cpp`; `luau-bindings` is the likely one. **PR #14 does not act on
 > `gcinfo` in its fix round** — it files the RR and proceeds.
 
+> **W3 assets+data MERGED 2026-08-27 — `26c9c5f` (PR #14), closeout sweep done (R-7 + R-12).**
+> Three adversarial review rounds. Round 1 measured RR-21's determinism condition NOT holding
+> (staging-table insertion order reaching compiled bytes and the hash) and found the pin that
+> should have caught it did not discriminate; round 2 found two blockers in code round 1's own
+> fix set had touched — a `pend_count` bound deleted in passing by the D5/D7 hunk, and an audit
+> note stating as "Conclusion, not a guess" that `script_table_next` could not raise, when it
+> can; round 3 verified both fixes under its own reverts, rebuilt round 2's actual forged save
+> file rather than trusting the lane's weaker fixture, and re-established RR-21 independently
+> (six key insertion orders through the real `data_compile`, one hash).
+>
+> **`WORKFLOW.md` §2 POST-REVIEW-EDIT VALVE USED — recorded here as §2 requires, never assumed.**
+> Round 3 returned *fix first* on a single defect: §8.5's `asset_load_font` deferral named
+> **render2d** as owner — a lane merged and closed, never holding font/text work in `ROADMAP.md`
+> §2's Builds column, which shipped `render/text.cpp` as a reserved stub by its own done
+> criterion, and which §8.1 of the same doc contradicts by keeping `core/loaders/font.cpp` in
+> this lane. The fix is a one-sentence doc edit implementing an already-recorded ruling (ruling
+> 2's operative words, "each deferred clause naming its owning lane"), which is precisely what
+> the valve exists for. The steward verified the diff itself — `docs/` plus one test comment,
+> **no code change** — with CI 23/23 green on a real `pull_request` event run and
+> `mergeable_state: clean`, and merged without a round 4, on the round-3 reviewer's own
+> recommendation. **The deferred review of commits `1a14424`/`3b428e3` goes to the
+> wave-boundary sweep (§3).**
+>
+> **Filings triaged (R-7).** (i) The `SIM_REMOVE`/`DATA_REMOVE` audit slice stays **QUEUED and
+> HELD** — it was ruled to hold until #14 *and* #15 merge, and #15 has not; owner remains the
+> next lane to touch `src/script/sandbox.cpp`. (ii) **`asset_load_font` and the two-process
+> compile check have no owning lane in `ROADMAP.md`** and now say so rather than naming a closed
+> one. That is correct as a record but it is not a plan: both need a home when a lane is scoped
+> for text/fonts, and `tl_core` links `stb` rather than the vendored `sdl_ttf`, so the font half
+> needs a build change nobody currently owns. **Held for the wave-boundary sweep as a scoping
+> item.** (iii) Nothing else the lane filed is unrouted.
+>
+> **R-12 pass:** `ASSETS-AND-DATA.md`'s status line moved from design-only to v0-implemented-and
+> -merged and carries its reconciliation date; `README.md` and `CLAUDE.md` status prose moved
+> off "assets+data in review".
+>
+> **RR numbering:** `RR-29`, `RR-30`, `RR-31` are allocated to `w3-loop-input` (steward-allocated
+> 2026-08-27, replacing its RR-24/25/26 after the `main` merge collided them with render2d's
+> merged numbers). `LESSONS.md`'s rule now binds in practice: **the steward allocates RR ids**,
+> lanes do not self-allocate from the shared counter. Next free id is RR-32.
+
 > **W3 render2d MERGED 2026-08-27 — `31da431` (PR #13), closeout sweep done (R-7 + R-12).**
 > Five adversarial review rounds to *ship*. Two rulings landed in it: **D1** (camera off the
 > ECS onto `RenderQueue` — as registered components its f32 bytes reached `registry_hash_all`,

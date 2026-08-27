@@ -1,6 +1,6 @@
 # Assets, game data tables, saves (tidelock, rev 1)
 
-> **Status:** design rev 1, 2026-08-22. **DECIDED** except §7. Carries D14 / C3-runtime; the data
+> **Status:** design rev 1, 2026-08-22; **v0 IMPLEMENTED AND MERGED 2026-08-27** (`w3-assets-data`, PR #14 — three adversarial review rounds; §8.5's criterion split by ruling into this lane's part, which is met, and clauses owned elsewhere or flagged as unowned, listed at §8.5). Last reconciled against the tree 2026-08-27. **DECIDED** except §7. Carries D14 / C3-runtime; the data
 > path is new (Luau-authored tables → compiled POD); saves are the reflection encoder (PIVOT §6).
 > **Owns:** `src/core/assets.h`, `data_tables.h`, `save.h`; `tools/cook` later.
 > **Build (2026-08-26, w3-assets-data):** §8.2/§8.3/§8.4's pseudocode-level structs got real
