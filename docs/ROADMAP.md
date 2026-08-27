@@ -139,8 +139,60 @@ With N concurrent sessions, run the ★ lane plus the N−1 lanes with the most 
 through W3. A lane that finishes early picks the next unstarted lane in the same wave whose inputs
 are merged; it never starts a lane from the next wave.
 
+## 5. Retro — what actually ran, and what blocked
+
+*Owed since 2026-08-22 by this doc's own footer and by `WORKFLOW.md` §3 artifact 3; none had
+been written after three waves shipped. Filed 2026-08-27 under `WORKFLOW.md` §5 R-18 (the
+artifacts do not wait for a label). Derived from `git log` and the `TODO.md` closeout records,
+not from recollection. W3's line is INTERIM — that wave is open.*
+
+**W0 — skeleton (2026-08-22→23).** One lane, serial by nature. Blocked nothing. The wave's
+lasting output was not code but the audit gates, and their lesson was that a gate is worth what
+its negative test is worth — the first adversarial pass let five planted violations through.
+
+**W1 — eight lanes, landed 2026-08-23→24.** ★ fx, mem, containers, rng/hash, platform,
+runner+driver, tooling-rt, jobs. All eight landed before `WORKFLOW.md` existed (rev 1 is
+2026-08-25), so none shipped through a PR and not all produced a lane merge commit — the ★ fx
+work landed as direct commits. **What actually blocked: nothing external; the cost was review
+depth.** Every lane that recorded a verdict recorded *fix-first* before *ship*.
+**The parallelism was less real than the graph suggests** — `w1-rng-hash` was merged *into*
+`w1-mem` and `main` was merged into `w1-containers` and `w1-platform` mid-flight, so lanes
+integrated with each other during the wave rather than at its boundary. §0 rule 3 ("wave
+boundaries are the only integration points") described a workflow nobody ran, in W1 and in
+every wave since.
+
+**W2 — five of six lanes shipped; the sixth has never launched (2026-08-25→26).**
+★ gate0 shipped and was ruled (`FX-PALETTE.md` rev 2). ecs, net-p1, luau-vm and vendor shipped,
+each through its own PR once the rule existed (#6, #9, #11, #12). **`alloy-substrate` never
+launched, and that is this program's largest scheduling fact so far**: it is W2's non-★
+keystone, it now blocks five of the seven remaining W3 lanes including W3's ★, and it has slipped
+an entire wave. It was deferred against the weekly Fable budget under R-8 — correctly, by that
+rule's own reasoning — but nothing in the plan makes a deferred keystone visible as *the* thing
+the next wave is waiting on. **Two W3 lanes shipped inside W2** (ci-matrix, governance), so the
+wave partition was already porous before the 2026-08-26 ruling made porosity explicit.
+
+**W3 — INTERIM, wave open (2026-08-26→27).** Shipped: render2d (#13), assets+data (#14),
+loop+input (#15), editor (#16) — the three slack lanes launched early under the 2026-08-26
+ruling because the Sonnet/Opus budget was free while Fable's was not, plus editor chained after
+render2d. Not started: ★ alloy-solver, luau-bindings, net-p2 and the three alloy pass lanes —
+five of the six behind `alloy-substrate`. **What blocked, measured: steward attention, not lane
+capacity.** §4's rule of thumb projects 4–8 saturated sessions through W3; the observed peak was
+three concurrent lanes, and `LESSONS.md` records a green, review-ready lane sitting idle for
+hours because no reviewer had been spawned. **The dominant cost was review rounds, and the
+rounds were not ceremonial**: on more than one lane a round-2 or round-3 blocker was a defect
+introduced by the previous round's own fix set, which is the argument for the depth rather than
+against it.
+
+**What the next cut should change, on this evidence.** (1) §0 rule 3 should describe continuous
+integration into lane branches, which is what every wave has actually done, or be dropped. (2) A
+deferred keystone needs to be visible in §1's graph as a blocker with a count of what waits on
+it, not just absent. (3) §4's throughput rule should be re-derived against steward attention,
+since that — not session count — has been the binding constraint in every wave that ran more
+than one lane.
+
 *Rev 1 — 2026-08-22. Revise at each wave boundary: record what actually ran in parallel and what
-blocked, one line per lane, so the next wave's cut is measured, not guessed.*
+blocked, one line per lane, so the next wave's cut is measured, not guessed. §5 opened 2026-08-27
+with the W0/W1/W2 retros this footer had been owed since it was written, plus an interim W3 line.*
 *§1 amended 2026-08-27 (ruled, Rafael): the W3 `save (ecs encoder)` node is deleted from the
 graph. It had no §2 row, and §2's **assets+data** row already owns "save v1" — which that lane
 built (`src/core/save.*`, the REFLECTED + `ECS_COLUMN` encoder, PR #14). The node was stale, not
