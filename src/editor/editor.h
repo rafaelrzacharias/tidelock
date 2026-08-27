@@ -151,5 +151,13 @@ void editor_toggle_panel(Editor* ed, const char* name);
 // header's Status note; TL_FATAL("unimplemented") until `PlatformDevApi` lands.
 void editor_frame(Editor* ed, World* w);
 
-// Destroys the ImGui context (if `editor_frame` ever created one) and releases the dev arena.
+// Marks `ed` dead (`initialized = 0`). Does NOT destroy an ImGui context - none exists yet,
+// since `editor_frame` (the only thing that would create one) is still `TL_FATAL("unimplemented")`
+// - and does NOT release the dev arena's reservation: `vmem_arena.h` has no teardown door at all
+// (init/push/reset_to/decommit_above only), so the arena's `VMemApi`-backed reservation is
+// released by whatever owns that `VMemApi`'s lifetime (`app/wiring.cpp`, W4, not built), not by
+// this call. Corrected 2026-08-27 (B-4) - the previous wording claimed both, which this function
+// has never done; likely the right v0 answer (nothing here needs tearing down before the process
+// exits), but the header should say what the function does, not what it might do once `app/`
+// exists.
 void editor_shutdown(Editor* ed);
