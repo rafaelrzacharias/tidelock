@@ -132,8 +132,9 @@ u32 tl_prof_test_ring_count(void);
 // The ring frame `slots_back` frames before the most recently completed one (0 = the latest).
 // Fatal if slots_back >= tl_prof_test_ring_count().
 const ProfFrame* tl_prof_test_ring_at(u32 slots_back);
-// The registered counter count, and the counter at `slot` (registration order).
+// The registered counter count (registration order).
 u32 tl_prof_test_counter_count(void);
+// The counter at `slot` (registration order). Fatal if slot >= tl_prof_test_counter_count().
 const ProfCounter* tl_prof_test_counter_at(u32 slot);
 // Clears every worker, the ring, and every counter to their zero-initialised state.
 void tl_prof_test_reset(void);

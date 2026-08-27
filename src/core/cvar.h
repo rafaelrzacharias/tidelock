@@ -65,6 +65,7 @@ constexpr ErrCode ERR_CVAR_SIM_UNROUTED  = (ErrCode)0x0364;  // CVAR_SIM flag se
 constexpr ErrCode ERR_CVAR_KIND_MISMATCH = (ErrCode)0x0365;  // typed accessor kind != the registered CvarDesc::kind
 constexpr ErrCode ERR_CVAR_PARSE         = (ErrCode)0x0366;  // console `set` value did not parse for the cvar's kind
 
+// The literal name of one of this header's ErrCodes (or "ERR_OK"/"ERR_?"), for logging. Pure.
 inline const char* cvar_err_name(ErrCode e) {
     return e == ERR_OK ? "ERR_OK"
          : e == ERR_CVAR_NOT_FOUND ? "ERR_CVAR_NOT_FOUND"
@@ -147,12 +148,18 @@ template <> constexpr u32 cvar_bits_of<bool>(bool v)  { return v ? 1u : 0u; }
 // The raw current bits of `key`. TL_CHECK: registered (callers that must not fatal use
 // cvar_find first). Pure.
 u32 cvar_get_raw(const CvarTable* t, NameHash key);
-i32  cvar_get_i32(const CvarTable* t, NameHash key);   // TL_CHECK: kind == CVAR_I32
-u32  cvar_get_u32(const CvarTable* t, NameHash key);   // TL_CHECK: kind == CVAR_U32
-f32  cvar_get_f32(const CvarTable* t, NameHash key);   // TL_CHECK: kind == CVAR_F32
-bool cvar_get_bool(const CvarTable* t, NameHash key);  // TL_CHECK: kind == CVAR_BOOL
-// `out_frac` receives the row's FRAC bit count (CvarDesc::frac_bits); TL_CHECK: kind == CVAR_FX_RAW.
-i32  cvar_get_fx_raw(const CvarTable* t, NameHash key, u8* out_frac);
+// `key`'s current value. TL_CHECK: registered AND its CvarDesc::kind == CVAR_I32 (a mismatched
+// kind is a programmer bug, not a runtime error - fatal, matching the other typed getters below).
+i32 cvar_get_i32(const CvarTable* t, NameHash key);
+// Same contract as cvar_get_i32, for CVAR_U32.
+u32 cvar_get_u32(const CvarTable* t, NameHash key);
+// Same contract as cvar_get_i32, for CVAR_F32.
+f32 cvar_get_f32(const CvarTable* t, NameHash key);
+// Same contract as cvar_get_i32, for CVAR_BOOL (bits != 0).
+bool cvar_get_bool(const CvarTable* t, NameHash key);
+// `key`'s current raw i32 value plus its registered FRAC bit count (CvarDesc::frac_bits) into
+// `out_frac`. TL_CHECK: registered AND kind == CVAR_FX_RAW.
+i32 cvar_get_fx_raw(const CvarTable* t, NameHash key, u8* out_frac);
 
 // Sets `key`'s current bits directly, unconditionally (skips the READONLY/SIM checks below).
 // Callers: cvar_set_raw (below, after its checks pass) and cvar_apply_sim_raw (this header's
@@ -164,9 +171,14 @@ ErrCode cvar_set_bits_unchecked(CvarTable* t, NameHash key, u32 bits);
 // ERR_CVAR_READONLY (CVAR_READONLY flag set), or ERR_CVAR_SIM_UNROUTED (CVAR_SIM flag set - see
 // this header's Determinism note); otherwise cvar_set_bits_unchecked.
 ErrCode cvar_set_raw(CvarTable* t, NameHash key, u32 bits);
+// Typed wrapper over cvar_set_raw (same ErrCode set: ERR_CVAR_NOT_FOUND, ERR_CVAR_READONLY,
+// ERR_CVAR_SIM_UNROUTED). TL_CHECK: registered AND kind == CVAR_I32.
 ErrCode cvar_set_i32(CvarTable* t, NameHash key, i32 v);
+// Same contract as cvar_set_i32, for CVAR_U32.
 ErrCode cvar_set_u32(CvarTable* t, NameHash key, u32 v);
+// Same contract as cvar_set_i32, for CVAR_F32.
 ErrCode cvar_set_f32(CvarTable* t, NameHash key, f32 v);
+// Same contract as cvar_set_i32, for CVAR_BOOL.
 ErrCode cvar_set_bool(CvarTable* t, NameHash key, bool v);
 
 // The CMD_SET_CVAR applier's seam (docs/TOOLING.md §3): bypasses the SIM refusal (the sealed

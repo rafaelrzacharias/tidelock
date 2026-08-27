@@ -4674,11 +4674,30 @@ never a real backend), `core/desync_diff.cpp` (build order item 6), `editor/keyf
 the Replay panel (build order item 7). None of these are half-implemented — nothing was started
 that wasn't finished and tested.
 
-### Ruling requests (ids are steward-allocated per `WORKFLOW.md`/the lane brief — **not
-self-numbered here**; the brief named RR-33 as next-free at lane start, but three sibling W3
-lanes have filed since, so the real next-free id must be confirmed, not assumed)
+### Correction (2026-08-27, steward, PR #16 comment): `91b2df9`'s commit message (now `381cc71`
+after the R-4 pre-review amend below) said *"ruling request filed in TODO.md"* — **that was
+false when written: no ruling request existed anywhere in this file at that commit.** The
+substance the message described (the `CVAR_SIM`/`CMD_SET_CVAR` gap) was real and correctly
+diagnosed; the claim that it was already *filed* was not. Recorded here plainly, per the
+steward's instruction, rather than left to stand silently: a permanent-record claim the tree
+did not support is exactly the class this program enforces hardest, whatever the underlying
+substance turns out to be.
 
-- **RR-pending (a): `CMD_SET_CVAR` does not exist in `core/commands.h`.** `TOOLING.md` §3 requires
+### Header-first deviation (2026-08-27, steward-acknowledged): `ROADMAP.md` §0 rule 1 wants a
+lane's first commit to be its header (contract block, signatures, `TL_FATAL("unimplemented")`
+stubs) so dependents compile against it from day one. `381cc71` (`core/cvar.h`/`.cpp`) shipped
+as a complete, tested implementation instead. Acknowledged rather than rewritten: no concurrent
+lane depends on `core/cvar.h` (`XREF.md` cites nothing into `TOOLING.md`'s internals yet), so
+the rule's harm — a dependent lane blocked compiling against a header that doesn't exist yet —
+did not occur, and a pre-review rewrite would cost more than it buys at this point. **Header-
+first is followed from here on** for the remaining modules this lane builds (console, dotpath/
+watch, the ImGui shell and its panels, desync_diff, replay) — the same argument will not hold
+once `v0-integration` (W4) or a sibling lane starts depending on them.
+
+### Ruling requests (ids are steward-allocated per `WORKFLOW.md`/the lane brief)
+
+- **RR-33 (steward-allocated 2026-08-27, PR #16): `CMD_SET_CVAR` does not exist in
+  `core/commands.h`, so no `CVAR_SIM` cvar can be written end to end.** `TOOLING.md` §3 requires
   a `CVAR_SIM`-flagged cvar's write to be a sealed, tick-stamped command so a lockstep session can
   refuse it (`CANON.md` "Cvars": SIM cvars fold into `session_fingerprint`). `core/commands.h`'s
   `CmdKind` enum and `core/commands.cpp`'s `apply_commands` are `ecs`-lane files (merged, closed —
@@ -4688,8 +4707,12 @@ lanes have filed since, so the real next-free id must be confirmed, not assumed)
   the meantime — correct, not a workaround, but no cvar can actually BE a live `SIM` cvar end to
   end until `CMD_SET_CVAR` lands. Needs: a `CmdKind` row, a `CvarTable*` reachable from whatever
   applies commands (which in turn needs the `World` question below), and a `core/commands.cpp`
-  applier case. Whoever owns `ecs`'s follow-ups (or a ruling that `editor` may make this one
-  narrow, additive enum-row edit) should pick this up.
+  applier case. **What needs ruling: who adds `CMD_SET_CVAR` and when** — `core/commands.h`/
+  `.cpp` are the merged-and-closed `ecs` lane's files, so either (i) `editor` is ruled a narrow,
+  additive exception to cone discipline for this one enum row + applier case, since no other
+  `ecs` behavior changes, or (ii) it waits for a dedicated follow-up lane/session against
+  `commands.h`, and `editor`'s `CVAR_SIM` support stays refuse-only (as it does today) until
+  then.
 - **RR-pending (b): should `CvarTable` live inside `World`?** `TOOLING.md` §9.1 says "`CvarTable`
   in `World` (non-registered arena)" but `core/world.h` (ecs, merged/closed) has no `cvars` field,
   and adding one is the same cone-discipline question as (a) above (`world.h` already carries
@@ -4697,7 +4720,7 @@ lanes have filed since, so the real next-free id must be confirmed, not assumed)
   `RenderQueue* render` — added by each of those lanes; `CvarTable* cvars` would be the same
   one-line shape). `core/cvar.h` deliberately does NOT assume this and is fully usable
   caller-owned (every test in `tests/core/cvar.test.cpp` constructs its own `CvarTable`) — but
-  `core/console.h`'s future `set <cvar>`/completion and RR-pending (a)'s applier both need SOME
+  `core/console.h`'s future `set <cvar>`/completion and RR-33's applier both need SOME
   way to reach the live table from wherever they run, and "who owns the one real `CvarTable`
   instance" is a design question this lane should not decide unilaterally by editing `world.h`.
 - **RR-pending (c): `core/crash_report.cpp` is blocked on `platform/`'s crash OS-half, which is
