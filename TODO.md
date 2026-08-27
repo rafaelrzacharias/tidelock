@@ -6310,3 +6310,94 @@ B-2's probe is the same fixture with three `WPos` rows, one `SaveArenaDesc` of
 `kind = SAVE_ENC_REFLECTED, info = &WPos_info, max_rows = 3u`, the column zeroed between write and
 read, and `TL_EXPECT_TRUE(r_err != ERR_OK || (col.data[2].x == 31 && col.data[2].y == 32))` —
 which fails with both calls returning `ERR_OK`.
+
+---
+
+### B-1(b) (VERIFIED, folded into B-1) `save_read` leaves the hashed `world.singletons` arena untouched, and no doc says a caller must fix it
+
+`src/core/save.cpp:304-305` writes the decoded seed and tick into `*out_seed`/`*out_tick` and
+nothing else. `src/core/world.cpp:63` registers `world.singletons` — the arena holding
+`WorldTickState{tick, seed}` — as `ARENA_HASHED | ARENA_SNAPSHOT`. So a world restored from a save
+carries the OLD tick in a HASHED arena until some caller writes the out-params back, and no such
+caller exists in the tree. There is also no `ComponentInfo` for `WorldTickState` anywhere
+(`grep -rn "WorldTickState" src tests`), so `world.singletons` cannot even be listed as a
+`SAVE_ENC_REFLECTED` entry in `SaveDesc::arena_descs` — the save path has no route to it at all.
+
+`save.h`'s out-param contract is defensible on its own. What is missing is the sentence that makes
+it safe: **restoring a save means writing `out_tick`/`out_seed` into `w->state` before the next
+tick, or the singleton arena hashes stale bytes.** Nothing in `save.h`, `ASSETS-AND-DATA.md` §5/
+§8.4, or `FRAME-LOOP.md` §8.2 step 10 (which names `registry_restore` from a checkpoint, not
+`save_read`) says it. The failure mode is a silent hash divergence, not an error.
+
+**Measured** (probe 4, same harness as B-1): a world at tick 456 saved, its tick reset to 0 to
+stand in for a fresh process, then loaded:
+
+```
+SEAM4: out_tick=456  w->state->tick after save_read = 0
+SEAM4: singletons arena[0] id=d66f0857601be00d  at_save=984d072c8d0d8809  after_load=8357cd4d56e50ab6
+SEAM4: world hash at_save=a921aeb840d2fddf after_load=64b0eefec294a714
+```
+
+---
+
+### B-3 (VERIFIED, medium) `src/core/CMakeLists.txt`'s two idioms disagree, and the explicit half silently drops a new file
+
+The one file both lanes edited carries a `file(GLOB ... CONFIGURE_DEPENDS producers/*.cpp)` for
+`loop+input`'s subdirectory and a hand-written two-entry `target_sources` list for `assets+data`'s
+(`src/core/CMakeLists.txt:10-11` vs `:19-22`). `TODO.md` RR-32 already records that the two idioms
+coexist; what it does not record is that they are not equivalent.
+
+**Measured.** I dropped a one-line `.cpp` into each subdirectory, each referencing an undefined
+symbol so that being compiled would be unmissable, and built `tl_core`:
+
+```
+[1/2] Building CXX object src/core/CMakeFiles/tl_core.dir/producers/zz_probe.cpp.o
+[2/2] Linking CXX static library lib/libtl_core.a
+$ grep -o "core/[a-z]*/zz_probe.cpp" out/dev-linux/compile_commands.json | sort -u
+core/producers/zz_probe.cpp
+```
+
+`producers/zz_probe.cpp` was picked up and compiled. `loaders/zz_probe.cpp` was not compiled, not
+mentioned, and did not appear in `compile_commands.json` — a clean, green build of a file that is
+not in the build. Both probe files were removed afterwards; `git status` is clean.
+
+**Honest severity.** I am ranking this medium, not ship-blocking, and I want the reason on the
+record because it is the half a reviewer usually skips: for anything a caller actually
+*references*, the miss is LOUD at link, and `CPP-SUBSET.md` §1's ban on mutable statics and
+dynamic initialisers closes the silent-self-registration path that would make it deadly. The
+genuinely silent case is a new loader that nothing yet calls — which is precisely the shape
+`ASSETS-AND-DATA.md` §8.5 already schedules (`asset_load_font`'s real body, currently a `TL_FATAL`
+stub, and whatever audio/atlas loader follows). The tree today is CORRECT: all five files under the
+two subdirectories are in `compile_commands.json` (`loaders/{font,image}.cpp`,
+`producers/{live,replay,script}.cpp`).
+
+**Fix direction (not applied).** One idiom, and give it the zero-check `LESSONS.md` demands four
+occurrences over: glob both subdirectories with `CONFIGURE_DEPENDS` and `if(NOT TL_CORE_LOADERS)
+message(FATAL_ERROR ...)` beside each, so a selection that matches nothing is an error rather than
+a clean run.
+
+---
+
+### B-4 (medium, doc) `save.test.cpp`'s "column order is not part of the contract" is false in the merged tree
+
+`tests/core/save/save.test.cpp:185-186` accepts either dense order after a load:
+
+```cpp
+TL_EXPECT_TRUE((p1->x == 1 && p1->y == 2 && p2->x == 3 && p2->y == 4) ||
+               (p1->x == 3 && p1->y == 4 && p2->x == 1 && p2->y == 2));   // column order is not part of the contract
+```
+
+That comment was true when `assets+data` was reviewed against `main`. It is false now: the column's
+dense arena is `ARENA_HASHED` (`src/core/world.cpp:108-110`) and `loop+input`'s
+`recorder_tick` folds exactly those arenas into the per-tick `world_hash` that the replay-trace
+determinism test compares. Dense order IS byte order IS the hash.
+
+I checked whether the CODE is actually order-nondeterministic and it is not: `save.cpp:296-300`
+re-adds in stored order, stored order is `encoder_write_column`'s dense walk, and command
+application is chunk-ordered. So this is not a live bug — it is a **contract that permits the bug**.
+A future refactor of the apply loop (batching by chunk, parallel re-add, sorting by entity id) would
+be legal by the comment and would silently desync. The comment should be replaced by the assertion
+it disclaims: restored dense order equals the saved dense order, exactly.
+
+Marking this as REASONED, not verified: I did not mutate the apply loop's ordering to watch a hash
+diverge. What would falsify it: an apply loop that provably cannot reorder under any future change.
