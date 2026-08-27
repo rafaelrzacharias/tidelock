@@ -13,12 +13,19 @@
 //   the node tree draws as a depth-indented TEXT list, not a rendered flame graph (no rectangle/
 //   timeline widget exists in this tree yet, and inventing one is a real feature on its own, not
 //   a byproduct of the first panel that reads `ProfState`). "Pause" freezes the PANEL'S OWN view
-//   (`Editor::prof_paused`/`prof_view_slot`), never `ProfState.head` itself - `prof.cpp` has no
-//   pause concept and this file does not add one there: freezing the shared ring would stop every
-//   OTHER reader (a future trace export, a second Editor) from seeing live frames too, for one
-//   panel's convenience. `dump` (`TOOLING.md` §9.3.2, `trace_export.cpp`) is not wired here -
-//   `trace_export.cpp` itself is still blocked on `fmt_buf`'s disk-flush half (`PlatformApi.
-//   file.append`, `TOOLING.md` §9.6 build order item 3) - there is nothing to call yet.
+//   of a specific ABSOLUTE frame (`Editor::prof_paused`/`prof_view_frame`), never `ProfState.head`
+//   itself - `prof.cpp` has no pause concept and this file does not add one there: freezing the
+//   shared ring would stop every OTHER reader (a future trace export, a second Editor) from seeing
+//   live frames too, for one panel's convenience. Corrected 2026-08-27 (B-1): `prof_view_slot` is
+//   `tl_prof_ring_at`'s `slots_back` - relative to the newest completed frame - so "freezing" that
+//   index does NOT freeze the view: the ring keeps advancing underneath a paused panel and the
+//   frame under a fixed `slots_back` changes on every `tl_prof_frame_end`. The panel pins the
+//   ABSOLUTE frame number on the pause edge and re-derives its current `slots_back` every draw
+//   (falling back to the oldest live frame, with an on-screen note, once the pinned frame ages out
+//   of the ring) - `editor.h`'s `Editor::prof_view_frame` carries the authoritative state.
+//   `dump` (`TOOLING.md` §9.3.2, `trace_export.cpp`) is not wired here - `trace_export.cpp` itself
+//   is still blocked on `fmt_buf`'s disk-flush half (`PlatformApi.file.append`, `TOOLING.md` §9.6
+//   build order item 3) - there is nothing to call yet.
 // Determinism: dev UI only (`TOOLING.md` §0). Never touches sim state; `ProfState` itself is
 //   never hashed or snapshotted (`tl_prof.h`'s own Determinism note).
 // Threading: none - single-threaded dev UI, matching every other panel this lane has built.

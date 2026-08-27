@@ -87,12 +87,31 @@ struct Editor {
     char    console_input[CONSOLE_LINE_CAP];       // the live input line, edited in place by ImGui
     char    console_last_reply[256];               // the most recent ConsoleFn's reply text
     ErrCode console_last_err;                       // ERR_OK or the most recent dispatch/exec failure
-    u32   prof_view_slot;   // the Profiler panel's own view index (docs/TOOLING.md §9.3.1's ring,
-                             // `tl_prof_ring_at`'s `slots_back`) - meaningful only when paused;
-                             // freezing the VIEW, never the ring itself (nothing stops `prof.cpp`
-                             // from advancing underneath a paused panel - every other reader, a
-                             // future trace export included, keeps seeing live frames)
-    u8    prof_paused;      // Profiler panel: true = hold on prof_view_slot; false = always slot 0
+    u64   prof_view_frame;  // Profiler panel (B-1 fix, 2026-08-27): the ABSOLUTE ProfFrame::frame
+                             // pinned while paused (from `tl_prof_ring_at(0)->frame` the moment
+                             // `prof_view_frame_valid` goes false->true). Meaningful only when
+                             // `prof_view_frame_valid` is set. `prof_view_slot` below is
+                             // `slots_back` - relative to the newest completed frame - so it is NOT
+                             // stable under an advancing ring; recording a `slots_back` offset on
+                             // pause and reusing it every draw is exactly the bug this field
+                             // replaces (a paused panel silently showed a different frame each
+                             // render, TOOLING.md §9.4). Each draw re-derives the current
+                             // `slots_back` for `prof_view_frame` by scanning the ring
+                             // (profiler_panel.cpp); once the frame ages out of the ring (evicted
+                             // past PROF_RING_FRAMES back), the panel falls back to the oldest
+                             // still-live frame and says so.
+    u32   prof_view_slot;   // the Profiler panel's CURRENT `tl_prof_ring_at` `slots_back` for
+                             // `prof_view_frame` - recomputed every draw while paused, never itself
+                             // the source of truth; always 0 (the latest frame) while unpaused.
+    u8    prof_paused;      // Profiler panel: true = hold on prof_view_frame; false = always slot 0
+    u8    prof_view_frame_valid;  // `prof_view_frame` holds a real pinned frame. False on the first
+                                    // draw after pausing (or right after init) - the panel pins
+                                    // fresh on that draw. Set false again on unpause so the NEXT
+                                    // pause re-pins to the then-current newest frame rather than a
+                                    // stale one (a checkbox toggle's true->false->true is the only
+                                    // real-usage path here, which headless tests cannot simulate -
+                                    // this flag is what makes the pin observable/drivable directly,
+                                    // matching `world_arena_hash_valid`'s identical shape below).
     u64*  world_arena_hash_cur;       // World panel: MAX_ARENAS u64s, dev_arena-backed, lazily
                                         // allocated on first "rehash arenas" click (never a
                                         // per-frame cost - registry_hash_all rehashes every

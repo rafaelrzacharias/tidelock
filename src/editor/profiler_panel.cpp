@@ -43,12 +43,41 @@ void profiler_panel_draw(Editor* ed, World* /*w*/) {
 
     u32 slot = 0u;
     if (paused) {
-        int s = (ed->prof_view_slot < ring_count) ? (int)ed->prof_view_slot : 0;
+        if (!ed->prof_view_frame_valid) {
+            // Freshly paused (or never pinned since the last unpause): pin the absolute frame
+            // under view, not a `slots_back` offset - the ring keeps advancing underneath a paused
+            // panel (nothing stops `prof.cpp`), so a stored `slots_back` names a DIFFERENT frame on
+            // every later draw (the B-1 bug this replaces).
+            ed->prof_view_frame = tl_prof_ring_at(0)->frame;
+            ed->prof_view_frame_valid = 1u;
+        }
+        // Re-derive this frame's CURRENT slots_back every draw - it moves as the ring advances.
+        bool found = false;
+        for (u32 i = 0; i < ring_count; ++i) {
+            if (tl_prof_ring_at(i)->frame == ed->prof_view_frame) { slot = i; found = true; break; }
+        }
+        if (!found) {
+            // The pinned frame aged out past PROF_RING_FRAMES - fall back to the oldest still-live
+            // frame and say so, rather than silently jumping to an unrelated frame.
+            slot = ring_count - 1u;
+            ed->prof_view_frame = tl_prof_ring_at(slot)->frame;
+            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f),
+                               "pinned frame aged out of the ring - showing the oldest live frame");
+        }
+        ed->prof_view_slot = slot;
+
+        int s = (int)slot;
         ImGui::SliderInt("frame", &s, 0, (int)ring_count - 1);
-        ed->prof_view_slot = (u32)s;
-        slot = ed->prof_view_slot;
+        if ((u32)s != slot) {
+            // The user picked a different frame - re-pin to ITS absolute frame number so it, too,
+            // stays put under an advancing ring rather than drifting back to a `slots_back` offset.
+            slot = (u32)s;
+            ed->prof_view_slot = slot;
+            ed->prof_view_frame = tl_prof_ring_at(slot)->frame;
+        }
     } else {
-        ed->prof_view_slot = 0u;   // always follows the latest frame while unpaused
+        ed->prof_view_slot = 0u;         // always follows the latest frame while unpaused
+        ed->prof_view_frame_valid = 0u;  // re-pin fresh on the next pause
     }
 
     const ProfFrame* f = tl_prof_ring_at(slot);
