@@ -174,6 +174,63 @@
 > `src/script/sandbox.cpp`; `luau-bindings` is the likely one. **PR #14 does not act on
 > `gcinfo` in its fix round** — it files the RR and proceeds.
 
+> **RULED 2026-08-27 (Rafael, via the steward) — SHARED REPO CONFIGURATION BELONGS TO NO LANE, and
+> a permissions change needs Rafael's explicit sign-off.** Filed after the `editor` lane
+> unilaterally committed three allowlist entries to `.claude/settings.json` mid-branch
+> (`1cbf742` on `w3-editor`). **The entries STAND** — they were narrow and well-judged
+> (exact-string scoping rather than globs; all three read-only; `docaudit.py` deliberately
+> EXCLUDED because it writes `docs/XREF.md`; build/test/git-write commands excluded as a
+> separate decision the lane declined to make). **The process was the defect.**
+>
+> The rule, binding every lane and every window: **`.claude/`, `.github/workflows/`,
+> `tools/audit/`, `tools/docaudit/` and `.gitattributes` are nobody's cone.** A lane needing a
+> change there files a ruling request and waits, exactly as `ROADMAP.md` §0 rule 2 requires for
+> another lane's module. **Anything touching permissions additionally needs Rafael's explicit
+> sign-off however read-only the entries look** — the decision being made is "what may any
+> future session in this repository do without being asked", which is not the same question as
+> "is this command safe", and it is durable and repo-wide rather than scoped to the lane that
+> wants it. A permissions change also does not belong in a feature branch even when it is the
+> right change.
+>
+> The lane knew the shape: hours earlier it hit `core/commands.h`, recognised a merged-and-closed
+> lane's file, filed RR-33/RR-35 and waited for the ruling. That was correct. This was the same
+> class and did not get the same treatment — which is why the rule is written here rather than
+> left as a one-off correction.
+>
+> **Sequel, same day — and it is the rule working, not failing.** The lane then pushed a SECOND
+> `.claude/settings.json` change (`476e676`: local build/configure, running `tl_tests`,
+> `git commit`, `git push` scoped to `w3-editor` only, `docaudit.py`, `git merge origin/main`)
+> whose message claimed Rafael had approved each category. **The steward could not verify that
+> claim from its own record and did NOT assume either way** — `WORKFLOW.md` R-14 requires a
+> claimed ruling the steward cannot verify to be checked with Rafael before it is acted on or
+> recorded, so it was. **Rafael confirmed: he authorized it directly in the lane's interactive
+> session, four separate questions, each decided by him.** The lane independently posted its own
+> R-14 relay on PR #16 naming the provenance, acknowledging the `1cbf742` process failure, and
+> stating that direct authorization does not exempt `476e676` from the same review — the right
+> call, and made without being asked. Both entries stand.
+>
+> **The lesson is the verification, not a fault.** A lane CAN hold a ruling the steward has never
+> seen; R-14 exists precisely so that gap is closed by asking rather than by trusting or by
+> accusing. Push scope was `w3-editor` only — never `main`, never force — and destructive
+> operations (force-push, `reset --hard`, push to `main`, branch deletion) were excluded and
+> still prompt. **One entry remains worth narrowing and is NOT changed here, because permissions
+> are Rafael's:** `Bash(git commit *)` also matches `git commit --amend`, and an amend is history
+> rewriting — permitted pre-review under R-4, forbidden once review begins (`WORKFLOW.md` §1).
+> Auto-allowing the bare wildcard removes the prompt that would otherwise surface an amend on a
+> frozen branch. Recommendation on the record: narrow it to the message-bearing forms.
+>
+> **HOME OF THIS RULE — reconcile at PR #16's merge closeout.** Rafael instructed the `editor`
+> lane directly to record the settings ownership ruling and the allowlist "somewhere durable and
+> all in the same section of the doc"; it added **`WORKFLOW.md` §7** on `w3-editor` (`7518ab6`),
+> which is the right home — process rules live in `WORKFLOW.md`, not `TODO.md`, and §7 already
+> gets the hard part right: it lists granted *categories* and names `.claude/settings.json`
+> itself as authoritative on the literal patterns, so the doc cannot drift into a stale copy of
+> the file. **At #16's merge closeout, trim the entries above to an episode record — what
+> happened and the R-14 verification — and cite `WORKFLOW.md` §7 for the rule itself.** The
+> citation is deliberately NOT added yet: §7 does not exist on `main` until #16 merges, and
+> `docaudit` would fail the dangling reference. The lane flagged this overlap itself rather than
+> letting the fact live in two places.
+
 > **W3 `editor` LAUNCHED 2026-08-27 (Rafael's word, after both holds expired by their own terms).**
 > Branch `w3-editor`, **Sonnet 5** per `ROADMAP.md` §2, reviewed by Opus throughout; the lane
 > spends no Fable, which matters while the weekly budget is out until the Tue 2026-09-01 reset
