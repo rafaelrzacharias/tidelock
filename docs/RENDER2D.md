@@ -359,7 +359,8 @@ cameras (§2, amended D1 - RenderQueue state, not ECS columns): TL_CHECK(camera_
     if world_get<Transform>(w, camera_follow[view].target) resolves: cam.cx = pk.x[dense(target)] + off_x (same y) - target == Entity{} (no follow) resolves to null on its own
     view_world[view] = AABB of the 4 viewport corners through screen_to_world; view_mat[view] = view_matrix(cam, layout)
 ```
-These two loops plus `simview.cpp` are the only `to_f32` call sites in the binary (CI grep; §9.5).
+These two loops plus `simview.cpp` and `sprite.cpp` are this module's `to_f32` call sites (§9.5's
+allowlist; not yet CI-enforced there).
 
 **9.3.4 Submission and reject**
 ```
@@ -473,20 +474,24 @@ resize event re-runs `resolve_layout` and recreates the target (old one destroye
 ### 9.5 Determinism note
 
 Nothing here is hashed; no sim TU reads render state. **This module's own** fx→float conversions
-are confined to `extract.cpp` (§9.3.3) and `simview.cpp` (§9.3.7 body/particle/basin positions —
-the SDF raster is `i16` and compared as an integer); `sprite.cpp` derives its one fx-palette ratio
-via `fx::TEXEL_M` (`foundation/fx_float.h`, a compile-time constant, not a `to_f32` call site of
-its own — review round 2 N5, after round 1's M2 fix briefly introduced exactly that third
-render-side site). The intended allowlist (`FX-PALETTE.md` §6): `to_f32`/`to_f64` under `src/`
-only in `render/extract.cpp`, `render/simview.cpp`, `editor/`, and `from_f32_quantized` only in
-`core/producers/live.cpp` and `editor/`. **Known to not hold on the tree today** (review round 2
-N5's own audit): `src/script/bind_fx.cpp` and `src/script/vm.h` also call `to_f32`/`to_f64`,
-neither `render/` nor `editor/` — pre-existing on `main`, not this lane's to fix, but the allowlist
-sentence is inaccurate as written until amended or those sites are relocated. **Not yet
-CI-enforced** — no grep step exists in `tools/` or `.github/workflows/` for this today (review
-round 1 D11); this paragraph states the intent other lanes are expected to honour, not a live
-gate. Filed in `TODO.md` as RR-24, amended with the `script/` finding, for whichever lane owns CI
-tooling. `-ffast-math` stays off (`CPP-SUBSET.md` §7).
+are confined to `extract.cpp` (§9.3.3), `simview.cpp` (§9.3.7 body/particle/basin positions — the
+SDF raster is `i16` and compared as an integer), and `sprite.cpp` (its one fx-palette ratio,
+`fx::to_f32(fx::TEXEL)` — review round 2 N5 found round 1's M2 fix had introduced this call site
+without updating the allowlist below; RULED 2026-08-27, Rafael, relayed by the steward: a
+compile-time `TEXEL_M` constant in `foundation/fx_float.h` would have been the better engineering,
+but `src/foundation/` is a different module's cone and this lane took it without a scoped
+exception — the in-cone fix is naming `sprite.cpp` as this module's own third allowlisted site
+instead, at the cost of one runtime `to_f32` call in place of a compile-time constant, accepted
+deliberately). The allowlist (`FX-PALETTE.md` §6): `to_f32`/`to_f64` under `src/` only in
+`render/extract.cpp`, `render/simview.cpp`, `render/sprite.cpp`, `editor/`, and
+`from_f32_quantized` only in `core/producers/live.cpp` and `editor/`. **Known to not hold on the
+tree today** (review round 2 N5's own audit): `src/script/bind_fx.cpp` and `src/script/vm.h` also
+call `to_f32`/`to_f64`, neither `render/` nor `editor/` — pre-existing on `main`, not this lane's
+to fix, but the allowlist sentence is inaccurate as written until amended or those sites are
+relocated. **Not yet CI-enforced** — no grep step exists in `tools/` or `.github/workflows/` for
+this today (review round 1 D11); this paragraph states the intent other lanes are expected to
+honour, not a live gate. Filed in `TODO.md` as RR-24, amended with the `script/` finding, for
+whichever lane owns CI tooling. `-ffast-math` stays off (`CPP-SUBSET.md` §7).
 
 ### 9.6 Tests — `tests/render/` (in `tl_tests`, headless platform)
 

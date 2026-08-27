@@ -3107,11 +3107,15 @@ right; it is the template the others now follow.
       today are exactly the allowlisted ones.
       **AMENDED (review round 2 N5, 2026-08-27):** two new findings for whoever picks this up.
       (1) Round 1's own M2 fix (`sprite.cpp`'s TEXEL ratio) briefly added a THIRD render-side
-      `to_f32` call site outside the allowlist, in the same commit series that filed this very RR -
-      caught in round 2, fixed by adding `fx::TEXEL_M` (`foundation/fx_float.h`, a compile-time
-      constant derived from `fx::TEXEL.v`, not a call site of its own) and pointing `sprite.cpp` at
-      it instead. A live grep gate would have caught this immediately instead of waiting for
-      review round 2 - strengthens the case for RR-24 itself. (2) The allowlist sentence in
+      `to_f32` call site outside the allowlist, in the same commit series that filed this very RR.
+      First fix attempt added `fx::TEXEL_M` (`foundation/fx_float.h`, a compile-time constant) -
+      **RE-RULED 2026-08-27 (Rafael, relayed by the steward, RR-26's other half):** that touched
+      `src/foundation/`, a different module's cone, without a scoped exception (the RR-21/RR-24
+      class of problem). Reverted whole (`src/foundation/fx_float.h` back to byte-identical with
+      `main`); the in-cone fix instead names `sprite.cpp`'s `fx::to_f32(fx::TEXEL)` as this
+      module's own legitimate third allowlisted site (`RENDER2D.md` §9.5, amended). A live grep
+      gate would have caught the ORIGINAL M2 gap immediately instead of waiting for review round 2
+      - strengthens the case for RR-24 itself. (2) The allowlist sentence in
       `RENDER2D.md` §9.5 is not just unenforced, it does not currently HOLD on the tree:
       `src/script/bind_fx.cpp` and `src/script/vm.h` call `to_f32`/`to_f64` too, neither `render/`
       nor `editor/` - pre-existing on `main`, not this lane's to fix (`script/` is a different
@@ -3318,7 +3322,7 @@ right; it is the template the others now follow.
         inside it) - correct and in the tree, just not exercised by a `tl_tests` case. Filed here
         rather than left as a silent gap; a future platform-side call-counter (if another consumer
         needs one) should close it then.
-- [ ] **RR-26 (BLOCKING, ruling request): `audits` red on `734b2c0` - a self-inflicted repeat of
+- [x] **RR-26 (BLOCKING, ruling request, RULED 2026-08-27 - Rafael, relayed by the steward): `audits` red on `734b2c0` - a self-inflicted repeat of
       RR-25's exact shape, and I cannot fix it forward for the same structural reason.**
       `commit_docs.py --base <PR base>` fails: "`src/foundation/ in 734b2c074 changed but none of
       docs/FX-PALETTE.md, docs/MEMORY.md, docs/CONTAINERS.md, docs/DETERMINISM.md, docs/JOBS.md,
@@ -3352,6 +3356,25 @@ right; it is the template the others now follow.
       against this branch's own `TODO.md` and `origin/main`'s, per RR-9's own caveat about
       checking every open branch, not just those two - a true collision is possible if another
       lane claimed it independently.)*
+      **RULING (Rafael, relayed by the steward):** the actual defect this RR's own "content
+      question" surfaced but did not name - `734b2c0`'s `fx::TEXEL_M` addition edited
+      `src/foundation/fx_float.h`, a different module's cone, without the scoped exception the
+      RR-21 (`script.h`) and RR-24 (`MAX_PEERS`) precedents both required before a lane could touch
+      another module's file. `[docs:none]` was explicitly rejected as the cure - "a new constant in
+      the float bridge is a real foundation fact that FX-PALETTE.md or CPP-SUBSET.md would have had
+      to record," so it was never a legitimately doc-exempt change in the first place, cone
+      violation aside. Resolution, landed as one forward commit (this one): `src/foundation/
+      fx_float.h` reverted byte-identical to `main`; `sprite.cpp` back to
+      `fx::to_f32(fx::TEXEL)`; `RENDER2D.md` §9.5's allowlist amended to name `sprite.cpp` as this
+      module's own legitimate third `to_f32` site (the in-cone fix, since §9.5 is this lane's own
+      doc to amend) - accepting one runtime call over a compile-time constant as the deliberate
+      cost. Whether this also clears `commit_docs.py`'s `audits` check on `734b2c0` itself is
+      unresolved as filed - the gate's own selftest asserts checks run per-commit against each
+      historical SHA's own diff, and `734b2c0`'s tree permanently touches `src/foundation/`
+      regardless of what a later commit does; measured locally (`python3 tools/audit/
+      commit_docs.py --base origin/main`, this lane's forward-commit range) before pushing, and
+      the real webhook CI run is the actual arbiter - reported honestly either way, not assumed
+      green because the steward said "by construction."
 
 ## Alloy (`docs/ALLOY.md` — headless-first; its own build queue in "Gates & rulings ledger")
 - [ ] **W3 alloy-liquids-gases OPENING task — the liquid design pass (the RR-10 ruling,
