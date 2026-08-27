@@ -23,7 +23,14 @@ u32 fmt_buf(Span<char> out, const char* fmt, ...) {
     // `count` is u32, so a caller-supplied buffer past INT_MAX would be a real truncation, not
     // just a cast concern - no caller in this tree approaches that size (logs/CSV/editor text),
     // so this is a documented limit, not a guarded one.
-    const int n = stbsp_vsnprintf(out.data, (int)out.count, fmt, ap);
+    //
+    // stb's `else` branch (buf != NULL) runs regardless of count, and clamps its NUL-terminator
+    // index to `count - 1` - at count == 0 that is buf[-1], one byte BEFORE `out`. Route the
+    // zero-capacity case (and a null `out.data`) through stb's own counting path (count == 0 &&
+    // buf == NULL) instead, which writes nothing and still returns the would-be length.
+    const int n = (out.data == nullptr || out.count == 0u)
+                      ? stbsp_vsnprintf(nullptr, 0, fmt, ap)
+                      : stbsp_vsnprintf(out.data, (int)out.count, fmt, ap);
     va_end(ap);
     return (n < 0) ? 0u : (u32)n;
 }

@@ -109,12 +109,26 @@ TL_TEST(fmt_buf_truncation, "foundation,containers,fmt") {
     TL_EXPECT_TRUE(strncmp(buf, "this is far too long for the buffer", out.count - 1u) == 0);
 
     // count == 0: stbsp_vsnprintf must not write through a zero-capacity span (no NUL either -
-    // there is no room for one), only report the length that would have been written.
-    Span<char> zero{ buf, 0u };
-    buf[0] = 'X';
+    // there is no room for one), only report the length that would have been written. stb's
+    // vsnprintf takes its truncating `else` branch whenever buf != nullptr regardless of count,
+    // and lands its terminating NUL at buf[l - 1] with l clamped to count - so at count == 0 that
+    // is buf[-1]: one byte BEFORE the span, not inside it. A struct puts the canary immediately
+    // ahead of the span buffer in memory (guaranteed by standard-layout field order, no padding
+    // between adjacent char arrays), so this test fails on the bug rather than reading the wrong
+    // side of the buffer.
+    struct {
+        char canary[4];
+        char buf2[8];
+    } layout;
+    memset(layout.canary, 0xAA, sizeof(layout.canary));
+    Span<char> zero{ layout.buf2, 0u };
+    layout.buf2[0] = 'X';
     const u32 z = fmt_buf(zero, "%s", "abc");
     TL_EXPECT_EQ(z, 3u);
-    TL_EXPECT_EQ(buf[0], 'X');   // untouched
+    TL_EXPECT_EQ(layout.buf2[0], 'X');   // untouched
+    for (u32 i = 0u; i < sizeof(layout.canary); ++i) {
+        TL_EXPECT_EQ((u8)layout.canary[i], (u8)0xAAu);   // must not be clobbered by an OOB write
+    }
 }
 
 // "process-stable for the run" (docs/CANON.md "Types") has an operational meaning nothing tested:
