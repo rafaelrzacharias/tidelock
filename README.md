@@ -45,9 +45,11 @@ Monocypher and stb, every allocator pooled and gated); four-leg hosted CI ({Wind
 {x86-64, arm64}) green on `main`; and the W3 **render2d** lane (merged 2026-08-27, PR #13 —
 camera, extract, queue/sort/batch, sprite and debug draw, the SDL present path) and the W3
 **assets+data** lane (merged 2026-08-27, PR #14 — asset registry, the Luau-authored data-table
-compiler, save v1). In flight: the W3 **loop+input** lane (launched early on the spare non-Fable
-budget, ruled 2026-08-26), in its round-3 fix round. `editor` and the sandbox removal-list audit
-both hold until loop+input merges; alloy-substrate launches at the weekly reset.
+compiler, save v1) and the W3 **loop+input** lane (merged 2026-08-27, PR #15 — the frame loop and
+its barrier, the `InputFrame` airlock and action map, the Live/Script/Replay producers behind one
+seam, and the record→replay recorder). All three W3 slack lanes launched early on the spare
+non-Fable budget (ruled 2026-08-26) have now shipped. Not yet launched: `editor` and the sandbox
+removal-list audit; alloy-substrate launches at the weekly reset.
 Next: W3 — alloy-solver ★ and the v0 lanes.
 
 ## Lineage

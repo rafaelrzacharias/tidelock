@@ -174,6 +174,55 @@
 > `src/script/sandbox.cpp`; `luau-bindings` is the likely one. **PR #14 does not act on
 > `gcinfo` in its fix round** — it files the RR and proceeds.
 
+> **W3 loop+input MERGED 2026-08-27 — `7e0088e` (PR #15), closeout sweep done (R-7 + R-12).
+> All three early-launched W3 slack lanes have now shipped.** Three adversarial review rounds.
+> The lane's headline defect was found by round 2 and is the reason this module's tests are worth
+> trusting: the record→replay done-criterion test **could not fail**, because `WorldTickState`
+> sits in an `ARENA_HASHED` arena, so each row's hash was a function of the tick alone and the
+> whole suite stayed green with the input→sim wire cut. It is now pinned by an exact-value
+> assertion on folded state and fails under all three mutations (wire cut, fold ignores input,
+> fold is a no-op). Round 3 then found the alpha fix's *direction* unpinned — a `0.0f` park is a
+> full-tick backward jump and satisfies an `alpha_1 == alpha_2` assertion just as well — and the
+> lane re-derived the exact-value pin rather than transcribing it.
+>
+> **`WORKFLOW.md` §2 POST-REVIEW-EDIT VALVE USED — recorded here as §2 requires, and this one
+> carries a caveat #14's did not.** Round 3 returned *fix first* on four defects; all four are
+> fixed and I verified each at `3061af2` (D1's pin present and re-derived with evidence; D2's
+> `loop.h` corrected and honest that the alpha reachability *path* exists while nothing yet
+> *writes* `w->render->alpha`; D3 comment-only per the RR-28 ruling; D4's renumbering checked
+> exhaustively). No production code changed — `loop.cpp` is untouched; the only `src/` edits are
+> comments, plus one test assertion. **Unlike #14, no reviewer endorsed the valve here**: I
+> substituted my own verification, on the evidence that round 3's full re-read remains
+> authoritative for every line of code. That claim is checkable and I checked it — of the whole
+> merged tree, only `src/core/CMakeLists.txt`, `TODO.md`, `LESSONS.md` and `XREF.md` differ from
+> *both* merge parents, and no file present in either parent went missing.
+> **Deferred to the wave-boundary sweep (§3), and named so the sweep can actually do it:**
+> (a) the review of `3061af2` and the merge `dd11b38`; (b) **the merged combination of
+> `loop+input` and `assets+data` has had no adversarial read by anyone** — each was reviewed
+> against `main` separately, and they first coexist in this merge. CI covers the mechanical half
+> (four legs × four tiers, both sanitizer legs, `tier-parity`, `fingerprint-stability`,
+> `build-id-cross-target`, all green); the semantic half is `ARCHITECTURE.md` §9's v0-integration
+> lane by design, but it is not free and the sweep should look.
+>
+> **Filings triaged (R-7).** **RR-27** (headless forced-accumulator, `FRAME-LOOP.md` §6) — an
+> honestly recorded deviation, still open; holds for the `FRAME-LOOP.md` owner or the wave
+> boundary. **RR-30** (`SystemFn` has no Engine-level context) and **RR-31** (`interp.cpp`'s
+> ping-pong is generic, nothing registers a concrete pair) — both **ROUTED to v0-integration**
+> (`ARCHITECTURE.md` §9, W4): `app/wiring.cpp` is the file that calls `interp_register_pair` and
+> that would write `w->render->alpha`, so it is the lane that closes both. **RR-32** (`src/core/
+> CMakeLists.txt` now carries two different idioms — an explicit file list and a `file(GLOB)` —
+> for the same "the flat glob cannot see a subdirectory" problem) — holds for the next lane that
+> adds a `.cpp` subdirectory, or the build-tooling owner; it should pick one.
+>
+> **R-12 pass:** `FRAME-LOOP.md` and `INPUT.md` status lines moved to v0-implemented-and-merged
+> and carry their reconciliation date; `FRAME-LOOP.md`'s status line was **also citing the dead
+> `RR-24`..`RR-26` numbers** and now cites `RR-29`..`RR-31` — exactly the staleness `docaudit`
+> structurally cannot see. `README.md` and `CLAUDE.md` status prose updated.
+>
+> **Both holds are now released by their own terms**: `editor` and the `SIM_REMOVE`/`DATA_REMOVE`
+> audit slice were ruled to hold "until #14 and #15 merge", and both have. Neither is launched —
+> that is Rafael's word to give. Next free ruling-request id is **RR-33**; the steward allocates.
+
 > **W3 assets+data MERGED 2026-08-27 — `26c9c5f` (PR #14), closeout sweep done (R-7 + R-12).**
 > Three adversarial review rounds. Round 1 measured RR-21's determinism condition NOT holding
 > (staging-table insertion order reaching compiled bytes and the hash) and found the pin that

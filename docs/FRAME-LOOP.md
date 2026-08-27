@@ -1,11 +1,14 @@
 # Frame loop, time, phases, interpolation (tidelock, rev 1)
 
-> **Status:** design rev 1, 2026-08-22. **DECIDED** except §7. Carries foundry CORE §3, D7, D10,
+> **Status:** design rev 1, 2026-08-22; **§8 v0 IMPLEMENTED AND MERGED 2026-08-27**
+> (`w3-loop-input`, PR #15 — three adversarial review rounds; §8.4's rows are met with the
+> headless forced-accumulator row honestly deviated, RR-27). Last reconciled against the tree
+> 2026-08-27. **DECIDED** except §7. Carries foundry CORE §3, D7, D10,
 > D11's knobs, FOUNDRY-API §2 into C++ + fixed point. **§8 (loop.h/.cpp, time.h, interp.cpp)
 > implemented by w3-loop-input, 2026-08-26/27** — declarations for the interpolation ping-pong
 > live in `loop.h` (no separate `interp.h`; `interp.cpp` is a pure implementation split, matching
 > this doc's own §8.1 file list, which never named one). Three filed, non-blocking ruling
-> requests from that lane are in `TODO.md` (`RR-24`..`RR-26`): the generic (not `Transform`-
+> requests from that lane are in `TODO.md` (`RR-29`..`RR-31`, renumbered 2026-08-27 from RR-24..RR-26 after a `main` merge collided them with render2d's): the generic (not `Transform`-
 > named) interpolation registration API, the LAST-phase recorder as a direct call rather than a
 > registered system (`SystemFn` has no path to `Engine`-level state), and the same gap for §0's
 > render-side `alpha`.

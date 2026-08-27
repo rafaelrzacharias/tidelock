@@ -1,6 +1,9 @@
 # Input — the action map and the `InputFrame` airlock (tidelock, rev 1)
 
-> **Status:** design rev 1, 2026-08-22. **DECIDED** except §8. Carries D13 / E2 into C++; the
+> **Status:** design rev 1, 2026-08-22; **v0 IMPLEMENTED AND MERGED 2026-08-27**
+> (`w3-loop-input`, PR #15 — §9.6's rows met, the record→replay trace pinned by an exact-value
+> assertion on folded state rather than a hash-inequality guard that could not fail). Last
+> reconciled against the tree 2026-08-27. **DECIDED** except §8. Carries D13 / E2 into C++; the
 > frame is now all-integer and `MAX_ACTIONS = 32` is ruled. **Implemented by w3-loop-input,
 > 2026-08-26/27** (§9's files: input.h, action_map.h/.cpp, producers/{live,script,replay},
 > recorder.h/.cpp) — `input_set_producer` lives on `Engine` (`core/loop.h`), not `World*` as §4

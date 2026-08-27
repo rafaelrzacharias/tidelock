@@ -188,8 +188,8 @@ environment in the same call, or use the self-sourcing scripts. Build traps go i
 Building — W2/W3 (re-dated 2026-08-27; the live truth is `TODO.md` + `docs/ROADMAP.md`, never
 this paragraph). W0–W1 shipped and reviewed; Gate 0 run and ruled (`FX-PALETTE.md` rev 2); W2 ecs
 + net-p1 + luau-vm + vendor merged. Of the three W3 slack lanes launched early (ruled
-2026-08-26), **render2d MERGED 2026-08-27** (PR #13, `31da431`) and **assets+data MERGED
-2026-08-27** (PR #14, `26c9c5f`); loop+input is in its round-3 fix round. `editor` and the
-`SIM_REMOVE`/`DATA_REMOVE` audit slice are both ruled to hold until #15 merges too;
-alloy-substrate launches at the weekly reset. Next: W3 (alloy-solver ★ → v0). This paragraph is
-checked at every wave boundary (`WORKFLOW.md` §3 artifact 4, R-12).
+2026-08-26), **all three MERGED 2026-08-27** — render2d (PR #13, `31da431`), assets+data
+(PR #14, `26c9c5f`) and loop+input (PR #15, `7e0088e`). `editor` and the `SIM_REMOVE`/
+`DATA_REMOVE` audit slice were held until those merges and are now released, unlaunched, pending
+Rafael's word; alloy-substrate launches at the weekly reset. Next: W3 (alloy-solver ★ → v0).
+This paragraph is checked at every wave boundary (`WORKFLOW.md` §3 artifact 4, R-12).
