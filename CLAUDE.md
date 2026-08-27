@@ -80,6 +80,34 @@ narrow slice at a time. Two rules, one tool:
   `docs/XREF.md`. A commit touching `src/<module>/` must touch that module's doc or say `[docs:none]`
   in the message (CI checks). Docs say "best so far", never "final"; a doc's status line carries the
   date of its last reconciliation pass.
+- **Criteria rows state a CONDITION, never a status (RR-44, ruled 2026-08-27).** The stale-marker set
+  above does NOT grow — it structurally cannot catch the real class, a statement TRUE when written that
+  code later falsified (`TOOLING.md` §9.6's "blocked only on RR-38's quantizer", falsified by RR-38
+  landing in the same PR). Two rules replace growing it, **binding on every doc author now, while the
+  gate that will enforce them is unbuilt and unowned**: (1) no met/not-met status word in a criteria row
+  — whether a condition holds belongs to the PR gate and `TODO.md`, not to the criterion that judges the
+  work; name the witness instead. (2) A conditional deferral in a criterion carries a resolvable
+  referent, `[blocked-on: RR-nn]`, so the clause is re-read when that ruling lands — a TAG in a row,
+  never a prose mention of an RR. **Scope (this is the operative definition; `TODO.md`'s RR-44 record
+  cites it rather than restating it).** A **criteria row** is one whole bullet — its lead line plus
+  every continuation line, since these bullets wrap — inside a **bucket block**. A bucket block opens
+  on a bold-leading paragraph **whose immediately following sibling is a bullet list**; a bold-leading
+  paragraph followed by more prose is ruling text and opens nothing. That discriminator is load-bearing,
+  not decorative: §9.6 holds three ruling headers (`**RR-40 …**`, `**RR-43 …**`, `**RR-44 …**`)
+  indented identically to the three bucket headers, so a pattern keyed only on "bold line alone in a
+  paragraph" opens a block on RR-44's own ruling prose and flags the phrases it quotes to explain
+  itself. Prefer the structural test to listing the bucket names: RR-43 has already shown the bucket
+  set changes, and a name list would fail silently the next time one is added or renamed. The headers
+  today are (`**Panels v0** …`, `**Shell v0** …`,
+  `**Deferred — blocked on a ruling or another lane** …` — match the whole header LINE, not a short
+  name: one of the three is a full phrase and a pattern written for short names silently misses it,
+  under-enforcing on exactly the bucket where deferral prose collects) and closes at the next such
+  header **or at the end of the enclosing numbered item, whichever comes first** — the last block in a
+  section terminates on a numbered item, not on a header. Everything outside a bucket block — ruling
+  prose above or between them — is out of scope **by construction**. There is deliberately no exemption
+  mechanism: an exemption is a hole, since anything can be exempted and the first inconvenient flag is
+  where it gets used. A case the scope handles badly is a bug in the scope, to be fixed here.
+  Rationale, evidence, provenance, enforcement status and owner: `TODO.md`, RR-44.
 
 ### Working boundaries
 - **Single-hat rule.** Don't plan architecture, write code, and write tests in one turn. Stage:

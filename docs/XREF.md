@@ -70,13 +70,14 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `MEMORY.md` -> §2, §3, §5, §8.1, §8.3
 - `RENDER2D.md` -> §1, §4
 - `ROADMAP.md` -> §8.7
+- `TOOLING.md` -> §8.6
 
 ## CPP-SUBSET.md
 - `ALLOY.md` -> §4, §5, §6
 - `ARCHITECTURE.md` -> §4
 - `BUILD.md` -> §1, §6, §7, §9
 - `CANON.md` -> §4
-- `CONTAINERS.md` -> §3, §5
+- `CONTAINERS.md` -> §3, §5, §9
 - `DETERMINISM.md` -> §1, §4, §5
 - `ECS.md` -> §9
 - `FX-PALETTE.md` -> §1, §2, §4, §5, §6, §7, §9
@@ -87,7 +88,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `PLATFORM.md` -> §1, §4
 - `RENDER2D.md` -> §1, §7
 - `TESTING.md` -> §4, §6
-- `TOOLING.md` -> §1, §9
+- `TOOLING.md` -> §1, §7, §9
 
 ## DETERMINISM.md
 - `ARCHITECTURE.md` -> §9.5
@@ -103,7 +104,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `NETCODE.md` -> §4, §8
 - `ROADMAP.md` -> §9.5
 - `TESTING.md` -> §1, §6
-- `TOOLING.md` -> §7
+- `TOOLING.md` -> §6, §7
 
 ## ECS.md
 - `ALLOY.md` -> §7
@@ -119,7 +120,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `LUAU-LAYER.md` -> §3, §4, §6.1, §9
 - `MEMORY.md` -> §6, §10.4
 - `ROADMAP.md` -> §10.8
-- `TOOLING.md` -> §4
+- `TOOLING.md` -> §4, §10.5
 
 ## FRAME-LOOP.md
 - `ARCHITECTURE.md` -> §2, §8.4
@@ -241,6 +242,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `RENDER2D.md` -> §0, §9.2, §9.3
 - `ROADMAP.md` -> §9
 - `TESTING.md` -> §9.1
+- `TOOLING.md` -> §9.7
 
 ## RENDER2D.md
 - `ASSETS-AND-DATA.md` -> §5, §9
@@ -249,6 +251,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `INPUT.md` -> §2
 - `PLATFORM.md` -> §2
 - `ROADMAP.md` -> §9
+- `TOOLING.md` -> §6
 
 ## RESERVED-SEAMS.md
 - `ARCHITECTURE.md` -> §11
@@ -273,8 +276,9 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 ## TOOLING.md
 - `ARCHITECTURE.md` -> §2
 - `CANON.md` -> §3
+- `CONTAINERS.md` -> §9.3.2
 - `CPP-SUBSET.md` -> §6, §9, §9.3.9
-- `DETERMINISM.md` -> §5
+- `DETERMINISM.md` -> §5, §9.6
 - `ECS.md` -> §2
 - `LUAU-LAYER.md` -> §1, §7
 - `PLATFORM.md` -> §9.3.9

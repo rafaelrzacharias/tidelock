@@ -2,6 +2,7 @@
 // commands.h and world.h (the recording API is world_*'s surface).
 #include "core/commands.h"
 #include "core/world.h"
+#include "core/cvar.h"
 #include <string.h>
 
 namespace {
@@ -184,6 +185,23 @@ void world_singleton_set_cmd(World* w, ComponentId comp, const void* value) {
     cmd_record(w, CMD_SINGLETON_SET, Entity{ 0 }, comp, value, info->size);
 }
 
+// Ruled exception (docs/ROADMAP.md §0 rule 2, RR-33/RR-35, commands.h's CMD_SET_CVAR comment).
+void world_set_cvar_cmd(World* w, NameHash key, u32 bits) {
+    TL_CHECK(w->cvars != nullptr);
+    const CvarDesc* d = cvar_find(w->cvars, key);
+    TL_CHECK(d != nullptr && (d->flags & CVAR_SIM) != 0u);
+    // Payload = LE NameHash key, then LE u32 bits (commands.h's CMD_SET_CVAR record contract).
+    // Both fields go through the explicit-LE ByteWriter and one segment - the applier's
+    // ByteReader reads both back with explicit-LE br_get_u64/br_get_u32, so writer and reader
+    // must agree by construction (a record reaching hashed sim state, not a host-endian memcpy).
+    u8 head[12];
+    ByteWriter bw;
+    bw_init(&bw, head, sizeof(head));
+    bw_put_u64(&bw, key);
+    bw_put_u32(&bw, bits);
+    cmd_record(w, CMD_SET_CVAR, Entity{ 0 }, 0u, head, 12u);
+}
+
 void world_flush(World* w) {
     apply_commands(w);
 }
@@ -262,6 +280,17 @@ void apply_commands(World* w) {
                     TL_CHECK((t->info->flags & COMP_SINGLETON) != 0u);
                     TL_CHECK(rec->payload_len == t->info->size);
                     memcpy(t->dense, payload, t->info->size);
+                    break;
+                }
+                case CMD_SET_CVAR: {
+                    // Ruled exception (RR-33/RR-35, commands.h's CMD_SET_CVAR comment).
+                    TL_CHECK(rec->payload_len == 12u && w->cvars != nullptr);
+                    ByteReader br;
+                    br_init(&br, payload, rec->payload_len);
+                    const NameHash key = br_get_u64(&br);
+                    const u32 bits = br_get_u32(&br);
+                    TL_CHECK(br_ok(&br));
+                    TL_CHECK(cvar_apply_sim_raw(w->cvars, key, bits) == ERR_OK);
                     break;
                 }
                 default: {

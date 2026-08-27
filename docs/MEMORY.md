@@ -302,6 +302,12 @@ enum { COMMIT_GRANULE = 64 * 1024 };
 ErrCode vmem_arena_init(VMemArena* a, NameHash id, u64 reserve_bytes, u32 flags, const VMemApi* os);
 // reserve_bytes rounded up to COMMIT_GRANULE; os->reserve; committed = used = high_water = 0.
 // The granule, not the page (ruled 2026-08-24): the commit path below fatals when align_up(end, COMMIT_GRANULE) > reserved, so a page-rounded reserve made the usable budget round_down(reserved, COMMIT_GRANULE) — a sub-64 KB reserve could never push a byte and a non-multiple reserve had an unreachable tail. Address space is free; the stated budget is the usable budget.
+// LIFETIME (RR-41): init STORES `os` in `a->os` (the struct field above) rather than copying
+// through it — every later push/reset/decommit call dereferences that stored pointer, not a
+// fresh argument. The pointee must outlive the arena; a caller that repoints or destroys the
+// VMemApi instance the arena was initialized with (e.g. a local `VMemApi` going out of scope,
+// or `platform/impl_headless/init.cpp`-style repointing off a soon-to-die local) leaves the
+// arena holding a dangling pointer with no signal until the next call through it.
 void* arena_push(VMemArena* a, u64 bytes, u32 align) {
     u64 start = align_up(a->used, align);           // align is a power of two, ≤ page
     u64 end   = start + bytes;

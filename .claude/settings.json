@@ -3,7 +3,21 @@
     "allow": [
       "mcp__bf7c680d-5fdc-5ef4-b4a0-abadb619bf0a",
       "mcp__claude-code-remote",
-      "mcp__Claude_Code_Remote"
+      "mcp__Claude_Code_Remote",
+      "Bash(python3 tools/audit/commit_docs.py --base origin/main)",
+      "Bash(python3 tools/audit/includes.py --root .)",
+      "mcp__github__pull_request_read",
+      "Bash(cmake -S . -B *)",
+      "Bash(cmake --build *)",
+      "Bash(ninja -C *)",
+      "Bash(./out/*/bin/tl_tests)",
+      "Bash(./out/*/bin/tl_tests *)",
+      "Bash(git commit *)",
+      "Bash(git push origin w3-editor)",
+      "Bash(git push -u origin w3-editor)",
+      "Bash(python3 tools/docaudit/docaudit.py)",
+      "Bash(git merge origin/main)",
+      "Bash(git merge origin/main *)"
     ]
   },
   "env": {

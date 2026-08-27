@@ -4699,6 +4699,1126 @@ All 11 items validated per-item (the command AND the real failure output — rev
 confirm the named test fails, restore, confirm green again), not just asserted fixed. Full-suite
 and audit validation recorded at the round's closing commit below.
 
+## W3 editor — lane notes, ruling requests, and the continuation queue (2026-08-27, `w3-editor`)
+
+Model gate: `ROADMAP.md` §2 — `editor` is a **Sonnet 5** lane, reviewed by Opus throughout. Slice
+brief (per commit, not repeated per-file): spec = `TOOLING.md` §9 build order items 2–3 (cvar,
+prof); consumes `CANON.md` "Cvars", `CPP-SUBSET.md` §2/§3/§7b; consumers = none yet (`XREF.md` has
+no section citing `TOOLING.md` internals — nothing downstream exists before W4 v0-integration);
+next milestone = `TOOLING.md` §9.6 step 5 ("v0 editor done": Log/Console/Inspector/Profiler/
+Probes/World panels). Two commits shipped this session, each validated on **both** `dev` and
+`netcode` tiers (full suite, `--isolate --tag !slow`, 0 failures both tiers) plus
+`tools/audit/commit_docs.py --base origin/main` and `tools/docaudit/docaudit.py` before push:
+
+- `core/cvar.h`/`.cpp` + `tests/core/cvar.test.cpp` — the reflected cvar table (build order item
+  2, cvar half). Caller-owned (no global, no `World` field added — see the ruling request below).
+- `foundation/tl_prof.h` (extended) + `foundation/prof.cpp` + `tests/foundation/tl_prof.test.cpp`
+  — the profiler runtime (build order item 3). Found and fixed a **pre-existing `-Wshadow` bug**
+  in `TL_PROF_SCOPE`/`TL_PROF_SCOPE_W` (W1 tooling-rt, never instantiated before this lane's
+  test — `LESSONS.md`'s "a template with no call site has never been compiled" struck again):
+  nesting two scopes shadowed the for-loop control variable and failed `-Werror`. Fixed with a
+  `__COUNTER__`-uniqued name; `LESSONS.md` entry filed below.
+  **CI red on the `debug` tier (all four legs) at `f592b88`, steward-caught:** `tl_prof_test_reset`
+  wrote `g_prof = ProfState{}` (a `memset`-equivalent on `dev`/`netcode` at `-O1`, but a genuine
+  ~53 MB stack temporary — instant segfault — on `debug`'s unoptimized build). This lane had only
+  been validating `dev` and `netcode` locally; **`debug` is now validated locally too, every
+  push, from here on.** Fixed with an in-place `memset`; `LESSONS.md` entry filed.
+
+**Not started this session** (parked cleanly, not half-built — the remaining `TOOLING.md` §9.6
+build-order items for whoever continues this lane; `editor/console.h`/`.cpp` §9.3.5's tokenizer/
+dispatch/completion/history WAS built later this same session, see below - moved here from an
+initial, wrong `core/` placement): `core/dotpath.h` + `watch.cpp` (§9.3.6), `editor/trace_export.cpp`
+(the Chrome-trace JSON half of
+build order item 3 — `prof.cpp`'s ring/counters are ready for it), `core/crash_report.cpp`
+(blocked, see ruling request below), `editor/shell.cpp` + the six v0 panels (Log, Console,
+Inspector, Profiler, Probes, World) over ImGui's headless null backend (`vendor/imgui` is
+present, `vendor_glue/imgui_glue` is tested — no `imgui_test_engine` or backend TUs are
+vendored, so panel tests drive `ImGui::NewFrame`/widget calls directly against a mocked `io`,
+never a real backend), `core/desync_diff.cpp` (build order item 6), `editor/keyframes.cpp` +
+the Replay panel (build order item 7). None of these are half-implemented — nothing was started
+that wasn't finished and tested.
+
+### Correction (2026-08-27, steward, PR #16 comment): `91b2df9`'s commit message (now `381cc71`
+after the R-4 pre-review amend below) said *"ruling request filed in TODO.md"* — **that was
+false when written: no ruling request existed anywhere in this file at that commit.** The
+substance the message described (the `CVAR_SIM`/`CMD_SET_CVAR` gap) was real and correctly
+diagnosed; the claim that it was already *filed* was not. Recorded here plainly, per the
+steward's instruction, rather than left to stand silently: a permanent-record claim the tree
+did not support is exactly the class this program enforces hardest, whatever the underlying
+substance turns out to be.
+
+### Header-first deviation (2026-08-27, steward-acknowledged): `ROADMAP.md` §0 rule 1 wants a
+lane's first commit to be its header (contract block, signatures, `TL_FATAL("unimplemented")`
+stubs) so dependents compile against it from day one. `381cc71` (`core/cvar.h`/`.cpp`) shipped
+as a complete, tested implementation instead. Acknowledged rather than rewritten: no concurrent
+lane depends on `core/cvar.h` (`XREF.md` cites nothing into `TOOLING.md`'s internals yet), so
+the rule's harm — a dependent lane blocked compiling against a header that doesn't exist yet —
+did not occur, and a pre-review rewrite would cost more than it buys at this point. **Header-
+first is followed from here on** for the remaining modules this lane builds (console, dotpath/
+watch, the ImGui shell and its panels, desync_diff, replay) — the same argument will not hold
+once `v0-integration` (W4) or a sibling lane starts depending on them.
+
+### Ruling requests (ids are steward-allocated per `WORKFLOW.md`/the lane brief)
+
+- **RR-37 (renamed from "RR-pending (d)", steward-allocated 2026-08-27, PR #16, "RR-37 allocated;
+  R-2 correction verified" message): `RENDER2D.md` §6's backend-trigger table needs a second
+  "trigger" row.** Not this lane's file (render2d, PR #13, already merged — cone discipline bars
+  a unilateral edit). Context: `docs/TOOLING.md` §10 R-2 (corrected this lane, same commit) found
+  that ImGui multi-viewport (drag an editor panel out to its own OS window) cannot run on the v0
+  SDL_Renderer backend `RENDER2D.md` §6 names — `RendererHasViewports` is never implemented
+  upstream for that backend. `RENDER2D.md` §6's table already reserves a `SDL_GPU` column with
+  `trigger: "a shader a demo needs that SDL_Render cannot express"`; multi-viewport pop-out is a
+  second, independent trigger for that same migration and belongs in that row (one fact, one home
+  — `CLAUDE.md`'s doc-integrity protocol) rather than restated only here or in `TOOLING.md`.
+  Rafael has expressed a preference for SDL_GPU specifically (`imgui_impl_sdlgpu3.cpp`) over raw
+  OpenGL3 for this migration (in-session, 2026-08-27) — not yet a formal ruling, since the actual
+  backend-migration decision needs the render2d lane's own input (render2d's sprite/batch path
+  would move onto SDL_GPU too, not just ImGui), just the trigger-table addition editor is flagging
+  now so the next lane that reopens `RENDER2D.md` doesn't rediscover this from scratch.
+  **Steward independently verified the underlying claim against the vendored backend sources
+  (not taken on my word) and it holds exactly**: `imgui_impl_sdlrenderer3.cpp` never sets
+  `RendererHasViewports`; `imgui_impl_sdl3.cpp` does set `PlatformHasViewports` (the platform half
+  is present, only the renderer half is the gap). The backends that DO set `RendererHasViewports`:
+  dx9, dx10, dx11, dx12, opengl2, opengl3, **sdlgpu3**, vulkan — so Rafael's stated SDL_GPU
+  preference is not merely taste, it is one of the backends that actually closes this gap, where
+  SDL_Renderer structurally cannot. Worth stating plainly whenever RR-37 is actually ruled: the
+  migration question is "the preferred backend already closes this" rather than an open trade.
+- **RR-34 (steward-allocated 2026-08-27, PR #16, "STOP: red head" message): `commit_docs.py`'s
+  `MODULE_DOCS["core"]` omits `TOOLING.md`, even though `TOOLING.md` §9.1's own file table places
+  `core/cvar.h` (and, by the same table, `core/dotpath.h`, `core/watch.h`, `core/desync_diff.h`,
+  `core/crash_report.cpp`) under `core/`.** (`console.h`/`.cpp` was originally built under
+  `core/` too but has since moved to `editor/console.h`/`.cpp` where the file table actually
+  places it - dev-tier only, unlike `cvar.h`, which is genuinely all-tier; this ruling request's
+  remaining `core/*` examples still stand.) The two facts side by side:
+  `tools/audit/commit_docs.py`'s `MODULE_DOCS = {"core": ["docs/ECS.md", "docs/FRAME-LOOP.md",
+  "docs/INPUT.md", "docs/ASSETS-AND-DATA.md"], ..., "editor": ["docs/TOOLING.md"], ...}` credits
+  `TOOLING.md` only for commits touching `src/editor/`, never `src/core/` — so every past and
+  future `editor`-lane commit that touches one of the `core/` files above and genuinely documents
+  it in `TOOLING.md` still fails the gate unless it also adds `[docs:none]`, which is accurate to
+  the gate's own (incomplete) model but misleading on its face (a doc WAS touched and IS the
+  right one). Hit twice already this lane (`381cc71`'s original message, `f592b88`'s fix) via
+  `[docs:none]` each time. **What needs ruling: does `MODULE_DOCS["core"]` gain `"docs/TOOLING.md"`
+  (the map widens to match where editor's files actually live), or does `TOOLING.md` §9.1's file
+  table move those entries to state they are `core/`-directory-but-`editor`-owned in some way the
+  gate can already see (unclear what that would look like given the gate keys purely on
+  directory)?** `commit_docs.py` is very likely `ci-matrix`'s or `governance`'s file (both W3,
+  neither confirmed merged/closed as of this lane's launch) — cone discipline bars editor from
+  editing it unilaterally either way.
+  **Addendum (2026-08-27, editor/profiler_panel commit): the same gap exists for `foundation/`,**
+  not just `core/` — `MODULE_DOCS["foundation"]` lists `FX-PALETTE.md`/`MEMORY.md`/
+  `CONTAINERS.md`/`DETERMINISM.md`/`JOBS.md`/`CPP-SUBSET.md`, never `TOOLING.md`, even though
+  `tl_log.h`/`tl_prof.h`/`tl_probe.h`/`tl_assert.h` are `TOOLING.md`-owned files that merely live
+  under `src/foundation/` (its own header comments cite `TOOLING.md` sections throughout, never
+  one of the six listed docs). The `tl_log_ring_count`/`_at` promotion (`log_panel` commit) and
+  this commit's `tl_prof_ring_count`/`_at`/`counter_count`/`counter_at` promotion both genuinely
+  documented their change in `TOOLING.md` (§9.4's Profiler row, this commit) yet both still needed
+  `[docs:none]` to pass the gate for the `foundation/` half of the diff — same shape as the `core/`
+  case above, same fix either widens `MODULE_DOCS["foundation"]` too.
+- **RR-33 (steward-allocated 2026-08-27, PR #16) — RULED 2026-08-27 (Rafael, via the steward):
+  option (i), a narrow additive exception. Implemented — see RR-35 below for the shipped shape
+  and tests, both ruled and landed together.** Original filing: `CMD_SET_CVAR` does not exist in
+  `core/commands.h`, so no `CVAR_SIM` cvar can be written end to end. `TOOLING.md` §3 requires
+  a `CVAR_SIM`-flagged cvar's write to be a sealed, tick-stamped command so a lockstep session can
+  refuse it (`CANON.md` "Cvars": SIM cvars fold into `session_fingerprint`). `core/commands.h`'s
+  `CmdKind` enum and `core/commands.cpp`'s `apply_commands` are `ecs`-lane files (merged, closed —
+  `ROADMAP.md` §0 rule 2 cone discipline bars editor from adding a member there). `core/cvar.h`
+  ships the seam (`cvar_apply_sim_raw`, documented as "only the future `CMD_SET_CVAR` applier may
+  call this") and `cvar_set_raw` refuses every `CVAR_SIM` write with `ERR_CVAR_SIM_UNROUTED` in
+  the meantime — correct, not a workaround, but no cvar can actually BE a live `SIM` cvar end to
+  end until `CMD_SET_CVAR` lands. Needs: a `CmdKind` row, a `CvarTable*` reachable from whatever
+  applies commands (which in turn needs the `World` question below), and a `core/commands.cpp`
+  applier case. **What needs ruling: who adds `CMD_SET_CVAR` and when** — `core/commands.h`/
+  `.cpp` are the merged-and-closed `ecs` lane's files, so either (i) `editor` is ruled a narrow,
+  additive exception to cone discipline for this one enum row + applier case, since no other
+  `ecs` behavior changes, or (ii) it waits for a dedicated follow-up lane/session against
+  `commands.h`, and `editor`'s `CVAR_SIM` support stays refuse-only (as it does today) until
+  then.
+- **RR-35 (steward-allocated 2026-08-27, PR #16, "RR-33 RULED" message) — RULED TOGETHER WITH
+  RR-33, same message, same reasoning: `CvarTable* cvars` (nullable) added to `core/world.h`.**
+  Originally filed as "should `CvarTable` live inside `World`?" — `TOOLING.md` §9.1 says
+  "`CvarTable` in `World` (non-registered arena)" but `core/world.h` (ecs, merged/closed) had no
+  `cvars` field. **RULED 2026-08-27 (Rafael, via the steward): part of the same narrow, additive
+  cone-discipline exception as RR-33** (`docs/ROADMAP.md` §0 rule 2). The precedent that made
+  this grantable: `world.h` already carries forward-declared pointers for every OTHER W3
+  consumer — `Editor* editor`, `AlloyWorld* sim`, `RenderQueue* render` — each added by the lane
+  that needed it, never by `ecs` itself; `CvarTable* cvars` is the identical shape, found and
+  named by this lane before the ruling landed. **Implemented**: `core/world.h` gains `struct
+  CvarTable;` (forward decl) + `CvarTable* cvars;` (nullable, caller-still-owns-the-instance -
+  no change to who allocates one); `core/commands.h` gains the `CMD_SET_CVAR` row (appended, so
+  every existing `CmdKind` value is unchanged) with an applier case in `core/commands.cpp` that
+  calls `cvar_apply_sim_raw` and `TL_CHECK`s it returns `ERR_OK`; `world_set_cvar_cmd(World*,
+  NameHash, u32)` is the new recording door (`core/world.h`/`commands.cpp`), `TL_CHECK`-refusing
+  a null `w->cvars`, an unregistered key, or a non-`CVAR_SIM` cvar (those still go through
+  `cvar_set_raw` directly, never a command). Tests: `tests/core/commands_cvar.test.cpp` (record →
+  barrier → applied; last-record-wins within one window; the two `TL_CHECK` refusals as
+  `TL_TEST_EXPECT_FATAL` rows). **Rejected alternatives, per the ruling:** deferring to a
+  follow-up lane against `commands.h` (leaves `TOOLING.md` §3's sealed-command requirement unmet
+  through this merge, scheduled nowhere); folding it into `v0-integration` (grows that lane's
+  scope again and still ships this lane's console `set <cvar>` incomplete). Kept strictly
+  additive per the ruling's own condition — no behavior change to anything already in
+  `commands.h`/`world.h`.
+- **RR-36 (renumbered from "RR-pending (c)", steward-allocated 2026-08-27, PR #16, "RR-33 RULED"
+  message): `core/crash_report.cpp` is blocked on `platform/`'s crash OS-half, which is
+  still a stub.** `platform.h`'s `CrashApi::install`/`raise_fatal` are real seam members, but
+  every implementation (`impl_headless/init.cpp`'s `crash_install_stub`/`crash_raise_fatal_stub`)
+  is `TL_FATAL("PlatformApi.crash is not implemented yet (docs/PLATFORM.md §9.7 step 5,
+  TODO.md)")` — and `os_crash_win.cpp`/`os_crash_posix.cpp` are already noted elsewhere in this
+  file (search "os_crash_win") as living directly in `src/platform/`, not `editor/`. `TOOLING.md`
+  §9.3.9's `core/crash_report.cpp` is real work editor CAN do without platform (`CrashHeader`/
+  `CrashSection` layout, assembling the report into the caller-supplied 16 MB arena from
+  explicit pointers — no `PlatformApi` needed for that half, and `crash_report_layout`'s
+  structural assertions, per `TOOLING.md` §9.5, are testable against it directly); what editor
+  CANNOT do is the raw OS file write (`TOOLING.md` §9.3.9: "raw `CreateFileW`/`WriteFile` /
+  `open`/`write`/`fsync` — not the `FileApi`" — and `core/` isn't on the `TL_FOUNDATION_TOOLING`
+  `<stdio.h>` exemption either, which is scoped to `src/foundation/` only, `CPP-SUBSET.md` §9
+  R-4) or the actual `platform.crash.install` call (calling it today would `TL_FATAL` in every
+  test that exercises init). Recommendation: split `core/crash_report.cpp`'s public surface into
+  a pure assembly function (buffer in, buffer out — testable now, no platform dependency) and a
+  separate `CrashWriterFn`-shaped adapter `app/wiring.cpp` (W4, not built) wires to
+  `platform.crash.install` once `platform/`'s OS half lands — not a ruling this lane needs
+  Rafael for, just recorded so the next editor slice doesn't rediscover the blocker from scratch.
+
+### Defects found in passing, not editor's to fix (cone discipline — filed as pointers)
+
+- `core/encoder.h`'s `ERR_ENC_FIELD_KIND` (`0x0321`) collides with `core/recorder.h`'s
+  `ERR_RECORDER_BAD_MAGIC` (also `0x0321`); `ERR_ENC_OVERFLOW` (`0x0322`) collides with
+  `ERR_RECORDER_FINGERPRINT` (also `0x0322`). Both pairs are within the `core` module's `0x03xx`
+  range but were assigned independently by two different lanes' files with no shared registry.
+  `core/cvar.h`'s own range starts at `0x0360` specifically to stay clear of every existing
+  block including these two. Not editor's file to fix.
+
+### `LESSONS.md`-shaped finding, recorded there too
+
+`TL_PROF_SCOPE`'s for-loop control variable was a fixed name (`_tl_ps`) shared across every
+expansion site; nesting two scopes (the profiler's entire reason to exist) redeclares it in the
+same block scope and fails `-Wshadow -Werror`. No call site had ever instantiated the macro
+before this lane's test wrote the first one. Fixed with the two-layer `__COUNTER__`/token-paste
+idiom (`TL_PROF_CONCAT`), applied to both the `TL_DEV` and compiled-out branches of both
+`TL_PROF_SCOPE` and `TL_PROF_SCOPE_W`.
+
+### Vendor unlocks found this session (2026-08-27) and what they do/don't unblock
+
+Checking what's next in the `TOOLING.md` §9.6 build-order queue (item 5: panels) turned up two
+vendor trees that were empty/absent earlier this session and are now populated — neither landed
+by this lane, both change what's buildable:
+
+- **`vendor/imgui/backends/`** now carries every upstream backend TU, including
+  `imgui_impl_sdlrenderer3.cpp` (the v0 backend `TOOLING.md` §1 names) and, notably,
+  `imgui_impl_null.{h,cpp}` — a real blind/headless ImGui platform+renderer pair
+  (`ImGui_ImplNull_Init`/`_NewFrame`, sets `io.DisplaySize`/`DeltaTime`, no window, no real
+  output). `TOOLING.md` §9.5's "panel tests run ImGui headless via a null backend" line names
+  exactly this and is now buildable — it wasn't when `editor.cpp`'s `editor_frame` was stubbed
+  earlier this session (`vendor/imgui/CMakeLists.txt` still only builds the four core TUs;
+  backends are vendored but unbuilt until a lane's own CMakeLists adds the one it needs, per that
+  file's own comment). **Not yet acted on**: whether a panel's `draw_fn` can be built and tested
+  today, independent of `editor_frame`'s real per-frame loop (still correctly blocked on
+  `PlatformDevApi`, `PLATFORM.md` §9.2/§9.7 step 5, unbuilt), by standing up an ImGui context
+  directly in test code via the null backend — this is a real seam question (does a panel draw
+  function take an already-active ImGui frame with no platform dependency, callable both from
+  `editor_frame` later and from a headless test today?) that wants a short design pass before the
+  first panel is built, not a decision made in passing here.
+- **`vendor/stb/stb_sprintf.h`** is now vendored (`vendor/VERSIONS`: stb pulls `stb_image.h` +
+  `stb_sprintf.h`). `foundation/fmt.h`'s `fmt_buf` is a `TL_FATAL("unimplemented")` STUB whose own
+  contract comment names exactly this as the unblock condition ("the body is filled in the day
+  `vendor/stb_sprintf/` lands") — that day has come. **Not this lane's file**: `fmt.h`'s design
+  doc is `CONTAINERS.md` §5/§8.6, not `TOOLING.md`, so implementing the body is CONTAINERS.md's
+  (w1-containers') call, not editor's, per cone discipline — flagging it here rather than touching
+  it, since nothing else in this file currently points at the fact that its blocker cleared.
+
+**What this does NOT unblock, checked and still blocked:** `editor/trace_export.cpp`
+(`TOOLING.md` §9.6 build order item 3's remaining piece, §9.3.2's fully-specified Chrome-trace
+JSON algorithm) needs `fmt_buf` for its formatting (§9.3.2: "Written with `fmt_buf` into a 1 MB
+staging buffer") — still a stub — AND `PlatformApi.file.append` for the actual disk flush,
+neither of which editor can substitute for: `editor/` is not on the `TL_FOUNDATION_TOOLING`
+`<stdio.h>` exemption (`CPP-SUBSET.md` §9 R-4 scopes that to `src/foundation/` only), so reaching
+for raw `stdio.h` in `trace_export.cpp` the way `probe.cpp`/`log.cpp` do would be a real
+CPP-SUBSET violation, not a workaround. Hand-rolling a formatter to route around `fmt_buf` would
+also violate `fmt.h`'s own stub comment ("would violate the doc's explicit 'over stb_sprintf' and
+duplicate a vendoring decision"). `trace_export.cpp` stays queued, genuinely blocked on
+`fmt_buf` landing first, not attempted this session.
+
+Also noted in passing, for whenever the first real panel or `trace_export.cpp` DOES land:
+`foundation/tl_prof.h`'s `tl_prof_test_ring_count`/`_ring_at`/`_counter_count`/`_counter_at` (and
+the same shape in `tl_log.h`/`tl_probe.h`) are the only read access to each ring, but their own
+contract comments state "Test-only introspection... never called from `src/` outside tests" —
+an explicit invariant, not just a naming choice. A real panel or `trace_export.cpp` consuming
+these needs that invariant lifted (rename off the `_test_` prefix, keep only the `_reset`/
+`_set_*` mutators genuinely test-scoped) — a small, mechanical, in-cone fix (these three headers
+are `TOOLING.md`'s own) best done in the same commit as the first real consumer that needs it
+(`ROADMAP.md`'s "pulled in by a real consumer, never pushed on spec"), not pre-emptively here.
+
+### editor/log_panel: the first v0 panel (2026-08-27), and what it settled
+
+Steward's check-in named the Log panel as the most tractable next slice (`LogState` already
+existed, needed only a `draw_fn`). Built it, and it settled three things every later panel
+inherits:
+
+- **A `PanelDrawFn` owns its own `ImGui::Begin(name, ...)`/`End()`.** `editor_frame` (still a
+  stub, `editor.h`'s Status note) will do no more than call every open panel's `draw_fn` - no
+  per-panel window boilerplate of its own. Recorded in `editor.h`'s `PanelDrawFn` contract
+  comment (its real home) since nothing in `TOOLING.md` pinned this down either way.
+- **The null ImGui backend genuinely works for headless panel tests**, confirmed by building
+  against it rather than assumed from the vendor-unlock note above:
+  `vendor/imgui/backends/imgui_impl_null.cpp` compiled into `tl_tests` (debug/dev only,
+  `tests/CMakeLists.txt`), a `tests/editor/imgui_test_util.h` helper standing up one process-wide
+  `ImGuiContext`, and `ImGui::FindWindowByName`/`ImGuiWindow::DrawList` (internal API,
+  `imgui_internal.h`, test-only) verifying a panel actually drew something. One caveat found
+  building it: `ImGuiWindow::ContentSize` reads 0 on a window's FIRST frame (auto-fit metrics
+  settle from frame two) - the test checks `DrawList->VtxBuffer.Size` instead, which is real
+  immediately.
+- **`foundation/tl_log.h`'s ring accessors were test-only by explicit contract**
+  ("never called from `src/` outside tests") **- promoted** (`tl_log_test_ring_count/_head/_at`
+  -> `tl_log_ring_count/_head/_at`, `tl_log_test_reset` stays test-scoped) now that
+  `log_panel.cpp` is a real, non-test caller. Exactly the class this file flagged above for
+  `tl_prof.h`/`tl_probe.h` "whenever the first real panel or `trace_export.cpp` lands" - done
+  here for `tl_log.h` specifically, not spec­ulatively for the other two (no consumer yet).
+
+**Also found and fixed, narrow and cited rather than silent:** `tools/audit/includes.py`'s
+`BACKEND_HEADERS` dict already named `src/editor` as allowed to include `imgui` (line naming it
+explicitly), but the separate `SYS_ALLOW_DIRS` allowlist gate 1 also checks was missing the
+matching `"imgui.h"` grant for `src/editor` (only `src/vendor_glue` had it) - a same-file internal
+inconsistency, not a new policy call: `docs/TOOLING.md` §9.1's file table already plans most of
+`src/editor/` (every `*_panel.cpp`, `console.cpp`, `inspector.cpp`, `shell.cpp`) to use ImGui
+directly, so `BACKEND_HEADERS`' own grant was clearly the intended shape and `SYS_ALLOW_DIRS` had
+just never been updated to match (nothing under `src/editor/` had included a vendor header before
+`log_panel.cpp`). Added the one missing entry, cited inline at the change site. Flagging here in
+case this reads differently to the steward than it did to me - it is a one-line, narrowly-scoped,
+self-evident consistency fix, not a design decision, but `tools/audit/` is not confirmed as this
+lane's own file the way `TOOLING.md` is.
+
+**CI red on `17c5a45`, both sanitizer legs, fixed (2026-08-27) — a real defect, steward-diagnosed
+from source since the ASan runtime is absent in this container.** `imgui_test_util.h`'s first
+version called `ImGui::CreateContext()` without `vendor_glue_imgui_install()` first, so every
+allocation went through the default (malloc) allocator instead of `pool_vendor` and was never
+freed - a genuine LeakSanitizer hit, not a false positive (`MEMORY.md` §8.6's own invariant: the
+install "must run before the first `ImGui::CreateContext()` call"). Fixed, and per the steward's
+explicit ask for a real design pass on "when does it get destroyed" (a genuine fork, not decided
+in passing): considered (a) never destroy, betting that `pool_vendor`'s VMem backing
+(`mem_pool.cpp` → `vmem_arena_init`, never `malloc`) makes it invisible to a malloc-only leak
+sanitizer - unverifiable locally, a bet on an assumption CI had not confirmed; (b) an explicit
+shutdown some test file calls itself - order-dependent, fragile; (c) `atexit(ImGui::DestroyContext)`
+registered once alongside the install call - matches `imgui_glue.test.cpp`'s own proven
+create/destroy-returns-pool-to-baseline round trip, and costs nothing extra since this codebase
+bans destructors (no static-teardown-ordering hazard to reason about). Chose (c).
+
+**Second, deeper bug found only by reproducing CI's actual invocation shape locally, not by
+reasoning on paper**: `tl_tests --tag '!slow'` (the sanitizer job, no `--isolate`) runs the WHOLE
+suite in one process, and `tests/vendor_glue/imgui_glue.test.cpp`'s own pre-existing test creates
+a SECOND context later in the same run. Traced `ImGui::CreateContext`/`DestroyContext`'s real
+bodies (`vendor/imgui/imgui.cpp`): `CreateContext` only leaves the NEW context current when there
+was NO current context beforehand; if this header's context were still current from an earlier
+editor test, `CreateContext` silently restores THIS one as current instead, and
+`imgui_glue.test.cpp`'s own `ImGui::GetCurrentContext() == ctx` assertion fails - reproduced
+locally first (`./tl_tests --tag '!slow'`, matching the sanitizer job exactly), confirmed red,
+then fixed: `imgui_test_begin_frame` sets this header's context current explicitly and
+`imgui_test_end_frame` releases it back to `nullptr` afterward, rather than leaving it current
+between frames - order-independent regardless of which editor/vendor_glue test runs when. The
+teardown itself also had to capture the exact `ImGuiContext*` rather than destroy the ambient
+"current" one at exit, for the same reason. Reproduced clean after the fix (non-isolated, exact
+CI shape, all four tiers): 592-609 tests (tier-dependent) selected, 0 failed.
+
+### `fmt_buf` implemented (2026-08-27, RULED — Rafael via the steward, narrow additive exception)
+
+Steward ruled the exception this lane flagged as blocked earlier: `foundation/fmt.h`'s `fmt_buf`
+stub named its own unblock condition (`vendor/stb_sprintf/` landing), that day came, `CONTAINERS.md`
+(the design home) is w1-containers' and that lane is merged and closed, and this lane is the real
+blocked consumer (`editor/trace_export.cpp` needs it). Conditions honoured: strictly additive
+(`src/foundation/fmt.cpp`'s `TL_FATAL` stub body replaced with the real implementation; nothing
+else in `foundation/` changed), the exception
+named in `fmt.cpp`'s own header and in `fmt.h`'s Status note, `CONTAINERS.md` §8.6b updated in the
+same commit (design home, rewritten from "ships as a stub" to record the real implementation, old
+note kept for history), `stbsp_vsnprintf` used over a hand-rolled formatter per `fmt.h`'s own
+instruction. `fmt.h`'s Determinism note now states plainly that `fmt_buf` is tooling-side only —
+`%f`/`%g` promotes a passed `float` to `double` at the call site, which `CPP-SUBSET.md` §9 bars
+from `src/sim/`/the det half of `foundation/`. Replaced `strview_interner_fmt.test.cpp`'s
+`fmt_buf_truncation` SKIP stub with a real test (fits, truncated-but-NUL-terminated with the
+untruncated length still reported, `count == 0` writes nothing).
+
+**Second `tools/audit/includes.py` touch this lane.** `fmt.cpp` needs `<stb_sprintf.h>`
+(declaration-only, the real implementation TU stays `vendor/stb/stb_impl.c`) and `<stdarg.h>` for
+the varargs forward. `SYS_ALLOW_DIRS` needed both headers, but `fmt` is deliberately NOT in
+`CMakeLists.txt`'s `TL_FOUNDATION_TOOLING` stem list (NONDET but not TOOLING, so it gets none of
+`log.cpp`/`prof.cpp`/`probe.cpp`'s automatic `stdio.h`/`stdlib.h`/`stdarg.h` grant) — scoped to a
+`"src/foundation/fmt"` prefix rather than widening all of `"src/foundation"`, matching
+`src/core/loaders`' own narrowest-prefix precedent for `stb_image.h`.
+
+**Steward review caught a real inconsistency here, corrected same-day (2026-08-27):**
+`BACKEND_HEADERS`'s `"stb_"` row was widened to grant all of `"src/foundation"`, not scoped to
+`"src/foundation/fmt"` the way `SYS_ALLOW_DIRS`'s matching entry was — asymmetric, and this
+lane's own commit message claimed "the same reason as" the earlier `imgui.h`/`src/editor` fix
+(which *completed* an existing grant) when this one *created* a new, wider-than-needed one. Fixed
+by narrowing `BACKEND_HEADERS["stb_"]` to `"src/foundation/fmt"` too — both gates now agree on
+the same narrow scope. The steward's own distinction, worth keeping: completing an existing grant
+on a second gate is mechanical and fine in-cone; creating a new grant should be scoped as
+narrowly as the work in front of it, not the module it happens to live in.
+
+Validated on all four tiers, broad regression sweep (`--isolate --tag '!runner' --tag '!slow'`,
+589 tests) 0 failed on all four, `includes.py`/`docaudit.py`/`commit_docs.py` clean.
+
+**Still open, as the steward's ruling named:** `trace_export.cpp` now has `fmt_buf` but still
+needs `PlatformApi.file.append` for the actual disk flush (unbuilt, platform's file) — build the
+in-memory JSON-into-`fmt_buf` half next and defer the flush explicitly, rather than waiting on
+platform a second time for a feature that is otherwise ready.
+
+### `core/desync_diff.cpp` — CORRECTION received, registry half not yet built (2026-08-27)
+
+Steward corrected an earlier finding in this file: `Snapshot` was reported as not existing
+anywhere in `src/core/` — true, but the wrong place to look. It lives one module down:
+`foundation/snapshot.h` (`Snapshot`, `SnapshotRing`), `foundation/arena_registry.cpp`
+(`registry_snapshot`/`registry_restore`). `core/` sits above `foundation/` in the DAG
+(`tools/audit/includes.py`'s `MODULE_DAG["core"] = ("core", "foundation", "platform")`), so
+`core/desync_diff.cpp` may include it freely. Lesson recorded for this lane's own future blocker
+sweeps: grep the whole `src/` tree, not the module a symbol is expected to live in — a miss in
+one directory is not evidence the symbol does not exist.
+
+§9.3.8's algorithm has two halves: the **registry-order walk** over per-arena `used[]`/`blob`
+(`Snapshot`'s own layout: segments in registry order, each 64-byte aligned) against a real
+`ArenaRegistry` and `Snapshot`, and the **`TL_POOL_ROW`/Alloy pool-table walk**, genuinely
+blocked (Alloy has not landed). **Built (2026-08-27): the registry-order walk, scoped to
+`DIFF_FINGERPRINT_MISMATCH`/`DIFF_USED`/`DIFF_BYTES`** (`core/desync_diff.h`/`.cpp`,
+`tests/core/desync_diff.test.cpp`). The ECS-column case (`table = component info`) needs
+cross-referencing `ArenaRegistry`'s per-arena `NameHash` ids against `World`'s registered
+`ComponentInfo` table for per-field formatting (`fmt(kind, a)`/`fmt(kind, b)`) — real work, not
+yet scoped or started, still deferred alongside the Alloy pool case; both report `DIFF_BYTES` (the
+honest fallback) until they land.
+
+**Read `registry_snapshot`/`registry_restore` (`foundation/arena_registry.cpp`) before writing a
+reader against the blob layout, and found the pseudocode's signature was missing a parameter**:
+only `ARENA_SNAPSHOT`-flagged arenas occupy blob space — `Snapshot::used[i]` is recorded for
+EVERY registered arena (diagnostic), but the write-side offset only advances for the flagged
+ones — so `desync_diff` cannot know which arenas are flagged without the registry itself. Added
+`const ArenaRegistry* reg` as the real first parameter and folded the completed signature (plus
+the `DiffKind`/`DesyncEntry`/`DiffFn` shapes, similarly undescribed beyond the pseudocode's loose
+field names) into `TOOLING.md` §9.3.8 in the same commit — `CONTAINERS.md` §8.6a's own precedent
+for this class of gap.
+
+Five tests: fingerprint mismatch short-circuits (returns 1, one call); identical snapshots report
+nothing; a `used[]` mismatch reports `DIFF_USED` and never *also* reports `DIFF_BYTES` for the
+SAME arena (continue-after-report); a same-size content difference (a byte poked directly in a
+live arena buffer between two snapshots) reports `DIFF_BYTES` at the correct offset; `max_n`
+stops the walk after exactly that many reports. One test bug found and fixed before it was a
+bug: `world.entities.live` is a fixed-capacity bitset (`used[]` constant, content changes as
+slots go live), so a real `DIFF_BYTES` alongside the `DIFF_USED` arenas from a single entity spawn
+is CORRECT behaviour, not a defect — the first version of `desync_diff_used_mismatch_skips_
+byte_compare` asserted no `DIFF_BYTES` anywhere in the result set at all, which is stricter than
+the actual contract (no `DIFF_BYTES` for the SAME arena that already reported `DIFF_USED`);
+confirmed empirically (a temporary debug log naming the arena index) before narrowing the
+assertion, not assumed.
+
+Validated on all four tiers, broad regression sweep (`--isolate --tag '!runner' --tag '!slow'`,
+594 tests) 0 failed on all four, `includes.py` clean with no further audit-script changes needed
+this time.
+
+Rafael asked in-session (2026-08-27) for this to be recorded as a planned post-v0 feature, not
+decided now. `vendor/imgui` is the **docking branch** (`IMGUI_HAS_DOCK`/`IMGUI_HAS_VIEWPORT`
+both defined) - docking panels within the one OS window is already in scope for v0
+(`TOOLING.md` §1) and needs no backend change. Dragging a panel OUT into a separate OS-level
+window (ImGui's *multi-viewport* feature) needs `ImGuiBackendFlags_PlatformHasViewports` +
+`...RendererHasViewports`, which the **SDL_Renderer** backend `TOOLING.md` §1 names for v0 does
+not implement upstream, ever (SDL's own docs) - so this cannot land on the v0 render path
+regardless of how much of `editor/shell.cpp` gets built.
+
+**Discussed, three options for post-v0:** (a) stay on SDL_Renderer - simplest, but a permanent
+dead end for this feature; (b) raw OpenGL3 (`imgui_impl_opengl3.cpp` + an SDL3 GL context) - full
+multi-viewport support, viable specifically because `CANON.md`'s target matrix is Windows + Linux
+only (no macOS, so OpenGL's deprecation-on-Apple problem never applies), but a second render path
+alongside whatever render2d's sprite/batch pipeline uses; (c) **SDL3_GPU** (the unified
+Vulkan/D3D12/Metal-wrapping API SDL3 itself is investing in) with ImGui's `imgui_impl_sdlgpu3.cpp`
+backend, which supports multi-viewport - the bigger lift (render2d's own sprite/batch path would
+move onto it too, not just ImGui) but the only option that isn't a legacy stopgap.
+
+**Rafael (2026-08-27, in-session): "I like that direction for sdl3_gpu and imgui_multi-viewport."**
+Recorded durably in `docs/TOOLING.md` §1 + the corrected §10 R-2 (this lane's own doc — the v0
+multi-viewport limitation and the SDL_GPU direction as recommendation). Still **not** a formal
+ruling on `RENDER2D.md` §6's own backend-trigger table (render2d's file, not editor's, and that
+table's "trigger" row currently reads "a shader a demo needs that SDL_Render cannot express" —
+multi-viewport pop-out is a second, independent trigger worth adding there) — filed as a ruling
+request below rather than edited directly (cone discipline).
+
+### editor/console: the Console panel (2026-08-27), and a real ODR bug found validating it
+
+Built `console_panel_register`/`console_panel_draw` directly into `console.h`/`.cpp` (not a
+separate `console_panel.cpp`) — `TOOLING.md` §9.1's file table places "registry, tokenizer,
+completion, history, cvar UI, Luau REPL hand-off" all in `editor/console.cpp` itself, unlike
+Log/Profiler/Probes/World's own separate `*_panel.cpp` files. `Editor` gained the panel's real
+state — `ConsoleState console`, a live input-line buffer, the most recent reply/error — the same
+"caller-owned, not a hidden static" shape `console.h`'s own contract already insists on (matching
+`sel`'s existing precedent on the same struct). Scope: the command REPL only. "cvar UI" and "Luau
+REPL hand-off" (the same file-table row) are NOT built here — cvar UI is its own real feature not
+yet scoped, and the Luau binding layer this needs does not exist (`docs/LUAU-LAYER.md`, a
+different lane) — both explicitly deferred, not silently skipped. Lockstep is hardcoded `false`
+in the panel's submit path since no netcode/Hovel session exists yet to ask; the real source is a
+follow-up once that lands.
+
+Four tests, matching `log_panel.test.cpp`'s precedent, with the same honest limit stated up
+front: nothing in this tree can simulate a real keystroke through the null ImGui backend (no
+`imgui_test_engine` vendored, the same gap that blocked `inspector_roundtrip_per_kind` earlier
+this session), so the "Enter submits" path is exercised by calling `console_exec` directly (what
+the draw function's own submit branch does) rather than through a simulated widget interaction,
+and the tests check that DRAWING the resulting state doesn't crash and renders something.
+
+**Validating on `dev` tier (not just `debug`) surfaced a real ODR bug in `imgui_test_util.h`
+itself, not in the Console panel's own code — recorded in full in `LESSONS.md`.** Short version:
+`g_imgui_test_ctx` lived in an anonymous namespace (internal linkage, one copy per `.cpp` file),
+but the `inline` functions reading/writing it (`imgui_test_ensure_context` et al.) have vague
+linkage, so the linker keeps only ONE translation unit's compiled body for the whole binary. With
+only `log_panel.test.cpp` including the header this was invisible (one TU, no conflict); the
+moment `console_panel.test.cpp` became a SECOND consumer, calls from either file could run
+through whichever TU's copy survived linking, silently touching a different `g_imgui_test_ctx`
+than the caller believed. Passed on `debug` (`-O0`), aborted on `dev` (`-O1`+) inside
+`ImGui_ImplNull_NewFrame`'s own internal "no current context" assert — diagnosed with `fprintf`
+breadcrumbs plus a GDB backtrace, not guessed. Fixed by making the variable a real `inline`
+variable (C++17, external/merged linkage) instead of an anonymous-namespace one, matching what
+the `inline` functions around it were already assuming.
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`, matching the sanitizer job's own invocation shape - now standard
+practice for this lane after the earlier CI-red fix taught the same lesson from the other
+direction) — 598/616 selected (tier-dependent), 0 failed in every combination.
+`includes.py`/`docaudit.py` clean.
+
+### CI red on `88edf34` (Windows debug only) — the ODR fix above was correct; the real bug was elsewhere
+
+Steward dispatched a full diagnosis (regression window narrowed to `e51966a` by CI run history,
+zero-output/fastest-of-its-siblings failure shape flagged, four concrete deltas between the
+failing `log_panel_register_wires_into_editor_panel_table` and its passing `console_panel` twin
+named exactly). Traced from there rather than re-deriving: the shared difference is that only the
+`log_panel` test calls `tl_log_test_reset()` — and `foundation/log.cpp`'s `tl_log_test_reset()`
+turned out to have the **exact same bug this file already documents for `prof.cpp`**:
+`g_log = LogRing{}` value-initializes a temporary (`LogRecord` 248 B × `slot[4096]` ≈ 0.97 MB)
+before assigning it. An order of magnitude smaller than `prof.cpp`'s ~53 MB, so it fit inside
+Linux's 8 MB default stack on every tier this lane validated (including `debug`/`-O0`, where
+`prof.cpp`'s version did NOT fit) — but Windows' default thread stack is 1 MB, and the same
+commit's `Editor` struct had just grown by a ~53 KB `ConsoleState`, which was enough to tip a
+test constructing `Editor ed;` and then calling `tl_log_test_reset()` over that smaller budget.
+Zero test output, fastest of its siblings - a stack overflow crashes before any assertion runs,
+matching `prof.cpp`'s own documented signature exactly. Fixed the same way:
+`memset(&g_log, 0, sizeof(g_log))`. Grepped `src/` for the same literal pattern
+(`g_\w+ = \w+{};`) once this second instance was found — no third exists today. Full lesson
+(the size-vs-stack-budget corollary this instance adds) in `LESSONS.md`.
+
+**The ODR fix recorded above was NOT the bug** — it was real (found and fixed correctly, holds up
+under review, worth keeping) but it was not what CI's Windows legs were reporting; the actual
+regression was a latent, pre-existing bug in a sibling file that this commit's unrelated struct
+growth happened to trip for the first time. Recorded plainly since the steward's own dispatch
+explicitly asked for "a dead end is a reportable outcome too" if a hypothesis was wrong — here it
+wasn't a dead end exactly (the ODR concern was genuine and the fix stands), but the REGRESSION's
+actual cause was one level removed from where the diff pointed, which is worth being honest about
+rather than letting the two fixes blur together as if they were the same finding.
+
+Validated on all four tiers, both isolated and non-isolated `--tag '!slow'` runs, 0 failed in
+every combination. `includes.py`/`docaudit.py` clean. Could not reproduce the Windows-specific
+crash locally (no Windows host) — reasoned from source (the exact size computation, the exact
+`prof.cpp` precedent) per the steward's own constraint of one validated hypothesis per push
+rather than a guess-and-check loop; CI is the adjudicator here, same as the sanitizer-red case.
+
+### editor/inspector: the generic reflection walker (2026-08-27)
+
+Built `inspector_panel_register`/`inspector_panel_draw`/`inspector_set_scalar_field` in a new
+`editor/inspector.h`/`.cpp` pair (`TOOLING.md` §9.1's file table already gave it its own file,
+unlike Console). A background research pass against the real `reflect.h`/`column.h`/`handle.h`/
+`world.h`/`editor.h` found `TOOLING.md` §9.3.4's pseudocode predated several `ECS.md`
+reconciliations — `FK_*` naming that is really `K_*`, `world_get(World*,ComponentId,Entity)`/
+`world_singleton_ptr` under those signatures that do not exist, a `CMD_SET_FIELD` payload shape
+(`{u16 field;u16 elem;u32 size;u8 bytes[]}`) that isn't the real one (`{u32 field_index;
+bytes[field.size]}`, no element index — `ECS.md` §10.5, not §4), and a `custom_draw`/`debug_draw`
+hook pair that `ComponentInfo` doesn't carry and no registry implements. §9.3.4 is rewritten in
+the same commit to match the shipped code, folding this session's own `desync_diff.cpp`/
+`CONTAINERS.md` §8.6a precedent of "correct the doc in the same commit, not after."
+
+Scope, decided before writing any widget code: an edit is offered ONLY for a non-array
+(`FieldInfo::count == 1`) integer or `K_bool` field. The nine fx palette kinds and every
+handle/`K_StrId` kind are DISPLAY ONLY — an fx edit needs a decimal-to-raw RNE quantizer, and none
+exists anywhere in this tree yet (`core/cvar.cpp`'s own `CVAR_FX_RAW` case documents the identical
+gap in its own comment). Inventing one here, untested — nothing in this tree can simulate the
+keystrokes that would exercise it — would be an unreviewable correctness risk for something that
+writes into registered/hashed sim state through a real command, which `CLAUDE.md` asks to avoid.
+An array-element write is not representable in the real `CMD_SET_FIELD` shape at all (no element
+index), matching the same gap `editor/dotpath.cpp`'s `dotpath_set_raw` already guards
+(`TL_CHECK(f->count == 1u)`) — the walker guards identically, by never drawing a widget for
+`count > 1` rather than drawing one that would write the wrong bytes. Lockstep is hardcoded
+`false` at the one call site, matching Console's own note — no netcode/Hovel session exists yet to
+ask.
+
+Seven tests (`tests/editor/inspector.test.cpp`): panel registration, no-selection no-crash,
+COMP_HIDDEN skip + array-field display together, a selected entity exercising every FieldKind
+family at once (int, bool, the fx palette, a self-referencing `K_Entity` handle, `K_StrId` through
+a real interner), a singleton drawn with no selection, and `inspector_set_scalar_field`'s
+lockstep-refusal and successful-write paths called directly against a real `World` (write, flush,
+read back) — the same "call the write function directly, not through a simulated keystroke" shape
+`console_panel.test.cpp`/`dotpath.test.cpp` already established, since nothing in this tree can
+drive a real widget edit through the null ImGui backend.
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`) runs, 0 failed in every combination. `includes.py`/`docaudit.py`
+clean.
+
+Still open, not silently closed by this slice: Console's cvar UI and Luau REPL hand-off remain
+deferred (weighed at ship review); `desync_diff`'s Alloy `TL_POOL_ROW` half stays blocked (Alloy
+not landed); the fx/handle edit widgets above stay display-only until an RNE quantizer exists and
+is itself reviewed and tested — filed as a ruling request below, not assumed.
+
+**Ruling request (RR):** should `inspector.cpp` (or `cvar.cpp`, whichever lands the primitive
+first) own the decimal-to-fixed-point RNE quantizer `FX-PALETTE.md`/`cvar.cpp`'s own
+`CVAR_FX_RAW` gap both point at, or does `foundation/fx.h` gain it as a shared `fx::from_f64`
+helper both callers use? Either answer unblocks fx-field editing in the Inspector and `set
+<name> <f64>` in the Console cvar UI at once — currently two independent TODOs pointing at the
+same missing primitive.
+
+### editor/profiler_panel: the Profiler panel (2026-08-27)
+
+Sixth item in `TOOLING.md` §9.6 build order item 5's panel list, after Inspector. New
+`editor/profiler_panel.h`/`.cpp`: reads `foundation/tl_prof.h`'s ring (the latest completed frame,
+or a paused view slot) and prints a depth-indented text list of every `ProfNode` (name, tick
+delta, worker, job id where tagged) plus the counter table.
+
+`tl_prof.h`'s `tl_prof_test_ring_count`/`_ring_at`/`_counter_count`/`_counter_at` are renamed to
+`tl_prof_ring_count`/`_ring_at`/`_counter_count`/`_counter_at` — promoted from test-only to a real
+production API now that `profiler_panel.cpp` is a real, non-test caller, the exact same move
+`log_panel.cpp` made for `tl_log_ring_count`/`_at` earlier this lane. `tl_prof_test_reset` stays
+test-scoped (nothing on a live path ever clears the ring). `tests/foundation/tl_prof.test.cpp`'s
+existing call sites were mechanically renamed to match; no behavior changed, only the promoted
+functions' names (`prof.cpp`'s own bodies are untouched).
+
+Scope, narrower than `TOOLING.md` §9.4's Profiler row as originally written (now corrected in the
+same commit): the node tree draws as a **text list, not a rendered flame graph** — no rectangle/
+timeline widget exists in this tree, and building one is a real feature on its own, not a
+byproduct of the first panel to read `ProfState`. "Pause" freezes the **panel's own view**
+(`Editor::prof_paused`/`prof_view_slot`, two new fields), never `ProfState.head` — freezing the
+shared ring would stop every other reader (a future trace export, a second `Editor`) from seeing
+live frames for one panel's convenience, and `prof.cpp` gained no pause concept of its own.
+`dump` (`TOOLING.md` §9.3.2) is not wired — `trace_export.cpp` is still blocked on `fmt_buf`'s
+disk-flush half (`PlatformApi.file.append`, §9.6 build order item 3), so there is nothing to call.
+
+Five tests (`tests/editor/profiler_panel.test.cpp`): registration, empty-ring no-crash, one frame
+with nested scopes + a counter (renders something, `DrawList->VtxBuffer.Size > 0`), a paused view
+slot driven directly (`ed->prof_paused`/`prof_view_slot` set the way the panel's own checkbox/
+slider would, matching every other panel's "drive the write path directly, nothing here can
+simulate a widget drag" precedent), and a stale paused slot past the current ring count — proves
+`profiler_panel_draw`'s own clamp-to-0 guard rather than handing a stale index straight to
+`tl_prof_ring_at` (which is `TL_CHECK`-fatal past `ring_count`).
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`) runs, 0 failed in every combination. `includes.py`/`docaudit.py`
+clean. `[docs:none]` on the `foundation/` half of this diff per the RR-34 addendum above —
+`TOOLING.md` §9.4 genuinely documents the promotion and the v0 scope narrowing in this same
+commit, but `commit_docs.py`'s `MODULE_DOCS["foundation"]` does not credit `TOOLING.md` for it.
+
+### editor/probes_panel: the Probes panel (2026-08-27), and a THIRD instance of the stack-temporary bug
+
+Seventh panel in `TOOLING.md` §9.6 build order item 5's list, after Profiler. New
+`editor/probes_panel.h`/`.cpp`: a read-only summary table over `foundation/tl_probe.h`'s
+registered keys (name, kind, enabled, count, changes, min/max/mean, last value, last tick).
+
+`tl_probe_test_key_count`/`_key_at` promoted to `tl_probe_key_count`/`_key_at`, same shape as the
+Log/Profiler panels' own promotions. `_key_at` gained a `TL_CHECK(slot < count)` bound it never
+had as a test-only function (`&g_probe.keys[slot]` with no guard) — added while promoting it to a
+real API a panel calls with a caller-supplied index, matching `tl_log_ring_at`/`tl_prof_ring_at`'s
+own precedent of checking `slot`. Every other accessor (`_staging`, `_reset`, `_set_tick`,
+`_set_enabled`) stays test-scoped — no real toggle path exists yet (`TOOLING.md` §9.4's Probes row,
+corrected in this same commit).
+
+**Found a third instance of this session's own stack-temporary bug class while touching
+`probe.cpp` for the promotion — not hypothetical, found by re-running the exact grep
+(`= \w+{};` on a namespace-scope static) `LESSONS.md`'s second-instance entry called for.**
+`tl_probe_test_reset`'s `g_probe = ProbeState{}` value-initializes a ~160 KB temporary
+(`ProbeKey keys[1024]` at 96 B each, plus a 64 KB `staging` buffer) before assigning it — the
+identical shape already fixed twice this lane (`prof.cpp`'s ~53 MB ring, `log.cpp`'s ~0.97 MB
+ring). 160 KB is well under Linux's 8 MB default stack (why every tier this lane validates never
+tripped it) but is exactly the class of number that tips over on a smaller stack budget (Windows'
+1 MB default thread stack, `log.cpp`'s own CI-red precedent) the moment it stacks with other
+frames in the same call chain — not yet observed failing, but not proven safe either, and the fix
+costs nothing. Fixed the same way: `memset(&g_probe, 0, sizeof(g_probe))`. Re-ran the pattern grep
+across all of `src/` after this fix; the only remaining matches (`render/queue.cpp`'s
+`TexHandle{}`, `mem_pool.cpp`'s `MemPoolStats{}`, `probe.cpp`'s own per-key `ProbeKey{}` at line
+51) are single small structs, not risky — this is the actual state of the codebase today, not an
+assumption carried forward from the second-instance fix's "no third exists" claim, which this
+finding falsifies for whatever grep scope that check actually ran.
+
+Four tests (`tests/editor/probes_panel.test.cpp`): registration, empty-table no-crash, every
+`ProbeKind` drawn together (LOG, an fx-scaled LOG, ON_CHANGE, MARK, in-range ASSERT — proves the
+row renders for each kind without crashing on a kind's own always-zero fields, e.g. MARK never
+sets min/max/mean), and a disabled key still shown (read-only means no control to hide it behind).
+
+Validated on all four tiers, both isolated and non-isolated (`--tag '!slow'`) runs, 0 failed in
+every combination. `includes.py`/`docaudit.py` clean. `[docs:none]` on the `foundation/` half of
+this diff, same RR-34-addendum reasoning as the Profiler commit above — `TOOLING.md` §9.4 is
+genuinely updated in this same commit.
+
+### editor/world_panel: the World panel (2026-08-27) — the sixth and final v0 panel, and a dangling-pointer bug in a helper shared by all six
+
+Last panel in `TOOLING.md` §9.6 build order item 5's list. New `editor/world_panel.h`/`.cpp`:
+the entity slot walk (`World.entities`, a `SlotMap<EntityRecord, Entity>` — walked
+`0..slotmap_slot_cap()` skipping dead slots per `CONTAINERS.md` §2, never `0..live_count`,
+virtualized via `ImGuiListClipper`), the singleton component name list (reusing
+`inspector.cpp`'s own `w->comps[]`/`COMP_SINGLETON` walk), and the registered arena set
+(`World::registry`).
+
+Scope, narrower than `TOOLING.md` §9.4's original World row (corrected in this same commit):
+**"last per-arena hashes" was not a stored field anywhere in this tree** — `ArenaEntry` carries
+only `{id, arena*, flags}`, no cached hash. `registry_hash_all` is real and does compute one, but
+it rehashes every `ARENA_HASHED` entry's full `[base,used)` on every call — a cost that scales
+with world size, unlike every other panel's fixed-cost reads. v0 computes it on an explicit
+"rehash arenas" click instead of every frame, keeping the previous click's set
+(`Editor::world_arena_hash_cur`/`_prev`, two new fields, dev_arena-backed pointers — NOT inline
+array members, to avoid growing `sizeof(Editor)` by the ~64 KB two `MAX_ARENAS`-sized arrays would
+cost, the same class of stack-growth risk this lane's own stack-temporary bugs already taught) to
+flag which arenas changed since the last click. No readable arena NAME exists anywhere either
+(`ArenaEntry::id` is an opaque `NameHash`, no reverse lookup) — arenas display by hex id.
+
+**Found mid-build that `registry_hash_all` is `TL_CHECK`-fatal on an unsealed registry**
+(`arena_registry.cpp`), and `registry_seal` is never called anywhere in this tree today —
+sealing is the registry owner's job, `app/`'s (`W4`, not built), the identical "blocked on app/"
+shape `editor.h`'s own Status note already carries for `editor_frame`. Shipping the button
+unconditionally would TL_FATAL the whole dev session on the first click in any world this lane's
+editor can reach today. Guarded instead: the arena section hides the button entirely (shows
+"registry not sealed yet") until `w->registry->sealed`, and `world_panel_rehash_arenas` itself
+checks again and no-ops rather than TL_FATALing, so a caller that reaches it directly (a future
+`app/`, or a test) is also safe. This lane's own tests seal their fixture registry explicitly
+(`registry_seal(&f.reg)`) to exercise the real hash path, and a dedicated test proves the
+unsealed-registry no-op holds too.
+
+**Found and fixed a real dangling-pointer bug in `make_editor()`, the `Editor` construction
+helper duplicated across every one of this lane's six panel test files** (Log, Console,
+Inspector, Profiler, Probes, and this commit's own World): `VMemApi api = test_vmem_api();
+editor_init(ed, &api, 0u);` — `api` is a plain LOCAL, but `editor_init` → `vmem_arena_init`
+STORES the raw `VMemApi*` pointer into `ed->dev_arena.os` rather than copying its contents. The
+moment `make_editor` returns, that pointer dangles. None of the first five panels ever noticed
+because none of them ever called `arena_push` on `ed->dev_arena` — this commit's "rehash arenas"
+feature was the first to do so, and it segfaulted with a confusing backtrace (the faulting PC's
+value matched `ed`'s own address, because a later stack frame had reused `api`'s old stack slot).
+This is the exact same root shape `dotpath.test.cpp`'s `dp_fixture`/`inspector.test.cpp`'s
+`ins_fixture` had already found and fixed for a DIFFERENT stored pointer (their own `Interner`
+setup, both explicitly commented "api MUST be static too") — but that fix was never generalized
+to `make_editor()`, because nothing connected the two until this file's feature happened to be
+the first to exercise the dangling path. Fixed by making every `make_editor()`'s `VMemApi api` a
+`static` local (six test files: `console_panel`, `editor`, `inspector`, `log_panel`,
+`probes_panel`, `profiler_panel`, plus this commit's own `world_panel` — `test_vmem_api()` is a
+pure, stateless value-returning function, so a single process-lifetime copy is exactly as correct
+as a fresh one per call). Full lesson, generalized past "make this one helper static" to the
+actual rule (grep an `init`-shaped function's contract for "stores"/"pointer to" before assuming
+a local argument is safe), recorded in `LESSONS.md`.
+
+Six tests (`tests/editor/world_panel.test.cpp`): registration, empty-world no-crash, null-world
+no-crash, a populated world with live AND dead (destroyed) entity slots plus a singleton drawn
+together, `world_panel_rehash_arenas` computing and correctly flagging a changed arena across two
+clicks (driven directly — nothing in this tree can simulate a real button click), and the
+unsealed-registry no-op path.
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`) runs, 0 failed in every combination — including the five sibling
+test files whose `make_editor()` this commit also touched. `includes.py`/`docaudit.py` clean.
+
+**`TOOLING.md` §9's v0 done criterion (§9.6 build order item 5) is now fully met on the panel
+count: Log, Console, Inspector, Profiler, Probes, World all exist.** The criterion's OTHER two
+clauses — "an edit in the inspector appears in the replay log" (blocked: `keyframes.cpp`/Replay,
+build order item 7, not started) and "zero heap allocation per frame outside `pool_vendor`" (not
+yet independently verified end-to-end) — are not yet satisfied; PR #16 does not merge until a
+fresh-context adversarial review confirms the whole v0 criterion, per the steward's own standing
+instruction, not just the panel count. Console's cvar UI and Luau REPL hand-off, and Inspector's
+fx/handle edit widgets, remain the deferrals already recorded above — still open, not silently
+closed by reaching six-of-six panels.
+
+### Ruling request: `keyframes.cpp`'s seek algorithm cannot reproduce an inspector edit — a real gap, not a v0 scoping choice
+
+Researched `TOOLING.md` §9.6 build order item 7 (`keyframes.cpp` + Replay panel, the next item
+after all six v0 panels) before writing any code, per this lane's own slice-brief discipline. Most
+of it is buildable in-cone today: `foundation/ring.h`'s real `RingBuffer<T>`, `foundation/
+snapshot.h`'s real `Snapshot`/`registry_snapshot`/`registry_restore` (the per-slot budget is a
+real runtime formula — `ring_init`'s own `slot_cap_bytes` parameter, "T-A-03 replaces the guess" —
+not a hardcoded worst case), and `core/producers/replay.h`'s real, already-tested
+`ReplayProducer` (`cursor` is a public field, matching §9.3.10's "set the cursor to
+`kf.input_offset`"). `core/loop.cpp`'s `engine_tick_once` is real (not a stub) and already calls
+`core/recorder.cpp`'s `recorder_tick` every tick, which already computes and stores `{InputFrame
+per peer, world_hash}` per row (`RecordedInputRow`) — this is the "recorder appends... world hash"
+half of §9.3.10 verbatim, already built and tested by the **loop+input** lane (`core/recorder.h`'s
+own contract block: "any producer's output can be recorded... replaying it through the Replay
+producer and comparing the hash trace IS the determinism test"). None of this needed inventing;
+tests can drive `engine_tick_once` directly the way `tests/core/loop.test.cpp` already does, with
+no live production loop required (`app/wiring.cpp`, `W4`, still not built, is only needed for a
+REAL dev session to record itself — `editor_frame` is already stubbed pending the same `app/`/
+`platform/` wiring, so this is not a new blocker, just the existing one).
+
+**The actual gap**: `core/recorder.h`'s own contract block is explicit that the format records
+ONLY `{frames, world_hash}` — no commands. `editor/inspector.cpp`'s edits reach sim state through
+`world_set_field_cmd` (`CMD_SET_FIELD`), a command applied at the barrier, NOT an `InputFrame` —
+it is never written to `RecordedInputRow` at all. §9.3.10's seek algorithm restores the nearest
+keyframe's `Snapshot`, then re-simulates forward by feeding the `ReplayProducer` the RECORDED
+`InputFrame`s for the intervening ticks, and asserts `TL_CHECK(world_hash(T) == recorded hash)`.
+If an inspector edit happened between keyframe N and tick T, re-sim from keyframe N replays only
+inputs — never the edit — so the re-simmed world at T does NOT contain the edit, and its hash
+provably differs from the ORIGINAL run's recorded hash at T (which DID include the edit's effect).
+That is not a corner case this lane could scope around: `TL_CHECK(world_hash(T) == recorded hash)`
+would fire on essentially any scrub that crosses an inspector edit, for every world built once this
+panel exists — a real correctness defect in the spec as literally written, discovered before
+writing any of it, not after.
+
+This directly collides with `TOOLING.md` §9.6's own v0 done criterion: **"an edit in the inspector
+appears in the replay log."** Two readings, and the right build depends on which one is meant:
+1. **Strong reading** (scrub past an edit and it holds): requires `RecordedInputRow` (or a sibling
+   record) to ALSO capture commands issued between ticks, not just `InputFrame`s — a schema change
+   to `core/recorder.h`/`.cpp`, the **loop+input** lane's own file (`ROADMAP.md` §2, `W3`, PR #15,
+   already merged), squarely outside editor's cone (`ROADMAP.md` §0 rule 2) and a real design
+   decision (what a "command log" entry looks like, ordering vs. inputs, wire-format/version
+   implications for `RecordedInput` files already on disk) — not a fix this lane can make
+   unilaterally the way the `log.cpp`/`prof.cpp`/`probe.cpp` promotions were ruled in (those were
+   one-line, no-interface-change bug fixes; this is a new capability with cross-lane format
+   implications).
+2. **Weak reading** (the edit is visible in the LIVE session, immediately, before any scrub — which
+   is already true today: `world_set_field_cmd` applies at the very next barrier, and every panel
+   already reads live `World` state): needs no recorder change at all, and this lane can build
+   `keyframes.cpp`/the Replay panel exactly as specified today, with a v0 scope note that a scrub
+   crossing an inspector edit is a KNOWN, documented gap (the edit's effect is lost on re-sim,
+   `TL_CHECK` fires or the state silently reverts, depending on how loosely v0 chooses to guard it)
+   until reading 1's cross-lane schema change lands.
+
+**What needs ruling:** which reading is the v0 done criterion, and if reading 1, is the schema
+change scoped now (this lane files a cross-lane request against loop+input's merged files) or
+deferred to a later wave with reading 2 shipped as v0's honest, documented limit? Stopped here per
+`CLAUDE.md`'s slice-brief step 6 ("what would be wrong in the big picture if this slice were built
+as literally specified... stop and file a ruling request — do not build the narrow slice") rather
+than guessing past a determinism-relevant correctness gap. `core/recorder.cpp`/`.h`,
+`core/producers/replay.h`/`.cpp`, `core/loop.cpp`/`.h`, `foundation/snapshot.h`/`.cpp`,
+`foundation/ring.h` all read directly (file:line) to confirm this, not inferred from `TOOLING.md`'s
+own pseudocode, which is known (this session, repeatedly) to predate several reconciliations.
+
+#### RR-42 (steward-allocated, ruled by Rafael, 2026-08-27): the ruling above — RECORDED FOR WHOEVER BUILDS ITEM 7, NOT BUILT IN THIS PR
+
+**The finding is bigger than the filing above framed it.** `core/commands.h`'s own comment says
+the external chunk is "for recorders outside any system (editor, app)" — so every external-chunk
+command shares this property, not just the Inspector's `CMD_SET_FIELD`: the console's
+`CMD_SET_CVAR`, dotpath writes, and (once wired) script/data reload and asset-ready all reach sim
+state the same way, outside any `InputFrame`. Combined with `recorder.h`'s own claim that
+replaying and comparing the hash trace IS the determinism test, the real statement is: **any
+external-chunk command applied during a recording makes that recording non-reproducible, and the
+determinism harness has no way to know.** This is a harness-soundness bug, not a Replay-panel
+scoping choice — found from the editor's end, but never only the editor's problem.
+
+**Ruling: a taint flag on the recording, plus forced keyframes at every external-chunk apply —
+not a command log.** Splits the two use cases `TOOLING.md` currently conflates:
+- **(a) Harness integrity** — the recording carries a TAINT FLAG, set the moment any
+  external-chunk command applies. The determinism harness refuses or ignores a tainted recording,
+  so the hash-trace test keeps meaning exactly what it claims to mean.
+- **(b) Dev scrubbing** — `keyframes.cpp` forces a keyframe at every external-chunk apply. A seek
+  to any tick at or after such an edit then RESTORES from a keyframe that already contains it,
+  rather than trying to re-derive it via input-only re-sim, so scrubbing across an edit reproduces
+  the session faithfully.
+
+Why this beats a command-log schema change (the "strong reading" option this filing offered):
+(a) keeps the determinism test honest without teaching the recorder a command format at all, (b)
+gives the Replay panel the behaviour a developer actually wants, and neither requires touching
+`RecordedInputRow`'s own wire shape in the general case.
+
+**Cost caveat, already resolved by the steward — do not re-investigate:** forced keyframes could
+be expensive if `CMD_ASSET_READY` fires often during streaming, but this is moot today —
+`commands.h`'s own text states `CMD_ALLOY`/`CMD_SCRIPT_RELOAD`/`CMD_DATA_RELOAD`/
+`CMD_ASSET_READY` have no producer yet and "an applier meeting one today is `TL_FATAL`
+('unwired')". The only LIVE external-chunk sources today are `CMD_SET_FIELD` and `CMD_SET_CVAR`,
+both human-driven and rare, so forced keyframes cost one snapshot per human action at v0.
+**Whoever lands the asset-streaming lanes MUST re-evaluate this ruling when `CMD_ASSET_READY`
+gets a real producer** — a per-asset-ready keyframe would not be cheap.
+
+**Cone condition on the taint flag, binding on whoever implements it:** `core/recorder.h`/`.cpp`
+belongs to `loop+input`, merged and closed — the SIXTH instance this wave of work landing on a
+closed lane's file. A narrow additive exception is granted IN PRINCIPLE, on one condition that
+must be checked FIRST: `Recorder` carries `build_id[32]`, a seed, and a base_tick, and
+`RecordedInput` is an on-disk file format. If adding the taint flag changes that on-disk format or
+its version in any way, STOP and file a fresh ruling request rather than proceeding — a
+wire-format break is not something a narrow exception covers. Only if the flag is genuinely
+additive and format-compatible does this exception apply.
+
+**Scope — binding on this PR: RECORD ONLY, DO NOT BUILD.** `keyframes.cpp` + the Replay panel are
+`TOOLING.md` §9.6 build-order **item 7**, not v0, not PR #16's gate (`RR-40`'s split above).
+`w3-editor` did not start `keyframes.cpp`, the Replay panel, or the recorder taint flag in this
+PR — this entry is the standing ruling for whoever picks up item 7 next, so the research and the
+decision are on the record before that code gets written, not so this lane builds it now.
+
+### editor: closing the third v0 done-criterion clause — "zero heap allocation per frame outside `pool_vendor`" (2026-08-27)
+
+With the `keyframes.cpp`/Replay clause blocked on a ruling (above), looked for other unblocked
+work on `TOOLING.md` §9.6's v0 done criterion rather than idle on it — its third clause, "zero
+heap allocation per frame outside `pool_vendor`," had not been independently verified for any of
+the six panels.
+
+Researched the mechanism before writing anything (it is subtle enough that a naive test would
+have proven nothing): `src/vendor_glue/vendor_new.cpp`'s own comment records a MEASURED fact
+about `tl_tests`'s actual link line — `operator new`/`delete` resolve to `vendor_new.cpp`'s
+pool-backed replacements, not `foundation/alloc_shim_ops.cpp`'s tripwire (`alloc_shim_ops.o` is
+never even pulled into this binary, because `vendor_new.cpp`'s occurrence in
+`libtl_vendor_glue.a` is scanned before foundation's first occurrence in every current link line
+— exactly the mechanism `src/script/vm.cpp`'s reference to `vendor_heap_install` needs, so Luau's
+Compiler has a real allocator). With no vendor heap installed (`vendor_heap_current() ==
+nullptr`), `vendor_alloc`/`vendor_free` `TL_FATAL` on ANY global `new`/`delete` — "the same
+message shape [a stray `new` from `src/` code] dies exactly as before," per the file's own
+comment. So confirming `vendor_heap_current() == nullptr` before and after running every panel's
+real `draw_fn` repeatedly, and confirming the process does not crash, is the same tripwire
+mechanism `w3-render2d`'s own lane notes already relied on for the identical clause ("every
+render test in this lane ran the real pipeline repeatedly with no tripwire fatal — the mechanism
+that exists is satisfied; there is no live counter to assert a number against," `TODO.md`, "W3
+render2d — lane notes"). ImGui itself never reaches this path — `vendor_glue/imgui_glue.cpp`
+routes every ImGui allocation through `pool_vendor()` directly, the clause's own named exemption —
+so a clean run here is checking exactly what "outside `pool_vendor`" means.
+
+New `tests/editor/no_stray_alloc.test.cpp`: one test, all six panels registered on a real
+`Editor` over a real, populated `World` (an entity with a component, a singleton set, seeded
+log/profiler/probe state so each panel's non-empty branches actually run), every registered
+panel's `draw_fn` called 20 times across 20 imgui frames, `vendor_heap_current() == nullptr`
+asserted before and after. Ran clean on all four tiers, both isolated and non-isolated
+(`--tag '!slow'`) runs, 0 failed. `includes.py`/`docaudit.py` clean.
+
+**`TOOLING.md` §9's v0 done criterion is now met on two of its three clauses: all six panels
+exist, and zero heap allocation per frame outside `pool_vendor` is verified.** Only "an edit in
+the inspector appears in the replay log" remains open, pending the ruling filed above.
+
+**Correction (steward, 2026-08-27, same day): the paragraph above overclaims.** The verified
+allocation property is the PANELS' own half only — the six `draw_fn`s, called directly, headless,
+with no `editor_frame` involved. `editor_frame`'s own per-frame work (`NewFrame`, the dockspace,
+`Render`) does not exist yet and is entirely unmeasured, so this clause does not sit wholly on the
+"done" side — it SPLITS across the panels-v0/shell-v0 line RR-40 draws below, the same as the
+inspector-edit-in-replay-log clause this entry already (correctly) left open. See RR-40's own
+entry for the precise, corrected split of all three original clauses — that entry is the accurate
+record; read this paragraph as the narrower, panels-only claim its own evidence actually supports,
+not as "two of three clauses fully closed."
+
+### RR-41 (steward-allocated, ruled by Rafael): document the `VMemApi` lifetime-capture contract (2026-08-27)
+
+Steward's own sweep, following on from the `make_editor()` dangling-pointer fix above, found this
+is the FOURTH independent encounter of the same hazard in this tree, not the first: `platform/
+impl_headless/init.cpp`'s `state->arena.os = &state->vmem_table;` ("repoint off the about-to-die
+local") and `headless_state.h`'s `VMemApi vmem_table;` ("stored here so its address is
+arena-owned, not a global") had already solved it twice, silently, with no doc trail; `dotpath.
+test.cpp`/`inspector.test.cpp`'s `Interner` setup a third time; `make_editor()` a fourth. Four
+local workarounds, zero documentation — past the "third special case is patching symptoms" line
+`CLAUDE.md` names.
+
+**Ruling: comment-only, narrow cone exception.** Added the lifetime-capture contract to
+`foundation/vmem_arena.h`'s `vmem_arena_init` (citing the `init.cpp` repoint as in-tree
+precedent, not a hypothetical) and to `editor/editor.h`'s `editor_init` (which forwards the same
+`os` into `ed->dev_arena`). No signature, semantic, or codegen change in either file — comment
+only, per the ruling's own binding condition. Validated on all four tiers (both isolated and
+non-isolated `--tag '!slow'` runs, 0 failed — a pure comment change touching two widely-included
+headers still gets the full sweep, since a stray syntax slip in a comment block can still break a
+build). `includes.py`/`docaudit.py` clean.
+
+**Explicitly NOT done, per the ruling's own warning against overcorrecting:** the many other
+`VMemApi api = test_vmem_api();` locals across `tests/` (data_tables, desync_diff, fold, array,
+and more) are NOT touched — most are safe plain locals whose arena dies at the same closing
+brace as the local. The hazard is specifically "a helper that returns while an arena initialised
+from the local lives on in the caller," not "every `VMemApi` local" — blanket-`static`-ing the
+rest would be a wrong, over-broad fix for a narrower bug class, exactly what this ruling warned
+against. Not this lane's files to touch either way (`tests/foundation/`, `tests/core/` — outside
+`editor`'s cone).
+
+### RR-39 (steward-allocated, ruled by Rafael): `inspector_roundtrip_per_kind` amended (2026-08-27)
+
+Steward found the Inspector's own done criterion (`TOOLING.md` §9.5's test-row table) was
+unmeetable as written: "driven through the headless ImGui test engine" names a dependency that is
+not vendored (`vendor/VERSIONS` pins imgui core-only; `IMGUI_ENABLE_TEST_ENGINE` commented out in
+`imconfig.h`; no `vendor/imgui_test_engine` directory; vendoring one is a ruling of its own, not
+this lane's to do unilaterally). This session's own `inspector.test.cpp` already used the
+direct-call driving method (matching `console_exec`'s precedent) and said so honestly in its
+header comment — but the doc row itself still claimed the unmet method, which is a different
+problem from a documented scope choice: an unmet done criterion, recorded as met.
+
+**Ruling: amend the row, same precedent as the §9.3.4 correction.** Dropped the test-engine
+clause; kept every substantive assertion (one `CMD_SET_FIELD` per edit, barrier applies it, `1.5`
+into `pos_t` → raw `0x60000`, handle kinds produce no command); the direct-call driving method is
+now the accepted one, in the doc, not just in a test file's own comment. `TOOLING.md` §9.5
+amended in this commit, citing RR-39.
+
+**Residual gap, tracked explicitly per the ruling (not to pass silently):** with no ImGui Test
+Engine vendored, nothing in this tree proves a real widget click actually reaches
+`inspector_set_scalar_field` — the setter is tested directly and thoroughly (this lane's own
+`inspector.test.cpp`), but the WIDGET-TO-SETTER EDGE (does `ImGui::InputScalar`'s
+`IsItemDeactivatedAfterEdit()` branch in `inspector.cpp`'s `draw_field` actually call the setter
+with the right arguments when a real user interaction happens) has zero test coverage and cannot
+get any until either the Test Engine is vendored (its own ruling) or some other simulated-input
+mechanism exists. Known, accepted post-v0 gap — not blocking this PR, but not to be
+rediscovered-and-relitigated later as if it were new.
+
+**Still outstanding on this row: the fx-edit assertion (`1.5` → `0x60000`) is not yet satisfied**
+— it needs RR-38's quantizer (filed separately) to exist before Inspector can wire fx editing at
+all. The Inspector is not "done" against this amended row until that lands and the test asserts
+it for real.
+
+### RR-40 (steward-allocated, ruled by Rafael): split the v0 editor done criterion into panels v0 / shell v0 (2026-08-27)
+
+Steward found this lane's own PR gate — `TOOLING.md` §9.6's "v0 editor done" bullet — could never
+be reached as written: `struct PlatformDevApi` is defined nowhere in this tree, `editor_frame` is
+`TL_FATAL("unimplemented")`, `editor/shell.cpp` doesn't exist, and `PLATFORM.md` §9.7 step 5 (the
+file that would build all three) has no lane queued for it. Four of the criterion's clauses
+therefore depend on infrastructure this lane cannot build and no other lane has started.
+
+**Ruling: split `§9.6`'s criterion into "panels v0" (this PR's real gate) and "shell v0"
+(deferred, blocked on `PLATFORM.md` §9.7 step 5, tracked here so it is not forgotten once this PR
+merges) — written into `TOOLING.md` §9.6 itself, not left in a chat message.** Went through every
+clause of the original criterion plus item 5's own text and assigned each one explicitly (full
+detail in `TOOLING.md`'s own amended §9.6 — this entry is the summary, not a duplicate; one fact,
+one home):
+
+- **Panels v0 (satisfied):** all six panels exist and are headless-tested; zero heap allocation
+  per frame, narrowed to what a shell-less test can prove (already-existing panels' `draw_fn`s) —
+  verified.
+- **Panels v0 (blocked on RR-38, not on the shell):** Console's `set <name> <value>` cvar command
+  (text-driven, no widget — `§9.3.5` describes no separate browser widget, a reading worth
+  sanity-checking further if it turns out wrong); Inspector's fx/handle field editing.
+- **Panels v0 (blocked on a SEPARATE, already-filed ruling, not the shell):** "an edit in the
+  inspector appears in the replay log" — re-examined rather than taken on trust: recording and
+  re-sim both run headlessly today (no shell needed), so this is NOT a shell-blocked clause the
+  way the steward's own preliminary read categorized it; it is blocked by the recorder-format gap
+  filed above ("keyframes.cpp's seek algorithm cannot reproduce an inspector edit"). Moved to its
+  correct blocker rather than left under "needs a shell."
+- **Shell v0 (deferred, blocked on `PLATFORM.md` §9.7 step 5 — `platform/`'s file, no lane
+  queued):** `editor/shell.cpp`, `PlatformDevApi` itself, `editor_frame`'s real implementation,
+  the capture-mask publish (`§9.3.7` — the algorithm is simple, but nothing calls it outside the
+  stubbed `editor_frame` body today), `imgui.ini` persisting in `pref_path`, and the BROADER
+  "zero heap allocation" reading (the whole live session including `editor_frame`'s own body,
+  once it exists).
+- **Post-v0, blocked on a DIFFERENT unbuilt lane (`script`'s Luau binding layer, `LUAU-LAYER.md`),
+  not the shell:** the Luau REPL hand-off and the Console panel's "Luau UI VM" data source.
+  Assigned explicitly rather than left floating on neither side of the split, per the ruling's own
+  instruction.
+
+**Corrected one clause against the steward's own preliminary categorization, per the ruling's own
+invitation to sanity-check rather than take it on trust:** "zero heap allocation per frame" and
+"an edit in the inspector appears in the replay log" were both listed as shell-blocked in the
+steward's first read. Neither actually needs a shell — the first is already verified headlessly
+(`no_stray_alloc.test.cpp`, pushed before this ruling arrived), and the second is blocked by a
+different, already-filed gap. Both corrections are written into `TOOLING.md`'s own amended text,
+not just here.
+
+**Tracked follow-up — shell v0, not this PR's gate, blocked on `PLATFORM.md` §9.7 step 5 (no lane
+queued as of this entry):** `editor/shell.cpp`, `PlatformDevApi`, `editor_frame`'s real body, the
+capture-mask publish, `imgui.ini`/`pref_path` persistence, and the broader zero-alloc reading.
+Whoever picks up `PLATFORM.md` §9.7 step 5 unblocks all of it at once.
+
+### RR-38 (steward-allocated, ruled by Rafael): the integer-only decimal-to-fixed-point quantizer (2026-08-27)
+
+Built `foundation/fx.h`'s `fx_parse_decimal_raw(StrView s, u8 frac) -> Result<i32>` (the primitive
+— both real callers only know FRAC at runtime, Inspector via a `FieldKind`, Console via
+`CvarDesc::frac_bits`) and `fx_parse_decimal<R>(StrView s) -> Result<R>` (a three-line typed
+wrapper over it, for call sites that do have a compile-time row). Tracks the literal's exact
+value as an integer numerator/denominator (digit-by-digit `u64` accumulation, overflow-checked at
+every step) and rounds it once via `rne_div` — the SAME primitive `div<R>`/`fx_lit<R>` already
+use, no float/double token anywhere, additive only (no existing `fx.h` symbol's signature,
+semantics, or name touched). Full ruling rationale (why integer-only dissolves the
+float-vs-cross-peer-determinism dilemma rather than picking a horn) recorded in `FX-PALETTE.md`
+§9 R-10, added in the same commit, per the ruling's own doc-integrity condition.
+
+Malformed or oversized user text returns a named `Result` error (`ERR_FX_PARSE`/`ERR_FX_RANGE`,
+new `fx` module range `0x08xx`) rather than tripping an internal `TL_ASSERT` — the parser
+pre-validates every bound `fx_lit`'s own precondition would otherwise assert on, so untrusted text
+can never reach an assert-guarded path, matching `CLAUDE.md`'s `Result<T>`-for-failure /
+`assert`-for-bugs split exactly (a mistyped console command is not a caller bug).
+
+Eleven pinned tests (`tests/foundation/fx_decimal.test.cpp`, `FX-PALETTE.md` §10.5's new row):
+the ruling's own criterion (`1.5` into `pos_t` → raw `0x60000`), integer/negative/bare-`.`/
+trailing-`.` forms, a battery of malformed literals asserting `ERR_FX_PARSE` (never a crash, never
+a silent partial parse), out-of-range/overflow cases asserting `ERR_FX_RANGE` (never a
+`TL_FATAL`), and explicit RNE ties-to-even at `fx<i32,1>`'s hand-verifiable midpoints (`0.25`→0,
+`0.75`→2) plus a 41-point sweep at `fx<i32,3>` cross-checked against `fx_test_util.h`'s
+independent `ref_rne_div` reference (the same "two derivations checking each other" shape
+`fx_rne.test.cpp` already uses for `rne_div` itself) — the ruling's own "same evidence standard as
+the fx trace tests" bar, not a smoke test. A genuine tie at `pos_t`'s own FRAC=18 needs 19
+fractional decimal digits (`FRAC+1`), past the parser's own 18-digit cap by design (true of every
+real palette row's own resolution boundary, not a parser gap) — the low-FRAC types above give the
+same tie-breaking proof with hand-checkable two-digit literals instead.
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`) runs, 0 failed in every combination. `includes.py`/`docaudit.py`
+clean.
+
+**Still open, per the ruling's own instruction:** RR-38 lands the primitive only. Inspector's
+fx-field/handle-field editing (`inspector.cpp`) and Console's `CVAR_FX_RAW` decimal-literal branch
+(`core/cvar.cpp`) both still need wiring to call it — tracked as this lane's own immediate next
+work, not folded into this commit (one feature per commit; the primitive and its two call sites
+are three separable, independently-testable slices).
+
+### Return to the Inspector: fx-field editing wired (RR-38/RR-39, 2026-08-27)
+
+Per the steward's explicit instruction ("the Inspector is not done until [the fx edit] lands"):
+`inspector.cpp`'s fx-kind branch (`K_pos`..`K_scalar`) now edits, not just displays. A second
+`InputTextWithHint("##wfx", "new value", ...)` box sits beside the existing read-only `%.9g`
+display; on `IsItemDeactivatedAfterEdit`, the typed text goes through
+`fx::fx_parse_decimal_raw(StrView, frac)` (RR-38) and, only on `ERR_OK`, through the same
+`inspector_set_scalar_field` door every other kind already uses. A parse failure (empty box,
+malformed text, out of range) is a silent no-op — no command recorded, matching the console's own
+"a rejected command doesn't mutate state" shape; the failure reason itself is not surfaced to the
+user yet (no toast/status-line mechanism exists in this panel) — a real, small, filed post-v0 UX
+gap, not a silently accepted one.
+
+The box always starts empty rather than pre-filled with the current value ("type a NEW value",
+not "click to edit the current one") — this needed no new per-field persistent state: a fresh,
+local, zero-length `buf` every frame is exactly what `ImGui::InputText`'s own per-ID state
+machinery expects (it only reads the caller's buffer content on the very first activation frame,
+then syncs its own internal edit state back out every subsequent frame regardless of what the
+caller wrote), so the box "starts empty and shows the live typed value while active" for free.
+
+**Also changed `ImGui::CollapsingHeader` to default OPEN** (`ImGuiTreeNodeFlags_DefaultOpen`) —
+a real, independently-justifiable UX choice (most inspector tools default their sections
+expanded) that also closes a real testing gap: every prior Inspector test that populated a
+component left its header closed (nothing in this tree can simulate the click to open one), so
+`draw_field`'s own field-row code — including, now, the fx edit widget's actual
+`InputTextWithHint` call — had never executed even once under test. It now runs for real in
+`inspector_panel_draw_selected_entity_every_kind_family_no_crash`.
+
+New test `inspector_fx_field_edit_widget_writes_through_parse_and_command`
+(`tests/editor/inspector.test.cpp`): the ruling's own pinned criterion end to end, driven
+directly (`fx::fx_parse_decimal_raw(sv_lit("1.5"), 18u)` → confirmed raw `0x60000` →
+`inspector_set_scalar_field` → `world_flush` → the column holds it), plus confirms a malformed
+parse (`""`) returns `ERR_FX_PARSE` and therefore never reaches the setter. **This satisfies
+`inspector_roundtrip_per_kind`'s amended (RR-39) fx-edit assertion** — the walker-to-setter
+pipeline is now real and tested; the RR-39-recorded residual gap (a real widget CLICK reaching
+the setter) is unchanged and still open, since the Test Engine gap that caused it is unrelated to
+this slice.
+
+`inspector.h`'s Invariants and `TOOLING.md` §9.3.4/RR-40's split both updated in this commit to
+match — fx fields are no longer "display only"; only handle/`K_StrId` kinds remain so, and
+`§9.3.4`'s own updated text now gives handle editing its own, unscoped reason (a resolution UI, not
+a data-representability gap) rather than leaving it implicitly grouped with the now-resolved fx
+gap.
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`) runs, 0 failed in every combination. `includes.py`/`docaudit.py`
+clean.
+
+**Still open:** Console's `CVAR_FX_RAW` decimal-literal branch (`core/cvar.cpp`) — the second of
+RR-38's two named callers — still needs wiring; tracked as the immediate next slice, not folded
+into this commit.
+
+### Console cvar `set`: the CVAR_FX_RAW decimal-literal branch wired (RR-38, 2026-08-27)
+
+The second, and last, of RR-38's two named callers. `core/cvar.cpp`'s `cvar_parse_and_set`'s
+`CVAR_FX_RAW` case now accepts a bare decimal literal (`"3.0"`, `"-1.5"`, ...) in addition to the
+pre-existing `"raw:<i32>"` form — `TOOLING.md` §9.3.5's own spec text ("`FX_RAW` accepts
+`raw:<i32>` or a decimal literal quantized RNE") is now fully implemented, not half of it. The
+literal is quantized via `fx::fx_parse_decimal_raw(StrView, key's own registered frac_bits)` —
+the exact same primitive the Inspector's fx edit widget calls, "one implementation, both
+callers" landing for real, not just as RR-38's own stated intent. `cvar.h`'s own contract comment
+(which used to name this exact gap, citing TODO.md) is updated in this same commit to say the gap
+is closed.
+
+Updated `tests/core/cvar.test.cpp`'s pre-existing `cvar_fx_raw_format_and_parse_round_trip` test,
+which had PINNED THE OLD, NOW-WRONG BEHAVIOR (`TL_EXPECT_EQ(cvar_parse_and_set(&tab, "cv_fx"_id,
+"3.0"), ERR_CVAR_PARSE); // "raw:" prefix required`) — removed that assertion from the round-trip
+test and gave it its own dedicated test, `cvar_fx_raw_accepts_bare_decimal_literal`: a successful
+positive literal, a successful negative one, and a malformed/out-of-range battery (empty, double
+dot, letters, an i32-overflowing magnitude) all correctly mapping to the SAME `ERR_CVAR_PARSE`
+every other kind's own malformed input already returns (`fx_parse_decimal_raw`'s own
+`ERR_FX_PARSE`/`ERR_FX_RANGE` distinction does not leak through `cvar_parse_and_set`'s single-
+error contract) — plus confirming the cvar's value is provably unchanged after every rejected
+attempt.
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`) runs, 0 failed in every combination. `includes.py`/`docaudit.py`
+clean. `[docs:none]` on this `core/` commit per the RR-34 addendum (`TODO.md`, filed earlier this
+lane) — `TOOLING.md` §9.3.5 already specifies this exact behavior and needed no edit; none of
+`MODULE_DOCS["core"]`'s own four docs (`ECS.md`/`FRAME-LOOP.md`/`INPUT.md`/`ASSETS-AND-DATA.md`)
+are the right home for a `TOOLING.md`-governed cvar-parsing change.
+
+**RR-38 is now fully landed end to end: the primitive (`fx.h`), both named callers (Inspector's
+fx-field edit widget, Console's `CVAR_FX_RAW` decimal-literal path), and the doc trail (`FX-
+PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > **FINDING (steward, 2026-08-27, measured not estimated) — the `X = Type{}` stack-temporary class is
 > unswept in `tests/` and `tools/`.** It has bitten three times in `src/` this wave (`prof.cpp` ~53 MB,
 > `log.cpp` 0.969 MB, `probe.cpp` ~160 KB — each fixed, each recorded in `LESSONS.md`), but nobody has
@@ -4720,13 +5840,20 @@ and audit validation recorded at the round's closing commit below.
 
 > **RR-43 (Rafael, 2026-08-27) — `TOOLING.md` §9.6 gains a THIRD bucket, amending RR-40.** RR-40 split
 > the v0 editor criterion into `panels v0` / `shell v0`. Review C found the two-bucket shape structurally
-> unsound: `shell v0` is defined as "needs a running `editor_frame`/real `PlatformDevApi`", and three of
-> its contents are not shell-blocked at all — the inspector-edit-in-replay-log clause (blocked on RR-42),
-> Console's `ARCHIVE` → `pref_path/cvars.txt` on shutdown (blocked on `pref_path`, the SAME dependency
-> `imgui.ini` is deferred for in the row four bullets down), and the Luau REPL hand-off plus Console's
-> "Luau UI VM" data source (blocked on the `script` lane). Consequences: `shell v0` can be denied
-> incorrectly by someone who lands the shell and finds it still unmet, and the `script` lane has no
-> reason to look in the editor doc's shell bucket. RULED: add **"Deferred — blocked on a ruling or
+> unsound: three clauses sat in a bucket whose name was false for them — **two of them in `panels v0`,
+> the PR's own merge gate**, and one in `shell v0`. In `panels v0`: the inspector-edit-in-replay-log
+> clause, which the doc ITSELF called unsatisfiable (blocked on RR-42), and Console's `ARCHIVE` →
+> `pref_path/cvars.txt` on shutdown, declared "blocked only on RR-38's quantizer" when RR-38 had already
+> landed in this very PR and its real blocker is `pref_path` — the SAME dependency `imgui.ini` is
+> deferred for four bullets down, treated as shell-blocking in one row and as no blocker in the other.
+> In `shell v0`: the Luau REPL hand-off plus Console's "Luau UI VM" data source (blocked on the `script`
+> lane, which the shell will never unblock). Consequences, in severity order: **the gate this PR was
+> about to be merged against was unmeetable and misdescribed** — that is why the verdict was `fix first`;
+> `shell v0` can additionally be denied incorrectly by someone who lands the shell and finds it still
+> unmet; and the `script` lane has no reason to look in the editor doc's shell bucket.
+> *(Corrected 2026-08-27 after Review C's fix-check caught this record misattributing two of the three
+> clauses to `shell v0` — the milder of the two failures. Verified against `c95fe92:docs/TOOLING.md`
+> before amending.)* RULED: add **"Deferred — blocked on a ruling or
 > another lane"**, each item naming its own blocker, so every bucket's name is a true predicate over its
 > contents. `panels v0` then reduces to a claimable gate. Executed by the `w3-editor` lane in PR #16.
 
@@ -4742,6 +5869,25 @@ and audit validation recorded at the round's closing commit below.
 > in criteria must carry a resolvable referent**, `[blocked-on: RR-nn]`, and `docaudit` errors when the
 > named ruling is recorded as ruled/landed — the condition is met, so the clause must be re-read. Rule (b)
 > would have fired automatically inside the very PR that landed RR-38.
+> **SCOPE — the operative definition lives in `CLAUDE.md`'s doc-integrity protocol, beside the
+> stale-marker sentence RR-44 supersedes; this record CITES it and does not restate it.** One home,
+> because the scope clause is the part of this ruling most likely to be refined once someone implements
+> it, and two copies would drift on the first refinement. WHY it is structural rather than an exemption
+> list, which the implementer needs and `CLAUDE.md` does not carry: RR-44's own text must quote the
+> phrases it bans in order to explain them, and rule (b)'s record must name the `[blocked-on:]` tag
+> without being parsed as a deferral — so the scope must exclude ruling prose BY CONSTRUCTION. The
+> alternative, scoping to "every line in §9.6" plus an exemption mechanism, is worse: an exemption
+> mechanism is itself a hole, since anything can be exempted and the first inconvenient flag is where it
+> gets used. A case the scope handles badly is a bug in the scope, and is fixed in `CLAUDE.md`.
+> *(Scope added 2026-08-27: the steward had recorded self-reference as an implementation note for
+> whoever builds the gate; Review C's fix-check argued it is a scoping gap in the RULING, since the
+> implementer would otherwise settle it silently and an exemption mechanism would be the likely choice.
+> Correct, and taken. Two implementation ambiguities C then found in the first draft — a header pattern
+> written for short names silently missing the one full-phrase bucket header, and an undefined block END
+> where the last block terminates on a numbered item rather than a header — are fixed in `CLAUDE.md`'s
+> definition, along with "bullet" meaning the whole logical bullet including continuation lines. The
+> restatement between the two files was C's NEW-C1; resolved in favour of `CLAUDE.md` as the operative
+> home, since that is what authors read every session.)*
 > **NOT BUILT — RECORD ONLY.** The enforcement lives in `tools/docaudit/docaudit.py`, a shared gate over
 > every doc in the repo and outside the `w3-editor` cone; enabling (a) also requires the §9.6 status-word
 > strip to land first (it did, in PR #16, under RR-43). Owner: unassigned. Whoever takes it should also
@@ -4769,10 +5915,14 @@ and audit validation recorded at the round's closing commit below.
 > correctly. Pre-existing infra, untouched by PR #16, and it only bites someone who deletes a test file —
 > which is exactly what an adversarial reviewer does after planting a probe test. Owner: unassigned.
 
-> **STEWARD NOTE (2026-08-27) — the merged-and-closed-lane ownership problem is at SEVEN instances, and
-> the seventh carried a live memory-corruption defect.** The recurring shape: work owned by a lane that
+> **STEWARD NOTE (2026-08-27) — the merged-and-closed-lane ownership problem is at SEVEN INSTANCES
+> ACROSS SIX FILES (`fmt_buf` twice), and the latest carried a live memory-corruption defect.** Stated
+> that way deliberately, per "measure, don't assert": a file needing TWO separate unowned interventions
+> is stronger evidence for the rule than a seventh distinct file would be. (Precision corrected
+> 2026-08-27 after Review C's fix-check flagged the bare "seven" as inviting a six-plus-one reading.)
+> The recurring shape: work owned by a lane that
 > merged and closed, so absent a steward ruling it belongs to nobody — `transform.h`, `asset_load_font`,
-> `CMD_SET_CVAR`, `fmt_buf`, `log.cpp`, `recorder.h`, and now `fmt_buf` again in its own right. Review A
+> `CMD_SET_CVAR`, `fmt_buf`, `log.cpp`, `recorder.h`, and `fmt_buf` a second time. Review A
 > found that `fmt_buf` writes a NUL at `buf[-1]` whenever `out.count == 0` (`stbsp_vsnprintf` takes its
 > `else` branch whenever `buf != NULL`, regardless of count), so `fmt.h`'s stated invariant "never
 > overflows `out`" had been false since it was written, at a boundary that is the ordinary end-state of

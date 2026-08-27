@@ -2,29 +2,30 @@
 // ---------------------------------------------------------------------------------------------
 // fmt.h - fmt_buf: locale-free formatted write into a caller buffer, over vendored stb_sprintf.
 //
-// Spec: docs/CONTAINERS.md §5 (design), §8.6 (this header).
+// Spec: docs/CONTAINERS.md §5 (design), §8.6/§8.6b (this header; §8.6b now records the
+//   implementation, not the stub).
 // Purpose: logs, CSV, editor text - the one formatter in the runtime; no heap, no locale.
 // Invariants: never overflows `out` - truncates and returns the length that WOULD have been
 //   written (stb_sprintf's own contract), so a caller can detect truncation by comparing the
 //   return value against out.count.
-// Status: **STUB - TL_FATAL("unimplemented")**. `docs/BUILD.md` §5 lists `stb_sprintf` as a
-//   vendored library but `vendor/CMakeLists.txt` assigns its arrival to the W1 platform lane
-//   ("SDL3 + stb arrive with the W1 platform lane") - not this lane, and not yet landed as of this
-//   commit (checked: no `vendor/*stb*` tree exists on `main` or `w1-platform`). Per
-//   docs/ROADMAP.md §0 rule 1 ("header first... stubs that TL_FATAL('unimplemented')"), the
-//   contract ships now so dependents compile against it; the body is filled in the day
-//   `vendor/stb_sprintf/` lands - implementing a hand-rolled formatter here instead would violate
-//   the doc's explicit "over stb_sprintf" and duplicate a vendoring decision that belongs to the
-//   platform lane (TODO.md carries this as a note, not a ruling - the owner and the mechanism are
-//   already decided, only the landing is pending).
-// Determinism: not on any sim path (logs/CSV/editor only, docs/CANON.md's Luau VM removal list
-//   keeps `string.format %p`-class holes out of sim scope); N/A until implemented.
-// Threading: none - a pure buffer-write function once implemented.
+// Status: implemented over vendored `stb_sprintf` (`fmt.cpp`), landed under a narrow, additive
+//   cone-discipline exception (steward-relayed ruling, Rafael, 2026-08-27, PR #16 - named again
+//   in `fmt.cpp`'s own header) once `vendor/stb/stb_sprintf.h` arrived; `docs/CONTAINERS.md`
+//   §8.6b updated in the same commit as the design home.
+// Determinism: **tooling-side only - never call this from a sim/det TU.** `fmt_buf`'s varargs
+//   accept `%f`/`%g`-class specifiers, which promote a passed `float` to `double` at the call
+//   site - a float on the call boundary is exactly what `docs/CPP-SUBSET.md` §9 bars from
+//   `src/sim/` and the det half of `src/foundation/` (this file itself contains no float token,
+//   the invariant `tl_prof.h`/`tl_probe.h`'s headers already document, but a CALLER can still
+//   pass one). Not on any sim path by construction today (logs/CSV/editor text only,
+//   `docs/CANON.md`'s Luau VM removal list keeps `string.format %p`-class holes out of sim
+//   scope); this note exists so that stays true on purpose, not by accident.
+// Threading: none - a pure buffer-write function, no shared state.
 // Includes: foundation/tl_types.h, foundation/array.h (for Span<char>).
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
 #include "foundation/array.h"
 
 // Formats into `out` (stb_sprintf semantics: truncates, never overflows, returns the length that
-// would have been written). STUB - see the contract block above.
+// would have been written) - tooling-side only, see this header's Determinism note.
 u32 fmt_buf(Span<char> out, const char* fmt, ...);

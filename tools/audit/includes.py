@@ -37,9 +37,22 @@ SCAN_EXT = (".h", ".hpp", ".inc", ".cpp")
 SYS_ALLOW = {"stdint.h", "stddef.h", "string.h", "limits.h"}
 SYS_ALLOW_DIRS = {                        # additional system headers, by path prefix
     "src/render": {"math.h"},
-    "src/editor": {"math.h"},
+    # BACKEND_HEADERS below already names src/editor for "imgui" (a panel's own draw_fn is real
+    # ImGui widget code, docs/TOOLING.md §9.1's editor/*_panel.cpp/console.cpp/inspector.cpp/
+    # shell.cpp rows) - this entry completes the same grant on gate 1's independent allowlist
+    # (both gates check independently, LESSONS.md; src/core/loaders' stb_image.h row above is the
+    # same shape). Added building editor/log_panel.cpp, the first file to actually need it.
+    "src/editor": {"math.h", "imgui.h"},
     "src/platform": {"math.h"},
     "src/foundation": {"rapidhash.h"},
+    # fmt.cpp's stbsp_vsnprintf (docs/CONTAINERS.md §8.6b) - declaration-only, same shape as
+    # src/core/loaders' stb_image.h row above; the real STB_SPRINTF_IMPLEMENTATION TU stays
+    # vendor/stb/stb_impl.c. `fmt` is NOT in TL_FOUNDATION_TOOLING (CMakeLists.txt's stem list -
+    # RR-7's io/state exemption is narrower than all of NONDET, fmt.cpp is NONDET but not
+    # TOOLING), so it gets no TOOLING_SYS_ALLOW stdarg.h grant automatically; scoped to this one
+    # file rather than widening "src/foundation" (the narrowest-prefix-that-fits philosophy
+    # src/core/loaders' own row states).
+    "src/foundation/fmt": {"stb_sprintf.h", "stdarg.h"},
     # Luau is vendored with its own include dirs on the target (vendor/luau/CMakeLists.txt),
     # so its public headers are spelled bare and reach gate 1 as system includes. The set is
     # closed: lua.h (the C API), lualib.h (luaopen_*/luaL_*), luacode.h (luau_compile).
@@ -93,7 +106,12 @@ BACKEND_HEADERS = {                       # token in the include path -> allowed
     "luacode.h": ("src/script",),
     "Luau/": ("src/script",),
     "monocypher": ("src/net",),
-    "stb_": ("src/platform/impl_sdl3", "src/core", "src/vendor_glue"),
+    # fmt.cpp joins this grant the same way core/loaders/image.cpp's stb_image.h row did
+    # (docs/CONTAINERS.md §8.6b): declaration-only, the real implementation TU stays vendor/.
+    # Scoped to "src/foundation/fmt", not all of "src/foundation" - steward review caught the
+    # first version widening this grant past what fmt.cpp needs, asymmetric with the matching
+    # SYS_ALLOW_DIRS entry below, which was already scoped this narrowly.
+    "stb_": ("src/platform/impl_sdl3", "src/core", "src/vendor_glue", "src/foundation/fmt"),
     "rapidhash": ("src/foundation",),
 }
 
@@ -379,6 +397,15 @@ def strip_comments(text, blank_strings=True):
     return "".join(out)
 
 
+def path_under(rel, prefix):
+    """`rel` is `prefix` itself, or lies under it with a '/' (prefix names a directory, e.g.
+    "src/render") or '.' (prefix names a bare file stem, e.g. "src/foundation/fmt") boundary
+    between them. A bare `rel.startswith(prefix)` would let "src/foundation/fmt" also admit
+    "src/foundation/fmt_buf.cpp"/"fmtx.cpp" - a grant several callers' own comments claim is
+    scoped to one file or one directory, not a name prefix."""
+    return rel == prefix or rel.startswith(prefix + "/") or rel.startswith(prefix + ".")
+
+
 def stem_matches(stem, stem_set):
     """A file's stem is in `stem_set` (nondet or tooling), or is that stem's header sibling:
     TOOLING.md §9.1's file table keeps the `tl_` prefix on the HEADER (`tl_log.h`) but drops it
@@ -624,7 +651,7 @@ def check_file(root, path, nondet, tooling, static_allow, errors):
 
     allow = set(SYS_ALLOW)
     for prefix, extra in SYS_ALLOW_DIRS.items():
-        if rel.startswith(prefix):
+        if path_under(rel, prefix):
             allow |= extra
     if is_tooling_tu:
         allow |= TOOLING_SYS_ALLOW
@@ -661,7 +688,7 @@ def check_file(root, path, nondet, tooling, static_allow, errors):
                               "(docs/PLATFORM.md §5, docs/DETERMINISM.md §2)" % (rel, i, inc, via))
         if m or m2:
             for token, prefixes in BACKEND_HEADERS.items():
-                if token in line and not any(rel.startswith(p) for p in prefixes):
+                if token in line and not any(path_under(rel, p) for p in prefixes):
                     errors.append("%s:%d: backend header %s outside its wrap module %s "
                                   "(docs/BUILD.md §4)" % (rel, i, token, prefixes))
 

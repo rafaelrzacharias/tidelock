@@ -166,13 +166,22 @@ void tl_probe_write_summary(void) {
     }
 }
 
-u32 tl_probe_test_key_count(void) { return g_probe.count; }
-const ProbeKey* tl_probe_test_key_at(u32 slot) { return &g_probe.keys[slot]; }
+u32 tl_probe_key_count(void) { return g_probe.count; }
+const ProbeKey* tl_probe_key_at(u32 slot) { TL_CHECK(slot < g_probe.count); return &g_probe.keys[slot]; }
 const char* tl_probe_test_staging(void) {
     g_probe.staging[g_probe.staging_used] = 0;
     return g_probe.staging;
 }
-void tl_probe_test_reset(void) { g_probe = ProbeState{}; g_tick = 0u; }
+void tl_probe_test_reset(void) {
+    // NOT `g_probe = ProbeState{}` - that value-initializes a ~160 KB TEMPORARY ProbeState
+    // (keys[1024] of ProbeKey alone is 1024 * 96 B, plus the 64 KB staging buffer) on the stack
+    // before assigning it - the same bug class this file's own module already fixed twice this
+    // lane (prof.cpp's ~53 MB ring, log.cpp's ~0.97 MB ring; found here via the literal-pattern
+    // grep LESSONS.md's entry for the second instance called for, run again while building the
+    // Probes panel). memset zeroes the existing static IN PLACE, no temporary.
+    memset(&g_probe, 0, sizeof(g_probe));
+    g_tick = 0u;
+}
 void tl_probe_test_set_tick(u64 tick) { g_tick = tick; }
 void tl_probe_test_set_enabled(u64 key, const char* name, u8 enabled) {
     ProbeKey& k = lookup_or_insert(key, name, PROBE_LOG, 0);

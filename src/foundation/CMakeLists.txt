@@ -54,7 +54,9 @@ add_library(tl_foundation_det STATIC ${TL_DET_SRC})
 target_link_libraries(tl_foundation_det PRIVATE tl_flags_common tl_flags_sim rapidhash)
 
 add_library(tl_foundation STATIC ${TL_HOST_SRC})
-target_link_libraries(tl_foundation PRIVATE tl_flags_common PUBLIC tl_foundation_det)
+# stb (fmt.cpp's stbsp_vsnprintf, docs/CONTAINERS.md §8.6b) - PRIVATE: <stb_sprintf.h> is
+# declaration-only here, matching src/core/CMakeLists.txt's stb link for loaders/image.cpp.
+target_link_libraries(tl_foundation PRIVATE tl_flags_common stb PUBLIC tl_foundation_det)
 
 tl_register_lib(tl_foundation_det TRUE)    # audited: symbol layering + writable-static
 tl_register_lib(tl_foundation FALSE)       # writable-static only

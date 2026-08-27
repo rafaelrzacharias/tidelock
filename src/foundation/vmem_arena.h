@@ -73,6 +73,19 @@ static_assert(__is_trivially_copyable(VMemArena), "");
 // reserve could never push a byte (ruled 2026-08-24, docs/MEMORY.md section 8.2). Every byte of
 // `reserved` is therefore pushable, and the over-reserve fatal sits on the real edge. Returns
 // ERR_MEM_BAD_ARG on a null/zero argument, ERR_MEM_OOM if the OS refuses the reservation.
+// `os` IS CAPTURED, NOT COPIED (`a->os = os;` - the field is a `const VMemApi*`): every later
+// call that touches `a` (`arena_push`'s commit, `arena_reset_to`/`arena_decommit_above`) reads
+// back through this same pointer, so `os` must outlive `a`. A caller-local `VMemApi` that goes
+// out of scope while `a` is still alive leaves `a->os` dangling - real in-tree precedent, not a
+// hypothetical: `platform/impl_headless/init.cpp`'s own `HeadlessState` had to explicitly
+// "repoint off the about-to-die local" (`state->arena.os = &state->vmem_table;`, with
+// `vmem_table` stored ON `HeadlessState` itself, `headless_state.h`'s own comment: "stored here
+// so its address is arena-owned, not a global") the first time this was built, precisely to
+// avoid this trap; `editor/editor.h`'s `editor_init` documents the same requirement for the `os`
+// it forwards to `ed->dev_arena`. RR-41 (2026-08-27): four independent encounters of this exact
+// hazard in this tree before it got written down here - a test helper that returns while an arena
+// it initialised lives on in the caller is the shape that bites; a plain local inside one test
+// body, whose arena dies at the same closing brace, is fine.
 ErrCode vmem_arena_init(VMemArena* a, NameHash id, u64 reserve_bytes, u32 flags, const VMemApi* os);
 
 // Bump-allocates `bytes` at `align` (power of two, <= page). Commits pages as needed; TL_FATAL

@@ -1,0 +1,209 @@
+#pragma once
+// ---------------------------------------------------------------------------------------------
+// console.h - ConsoleCmd, the tokenizer, dispatch, completion, and history.
+//
+// Spec: docs/TOOLING.md §3 (design), §9.2 (ConsoleCmd, this header's struct), §9.3.5 (tokenizer/
+//   dispatch/completion algorithm); docs/CPP-SUBSET.md §3 (Result<T>/ErrCode).
+// Purpose: `ConsoleCmd cmd{}; cmd.name = "spawn"; cmd.usage = "spawn <name> <x> <y>"; cmd.fn = fn;
+//   console_register(&state, &cmd);` builds a name-sorted command table (corrected 2026-08-27,
+//   B-7 - the four-argument call this comment used to show does not exist; the real signature is
+//   `console_register(ConsoleState*, const ConsoleCmd*)`); `console_exec` tokenizes one line and
+//   dispatches it. Every
+//   sim-affecting command is refused outright in a lockstep session (the caller states whether
+//   one is live via `console_exec`'s `lockstep` parameter - this module has no session concept
+//   of its own, matching cvar.h's caller-owned shape).
+// Invariants: `CONSOLE_TABLE_CAP` (512) live commands, keyed by NAME (bytewise), duplicate
+//   registration is TL_FATAL (matching cvar_register/TL_COMPONENT's precedent - init-time
+//   misconfiguration). `sorted` is a name-BYTEWISE-ascending index over `cmds` (insertion sort at
+//   register time, not perf-sensitive) - completion (docs/TOOLING.md §9.3.5) walks a `lower_bound`
+//   prefix range over it; dispatch ALSO looks up through `sorted` (console_find's own binary
+//   search over the same index, by name - console_find's own comment) - corrected 2026-08-27
+//   (B-5): earlier revisions of this block, docs/TOOLING.md §9.3.5, and this file's own top
+//   comment all described dispatch as a separate name-HASH lookup (a linear scan or a `SortedMap`,
+//   depending which of the three you read); none of that was ever built. The binary search over
+//   `sorted` this module already had for completion turned out to serve dispatch too, with no
+//   hash, no collision class, and no second index to keep in sync - `ConsoleCmd::key` (below)
+//   exists but `console_find` never reads it. Tokenizer: ASCII space/tab split; a `"`-quoted token keeps
+//   spaces and honours `\"`/`\\`; `#` starts a comment (rest of the line dropped); max
+//   `CONSOLE_MAX_TOKENS` (16) tokens; an unterminated quote is a syntax error. History is a fixed
+//   64-line ring (`char[64][CONSOLE_LINE_CAP]`), not a `RingBuffer<T>` (no VMemArena dependency -
+//   same self-contained shape as cvar.h's `CvarTable`).
+// Determinism: never hashed, never snapshotted - console output and history are dev-plane state
+//   (docs/CPP-SUBSET.md §9 R-4's tooling-plane reasoning, though this module is caller-owned
+//   rather than a static, so it doesn't need the RR-7 exemption itself). A `ConsoleFn` that
+//   mutates sim state MUST do so only through a command (`core/commands.h`'s `CMD_*` kinds) -
+//   this header cannot enforce that at the type level; it is the contract every `ConsoleFn`
+//   implementation must honour (docs/TOOLING.md §0 "tools never poke sim state").
+// Threading: none - a ConsoleState is caller-owned, single-threaded (dev console input is
+//   render-rate, not tick-rate).
+// Tier: dev only (docs/TOOLING.md §9.1 file table: `editor/console.cpp`) - moved here from
+// core/console.h/.cpp, where it was first built (w3-editor's own mistake: cvar.h is legitimately
+// all-tier, this is not - the console UI/REPL has no reason to exist in netcode/ship, unlike a
+// CVAR_SIM cvar's own storage). `src/editor/` compiles only on debug/dev tiers (its CMakeLists.txt
+// is empty on netcode/ship), so this file's tier gating is structural (by directory), not a
+// `#if TL_DEV` inside it.
+// Includes: foundation/tl_types.h, foundation/tl_assert.h, foundation/hash.h, foundation/strview.h,
+//   core/world.h (ConsoleFn's World* parameter only - no World field is added by this header).
+// ---------------------------------------------------------------------------------------------
+#include "foundation/tl_types.h"
+#include "foundation/tl_assert.h"
+#include "foundation/hash.h"
+#include "foundation/strview.h"
+#include "core/world.h"
+
+// core module's console sub-range (0x037x; see core/cvar.h's contract block for the rest of the
+// 0x03xx block's layout, including the pre-existing 0x0321/0x0322 collision it notes).
+constexpr ErrCode ERR_CONSOLE_UNKNOWN_CMD      = (ErrCode)0x0370;  // no command registered under that name
+constexpr ErrCode ERR_CONSOLE_TOO_MANY_ARGS    = (ErrCode)0x0371;  // more than CONSOLE_MAX_TOKENS tokens
+constexpr ErrCode ERR_CONSOLE_SYNTAX           = (ErrCode)0x0372;  // unterminated quote
+constexpr ErrCode ERR_CONSOLE_ARGC             = (ErrCode)0x0373;  // argc outside [argc_min, argc_max]
+constexpr ErrCode ERR_CONSOLE_LOCKSTEP_REFUSED = (ErrCode)0x0374;  // SIM_AFFECTING command under lockstep=true
+constexpr ErrCode ERR_CONSOLE_DUPLICATE        = (ErrCode)0x0375;  // name already registered (TL_FATAL site)
+constexpr ErrCode ERR_CONSOLE_TABLE_FULL       = (ErrCode)0x0376;  // CONSOLE_TABLE_CAP already live (TL_FATAL site)
+constexpr ErrCode ERR_CONSOLE_TOKEN_TOO_LONG   = (ErrCode)0x0377;  // a quoted token exceeds unescape_cap (B-11: was a silent truncation)
+
+// The literal name of one of this header's ErrCodes (or "ERR_OK"/"ERR_?"), for logging. Pure.
+inline const char* console_err_name(ErrCode e) {
+    return e == ERR_OK ? "ERR_OK"
+         : e == ERR_CONSOLE_UNKNOWN_CMD ? "ERR_CONSOLE_UNKNOWN_CMD"
+         : e == ERR_CONSOLE_TOO_MANY_ARGS ? "ERR_CONSOLE_TOO_MANY_ARGS"
+         : e == ERR_CONSOLE_SYNTAX ? "ERR_CONSOLE_SYNTAX"
+         : e == ERR_CONSOLE_ARGC ? "ERR_CONSOLE_ARGC"
+         : e == ERR_CONSOLE_LOCKSTEP_REFUSED ? "ERR_CONSOLE_LOCKSTEP_REFUSED"
+         : e == ERR_CONSOLE_DUPLICATE ? "ERR_CONSOLE_DUPLICATE"
+         : e == ERR_CONSOLE_TABLE_FULL ? "ERR_CONSOLE_TABLE_FULL"
+         : e == ERR_CONSOLE_TOKEN_TOO_LONG ? "ERR_CONSOLE_TOKEN_TOO_LONG" : "ERR_?";
+}
+
+enum { CONSOLE_MAX_TOKENS = 16, CONSOLE_TOKEN_CAP = 128, CONSOLE_TABLE_CAP = 512 };
+enum { CONSOLE_HISTORY_CAP = 64, CONSOLE_LINE_CAP = 256 };
+enum : u8 { CONSOLE_SIM_AFFECTING = 1 };
+
+// docs/TOOLING.md §9.3.5: `argc`/`argv` exclude the command name itself (argv[0] in the doc's own
+// wording is the first ARGUMENT). `reply` is where the command writes its human-readable result;
+// the return value's `err` is ERR_OK or a command-specific ErrCode, `value` the bytes written to
+// `reply` (0 on failure). `w` may be null for a command that touches no World (console self-test,
+// `help`, etc.) - a ConsoleFn that needs one must TL_CHECK it itself.
+typedef Result<u32> (*ConsoleFn)(World* w, u32 argc, const StrView* argv, Span<char> reply);
+
+// docs/TOOLING.md §9.2, verbatim shape (`lua_ref`/`from_luau` are placeholders - no Luau binding
+// exists yet, docs/LUAU-LAYER.md's binding layer is a different, not-yet-built lane; a call
+// through them is unreachable today, not merely untested).
+struct ConsoleCmd {
+    NameHash    key;            // computed from `name` by console_register (B-5, 2026-08-27) - a
+                                 // caller may leave this 0, or supply the same value itself (both
+                                 // TL_CHECK-agree if non-zero); dispatch/completion never read it,
+                                 // both go through `sorted`'s bytewise name search instead
+    const char* name;
+    const char* usage;
+    ConsoleFn   fn;
+    const char* arg_hints[4];   // "entity" | "cvar" | "cmd" | "file:<dir>" | "enum:a|b|c" | null
+    u8          flags;          // CONSOLE_SIM_AFFECTING
+    u8          argc_min, argc_max;
+    u8          from_luau;
+    u32         lua_ref;
+};
+
+// docs/TOOLING.md §9.3.5 (deviation recorded there, B-5): a name-sorted (bytewise) index over
+// `cmds`, used for BOTH completion (a prefix walk) and dispatch (console_find's own binary
+// search) - this header's contract block explains why no separate hash lookup exists. History
+// is a fixed ring; `hist_head` is the NEXT write slot, `hist_count` caps at CONSOLE_HISTORY_CAP.
+struct ConsoleState {
+    ConsoleCmd cmds[CONSOLE_TABLE_CAP];
+    u16        sorted[CONSOLE_TABLE_CAP];   // name-bytewise-ascending index into cmds
+    u32        count;
+    char       history[CONSOLE_HISTORY_CAP][CONSOLE_LINE_CAP];
+    u32        hist_head, hist_count;
+};
+
+// Zero-initializes `s` (count = 0, no history).
+void console_init(ConsoleState* s);
+
+// Registers `cmd` (copied by value - the caller's `ConsoleCmd` need not outlive the call, unlike
+// cvar.h's CvarDesc-by-pointer shape, since ConsoleCmd carries no per-instance mutable state to
+// alias). Computes `cmd->key` from `cmd->name` (ConsoleCmd::key's own comment) - TL_CHECK if the
+// caller supplied a non-zero key that disagrees. TL_FATAL: table full, duplicate NAME
+// (registration-time misconfiguration, matching cvar_register's precedent).
+void console_register(ConsoleState* s, const ConsoleCmd* cmd);
+
+// Binary search on `sorted` (bytewise name order) for an exact name match. Null when unknown.
+const ConsoleCmd* console_find(const ConsoleState* s, StrView name);
+
+// One resolved token from console_tokenize.
+struct ConsoleToken { const char* ptr; u32 len; };
+
+// Tokenizes `line` into `out` (capacity `out_cap`, normally CONSOLE_MAX_TOKENS): splits on
+// unquoted ASCII space/tab; a `"`-quoted token keeps embedded spaces and unescapes `\"`/`\\` (no
+// other escape is recognised - a bare backslash before any other character is copied literally,
+// matching a permissive shell-lite reading since docs/TOOLING.md §9.3.5 only names those two);
+// `#` outside a quote starts a comment (the rest of the line is dropped, never tokenized).
+// Returns the token count, or a negative-shaped failure via `out_err`: ERR_CONSOLE_TOO_MANY_ARGS
+// (more than `out_cap` tokens), ERR_CONSOLE_SYNTAX (unterminated quote), or
+// ERR_CONSOLE_TOKEN_TOO_LONG (a quoted token's unescaped length exceeds the `unescape_cap` still
+// available to it - corrected 2026-08-27, B-11: this used to truncate the token silently, `out_err`
+// left ERR_OK, which is exactly the "no silent fallbacks" CLAUDE.md rules out; NEVER a buffer
+// overrun either way - the write itself was always bounded). `out[i].ptr` points into `line` (or
+// into `unescape_buf`/`unescape_cap` for a token that needed unescaping - a caller-supplied
+// scratch buffer, since this module has no arena of its own).
+u32 console_tokenize(const char* line, ConsoleToken* out, u32 out_cap,
+                      char* unescape_buf, u32 unescape_cap, ErrCode* out_err);
+
+// Tokenizes `line`, resolves the command by its first token, checks argc bounds and (when
+// `lockstep`) CONSOLE_SIM_AFFECTING, then calls `fn(w, argc-1, argv+1, reply)`. Appends `line` to
+// history unconditionally (even on failure - docs/TOOLING.md §3's console log gets every
+// attempted line). Returns the same Result<u32> shape as ConsoleFn; a dispatch-level failure
+// (unknown command, syntax, argc, lockstep refusal) never calls `fn` and `value` is 0.
+Result<u32> console_exec(ConsoleState* s, World* w, bool lockstep, const char* line, Span<char> reply);
+
+// The completion set for `prefix` (docs/TOOLING.md §9.3.5's "lower_bound on the typed prefix,
+// walk while prefix matches", capped at 32 shown): writes up to `out_cap` matching command names
+// (bytewise prefix match against `sorted`) into `out[i]` and returns the match count actually
+// written (never more than `out_cap`, and never more than 32 regardless of `out_cap` - docs/
+// TOOLING.md §9.3.5's own cap). `out[i]` are `ConsoleCmd*` into `s->cmds` (stable while `s` is
+// not further registered into).
+u32 console_complete(const ConsoleState* s, StrView prefix, const ConsoleCmd** out, u32 out_cap);
+
+// Registers the built-in `set <name> <value>` cvar command (docs/TOOLING.md §9.3.5's Cvars
+// clause; Review C's D1(b), 2026-08-27) - NOT called by `console_panel_register` (whose own
+// contract stays accurate: it registers nothing of its own). The caller assembling the real
+// command set (`app/`, not built) calls this alongside any other `console_register` call. Reads
+// `w->cvars` at CALL time (via the `World* w` every `ConsoleFn` already receives) rather than
+// capturing a `CvarTable*` at registration - `ConsoleFn` is a bare function pointer, no closure
+// state. Parses `value` per the cvar's registered kind through the SHARED `core/cvar.cpp` parser
+// (`cvar_parse_raw` - never a second one); a `CVAR_SIM`-flagged cvar routes through
+// `world_set_cvar_cmd`'s sealed `CMD_SET_CVAR` door (checked for `CVAR_READONLY` first, since
+// `cvar_apply_sim_raw` TL_CHECK-fatals a malformed command reaching the barrier - `world.h`'s own
+// contract on `world_set_cvar_cmd`), never a direct write; a non-SIM cvar goes through the
+// ordinary `cvar_set_raw` door. Registered with `CONSOLE_SIM_AFFECTING` - the target cvar is not
+// known until dispatch, so lockstep refusal is command-level (this header's own dispatch note),
+// covering every `set` call rather than only the ones that turn out to touch a SIM cvar.
+void console_register_cvar_set(ConsoleState* s);
+
+// history[i] in OLDEST-to-newest order (i=0 is the oldest live line, i=hist_count-1 the most
+// recent - matching tl_log.h's tl_log_ring_at "write order" convention). Fatal if
+// i >= s->hist_count.
+const char* console_history_at(const ConsoleState* s, u32 i);
+
+struct Editor;   // editor/editor.h - forward-declared only, this header stays World/ImGui-free
+                 // beyond the panel entry points below (matches log_panel.h's shape).
+
+// Registers the Console panel on `ed` (`editor_register_panel(ed, "Console", console_panel_draw,
+// true)`). Registers no commands of its own - a bare console with nothing to run is a legitimate
+// state; whoever wires up the real command set (the game layer, this module's own future
+// built-ins) calls `console_register` separately, same as any other `ConsoleFn` caller.
+void console_panel_register(Editor* ed);
+
+// The panel's own content (see this header's Purpose note on why editor/console.cpp, not a
+// separate console_panel.cpp - docs/TOOLING.md §9.1's file table). History (oldest to newest),
+// the most recent reply/error, then a live input line; Enter dispatches through `console_exec`
+// with `lockstep = false` - no netcode/Hovel session exists yet to ask (TODO.md: the real
+// lockstep source is a follow-up once that lands, not invented here). NOT built by this function
+// (list corrected 2026-08-27, B-7 - two real gaps this comment used to omit): "cvar UI"/"Luau
+// REPL hand-off" (this header's Purpose note, `TOOLING.md` §9.1's same row) - cvar UI is its own
+// real feature, not yet scoped; the Luau binding layer this needs does not exist
+// (`docs/LUAU-LAYER.md`, a different lane). Tab COMPLETION - `console_complete` exists, is well
+// tested, and is never called from this function; no Tab handling exists in the panel at all.
+// HISTORY WALK (`TOOLING.md` §9.3.5: "History: a 64-line ring... ↑/↓ walks it") - history renders
+// as a static list; ↑/↓ binds no keys and `console_history_at` is called only for display, never
+// to populate the input line.
+void console_panel_draw(Editor* ed, World* w);

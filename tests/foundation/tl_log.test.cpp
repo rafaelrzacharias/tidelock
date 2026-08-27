@@ -63,13 +63,13 @@ TL_TEST(log_ring_wraps_overwriting_oldest, "foundation") {
     for (u32 i = 0; i < 4097u; ++i) {
         TL_LOG_ERR("msg %u", i);   // always on - independent of the tier's TL_LOG_MIN
     }
-    TL_ASSERT_EQ(tl_log_test_ring_count(), 4096u);
+    TL_ASSERT_EQ(tl_log_ring_count(), 4096u);
     // 4097 writes into a 4096-slot ring: message 0 was overwritten, 1..4096 survive, and the
     // ring's write cursor is back to where message 4097 (the 4098th) would land - slot 1.
-    TL_EXPECT_EQ(tl_log_test_ring_head(), 1u);
+    TL_EXPECT_EQ(tl_log_ring_head(), 1u);
     bool found_msg_0 = false, found_msg_4096 = false;
-    for (u32 slot = 0; slot < tl_log_test_ring_count(); ++slot) {
-        const LogRecord* r = tl_log_test_ring_at(slot);
+    for (u32 slot = 0; slot < tl_log_ring_count(); ++slot) {
+        const LogRecord* r = tl_log_ring_at(slot);
         if (strcmp(r->msg, "msg 0") == 0) { found_msg_0 = true; }
         if (strcmp(r->msg, "msg 4096") == 0) { found_msg_4096 = true; }
     }
@@ -78,13 +78,14 @@ TL_TEST(log_ring_wraps_overwriting_oldest, "foundation") {
     // The scan above passes for either indexing convention; these two do not. tl_log.h says slot
     // order is WRITE order, so after the wrap slot 0 must be the oldest LIVE record (msg 1, at
     // ring index head=1) and the last slot the newest (msg 4096, at ring index 0).
-    TL_EXPECT_TRUE(strcmp(tl_log_test_ring_at(0)->msg, "msg 1") == 0);
-    TL_EXPECT_TRUE(strcmp(tl_log_test_ring_at(4095u)->msg, "msg 4096") == 0);
+    TL_EXPECT_TRUE(strcmp(tl_log_ring_at(0)->msg, "msg 1") == 0);
+    TL_EXPECT_TRUE(strcmp(tl_log_ring_at(4095u)->msg, "msg 4096") == 0);
     tl_log_test_reset();
 #else
-    // The tl_log_test_* introspection hooks have no symbol outside dev
-    // (tl_log.h guards them with TL_DEV); the ring itself is exercised by the
-    // dev leg of the same suite. A visible SKIP, never a vacuous pass.
+    // The tl_log_ring_* introspection functions (renamed from tl_log_test_* when promoted to a
+    // real production API, tl_log.h) have no symbol outside dev (tl_log.h guards them with
+    // TL_DEV); the ring itself is exercised by the dev leg of the same suite. A visible SKIP,
+    // never a vacuous pass.
     TL_SKIP("ring introspection is a dev-only symbol (tl_log.h TL_DEV guard)");
 #endif
 }
@@ -96,19 +97,20 @@ TL_TEST(log_ring_exactly_full_overwrites_nothing, "foundation") {
     for (u32 i = 0; i < 4096u; ++i) {
         TL_LOG_ERR("msg %u", i);
     }
-    TL_ASSERT_EQ(tl_log_test_ring_count(), 4096u);
-    TL_EXPECT_EQ(tl_log_test_ring_head(), 0u);   // wrapped to the start, nothing dropped
-    TL_EXPECT_TRUE(strcmp(tl_log_test_ring_at(0)->msg, "msg 0") == 0);
-    TL_EXPECT_TRUE(strcmp(tl_log_test_ring_at(4095u)->msg, "msg 4095") == 0);
+    TL_ASSERT_EQ(tl_log_ring_count(), 4096u);
+    TL_EXPECT_EQ(tl_log_ring_head(), 0u);   // wrapped to the start, nothing dropped
+    TL_EXPECT_TRUE(strcmp(tl_log_ring_at(0)->msg, "msg 0") == 0);
+    TL_EXPECT_TRUE(strcmp(tl_log_ring_at(4095u)->msg, "msg 4095") == 0);
     // One more write is what drops "msg 0" - the transition the wrap test asserts from the far side.
     TL_LOG_ERR("msg %u", 4096u);
-    TL_EXPECT_EQ(tl_log_test_ring_count(), 4096u);
-    TL_EXPECT_TRUE(strcmp(tl_log_test_ring_at(0)->msg, "msg 1") == 0);
+    TL_EXPECT_EQ(tl_log_ring_count(), 4096u);
+    TL_EXPECT_TRUE(strcmp(tl_log_ring_at(0)->msg, "msg 1") == 0);
     tl_log_test_reset();
 #else
-    // The tl_log_test_* introspection hooks have no symbol outside dev
-    // (tl_log.h guards them with TL_DEV); the ring itself is exercised by the
-    // dev leg of the same suite. A visible SKIP, never a vacuous pass.
+    // The tl_log_ring_* introspection functions (renamed from tl_log_test_* when promoted to a
+    // real production API, tl_log.h) have no symbol outside dev (tl_log.h guards them with
+    // TL_DEV); the ring itself is exercised by the dev leg of the same suite. A visible SKIP,
+    // never a vacuous pass.
     TL_SKIP("ring introspection is a dev-only symbol (tl_log.h TL_DEV guard)");
 #endif
 }
@@ -120,16 +122,17 @@ TL_TEST(log_message_truncates_at_capacity, "foundation") {
     for (u32 i = 0; i < sizeof(long_msg) - 1; ++i) { long_msg[i] = 'a'; }
     long_msg[sizeof(long_msg) - 1] = 0;
     TL_LOG_ERR("%s", long_msg);
-    TL_ASSERT_EQ(tl_log_test_ring_count(), 1u);
-    const LogRecord* r = tl_log_test_ring_at(0);
+    TL_ASSERT_EQ(tl_log_ring_count(), 1u);
+    const LogRecord* r = tl_log_ring_at(0);
     TL_EXPECT_EQ((u32)r->len, 223u);                        // docs/TOOLING.md §9.5, verbatim
     TL_EXPECT_EQ((u32)r->len, (u32)(TL_LOG_MSG_CAP - 1));   // capacity minus the NUL
     TL_EXPECT_EQ(r->msg[TL_LOG_MSG_CAP - 1], '\0');
     tl_log_test_reset();
 #else
-    // The tl_log_test_* introspection hooks have no symbol outside dev
-    // (tl_log.h guards them with TL_DEV); the ring itself is exercised by the
-    // dev leg of the same suite. A visible SKIP, never a vacuous pass.
+    // The tl_log_ring_* introspection functions (renamed from tl_log_test_* when promoted to a
+    // real production API, tl_log.h) have no symbol outside dev (tl_log.h guards them with
+    // TL_DEV); the ring itself is exercised by the dev leg of the same suite. A visible SKIP,
+    // never a vacuous pass.
     TL_SKIP("ring introspection is a dev-only symbol (tl_log.h TL_DEV guard)");
 #endif
 }

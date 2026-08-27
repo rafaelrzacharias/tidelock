@@ -2,10 +2,26 @@
 # two exemptions of docs/TESTING.md §8 R-2: the generated test list, and printf-class io/clock.
 file(GLOB_RECURSE TL_TEST_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.test.cpp")
 
-add_executable(tl_tests runner/main.cpp ${TL_TEST_SOURCES})
+# imgui_impl_null.cpp (vendor/imgui/backends/) is the headless platform+renderer pair
+# docs/TOOLING.md §9.5's "panels run ImGui headless via a null backend" test infra needs -
+# vendored but unbuilt by vendor/imgui/CMakeLists.txt itself (its own comment: each backend TU is
+# compiled by whichever lane owns the integration). tests/ is the owner here (src/editor/'s own
+# tl_editor lib never links it - panels ship against the real backend once PlatformDevApi lands).
+# debug/dev only, matching tl_editor's own real-vs-INTERFACE split: on netcode/ship `imgui` still
+# exists as a target (vendor/CMakeLists.txt adds it unconditionally) but tl_editor does not link
+# it, and every tests/editor/*.test.cpp call site is already `#if TL_DEV`-guarded.
+set(TL_TEST_EXTRA_SRC "")
+if(TL_TIER STREQUAL "debug" OR TL_TIER STREQUAL "dev")
+  list(APPEND TL_TEST_EXTRA_SRC "${CMAKE_SOURCE_DIR}/vendor/imgui/backends/imgui_impl_null.cpp")
+endif()
+
+add_executable(tl_tests runner/main.cpp ${TL_TEST_SOURCES} ${TL_TEST_EXTRA_SRC})
 target_link_libraries(tl_tests PRIVATE tl_flags_common
-  tl_foundation tl_core tl_net tl_sim tl_script tl_render tl_platform_headless tl_vendor_glue)
+  tl_foundation tl_core tl_net tl_sim tl_script tl_render tl_platform_headless tl_vendor_glue tl_editor)
 target_include_directories(tl_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+if(TL_TIER STREQUAL "debug" OR TL_TIER STREQUAL "dev")
+  target_include_directories(tl_tests PRIVATE "${CMAKE_SOURCE_DIR}/vendor/imgui/backends")
+endif()
 # tests/foundation/tl_assert.test.cpp relaunches this same binary (--filter) to prove the panic
 # ABI's real exit-2/marker contract in a child process, without a bespoke probe exe or the
 # not-yet-built TL_TEST_EXPECT_FATAL (docs/TESTING.md §9.1, TODO.md).

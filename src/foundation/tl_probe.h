@@ -76,11 +76,18 @@ void tl_probe_assert(u64 key, const char* name, i64 raw, i64 lo, i64 hi);
 void tl_probe_write_summary(void);
 
 #if TL_DEV
-// Test-only introspection (docs/TESTING.md's runner links against these). Guarded by TL_DEV.
+// Key introspection (guarded by TL_DEV). Originally test-only; promoted to a real production API
+// the day editor/probes_panel.cpp became its first non-test caller (docs/TOOLING.md §9.6 build
+// order item 5), matching tl_log.h's tl_log_ring_count/_at and tl_prof.h's tl_prof_ring_count/_at
+// promotions the day their own first panel needed them. Every other accessor below this pair
+// stays test-scoped: nothing on a live path formats the TSV staging buffer, rewinds the tick, or
+// force-sets a key's enabled flag outside a test (the real toggle is console/cvar-routed,
+// TOOLING.md §3 - not yet wired to a probe command, TODO.md; the Probes panel is read-only at v0).
 // Number of registered keys, in registration order.
-u32 tl_probe_test_key_count(void);
-// Key at `slot`. Precondition: slot < tl_probe_test_key_count().
-const ProbeKey* tl_probe_test_key_at(u32 slot);
+u32 tl_probe_key_count(void);
+// Key at `slot`, in registration order. Fatal if slot >= tl_probe_key_count().
+const ProbeKey* tl_probe_key_at(u32 slot);
+// Test-only introspection (docs/TESTING.md's runner links against these). Guarded by TL_DEV.
 // The formatted TSV rows written so far (docs/TOOLING.md §9.2's `staging` buffer), NUL-terminated.
 const char* tl_probe_test_staging(void);
 // Clears every key and the staging buffer to their zero-initialised state.
@@ -89,6 +96,7 @@ void tl_probe_test_reset(void);
 // (this header's Determinism note) - tests use this to exercise the throttle algorithm today.
 void tl_probe_test_set_tick(u64 tick);
 // Registers `key` if new, then sets its enabled flag. The real toggle is console/cvar-routed
-// (`TOOLING.md` §3, `core/console.cpp`, not built yet) - tests use this directly until then.
+// (`TOOLING.md` §3, `editor/console.cpp` + `core/cvar.h` - built, but not yet wired to a probe
+// toggle command) - tests use this directly until that wiring lands.
 void tl_probe_test_set_enabled(u64 key, const char* name, u8 enabled);
 #endif

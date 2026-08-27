@@ -31,6 +31,13 @@ struct World;
 // The record kinds (docs/ECS.md §10.5). CMD_ALLOY / CMD_SCRIPT_RELOAD / CMD_DATA_RELOAD /
 // CMD_ASSET_READY have no recorder yet - their producing lanes (alloy-substrate, luau-bindings,
 // assets) land them; an applier meeting one today is TL_FATAL("unwired"), never a silent skip.
+// CMD_SET_CVAR is added here under a NARROW, ADDITIVE, RULED exception to cone discipline
+// (docs/ROADMAP.md §0 rule 2; ruled 2026-08-27, Rafael, relayed by the steward, RR-33/RR-35 on
+// PR #16's `w3-editor`) - the `ecs` lane that owns this file is merged and closed, and
+// `TOOLING.md` §3 requires a `CVAR_SIM`-flagged cvar's write to be exactly this: a sealed,
+// tick-stamped command a lockstep session can refuse (`core/cvar.h`'s `cvar_apply_sim_raw` is
+// the applier seam this command's case in commands.cpp calls). Appended at the end so every
+// existing row keeps its numeric value.
 enum CmdKind : u8 {
     CMD_SPAWN_REALIZE = 1,
     CMD_DESTROY,
@@ -42,10 +49,13 @@ enum CmdKind : u8 {
     CMD_SCRIPT_RELOAD,
     CMD_DATA_RELOAD,
     CMD_ASSET_READY,
+    CMD_SET_CVAR,
 };
 
 // One record, 16 B (docs/ECS.md §10.5). Payload bytes live in the chunk's payload array;
-// CMD_SET_FIELD's payload is a u32 field index followed by the field's bytes.
+// CMD_SET_FIELD's payload is a u32 field index followed by the field's bytes. CMD_SET_CVAR's
+// payload is a NameHash key (LE u64) followed by the new raw bits (LE u32) - `comp`/`e` unused
+// (docs/TOOLING.md §3's cvar has no entity or component of its own).
 struct CmdRecord {
     CmdKind kind;
     u8  _pad0;
