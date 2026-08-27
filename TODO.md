@@ -7545,3 +7545,31 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > (`WORKFLOW.md` §7); (c) the two-process compile check needs a process-spawn primitive that does
 > not exist in the codebase. Until this is ruled, `ASSETS-AND-DATA.md` §8.5's deferred clauses name
 > no owner and C's D4 header fix can only say "unowned" honestly rather than name anyone.
+
+> **RR-48 AMENDED by area B's own follow-up, and the amendment changes which fix is correct.** My
+> allocation above described the mechanism as the `used` high-water, which stands — but the three
+> fix directions it carried are now reordered by evidence the reviewer produced after its verdict.
+> **It is the extent's LENGTH, not stale bytes:** `src/core/column.cpp:98-101` already zeroes the
+> vacated tail row on every remove, with the `Array<T>` reasoning in a comment, so removal history
+> does NOT move the hash within one world and "zero the tail harder" is not a fix. Hashing 24
+> zeroed-tail bytes is simply not hashing 16.
+> - Direction **(b)** (re-establish the extent on load) is **more expensive than it looked**:
+>   `ArenaBlock` records rows, not the arena's high-water, so there is nothing in the file to
+>   restore the extent FROM. It needs a format change and a `SAVE_FORMAT_VERSION` bump.
+> - Direction **(c)** (hash a column's live extent, `[base, base + count*stride)`) is **cheap and
+>   removes the class rather than the instance**, and subsumes (b). Every byte above `count` is
+>   already guaranteed zero by `column_remove`, so it discards no live information — it only stops
+>   a peer's allocation high-water from being part of its state.
+> Still a ruling and still Rafael's: (c) touches `registry_hash_all`, which `CANON.md` calls the
+> lockstep contract, so it is not a lane's to take. **But the recommendation is now (c), where
+> before it was a genuine three-way.**
+>
+> **PROCESS NOTE AGAINST THE STEWARD, recorded because it nearly cost this finding.** I archived
+> area B's session on reading a verdict that LOOKED final; its `task_summary` at that moment read
+> "Appending B-1 sharpening, committing, pushing", and this commit landed at 22:47:22 against an
+> archive at 22:48:04. Nothing was lost, by about forty seconds and no judgement of mine.
+> `LESSONS.md` says to archive the instant a verdict is filed — correct as far as it goes, and this
+> is its edge: **the signal to archive on is the OBSERVABLE going quiet (a branch head that has
+> stopped moving, plus an IDLE session), not a verdict that reads complete.** A reviewer's most
+> valuable commit can be the one that corrects its own headline, and that is by construction the
+> last one it writes.
