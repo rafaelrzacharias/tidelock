@@ -241,6 +241,7 @@ anywhere. Rules:
 | `TL_LOG_{TRACE,DEBUG,INFO,WARN,ERR}` | `foundation/tl_log.h` | all levels | `INFO+` (both; ship quiets via cvar, `TOOLING.md` §9) |
 | `TL_PROF_SCOPE(name)`, `TL_PROF_COUNTER(name, v)` | `foundation/tl_prof.h` | active | compiled out |
 | `TL_PROBE_*` | `foundation/tl_probe.h` | active | compiled out |
+| `TL_DBG_{LINE,RECT,CIRCLE,LINE_PERSIST,RECT_PERSIST,CIRCLE_PERSIST}` | `render/debugdraw.h` | active | compiled out (arg list unevaluated; `debugdraw.cpp` itself still builds/tests in every tier, `RENDER2D.md` §9.1) |
 | `TL_CVAR(type, name, default, flags, help)` | `core/cvar.h` | registered + console | `SIM` cvars registered (fingerprinted); others constant-folded |
 | `TL_TEST(name, tags)`, `TL_EXPECT_*`, `TL_ASSERT_*` | `tests/runner/tl_test.h` | tests only | — |
 | `TL_SCRATCH_SCOPE_BEGIN(s)` / `TL_SCRATCH_SCOPE_END(s)` | `foundation/scratch.h` | mark/reset pair, no RAII (the shipped spelling — the single-macro `TL_SCRATCH_SCOPE(s)` was rev-1's guess) | same |

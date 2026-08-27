@@ -48,10 +48,10 @@ binary are in `extract.cpp` and the sim-view writer.
 
 ---
 
-## 2. Camera (DECIDED)
+## 2. Camera (DECIDED — amended review round 1 D1, 2026-08-27: off the ECS)
 
 ```cpp
-struct Camera2D { f32 cx, cy; f32 zoom; f32 rot_turns; f32 ppu; u8 pixel_snap; u8 view; };   // render-side component
+struct Camera2D { f32 cx, cy; f32 zoom; f32 rot_turns; f32 ppu; u8 pixel_snap; };   // plain value struct, RenderQueue.camera[view]
 ```
 
 Double-buffered + interpolated like any transform (the camera follows an entity by reading its
@@ -59,6 +59,36 @@ Double-buffered + interpolated like any transform (the camera follows an entity 
 scaling / filter / pixel-snap / integer-letterbox) is a value struct; `resolve_layout(window,
 presentation) → {internal_size, viewport, scale}` is the one function every pass asks — aspect
 math cannot drift. Default: integer letterbox for the pixel-art/sim view, aspect-fit otherwise.
+
+**Not an ECS component.** `Camera2D`/`CameraPrev`/`CameraFollow` live on `RenderQueue` — one slot
+per view (`camera`/`camera_prev`/`camera_follow`, indexed `[0, camera_count)`), the same place
+every other render-side field already lives — never as registered ECS components. The rev-1 text
+above called `Camera2D` a "render-side component," registered via a hand-rolled empty-field
+`ComponentInfo` (core's `FieldKind` enum has no float row). That empty field table hid the struct
+from `world_reflection_hash` (schema-level) but not from `registry_hash_all` (arena-level — hashes
+every `ARENA_HASHED` arena's raw bytes regardless of what its field table says), so a camera pan,
+a follow retarget, or a window resize feeding a different zoom — none of them sim state — moved
+the lockstep state hash. Two peers with identical sim state but different camera positions
+desynced. Fixed by removing the ECS registration entirely: camera state cannot enter
+`registry_hash_all` if it never touches a registered arena, so "nothing in this module is hashed
+or snapshotted" (this doc's own caption) now holds by construction. `CameraFollow`'s
+`target == Entity{}` means "no follow" for that view — `world_get<Transform>(w, target)` resolves
+a never-issued generation to null on its own, so no separate has-follow flag is needed.
+
+**`camera_prev` initialization vs. advance (ruled 2026-08-27, Rafael, relayed by the steward,
+review round 2 N1).** `render_camera_init(w, view, cam)` seeds BOTH `camera[view]` and
+`camera_prev[view]` to `cam` the first time a view is configured — the first frame's lerp is then
+`prev == cur`, the identity, for any `alpha`, so `sys_extract`'s per-view loop stays an
+unconditional lerp with no sentinel test and no branch. Before this ruling, a raw `camera[view]`
+write left `camera_prev[view]` at `render_init`'s zero-fill (`ppu == 0`), and the first
+`sys_extract()` call aborted (a singular `view_matrix`, tripping D10's `TL_CHECK(det != 0)` three
+calls deep) — this closes that spec silence rather than working around it. Advancing
+`camera_prev` on later ticks (the `camera_prev[v] = camera[v]` copy, once per sim tick, AFTER the
+first) is still the future `app/wiring.cpp` lane's job (no consumer calls it before W4
+v0-integration exists, same status as `sys_extract`/`render_present`/`simview_update` today) -
+camera left core's generic Transform/TransformPrev ping-pong mechanism when it left the ECS, so it
+needs its own explicit copy there, not core's; initialization is defined, only the per-frame
+ADVANCE is unbuilt.
 
 ---
 
@@ -186,10 +216,11 @@ failures are `Result<T>`/`ErrCode` in the `ERR_RENDER_*` range. Draw verbs are t
 | `extract.cpp` | `sys_extract` (`PRE_RENDER`): fx→f32, lerp, packet, camera | all |
 | `queue.h/.cpp` | `DrawCommand`, key pack/unpack, `DrawData` SoA, `ClipTable`, submit, reject | all |
 | `batch.cpp` | key sort (calls `sort_u64_kv`), scan-batching, vertex/index emission | all |
-| `sprite.cpp` | `Sprite` component + `sys_sprite_render` (`RENDER`) | all |
+| `render_internal.h` | `render_sort_and_batch`/`render_emit_geometry` declarations shared between `batch.cpp` and `backend_sdl.cpp` - NOT part of `tl_render`'s public surface (`render.h` is); `render_resolve_view` also lives here | all |
+| `sprite.h/.cpp` | `Sprite` component + `sys_sprite_render` (`RENDER`) | all |
 | `simview.h/.cpp` | material LUT, chunk/body/particle/basin writers over `sim/views.h`, `simview_texel_to_world` | all (Milestone 2; v0 ships the header + an empty update) |
-| `debugdraw.h/.cpp` | immediate lines/rects/circles, persistent list, tessellation | `debug`, `dev` — in `netcode`/`ship` the `TL_DBG_*` macros expand to `((void)0)` and the TU is not built |
-| `text.cpp` | reserved stub: `text_layout()` returns `ERR_RENDER_UNSUPPORTED` | all |
+| `debugdraw.h/.cpp` | immediate lines/rects/circles, persistent list, tessellation | all — the `foundation/tl_prof.h`/`tl_probe.h` precedent (`CPP-SUBSET.md` §7b): the TU itself builds and is tested in every tier; only a call site that goes through the `TL_DBG_*` macros pays for it, and outside `TL_DEV` those expand to `((void)0)`, argument list unevaluated |
+| `text.h/.cpp` | reserved stub: `text_layout()` returns `ERR_RENDER_UNSUPPORTED` | all |
 | `backend_sdl.cpp` | `render_present`: sort → batch → `DrawApi` verbs. Includes `platform/platform.h` only; the name records the SDL_Render-shaped verb set. A future `backend_gpu.cpp` replaces this one TU | all |
 
 `tl_render` links into `tidelock` and into `tl_tests` (with `tl_platform_headless`) for
@@ -202,9 +233,9 @@ failures are `Result<T>`/`ErrCode` in the `ERR_RENDER_*` range. Draw verbs are t
 struct Rect_f32 { f32 x, y, w, h; };  struct Rect_i32 { i32 x, y, w, h; };  struct Rect_u16 { u16 x, y, w, h; };
 // camera.h
 struct Mat3 { f32 m[9]; };                       // row-major affine: [m0 m1 m2; m3 m4 m5; 0 0 1]
-struct Camera2D   { f32 cx, cy; f32 zoom; f32 rot_turns; f32 ppu; u8 pixel_snap; u8 view; u16 _pad0; }; // 24 B, render-side component
-struct CameraPrev { f32 cx, cy; f32 zoom; f32 rot_turns; f32 ppu; u8 pixel_snap; u8 view; u16 _pad0; }; // 24 B, hidden column, ping-ponged at the barrier
-struct CameraFollow { Entity target; f32 off_x, off_y; };                                              // 12 B, optional
+struct Camera2D   { f32 cx, cy; f32 zoom; f32 rot_turns; f32 ppu; u8 pixel_snap; u8 _pad0[3]; };        // 24 B, RenderQueue.camera[view] - not an ECS component (§2)
+struct CameraPrev { f32 cx, cy; f32 zoom; f32 rot_turns; f32 ppu; u8 pixel_snap; u8 _pad0[3]; };        // 24 B, RenderQueue.camera_prev[view]
+struct CameraFollow { Entity target; f32 off_x, off_y; };                                              // 12 B, RenderQueue.camera_follow[view]; target == Entity{} = no follow
 struct Presentation { u16 internal_w, internal_h;   // 0,0 = render at window res (no internal target)
                       u8 mode;   /* PRES_INTEGER_LETTERBOX=0 | PRES_ASPECT_FIT=1 | PRES_STRETCH=2 */
                       u8 filter; /* FILTER_NEAREST=0 | FILTER_LINEAR=1 — the upscale blit only */
@@ -254,8 +285,17 @@ struct RenderQueue {
     RenderPacket packet; Rect_f32 view_world[MAX_VIEWS]; Mat3 view_mat[MAX_VIEWS];
     Presentation pres[MAX_VIEWS]; Layout layout; TexHandle target[MAX_LAYERS]; u32 clear_rgba[MAX_LAYERS];
     u8 layer_view[MAX_LAYERS];   // which view's matrix a world-space layer uses (UI/DEBUG: 0xFF = screen space)
+    // Camera state (§2, amended review round 1 D1) - not an ECS component; camera_count gates how
+    // many of the MAX_VIEWS slots sys_extract processes.
+    Camera2D camera[MAX_VIEWS]; CameraPrev camera_prev[MAX_VIEWS]; CameraFollow camera_follow[MAX_VIEWS]; u8 camera_count;
     f32 alpha; u32 stats_submitted, stats_rejected, stats_draw_calls, stats_batches; };
 ```
+This is the spec-pinned minimum, not the exhaustive shipped shape (review round 3 A-11) - `render.h`
+carries two more entries beyond it, each with its own contract-block note there rather than restated
+here (one fact, one home): `platform` (the `PlatformApi*` `render_present` needs; render.h's own
+SIGNATURE NOTE), and `dbg_ring`/`dbg_ring_count`/`dbg_ring_next` (the persistent debug-draw ring,
+§7/§9.3.8 - opaque here because its element type is `debugdraw.h`'s and `debugdraw.h` includes
+`render.h`, not the reverse). See `render.h` for the live, complete struct.
 
 ```cpp
 // sprite.h — 20 B: rgba@0 src@4 tex@12 depth_bias@14 layer@16 flags@17 _pad0@18; src = {x,y,w,h} texels (ECS §6 kinds: no Rect kind, so XA(u16,4))
@@ -313,7 +353,7 @@ world position is texel-aligned lands on a pixel boundary — the §0 pixel-perf
 
 **9.3.3 Extract** (`sys_extract`, `PRE_RENDER`, the first system of the phase; `alpha` from the loop via `World.render->alpha`):
 ```
-cur = world_column<Transform>(w); prev = world_column<TransformPrev>(w); n = cur.count   (TL_ASSERT prev.count == n)
+cur = world_column<Transform>(w); prev = world_column<TransformPrev>(w); n = cur.count   (TL_CHECK prev.count == n)
 pk = packet_reserve(scratch_main, n)
 for i in 0..n (ascending dense index):
   a = (cur[i].flags & TRANSFORM_SNAP) ? 1.0f : alpha        // the bit is read, never written here; the barrier clears it (FRAME-LOOP §3 step 3)
@@ -321,11 +361,13 @@ for i in 0..n (ascending dense index):
   r0 = to_f32(prev[i].rot); r1 = to_f32(cur[i].rot)          // turns
   d = r1 - r0; d -= floorf(d + 0.5f)                           // shortest arc: d ∈ [-0.5, 0.5)
   pk.rot_turns[i] = r0 + d * a;  pk.sx[i] = pk.sy[i] = 1.0f    // scale columns exist for a future Scale component; v0 constant
-cameras: for each (Camera2D cur, CameraPrev prev) pair: lerp cx, cy, zoom, ppu linearly; rot_turns shortest-arc as above
-         if the entity has CameraFollow and target has Transform: cam.cx = pk.x[dense(target)] + off_x (same y)
-         view_world[view] = AABB of the 4 viewport corners through screen_to_world; view_mat[view] = view_matrix(cam, layout)
+cameras (§2, amended D1 - RenderQueue state, not ECS columns): TL_CHECK(camera_count <= MAX_VIEWS)
+  for view in 0..camera_count: lerp cx, cy, zoom, ppu linearly from camera_prev[view] -> camera[view]; rot_turns shortest-arc as above
+    if world_get<Transform>(w, camera_follow[view].target) resolves: cam.cx = pk.x[dense(target)] + off_x (same y) - target == Entity{} (no follow) resolves to null on its own
+    view_world[view] = AABB of the 4 viewport corners through screen_to_world; view_mat[view] = view_matrix(cam, layout)
 ```
-These two loops plus `simview.cpp` are the only `to_f32` call sites in the binary (CI grep; §9.5).
+These two loops plus `simview.cpp` and `sprite.cpp` are this module's `to_f32` call sites (§9.5's
+allowlist; not yet CI-enforced there).
 
 **9.3.4 Submission and reject**
 ```
@@ -353,7 +395,11 @@ for pass in 0..8:  shift = pass*8
   swap(src, dst)
 if src.k != keys: memcpy(keys, src.k, n*8); memcpy(order, src.v, n*4)
 ```
-O(8n) worst, stable, no comparisons; 1M keys ≈ 8 ms single-threaded (the test's upper bound is 30 ms).
+O(8n) worst, stable, no comparisons; 1M keys measured 89–144 ms on the CI container (review rounds
+1 and 2, `radix_order`) - the test's own bound is < 5000 ms, a generous non-strict smoke check for
+a gross algorithmic regression, not a perf grade (§9.6; `WORKFLOW.md` §4 owns real perf grading).
+This paragraph previously said "≈ 8 ms... the test's upper bound is 30 ms" - neither number held
+against a measurement (review round 2 N9); fixed to match §9.6's row, the one home for this bound.
 
 **9.3.6 Scan-batching** (after the sort; `order` gives sorted position → command):
 ```
@@ -434,26 +480,50 @@ resize event re-runs `resolve_layout` and recreates the target (old one destroye
 
 ### 9.5 Determinism note
 
-Nothing here is hashed; no sim TU reads render state. The fx→float conversions are confined to
-`extract.cpp` (§9.3.3) and `simview.cpp` (§9.3.7 body/particle/basin positions — the SDF
-raster is `i16` and compared as an integer). CI: `to_f32`/`to_f64` may appear under `src/` only
-in `render/extract.cpp`, `render/simview.cpp`, `editor/`, and `from_f32_quantized` only in
-`core/producers/live.cpp` and `editor/` (`FX-PALETTE.md` §6). `-ffast-math` stays off (`CPP-SUBSET.md` §7).
+Nothing here is hashed; no sim TU reads render state. **This module's own** fx→float conversions
+are confined to `extract.cpp` (§9.3.3), `simview.cpp` (§9.3.7 body/particle/basin positions — the
+SDF raster is `i16` and compared as an integer), and `sprite.cpp` (its one fx-palette ratio,
+`fx::to_f32(fx::TEXEL)` — review round 2 N5 found round 1's M2 fix had introduced this call site
+without updating the allowlist below; RULED 2026-08-27, Rafael, relayed by the steward: a
+compile-time `TEXEL_M` constant in `foundation/fx_float.h` would have been the better engineering,
+but `src/foundation/` is a different module's cone and this lane took it without a scoped
+exception — the in-cone fix is naming `sprite.cpp` as this module's own third allowlisted site
+instead, at the cost of one runtime `to_f32` call in place of a compile-time constant, accepted
+deliberately). The allowlist (`FX-PALETTE.md` §6): `to_f32`/`to_f64` under `src/` only in
+`render/extract.cpp`, `render/simview.cpp`, `render/sprite.cpp`, `editor/`, and
+`from_f32_quantized` only in `core/producers/live.cpp` and `editor/`. **Known to not hold on the
+tree today** (review round 2 N5's own audit): `src/script/bind_fx.cpp` and `src/script/vm.h` also
+call `to_f32`/`to_f64`, neither `render/` nor `editor/` — pre-existing on `main`, not this lane's
+to fix, but the allowlist sentence is inaccurate as written until amended or those sites are
+relocated. **Not yet CI-enforced** — no grep step exists in `tools/` or `.github/workflows/` for
+this today (review round 1 D11); this paragraph states the intent other lanes are expected to
+honour, not a live gate. Filed in `TODO.md` as RR-24, amended with the `script/` finding, for
+whichever lane owns CI tooling. `-ffast-math` stays off (`CPP-SUBSET.md` §7).
 
 ### 9.6 Tests — `tests/render/` (in `tl_tests`, headless platform)
+
+This table is the spec-anchored subset — one row per algorithm/invariant this doc states, not the
+exhaustive shipped suite (review round 3 A-11: the tree has grown well past this table across
+review rounds' own discriminating-test additions, e.g. `emit_out_of_range_view_fatals`,
+`texture_size_called_once_per_batch_not_per_command`, `tl_dbg_line_argument_list_evaluated_only_at_tl_dev` -
+none restate a §9 algorithm this table already names, so they are not rows here). `tl_tests --tag
+render`'s own "N selected" line is the one live count (`TODO.md`'s own test-count entry, corrected
+the same round, is why this table does not restate a number either).
 
 | Test | Asserts |
 |---|---|
 | `key_pack_unpack` | every field round-trips at 0, max, and a random 10k sample; field masks do not overlap (`static_assert` set) |
-| `radix_order` | sorted ascending; equal keys keep submission order (ties at every byte); 1M random keys vs a naive reference; all-identical 1M keys unchanged; < 30 ms |
+| `radix_order` | sorted ascending; equal keys keep submission order (ties at every byte) over 1M random keys, checked against a naive stable-insertion-sort oracle on a 200-sample slice; all-identical 1M keys unchanged; < 5000 ms — a generous, non-strict smoke bound catching only a gross algorithmic regression (e.g. an accidental O(n²)), not a perf grade (`WORKFLOW.md` §4 owns that) |
 | `batch_boundaries` | splits exactly on tex/clip/blend/layer changes, never on depth; counts sum to n; empty queue → 0 batches |
 | `clip_stack` | push/pop ids, submit stamps the top, depth 32 overflow → fatal (child process), id 0 when empty |
 | `reject` | quads fully outside `view_world` increment `stats_rejected` and add no command; touching-edge quads are kept |
 | `resolve_layout_table` | table of (win, internal, mode) → expected viewport/scale: 1280×720/320×180 LETTERBOX → s=4 centred; 1279×719 → s=3, viewport 960×540 at (159,89); 300×100 → s=1 oversize; ASPECT_FIT 1000×1000/320×180 → 1000×562 at (0,219); dpi 2.0 |
 | `world_screen_roundtrip` | 10k random points, zoom ∈ {0.5,1,4}, rot ∈ {0,0.125,0.5}: `screen_to_world(world_to_screen(p))` within 1e-3 m; the Y flip: world +Y maps to decreasing screen Y; picking through `target_to_window` inverse |
-| `simview_half_texel` | a synthetic chunk with an SDF edge at texel column 37 (`sdf < 0` for `tx ≥ 37`), ppu = 32, camera at the chunk origin: the first opaque staging pixel is column 37 and the chunk quad's left edge lands on target px `W/2 − 128·2·…` exactly; `simview_texel_to_world(cx, 37, 0).x == −4096 + 8cx + 37.5·TEXEL` |
-| `present_descriptor` | headless `DrawApi` records calls: a 3-layer queue yields `set_target` ×3 (world target, window, window), one `clear` per layer, `draw_geometry` count == batch count, one blit, one `present`; vertex counts = 4 per command |
+| `simview_half_texel` | **Milestone 2** (needs the SDF-raster writer over `sim/views.h`, not yet on `main`): a synthetic chunk with an SDF edge at texel column 37 (`sdf < 0` for `tx ≥ 37`), ppu = 32, camera at the chunk origin: the first opaque staging pixel is column 37 and the chunk quad's left edge lands on target px `W/2 − 128·2·…` exactly |
+| `simview_texel_to_world_half_texel_rule` | the pure half of the row above, landed early (review round 2 N10 - no `sim/views.h` dependency): `simview_texel_to_world(cx, 37, 0).x == −4096 + 8cx + 37.5·TEXEL`; row 0 is the chunk's TOP, not bottom; row 0 and row 127 are 127 texels apart |
+| `present_descriptor` | headless `DrawApi` records calls: a 3-layer queue (WORLD with its internal target, UI/DEBUG to the window, per §9.4's own "Targets" paragraph) yields `set_target` ×5 (the step-4 top-level window clear's own call, world target, the WORLD blit's own call back to window, then window again for UI and for DEBUG - each layer transition calls `set_target` unconditionally, so two consecutive window-target layers are two calls, not a merged one), `clear` ×2 (the top-level window clear plus WORLD's own - UI/DEBUG have a null target, so step 4's `if target != null` guards their clear out), `draw_geometry` ×4 in the raw call log (one per batch, three, plus the WORLD blit's own quad) while `stats_draw_calls == stats_batches` (three, the per-batch count the blit is deliberately not part of), one blit, one `present`; every `draw_geometry` call (batches and the blit alike) carries 4 vertices |
 | `extract_snap_and_arc` | snap bit forces `a = 1`; rotation 0.9 → 0.1 turns lerps through 1.0, not 0.5 |
+| `camera_state_is_not_hashed` | positive control first (a registered `Transform`'s bytes DO move the hash, proving it is live — review round 3 A-1, closing the tautology round 2 flagged), then `registry_hash_all` is invariant under `RenderQueue.camera`/`camera_follow` changes (a pan, `±0.0f`, a follow retarget) — the review round 1 D1 invariant §2's caption claims |
 
 Pixel goldens (FLIP-compared, `--render=software`) are nightly, never PR-blocking (§8).
 
@@ -463,13 +533,24 @@ Pixel goldens (FLIP-compared, `--render=software`) are nightly, never PR-blockin
 2. `queue.h/.cpp` + `key_pack_unpack`, `clip_stack`, `reject`; `batch.cpp` + `radix_order`, `batch_boundaries`.
 3. `backend_sdl.cpp` over the headless `DrawApi` + `present_descriptor`; then on sdl3: a window that clears and presents.
 4. `extract.cpp`, `sprite.cpp` + `extract_snap_and_arc`; a textured sprite moving under interpolation at 144 Hz render / 60 Hz sim shows no stutter (manual).
-   **v0 done:** steps 1–4 green; `tidelock` draws sprites through the queue; `stats_draw_calls == batches`; zero heap allocation per frame (the allocator shim counter is 0 in steady state).
+   **render2d v0 done (this module's own provable scope — review round 1 D8):** steps 1–4
+   green on BOTH the `dev` and `netcode` tiers (`WORKFLOW.md` §6 R-11); `stats_draw_calls ==
+   stats_batches` asserted directly (`present_descriptor`); every render test exercises the
+   real pipeline (`render_present`, `sys_extract`, `sys_sprite_render`, `render_build_frame`)
+   repeatedly with no allocator tripwire fatal — `MEMORY.md` §2's CRT-malloc *counter* was
+   dropped by a 2026-08-26 ruling (`foundation/alloc_shim.h`'s contract block); the live
+   mechanism is tripwires, not a number to assert, and it is satisfied. **"`tidelock` draws
+   sprites through a real window" and "fingerprints logged" are NOT this module's to claim** —
+   they need `app/wiring.cpp` (W4, not built by any merged lane yet) and belong to
+   `ARCHITECTURE.md` §9's own **v0** milestone row, which spans SDL3 platform + assets + data
+   compiler + Luau VMs + this module + the ImGui shell together. `TODO.md`'s "W3 render2d" lane
+   notes carry the measured verification for the four bullets above.
 5. Milestone 2: `simview.cpp` chunks (+ `simview_half_texel`), then bodies, particles, basins, burn; `parallel_for` adoption when `JOBS.md` lands (the writer is already chunk-keyed).
    **Milestone 2 done:** a carved chunk re-uploads only on `dirty_serial` change (counter test), ~60 visible chunks ≤ 1 ms CPU write + upload, graded per `WORKFLOW.md` §4 (the committed PC rev-2 record until the Deck re-anchors).
 
 ---
 
-## 10. Rulings (closed 2026-08-22 — nothing open)
+## 10. Rulings
 
 - **R-1 One streaming texture per chunk.** Dirty tracking is per chunk already; ~30–60 visible
   chunks is ~60 draws, far below any SDL_Render concern; an atlas would couple upload granularity
@@ -479,5 +560,24 @@ Pixel goldens (FLIP-compared, `--render=software`) are nightly, never PR-blockin
   (Noita-class); AA would blur the one thing the sim view must make legible — the carve edge.
   The edge tint colour and width (0 or 1 texel) come from the Luau material palette LUT per
   material, so "soft" materials can still read as such without an AA path.
+- **R-3 Camera comes off the ECS (Rafael, 2026-08-27, review round 1 D1).** `Camera2D`/
+  `CameraPrev`/`CameraFollow` were registered ECS components (a hand-rolled empty-field
+  `ComponentInfo`, working around `core/reflect.h`'s missing float `FieldKind` row); their raw f32
+  bytes still entered `registry_hash_all`'s per-arena byte hash despite the empty field table
+  (that hash reads bytes, never the field table), so a camera pan/follow/resize desynced two
+  lockstep peers with identical sim state. Fixed by moving camera state onto `RenderQueue` (§2)
+  instead of chasing a better field-table workaround — it is structurally impossible to hash once
+  it never touches a registered arena. See §2 for the full account and `camera_state_is_not_hashed`
+  (§9.6) for the passing regression.
 
-*Rev 1 — 2026-08-22.*
+*Rev 1 — 2026-08-22, reconciled 2026-08-26 (w3-render2d): §9.6's `present_descriptor` row
+corrected to match §9.4's own step-4 pseudocode and "Targets" paragraph exactly (the row's
+"`set_target` ×3, one `clear` per layer" undercounted - the algorithm calls `set_target`
+unconditionally on every layer transition and clears only when the layer's own target is
+non-null; measured by building the actual sequence for the row's own 3-layer example, not
+guessed). Reconciled 2026-08-27 (w3-render2d, review round 1 D1): §2/§9.1/§9.2/§9.3.3 amended for
+R-3 above - `Camera2D`/`CameraPrev` drop their `view` field (array-indexed now, not stored), the
+`RenderQueue` struct dump gains `camera`/`camera_prev`/`camera_follow`/`camera_count`, and §9.3.3's
+extract pseudocode reads from RenderQueue state instead of ECS columns (its stale `TL_ASSERT
+prev.count == n` also corrected to `TL_CHECK`, matching review round 1 D5's already-shipped code
+fix that this pass had missed).*
