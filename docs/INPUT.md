@@ -103,7 +103,7 @@ the loop calls before `FIRST` (`FRAME-LOOP.md` §0). Four producers, one mechani
 | Producer | Frames come from | Built |
 |---|---|---|
 | **Live** | `fold_tick` over the platform's raw event buffer: continuous state (down/axis) persists, edges are derived prev↔current, analog quantized, pointer projected + quantized, dev-only ImGui capture mask applied first | v0 |
-| **Script** | a test's scripted frames (`press("jump", tick=10)`, `hold("move_x", 127, 0..30)`), built by the harness | v0 (headless tests) |
+| **Script** | a test's scripted frames (`press("jump", tick=10)`, `hold("move_x", 127, from=0, to=30)` — down over `[0, 30)`, `script.h`'s ruled half-open range), built by the harness | v0 (headless tests) |
 | **Replay** | a recorded stream (`RecordedInput` = header + tick-stamped frames + per-tick hashes) | v0 (the determinism guard) |
 | **Network** | the sequencer's confirmed frames for all live slots (`NETCODE.md`) | Hovel |
 

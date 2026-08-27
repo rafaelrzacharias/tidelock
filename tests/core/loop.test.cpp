@@ -159,6 +159,12 @@ TL_TEST(engine_frame_produce_wait_alpha_parks_instead_of_cycling, "core,loop,pro
     // in general. The clamp parks both at the same just-below-1.0 value regardless of how much
     // further the stall runs.
     TL_EXPECT_EQ(alpha_1, alpha_2);
+    // Pins the DIRECTION, not just the stability, of the park value (round 2 defect 2 fix, round 3
+    // defect 1): alpha_1 == alpha_2 alone is satisfied just as well by a 0.0f fallback, which is
+    // exactly the wrong direction - it maps "one tick almost fully elapsed" to "no tick elapsed", a
+    // full-tick backward jump in the render pose. nextafter(1.0f, 0.0f) is the only value that is
+    // both stable across the stall AND on the correct side of the boundary.
+    TL_EXPECT_EQ(alpha_1, 0x1.fffffep-1f);
 }
 
 TL_TEST(engine_barrier_order_event_and_command_visible_next_tick, "core,loop,barrier,fast") {

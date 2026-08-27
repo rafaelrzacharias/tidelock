@@ -112,7 +112,7 @@
 > and kept the defect (`pending` CYCLES during a stall → a full 0→1 sawtooth at ~60 Hz with the
 > sim frozen), and it is NOT latent — merged render2d's `extract.cpp` lerps every entity and
 > the camera by that alpha. The branch is 33 commits behind `main`, and two of the lane's own
-> ruling requests (RR-25(c), RR-26) rest on premises that expired when render2d merged.
+> ruling requests (RR-30(c), RR-31) rest on premises that expired when render2d merged.
 >
 > **PR #14 `w3-assets-data` @ `c12bfac` — nine of ten round-1 fixes discriminate under the
 > reviewer's own reverts; 2 new blockers.** (i) `save_read` trusts `hdr.arena_count`: the
@@ -3732,7 +3732,9 @@ airlock + action map, Live/Script/Replay producers, the recorder — built on br
 blocking (each has a working, documented interim resolution recorded in the touched headers'
 contract blocks):
 
-- [x] **RR-24 (w3-loop-input): `MAX_PEERS`'s doc-home (`CANON.md`: "owned by NETCODE") and its
+- [x] **RR-29 (w3-loop-input, was RR-24 — renumbered 2026-08-27, steward-allocated, review round 3
+      defect 4: `main`'s merge collided this lane's self-allocated RR-24/25/26 with render2d's own
+      RR-24/25/26, already on `main`; render2d's do not move): `MAX_PEERS`'s doc-home (`CANON.md`: "owned by NETCODE") and its
       C++ symbol-home collided with the module DAG. RULED 2026-08-26 (Rafael, relayed by the
       steward).** `net/wire.h` (net-p1, merged) and `core/input.h` (this lane) each defined their
       own `constexpr u32 MAX_PEERS = 8u;`; nothing in the merged tree included both headers in one
@@ -3753,8 +3755,9 @@ contract blocks):
       `MAX_PEERS` — core's becomes the one definition, legal precisely because net already depends
       on core. Not this lane's file to edit (`net/`, cone discipline, `WORKFLOW.md`).~~
 
-- [ ] **RR-25 (w3-loop-input): `SystemFn`'s `void(*)(World*)` shape has no path to Engine-level
-      context — hit twice in this slice, plus a third half now answered in practice by a
+- [ ] **RR-30 (w3-loop-input, was RR-25 — renumbered 2026-08-27, steward-allocated, review round 3
+      defect 4, same collision as RR-29 above): `SystemFn`'s `void(*)(World*)` shape has no path to
+      Engine-level context — hit twice in this slice, plus a third half now answered in practice by a
       different lane's precedent.** **CORRECTED 2026-08-27 (review round 2 defect 4): both (a)'s
       and (c)'s premises expired the moment `main` merged render2d (`31da431`) — re-read against
       the merged tree below, not left as originally filed.**
@@ -3779,17 +3782,24 @@ contract blocks):
       (never as registered systems) right after the LAST phase runs.
       (c) **premise falsified, not just stale**: this RR originally read "there is no path yet for
       a future PRE_RENDER extraction system to read [alpha]". `src/render/extract.cpp:32` —
-      `const f32 alpha = q->alpha;` — reads alpha off `RenderQueue` from inside a registered
-      `PRE_RENDER` system today. The actual answer render2d landed is neither of the two options
-      this RR proposed (widen `SystemFn`, or bless the direct-call pattern): `engine_frame` writes
-      `alpha` onto `RenderQueue` (a `World`-visible struct), and a registered system reads it from
-      there — sidestepping the `SystemFn`-shape gap entirely rather than closing it. That answers
-      this lane's own alpha half in practice; the `SystemFn`-widening question stays open only for
-      a future consumer that needs `Engine`-level state a `World`-visible struct can't carry (the
-      recorder/interp-registration half in (a)/(b) above), not for alpha.
+      `const f32 alpha = q->alpha;` — reads alpha off `RenderQueue` (a `World`-visible struct) from
+      inside a registered `PRE_RENDER` system today, neither of the two options this RR proposed
+      (widen `SystemFn`, or bless the direct-call pattern) — carrying the value through `World`
+      state sidesteps the `SystemFn`-shape gap entirely rather than closing it. **Verified 2026-08-27
+      (review round 3 D2, `grep -rn "alpha\s*=" src/ app/`): nothing in the tree currently writes
+      `w->render->alpha` — `engine_frame` still only returns its computed `alpha` to its caller.**
+      The reachability PATH exists (the field, and a registered system reading it); the WIRING that
+      would populate it from `engine_frame`'s return value does not yet exist anywhere. That is
+      still a real gap, just a smaller and different one than originally filed — not this lane's to
+      close (`engine_frame`'s caller/driver, `app/wiring.cpp`, is nobody's file yet). The
+      `SystemFn`-widening question stays open for a future consumer that needs `Engine`-level state
+      a `World`-visible struct can't carry (the recorder/interp-registration half in (a)/(b) above),
+      not for alpha.
 
-- [ ] **RR-26 (w3-loop-input): `core/interp.cpp`'s ping-pong is generic by construction, not the
-      concrete `Transform`/`TransformPrev` `CPP-SUBSET.md` §8's own reference template names.**
+- [ ] **RR-31 (w3-loop-input, was RR-26 — renumbered 2026-08-27, steward-allocated, review round 3
+      defect 4, same collision as RR-29 above): `core/interp.cpp`'s ping-pong is generic by
+      construction, not the concrete `Transform`/`TransformPrev` `CPP-SUBSET.md` §8's own reference
+      template names.**
       **CORRECTED 2026-08-27 (review round 2 defect 4): "no lane has landed the real component...
       checked at slice-brief time" is gone — re-read below.** That template is worked pseudocode
       (`TL_FIELDS_Transform(...) /* bit 0 = snap (FRAME-LOOP.md §4) */`); `Transform`/`TransformPrev`
@@ -3870,8 +3880,9 @@ addressed:
   stall (`loop.cpp`/`FRAME-LOOP.md` §0) — see the cross-ISA follow-up below for the full story.
 - **Finding 3** (ship-blocking): `script_produce` permanently stranding its timeline past a
   skipped tick (`script.cpp`).
-- **Finding 4**: the `MAX_PEERS` collision — RR-24 above, RULED 2026-08-26 (Rafael):
-  `core/input.h` is the one home, `net/wire.h` gets a scoped exception.
+- **Finding 4**: the `MAX_PEERS` collision — RR-29 above (renumbered from RR-24, review round 3
+  defect 4), RULED 2026-08-26 (Rafael): `core/input.h` is the one home, `net/wire.h` gets a scoped
+  exception.
 - **Finding 5**: `script_hold`'s header claiming `[from, to]` against the code's and test's
   `[from, to)` (`script.h`).
 - **Finding 6**: the analog-quantization tests not discriminating RNE from truncation
@@ -3926,7 +3937,7 @@ reviewed anchor (`2be6e1c` for this lane) may be rewritten to cure per-commit ga
 the anchor and everything before it stay frozen — this generalizes `WORKFLOW.md` R-4's "before
 first review round" rule to also cover post-review fix commits that have not themselves been
 reviewed yet, and the steward records the general rule in `WORKFLOW.md` at wave closeout. In
-practice: the RR-24 fix landed as a properly amended, force-pushed commit on top of the frozen fix
+practice: the RR-29 (formerly RR-24) fix landed as a properly amended, force-pushed commit on top of the frozen fix
 commits (this session's own permission classifier blocked the wider multi-commit squash across
 three separate attempts, so the two original fix-round commits stayed distinct rather than being
 folded into the anchor's line — see the PR thread for the detail).
@@ -3967,9 +3978,10 @@ verdict, 11 defects (1-4 ship-blocking, 5-8 before merge, 9-11 minor).** All add
   a different entity's previous one the moment the two columns' orders diverge. New fatal test:
   `interp_pingpong_dense_order_divergence_is_fatal`.
 - **Defect 4** (ship-blocking): merged `origin/main` (`0ae331d`, bringing in render2d's `31da431`)
-  — 33 commits behind, and defects 2/3 were only visible from that vantage point. RR-25(a)/(c) and
-  RR-26 corrected in place against the merged tree rather than left on their stale slice-brief-time
-  premises (see those entries above).
+  — 33 commits behind, and defects 2/3 were only visible from that vantage point. RR-30(a)/(c) and
+  RR-31 (renumbered from RR-25/RR-26, review round 3 defect 4 — `main`'s own RR-24/25/26 collided
+  with this lane's self-allocated ones) corrected in place against the merged tree rather than left
+  on their stale slice-brief-time premises (see those entries above).
 - **Defect 5**: `INPUT.md` §9.4's `produce(tick)` wording still said `event.tick == tick` after
   round 1's fix changed the code to `<=` — updated to match, citing finding 3.
 - **Defect 6**: `FRAME-LOOP.md` §3's "pointer swap, O(1)" contradicted the shipped per-entity

@@ -16,20 +16,20 @@
 //   `engine_frame` step through it is skipped in that mode; `engine_frame` itself asserts
 //   platform is set (a null-platform caller has no real-time frame to drive and should call
 //   `engine_tick_once` directly instead).
-// Interpolation (docs/FRAME-LOOP.md §4) is GENERIC by design: the concrete columns
-//   (Transform/TransformPrev) are render2d's deliverables and do not exist anywhere in the tree
-//   yet (checked at slice-brief time) - hardcoding a component name that does not exist would not
-//   compile, and the alternative (a new ComponentInfo flag in reflect.h) touches a file this lane
-//   does not own (docs/WORKFLOW.md cone discipline). Camera state is NOT an interp-pingponged ECS
-//   column: Rafael's D1 ruling (render2d lane, 2026-08-27) took Camera2D/CameraPrev/CameraFollow
-//   off the ECS entirely (registered components' f32 bytes land in registry_hash_all; a camera pan
-//   read as a lockstep desync) onto `RenderQueue`, outside this barrier. `interp_register_pair` is
-//   the registration seam a future consumer (e.g. Transform/TransformPrev) calls once its columns
-//   exist; filed as a ruling request in TODO.md for confirmation/extension. The same TODO entry
-//   covers PRE_RENDER's `alpha` reach:
-//   `SystemFn` is `void(*)(World*)` with no alpha parameter, so today `engine_frame` returns alpha
-//   to its caller and a render-side consumer has no path to it from inside a registered system -
-//   render2d's problem to solve when it lands, not redesigned here.
+// Interpolation (docs/FRAME-LOOP.md §4) is GENERIC by design (TODO.md RR-31): `interp_register_pair`
+//   is the registration seam a concrete consumer calls once its columns exist. `src/core/transform.h`
+//   is now that consumer (`main`, post-round-2-merge) - see its own contract block and
+//   `FRAME-LOOP.md` §3's recorded deviation for the per-field-copy-vs-pointer-swap shape RR-28 ruled.
+//   Camera state is NOT an interp-pingponged ECS column: Rafael's D1 ruling (render2d lane,
+//   2026-08-27) took Camera2D/CameraPrev/CameraFollow off the ECS entirely (registered components'
+//   f32 bytes land in registry_hash_all; a camera pan read as a lockstep desync) onto `RenderQueue`,
+//   outside this barrier. PRE_RENDER's `alpha` reach (TODO.md RR-30(c)) no longer describes a real
+//   gap: `render/extract.cpp`'s `sys_extract`, a registered `SystemFn`, reads `w->render->alpha`
+//   (`RenderQueue`, a `World`-owned field) rather than needing an `Engine*` - the consumer solved
+//   the reachability problem by carrying the value through `World` state instead of widening
+//   `SystemFn`'s signature. This header still returns `alpha` to `engine_frame`'s caller unchanged;
+//   whether/where that value is written into `w->render->alpha` is render2d's/the wiring layer's
+//   concern, not this file's.
 // Determinism: `engine_tick_once` touches nothing outside `World` and `InputFrame`; `Engine`'s
 //   other members (Clock, the raw-event ring, the accumulator) are real-time/render-side and
 //   never read by sim code. f64/f32 are legal here - core/ is not a sim TU (docs/CPP-SUBSET.md §1).
