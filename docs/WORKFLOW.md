@@ -143,6 +143,21 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
 - **R-11 Lane token discipline (ruled 2026-08-26, Rafael):** tag-scoped iteration, local
   validation before every push, read-once specs, terse output, cheap subagents for search;
   every lane brief cites it (§6).
+- **R-13 Post-anchor commits may be rewritten to cure a per-commit gate miss (ruled
+  2026-08-27, Rafael):** `commit_docs` is per-commit by design, so no later commit can waive an
+  earlier one and a forward revert does not clear the earlier commit's own diff. Commits AFTER
+  the reviewed anchor may therefore be reworded — message-only where possible — to add
+  `[docs:none]` or the missing doc touch; the anchor and everything before it stay frozen (§1,
+  R-4). The cure is executed with an explicit expected-SHA lease, and verified before pushing:
+  trees bit-identical to the pre-rewrite branch, the anchor's SHA unchanged, and the gate
+  passing. Where a lane's own tooling refuses history rewrites, the steward executes it — a
+  lane must NOT route around its own permission classifier. Filed after `w3-render2d` hit this
+  twice (RR-25, RR-26) and `w3-loop-input` once, all three cured this way.
+- **R-14 Rulings may reach a lane or reviewer directly (ruled 2026-08-27, Rafael):** the
+  steward is not the only channel. A lane or reviewer that receives a ruling from Rafael
+  directly records it with that provenance and relays it to the steward promptly, so the
+  steward's dispatch and the ruling cannot silently diverge. A claimed ruling the steward
+  cannot verify is checked with Rafael before it is acted on or recorded.
 - **R-12 Doc-relevancy pass (ruled 2026-08-26, Rafael):** staleness in a status line is drift
   like any other. Every lane closeout sweep (R-7) also checks the lane's own doc — its status
   line and its claims — against what actually shipped; every wave boundary adds the pass over

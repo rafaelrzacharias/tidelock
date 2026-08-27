@@ -16,6 +16,22 @@
 > update", so that lane builds everything else and picks the header up by merging main once
 > substrate lands.
 
+> **W3 render2d MERGED 2026-08-27 — `31da431` (PR #13), closeout sweep done (R-7 + R-12).**
+> Five adversarial review rounds to *ship*. Two rulings landed in it: **D1** (camera off the
+> ECS onto `RenderQueue` — as registered components its f32 bytes reached `registry_hash_all`,
+> so a camera pan read as a lockstep desync) and **N1** (`render_camera_init` seeds
+> `camera_prev = camera`, closing a spec silence that left a reachable `TL_CHECK` abort at
+> alpha 0 in every tier). Round 2's finding — that none of round 1's sixteen fixes had a test
+> that would fail if the fix were reverted — drove the discriminating-test sweep, since
+> re-verified by the reviewer's own reverts. `RENDER2D.md`, `README.md` and `CLAUDE.md` status
+> re-dated; `WORKFLOW.md` gains **R-13** (post-anchor rewrites cure a per-commit gate miss) and
+> **R-14** (rulings may reach a lane directly). **Filings triaged:** the `FRAME-LOOP.md`
+> cross-lane note is ROUTED and fixed by `w3-loop-input`; **RR-22** (`tl_field_kind_TexHandle`)
+> and **RR-23** (`FieldKind` has no float row) both HOLD for the next lane to touch
+> `core/reflect.h` — luau-bindings is the likely one; **RR-24** (`RENDER2D.md` §9.5's CI-grep
+> claim is intent, not a live gate) and the `pr.yml` `workflow_dispatch`/`HEAD~1` range gap
+> both HOLD for the CI-tooling owner. None blocks a lane now.
+
 Worked top to bottom; the first open `[ ]` is what to do next. History → `git log`; gotchas →
 `LESSONS.md`; rationale → the doc named on each line. Governing rules: `CLAUDE.md` principles,
 `docs/ARCHITECTURE.md` §0/§4, test-infra-first.

@@ -1,6 +1,9 @@
 # Render2D — coordinates, extract, submission, the sim view (tidelock, rev 1)
 
-> **Status:** design rev 1, 2026-08-22. **DECIDED** except §10. Carries foundry D8/D9/D10 and fork 1
+> **Status:** rev 1, design 2026-08-22; **v0 IMPLEMENTED and MERGED 2026-08-27** (`w3-render2d`,
+> PR #13, merge `31da431`; five adversarial review rounds to a *ship* verdict). **DECIDED** except §10.
+> §9's v0 criterion is met for this module's own scope; "tidelock draws sprites" is
+> `ARCHITECTURE.md` §9's v0 milestone row (needs `app/wiring.cpp`, W4). Carries foundry D8/D9/D10 and fork 1
 > (SDL_Render v0, SDL_GPU reserved) into C++ with an fx sim on the other side of the extract step.
 > **Owns:** `src/render/camera.h`, `extract.h`, `queue.h`, `sprite.h`, `simview.h`,
 > `backend_sdl.cpp` (the only TU that calls the platform `DrawApi`; no TU in `render/` includes an
