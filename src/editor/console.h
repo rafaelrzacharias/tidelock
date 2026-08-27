@@ -60,6 +60,7 @@ constexpr ErrCode ERR_CONSOLE_ARGC             = (ErrCode)0x0373;  // argc outsi
 constexpr ErrCode ERR_CONSOLE_LOCKSTEP_REFUSED = (ErrCode)0x0374;  // SIM_AFFECTING command under lockstep=true
 constexpr ErrCode ERR_CONSOLE_DUPLICATE        = (ErrCode)0x0375;  // name already registered (TL_FATAL site)
 constexpr ErrCode ERR_CONSOLE_TABLE_FULL       = (ErrCode)0x0376;  // CONSOLE_TABLE_CAP already live (TL_FATAL site)
+constexpr ErrCode ERR_CONSOLE_TOKEN_TOO_LONG   = (ErrCode)0x0377;  // a quoted token exceeds unescape_cap (B-11: was a silent truncation)
 
 // The literal name of one of this header's ErrCodes (or "ERR_OK"/"ERR_?"), for logging. Pure.
 inline const char* console_err_name(ErrCode e) {
@@ -70,7 +71,8 @@ inline const char* console_err_name(ErrCode e) {
          : e == ERR_CONSOLE_ARGC ? "ERR_CONSOLE_ARGC"
          : e == ERR_CONSOLE_LOCKSTEP_REFUSED ? "ERR_CONSOLE_LOCKSTEP_REFUSED"
          : e == ERR_CONSOLE_DUPLICATE ? "ERR_CONSOLE_DUPLICATE"
-         : e == ERR_CONSOLE_TABLE_FULL ? "ERR_CONSOLE_TABLE_FULL" : "ERR_?";
+         : e == ERR_CONSOLE_TABLE_FULL ? "ERR_CONSOLE_TABLE_FULL"
+         : e == ERR_CONSOLE_TOKEN_TOO_LONG ? "ERR_CONSOLE_TOKEN_TOO_LONG" : "ERR_?";
 }
 
 enum { CONSOLE_MAX_TOKENS = 16, CONSOLE_TOKEN_CAP = 128, CONSOLE_TABLE_CAP = 512 };
@@ -136,11 +138,13 @@ struct ConsoleToken { const char* ptr; u32 len; };
 // matching a permissive shell-lite reading since docs/TOOLING.md §9.3.5 only names those two);
 // `#` outside a quote starts a comment (the rest of the line is dropped, never tokenized).
 // Returns the token count, or a negative-shaped failure via `out_err`: ERR_CONSOLE_TOO_MANY_ARGS
-// (more than `out_cap` tokens) or ERR_CONSOLE_SYNTAX (unterminated quote). `out[i].ptr` points
-// into `line` (or into `unescape_buf`/`unescape_cap` for a token that needed unescaping - a
-// caller-supplied scratch buffer, since this module has no arena of its own); TL_CHECK:
-// `unescape_cap` is at least as large as the longest quoted token actually seen, else the token
-// is truncated rather than overflowing (never a buffer overrun).
+// (more than `out_cap` tokens), ERR_CONSOLE_SYNTAX (unterminated quote), or
+// ERR_CONSOLE_TOKEN_TOO_LONG (a quoted token's unescaped length exceeds the `unescape_cap` still
+// available to it - corrected 2026-08-27, B-11: this used to truncate the token silently, `out_err`
+// left ERR_OK, which is exactly the "no silent fallbacks" CLAUDE.md rules out; NEVER a buffer
+// overrun either way - the write itself was always bounded). `out[i].ptr` points into `line` (or
+// into `unescape_buf`/`unescape_cap` for a token that needed unescaping - a caller-supplied
+// scratch buffer, since this module has no arena of its own).
 u32 console_tokenize(const char* line, ConsoleToken* out, u32 out_cap,
                       char* unescape_buf, u32 unescape_cap, ErrCode* out_err);
 

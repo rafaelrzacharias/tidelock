@@ -180,6 +180,32 @@ TL_TEST(console_tokenize_unterminated_quote_is_syntax_error, "core,editor,consol
 #endif
 }
 
+// B-11 (2026-08-27): a quoted token longer than the caller's remaining scratch space used to
+// truncate silently (out_err stayed ERR_OK, the returned token's own len just read short) - named
+// instead. B's own reproduction: 8 bytes of scratch, a 16-character quoted token.
+TL_TEST(console_tokenize_overlong_quoted_token_is_named_error, "core,editor,console,fast") {
+#if TL_DEV
+    ConsoleToken toks[CONSOLE_MAX_TOKENS];
+    char scratch[8];
+    ErrCode err;
+    const u32 n = console_tokenize("say \"0123456789abcdef\"", toks, CONSOLE_MAX_TOKENS,
+                                    scratch, sizeof(scratch), &err);
+    TL_EXPECT_EQ(err, ERR_CONSOLE_TOKEN_TOO_LONG);
+    TL_EXPECT_EQ(n, 0u);
+
+    // The same token within a scratch buffer large enough for it still succeeds, unaffected.
+    char big_scratch[64];
+    ErrCode ok_err;
+    const u32 ok_n = console_tokenize("say \"0123456789abcdef\"", toks, CONSOLE_MAX_TOKENS,
+                                       big_scratch, sizeof(big_scratch), &ok_err);
+    TL_ASSERT_EQ(ok_err, ERR_OK);
+    TL_ASSERT_EQ(ok_n, 2u);
+    TL_EXPECT_EQ(toks[1].len, 16u);
+#else
+    TL_CONSOLE_SKIP;
+#endif
+}
+
 TL_TEST(console_exec_dispatches_and_returns_reply, "core,editor,console,fast") {
 #if TL_DEV
     ConsoleState cs;

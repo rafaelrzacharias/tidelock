@@ -80,15 +80,18 @@ u32 console_tokenize(const char* line, ConsoleToken* out, u32 out_cap,
                 char c = line[i];
                 if (c == '"') { ++i; closed = true; break; }
                 if (c == '\\' && (line[i + 1] == '"' || line[i + 1] == '\\')) { c = line[i + 1]; ++i; }
-                if (len < dst_cap_left) { dst[len] = c; }   // TL_CHECK'd via the header contract: excess truncates, never overflows
+                if (len < dst_cap_left) { dst[len] = c; }   // never overflows regardless of out_err below
                 ++len;
                 ++i;
             }
             if (!closed) { *out_err = ERR_CONSOLE_SYNTAX; return 0; }
-            const u32 clamped = (len < dst_cap_left) ? len : dst_cap_left;
+            // B-11 (2026-08-27): a token longer than the caller's remaining scratch space used to
+            // truncate silently (out_err left ERR_OK); named instead, so a caller relying on the
+            // full argument text finds out rather than silently acting on a cut one.
+            if (len > dst_cap_left) { *out_err = ERR_CONSOLE_TOKEN_TOO_LONG; return 0; }
             out[count].ptr = dst;
-            out[count].len = clamped;
-            esc_used += clamped;
+            out[count].len = len;
+            esc_used += len;
             ++count;
             continue;
         }
