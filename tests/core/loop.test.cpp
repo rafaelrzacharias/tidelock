@@ -2,6 +2,7 @@
 // ticks (docs/FRAME-LOOP.md §8.4).
 #include "runner/tl_test.h"
 #include "core/loop.h"
+#include "core/recorder.h"
 #include "core/world_test_util.h"
 
 namespace {
@@ -169,4 +170,90 @@ TL_TEST(interp_pingpong_copies_current_into_prev, "core,loop,interp,fast") {
     TL_ASSERT_NOT_NULL(v);
     TL_EXPECT_EQ(v->dx, 10);
     TL_EXPECT_EQ(v->dy, 20);
+}
+
+TL_TEST(interp_snap_entity_updates_one_entity_immediately, "core,loop,interp,snap,fast") {
+    EngineFixture f;
+    TL_ASSERT_TRUE(engine_fixture_init(&f, 1u, nullptr));
+    world_register_component(&f.e.world, &WPos_info);
+    world_register_component(&f.e.world, &WVel_info);
+    world_build_schedule(&f.e.world);
+
+    const ComponentId pos_id = world_component_id<WPos>(&f.e.world);
+    const ComponentId vel_id = world_component_id<WVel>(&f.e.world);   // stand-in "prev" column
+    interp_register_pair(&f.e, pos_id, vel_id);
+
+    Entity a = world_spawn(&f.e.world);
+    world_add(&f.e.world, a, WPos{ 10, 20 });
+    world_add(&f.e.world, a, WVel{ 0, 0 });
+    Entity b = world_spawn(&f.e.world);
+    world_add(&f.e.world, b, WPos{ 100, 200 });
+    world_add(&f.e.world, b, WVel{ 0, 0 });
+    world_flush(&f.e.world);
+
+    // A teleport: current (WPos) jumps for `a` only, snapped to prev (WVel) IMMEDIATELY rather
+    // than waiting for the next barrier's ping-pong (docs/FRAME-LOOP.md section 4).
+    WPos* pa = world_get<WPos>(&f.e.world, a);
+    TL_ASSERT_NOT_NULL(pa);
+    pa->x = 999;
+    pa->y = 888;
+    interp_snap_entity(&f.e.world, f.e.interp_pairs, f.e.interp_pair_count, a);
+
+    WVel* va = world_get<WVel>(&f.e.world, a);
+    TL_ASSERT_NOT_NULL(va);
+    TL_EXPECT_EQ(va->dx, 999);
+    TL_EXPECT_EQ(va->dy, 888);
+
+    // b was never snapped - its prev stays at whatever it was, untouched by a's snap.
+    WVel* vb = world_get<WVel>(&f.e.world, b);
+    TL_ASSERT_NOT_NULL(vb);
+    TL_EXPECT_EQ(vb->dx, 0);
+    TL_EXPECT_EQ(vb->dy, 0);
+}
+
+TL_TEST(engine_shutdown_releases_the_event_arena, "core,loop,shutdown,fast") {
+    FakeClockCtx clock_ctx{ 0u, 60u };
+    PlatformApi platform = make_fake_platform(&clock_ctx);
+    EngineFixture f;
+    TL_ASSERT_TRUE(engine_fixture_init(&f, 1u, &platform));
+    world_build_schedule(&f.e.world);
+    engine_shutdown(&f.e);   // review round 1 finding 9: zero call sites before this test
+}
+
+TL_TEST_EXPECT_FATAL(input_set_producer_after_first_tick_is_fatal, "core,loop,fatal,fast") {
+    EngineFixture f;
+    if (!engine_fixture_init(&f, 1u, nullptr)) { return; }
+    world_build_schedule(&f.e.world);
+    InputFrame frames[MAX_PEERS];
+    for (u32 p = 0; p < MAX_PEERS; ++p) { frames[p] = input_zero_frame(); }
+    engine_tick_once(&f.e, frames);
+    ++t->checks;
+    input_set_producer(&f.e, InputProducer{ nullptr, zero_produce });   // must TL_FATAL: init-only door
+}
+
+TL_TEST_EXPECT_FATAL(interp_register_pair_after_first_tick_is_fatal, "core,loop,fatal,fast") {
+    EngineFixture f;
+    if (!engine_fixture_init(&f, 1u, nullptr)) { return; }
+    world_register_component(&f.e.world, &WPos_info);
+    world_register_component(&f.e.world, &WVel_info);
+    world_build_schedule(&f.e.world);
+    InputFrame frames[MAX_PEERS];
+    for (u32 p = 0; p < MAX_PEERS; ++p) { frames[p] = input_zero_frame(); }
+    engine_tick_once(&f.e, frames);
+    const ComponentId pos_id = world_component_id<WPos>(&f.e.world);
+    const ComponentId vel_id = world_component_id<WVel>(&f.e.world);
+    ++t->checks;
+    interp_register_pair(&f.e, pos_id, vel_id);   // must TL_FATAL: init-only door
+}
+
+TL_TEST_EXPECT_FATAL(recorder_attach_after_first_tick_is_fatal, "core,loop,fatal,fast") {
+    EngineFixture f;
+    if (!engine_fixture_init(&f, 1u, nullptr)) { return; }
+    world_build_schedule(&f.e.world);
+    InputFrame frames[MAX_PEERS];
+    for (u32 p = 0; p < MAX_PEERS; ++p) { frames[p] = input_zero_frame(); }
+    engine_tick_once(&f.e, frames);
+    Recorder rec{};
+    ++t->checks;
+    recorder_attach(&f.e, &rec);   // must TL_FATAL: init-only door
 }

@@ -4,6 +4,7 @@
 #include "runner/tl_test.h"
 #include "core/producers/live.h"
 #include "foundation/vmem_test_api.h"
+#include "foundation/ring.h"
 
 namespace {
 
@@ -38,6 +39,21 @@ RawEvent pad_axis_ev(u8 pad, u8 axis, i16 value) {
     e.u.pad_axis.axis = axis;
     e.u.pad_axis.value = value;
     return e;
+}
+
+RawEvent pad_connect_ev(u8 pad, u8 connected) {
+    RawEvent e{};
+    e.kind = EV_PAD_CONNECT;
+    e.u.pad_connect.pad = pad;
+    e.u.pad_connect.connected = connected;
+    return e;
+}
+
+struct CaptureState { u8 want_mouse; u8 want_keyboard; };
+void capture_fn(void* ctx, u8* want_mouse, u8* want_keyboard) {
+    CaptureState* s = (CaptureState*)ctx;
+    *want_mouse = s->want_mouse;
+    *want_keyboard = s->want_keyboard;
 }
 
 }  // namespace
@@ -207,4 +223,183 @@ TL_TEST(fold_context_switch_synthetic_release, "core,input,fold,context,fast") {
     action_map_set_context(&f.map, 1u);
     TL_ASSERT_EQ(live_produce_frame(&f.lp, nullptr, 0u, 1u, out, &live_mask), PRODUCE_READY);
     TL_EXPECT_EQ(out[0].actions[jump].flags, (u8)AS_RELEASED);
+}
+
+TL_TEST(live_produce_ring_silently_drops_the_oldest_excess, "core,input,live,ring,fast") {
+    // Review round 1 finding 9: live_produce (the actual InputProducer fn-ptr, ctx = a ring) was
+    // never exercised - every fold test calls live_produce_frame directly with a hand-built event
+    // array. This drives the real ring: overwrite_oldest silently evicts events pushed past
+    // capacity between two produce() calls (live.h's own contract block on live_produce).
+    FoldFixture f;
+    TL_ASSERT_TRUE(fold_fixture_init(&f, 8u));
+    const ActionId actions[6] = {
+        action_register(&f.map, "a1"_id, 0u, ACT_DIGITAL, CLS_EDGE),
+        action_register(&f.map, "a2"_id, 0u, ACT_DIGITAL, CLS_EDGE),
+        action_register(&f.map, "a3"_id, 0u, ACT_DIGITAL, CLS_EDGE),
+        action_register(&f.map, "a4"_id, 0u, ACT_DIGITAL, CLS_EDGE),
+        action_register(&f.map, "a5"_id, 0u, ACT_DIGITAL, CLS_EDGE),
+        action_register(&f.map, "a6"_id, 0u, ACT_DIGITAL, CLS_EDGE),
+    };
+    for (u32 i = 0; i < 6u; ++i) {
+        Binding b{}; b.action = actions[i]; b.dev = DEV_KEY; b.code_pos = (u16)(1u + i);
+        action_bind(&f.map, b);
+    }
+
+    VMemArena ring_arena;
+    TL_ASSERT_EQ(vmem_arena_init(&ring_arena, "fold.test.ring"_id, 64u * 1024u, 0u, &f.api), ERR_OK);
+    RingBuffer<RawEvent> ring;
+    ring_init(&ring, &ring_arena, 4u, true);   // cap 4, overwrite-oldest
+
+    // Push 6 key-down events (scancodes 1..6) into a cap-4 ring: 1 and 2 are evicted before
+    // live_produce ever sees them, not truncated by its own drain loop.
+    for (u32 sc = 1u; sc <= 6u; ++sc) {
+        TL_ASSERT_TRUE(ring_push(&ring, key_ev(sc, 1u, 0u)));
+    }
+
+    LiveProducerCtx ctx{ &f.lp, &ring };
+    InputFrame out[MAX_PEERS];
+    u8 live_mask = 0u;
+    TL_ASSERT_EQ(live_produce(&ctx, 0u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_TRUE(ring_empty(&ring));   // everything the ring still held got drained in one call
+
+    TL_EXPECT_EQ(out[0].actions[actions[0]].flags & AS_DOWN, (u8)0);   // scancode 1: dropped, never seen
+    TL_EXPECT_EQ(out[0].actions[actions[1]].flags & AS_DOWN, (u8)0);   // scancode 2: dropped, never seen
+    for (u32 i = 2; i < 6u; ++i) {
+        TL_EXPECT_TRUE((out[0].actions[actions[i]].flags & AS_DOWN) != 0u);   // scancodes 3..6 survived
+    }
+}
+
+TL_TEST(fold_socd_first_wins_release_fallback, "core,input,fold,socd,fast") {
+    // Review round 1 finding 12: the SOCD_FIRST_WINS release-driven fallback branch
+    // (live.cpp's `else if (s.last_dir == 1 && !pos_down) ...`) had no test.
+    FoldFixture f;
+    TL_ASSERT_TRUE(fold_fixture_init(&f, 4u));
+    const ActionId ax = action_register(&f.map, "ax_first"_id, 0u, ACT_ANALOG, CLS_AXIS);
+    Binding b{}; b.action = ax; b.dev = DEV_KEYS_AXIS; b.code_neg = 10u; b.code_pos = 11u; b.socd = SOCD_FIRST_WINS;
+    action_bind(&f.map, b);
+
+    InputFrame out[MAX_PEERS];
+    u8 live_mask = 0u;
+
+    // pos pressed first: locks the winning side to pos.
+    RawEvent pos_down = key_ev(11u, 1u, 0u);
+    TL_ASSERT_EQ(live_produce_frame(&f.lp, &pos_down, 1u, 0u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_EQ(out[0].actions[ax].value, (i8)127);
+
+    // neg pressed while pos still held: SOCD_FIRST_WINS ignores it - the first press already won.
+    RawEvent neg_down = key_ev(10u, 1u, 0u);
+    TL_ASSERT_EQ(live_produce_frame(&f.lp, &neg_down, 1u, 1u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_EQ(out[0].actions[ax].value, (i8)127);
+
+    // pos (the winning side) releases while neg is still held: the release-driven fallback engages.
+    RawEvent pos_up = key_ev(11u, 0u, 0u);
+    TL_ASSERT_EQ(live_produce_frame(&f.lp, &pos_up, 1u, 2u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_EQ(out[0].actions[ax].value, (i8)-127);
+}
+
+TL_TEST(fold_deadzone_none_trigger_and_radial_alias, "core,input,fold,deadzone,fast") {
+    // Review round 1 finding 12: DZ_NONE, DZ_TRIGGER, and DZ_RADIAL (a documented no-op alias for
+    // DZ_AXIAL) had no test at all.
+    FoldFixture f;
+    TL_ASSERT_TRUE(fold_fixture_init(&f, 8u));
+    const ActionId ax_none = action_register(&f.map, "ax_none"_id, 0u, ACT_ANALOG, CLS_AXIS);
+    const ActionId ax_trig = action_register(&f.map, "ax_trig"_id, 0u, ACT_ANALOG, CLS_AXIS);
+    const ActionId ax_axial = action_register(&f.map, "ax_axial"_id, 0u, ACT_ANALOG, CLS_AXIS);
+    const ActionId ax_radial = action_register(&f.map, "ax_radial"_id, 0u, ACT_ANALOG, CLS_AXIS);
+
+    Binding bn{}; bn.action = ax_none; bn.dev = DEV_PAD_AXIS; bn.code_neg = 0u; bn.code_pos = 0u;
+    bn.dz = DZ_NONE; bn.sensitivity = 1.0f;
+    action_bind(&f.map, bn);
+    Binding bt{}; bt.action = ax_trig; bt.dev = DEV_PAD_AXIS; bt.code_neg = 0u; bt.code_pos = 1u;
+    bt.dz = DZ_TRIGGER; bt.dz_radius = 0.5f; bt.sensitivity = 1.0f;
+    action_bind(&f.map, bt);
+    Binding ba{}; ba.action = ax_axial; ba.dev = DEV_PAD_AXIS; ba.code_neg = 0u; ba.code_pos = 2u;
+    ba.dz = DZ_AXIAL; ba.dz_radius = 0.5f; ba.sensitivity = 1.0f;
+    action_bind(&f.map, ba);
+    Binding br{}; br.action = ax_radial; br.dev = DEV_PAD_AXIS; br.code_neg = 0u; br.code_pos = 2u;
+    br.dz = DZ_RADIAL; br.dz_radius = 0.5f; br.sensitivity = 1.0f;
+    action_bind(&f.map, br);
+
+    InputFrame out[MAX_PEERS];
+    u8 live_mask = 0u;
+
+    // DZ_NONE: a tiny raw value (32767/32768 * 3000/32768 range) that DZ_AXIAL/DZ_RADIAL at the
+    // same radius zero out (fold_deadzone_axial_shape's own "below the radius" case) passes
+    // through unclipped here.
+    RawEvent small = pad_axis_ev(0u, 0u, 3000);   // 3000/32768 ~= 0.0916
+    TL_ASSERT_EQ(live_produce_frame(&f.lp, &small, 1u, 0u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_EQ(out[0].actions[ax_none].value, (i8)12);   // round(0.0916 * 127) = 12, unclipped
+
+    // DZ_TRIGGER, radius 0.5: below the radius clamps to exactly 0 (axis 1, tick 1).
+    RawEvent below = pad_axis_ev(0u, 1u, 4096);   // 4096/32768 = 0.125 < 0.5
+    TL_ASSERT_EQ(live_produce_frame(&f.lp, &below, 1u, 1u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_EQ(out[0].actions[ax_trig].value, (i8)0);
+
+    // DZ_TRIGGER, radius 0.5: above the radius rescales - (0.75 - 0.5)/(1 - 0.5) = 0.5 exactly,
+    // * 127 = 63.5 exactly, RNE ties to even -> 64 (axis 1, tick 2).
+    RawEvent above = pad_axis_ev(0u, 1u, 24576);   // 24576/32768 = 0.75
+    TL_ASSERT_EQ(live_produce_frame(&f.lp, &above, 1u, 2u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_EQ(out[0].actions[ax_trig].value, (i8)64);
+
+    // DZ_RADIAL is the same code path as DZ_AXIAL (live.cpp's apply_deadzone: one case label for
+    // both) - same input on axis 2, both actions must produce byte-identical output.
+    RawEvent shared = pad_axis_ev(0u, 2u, 20000);
+    TL_ASSERT_EQ(live_produce_frame(&f.lp, &shared, 1u, 3u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_EQ(out[0].actions[ax_axial].value, out[0].actions[ax_radial].value);
+    TL_EXPECT_NE(out[0].actions[ax_axial].value, (i8)0);   // and it is not the trivial "both zero" case
+}
+
+TL_TEST(fold_imgui_capture_masks_the_matching_device_only, "core,input,fold,capture,fast") {
+    // Review round 1 finding 12: the ImGui capture mask (docs/INPUT.md section 5) had no test.
+    VMemApi api = test_vmem_api();
+    VMemArena arena;
+    TL_ASSERT_EQ(vmem_arena_init(&arena, "fold.test.capture"_id, 1024u * 1024u, 0u, &api), ERR_OK);
+    ActionMap map;
+    action_map_init(&map, &arena, 4u);
+    CaptureState cap{ 0u, 0u };
+    LiveProducer lp;
+    live_producer_init(&lp, &map, 0u, ImGuiCaptureApi{ &cap, capture_fn });
+
+    const ActionId key_act = action_register(&map, "key_act"_id, 0u, ACT_DIGITAL, CLS_EDGE);
+    Binding bk{}; bk.action = key_act; bk.dev = DEV_KEY; bk.code_pos = 44u;
+    action_bind(&map, bk);
+    const ActionId mouse_act = action_register(&map, "mouse_act"_id, 0u, ACT_DIGITAL, CLS_EDGE);
+    Binding bm{}; bm.action = mouse_act; bm.dev = DEV_MOUSE_BUTTON; bm.code_pos = 1u;
+    action_bind(&map, bm);
+
+    InputFrame out[MAX_PEERS];
+    u8 live_mask = 0u;
+
+    // ImGui wants the keyboard only: the key press is masked out before device state even
+    // updates; the mouse press (a different device) still reaches the fold.
+    cap.want_keyboard = 1u;
+    cap.want_mouse = 0u;
+    RawEvent key_press = key_ev(44u, 1u, 0u);
+    RawEvent mouse_ev{}; mouse_ev.kind = EV_MOUSE_BUTTON; mouse_ev.u.mouse_button.button = 1u; mouse_ev.u.mouse_button.down = 1u;
+    RawEvent evs[2] = { key_press, mouse_ev };
+    TL_ASSERT_EQ(live_produce_frame(&lp, evs, 2u, 0u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_EQ(out[0].actions[key_act].flags & AS_DOWN, (u8)0);
+    TL_EXPECT_TRUE((out[0].actions[mouse_act].flags & AS_DOWN) != 0u);
+}
+
+TL_TEST(fold_pad_disconnect_zeroes_axis_and_button_state, "core,input,fold,pad,fast") {
+    // Review round 1 finding 12: pad connect/disconnect state zeroing had no test.
+    FoldFixture f;
+    TL_ASSERT_TRUE(fold_fixture_init(&f, 4u));
+    const ActionId ax = action_register(&f.map, "ax_pad"_id, 0u, ACT_ANALOG, CLS_AXIS);
+    Binding b{}; b.action = ax; b.dev = DEV_PAD_AXIS; b.code_neg = 0u; b.code_pos = 0u; b.sensitivity = 1.0f;
+    action_bind(&f.map, b);
+
+    InputFrame out[MAX_PEERS];
+    u8 live_mask = 0u;
+
+    RawEvent full = pad_axis_ev(0u, 0u, 32767);
+    TL_ASSERT_EQ(live_produce_frame(&f.lp, &full, 1u, 0u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_EQ(out[0].actions[ax].value, (i8)127);
+
+    // Disconnecting the pad zeroes its axis (and button) state - the stale full-deflection value
+    // does not survive a disconnect even though no new axis event arrives.
+    RawEvent disconnect = pad_connect_ev(0u, 0u);
+    TL_ASSERT_EQ(live_produce_frame(&f.lp, &disconnect, 1u, 1u, out, &live_mask), PRODUCE_READY);
+    TL_EXPECT_EQ(out[0].actions[ax].value, (i8)0);
 }

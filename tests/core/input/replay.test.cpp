@@ -172,6 +172,45 @@ TL_TEST(recorder_read_refuses_fingerprint_mismatch, "core,input,replay,recorder,
     TL_EXPECT_EQ(recorder_read_header(&r, &header, wrong_fingerprint), ERR_RECORDER_FINGERPRINT);
 }
 
+TL_TEST(recorder_pointer_round_trips_negative_and_positive_through_the_le_encoding, "core,input,replay,recorder,fast") {
+    // Review round 1 finding 12: every recorded frame in every other shipped test has pointer
+    // (0, 0) - put_input_frame/get_input_frame's (u32)/(i32) reinterpret round trip for
+    // pointer_x/pointer_y was never exercised with a nonzero, negative value.
+    WorldFixture* wf = wt_fixture(0);
+    TL_ASSERT_TRUE(world_fixture_init(wf, 1u));
+    world_fixture_register_std(wf);
+    world_build_schedule(&wf->w);
+    registry_seal(&wf->reg);
+
+    VMemArena rec_arena;
+    TL_ASSERT_EQ(vmem_arena_init(&rec_arena, "replay.test.ptr.rec"_id, 64u * 1024u, 0u, &wf->api), ERR_OK);
+    Recorder rec;
+    recorder_init(&rec, &rec_arena, 4u, 0u, 1u, 1u, 0b1u, g_build_id, g_fingerprint);
+
+    InputFrame frames[MAX_PEERS];
+    for (u32 p = 0; p < MAX_PEERS; ++p) { frames[p] = input_zero_frame(); }
+    frames[0].pointer_x = -12345;
+    frames[0].pointer_y = 67890;
+    recorder_tick(&rec, &wf->w, frames);
+
+    VMemArena buf_arena;
+    TL_ASSERT_EQ(vmem_arena_init(&buf_arena, "replay.test.ptr.buf"_id, 64u * 1024u, 0u, &wf->api), ERR_OK);
+    const u64 needed = recorder_bytes_needed(&rec);
+    u8* buf = (u8*)arena_push(&buf_arena, needed, 8u);
+    ByteWriter w;
+    bw_init(&w, buf, needed);
+    TL_ASSERT_EQ(recorder_write(&rec, &w), needed);
+
+    ByteReader r;
+    br_init(&r, buf, w.len);
+    RecordedInputHeader header{};
+    TL_ASSERT_EQ(recorder_read_header(&r, &header, g_fingerprint), ERR_OK);
+    RecordedInputRow row{};
+    TL_ASSERT_EQ(recorder_read_body(&r, &header, &row), ERR_OK);
+    TL_EXPECT_EQ(row.frames[0].pointer_x, -12345);
+    TL_EXPECT_EQ(row.frames[0].pointer_y, 67890);
+}
+
 TL_TEST(recorder_read_header_refuses_frame_count_past_buffer_end, "core,input,replay,recorder,fast") {
     // Review round 1 finding 7: frame_count is fully corruption/attacker-controlled. A header
     // claiming far more rows than the (short, truncated-looking) buffer could possibly hold must

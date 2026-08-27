@@ -151,6 +151,21 @@ no-op, the `Script` producer feeds frames, `run_phases_render` runs with a null 
 is skipped entirely for sim-only tests), and the loop runs as fast as the CPU allows
 (`accumulator` is forced to `FIXED_DT` per iteration). This is `tests/` and Hovel.
 
+**Recorded deviation (w3-loop-input, 2026-08-27, review round 1 finding 11, `TODO.md` RR-27):**
+the forced-`FIXED_DT` accumulator is NOT implemented. `PlatformApi::is_headless` (`PLATFORM.md`
+§9.2) is the only headless signal `engine_frame` can see, and it already means something narrower
+and already load-bearing: "skip `present()`" - `tests/core/loop.test.cpp`'s own accumulator suite
+(`engine_frame_max_steps_cap_drops_time` et al.) sets `is_headless = 1` on its fake platform
+specifically so it can drive `engine_frame` with a fake clock and assert on the REAL measured
+`real_dt`-based stepping (steps-per-frame, the `MAX_STEPS` cap). Gating this section's
+forced-`FIXED_DT` behavior on that same flag was tried and reverted: it made every accumulator
+test headless mode already uses see exactly one simulated tick per call regardless of the fake
+clock's reading, breaking `engine_frame_max_steps_cap_drops_time` (measured, not argued - the row
+failed on the test's own assertion). Closing this needs a mechanism distinct from `is_headless` -
+an `Engine`-level opt-in (e.g. a `force_fixed_dt` member alongside `producer`/`interp_pairs`,
+set by the driver that wants it) rather than a blanket per-platform behavior every headless caller
+inherits whether it wants it or not - which is a design decision, not a bug fix.
+
 ---
 
 ## 7. Rulings (closed 2026-08-22 — nothing open)

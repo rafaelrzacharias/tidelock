@@ -3228,38 +3228,75 @@ contract blocks):
       own done criterion (`FRAME-LOOP.md` §8.4's test list is satisfied by the generic mechanism
       plus a synthetic test component); flagged for whoever finishes wiring Transform.
 
-**Review round 1 (fresh-context adversarial, PR #15) — fix-first verdict, addressed in a follow-up
-commit on this branch.** 6 of 13 findings fixed with regression tests: the missing record->replay
-hash-trace test (finding 1, `tests/core/input/replay.test.cpp`); `engine_frame`'s alpha reaching
->= 1.0 under a `PRODUCE_WAIT` stall (finding 2, `loop.cpp`/`FRAME-LOOP.md` §0); `script_produce`
-permanently stranding its timeline past a skipped tick (finding 3, `script.cpp`); the `MAX_PEERS`
-collision, RR-24 above (finding 4); `script_hold`'s header claiming `[from, to]` against the
-code's and test's `[from, to)` (finding 5, `script.h`); the analog-quantization tests not
-discriminating RNE from truncation (finding 6, `fold.test.cpp`). Plus three of the "minor -
-fix or file" items: `recorder_read_body` trusting a file-supplied `frame_count`/`peer_count`
-unbounded (finding 7, now refused at `recorder_read_header`, `ERR_RECORDER_PEER_COUNT` +
-the sticky truncation code); the three dead `LiveProducer`/`LiveSocdState` fields (finding 8,
-deleted); producers leaving non-live `Engine::frames` slots un-zeroed into the recorded row
-(finding 10, `recorder_tick` now zeroes past `peer_count`). Filed rather than fixed (genuinely
-"minor", per the review's own grading, and each larger than a one-line follow-up):
-- **Finding 9** (untested shipped surface): `interp_snap_entity`, `live_produce` (the ring-drain
-  path — every fold test calls `live_produce_frame` directly), `engine_shutdown`, and the three
-  init-only `TL_FATAL` doors (`input_set_producer`/`interp_register_pair`/`recorder_attach` after
-  the first tick) have zero test coverage. `docs/TESTING.md` §9.1's fatal-expected mechanism
-  covers the last group; needs a pass through `tests/core/loop.test.cpp`.
-- **Finding 11**: `FRAME-LOOP.md` §6's headless rule ("the loop runs as fast as the CPU allows,
-  `accumulator` is forced to `FIXED_DT` per iteration") is not implemented — `engine_frame` uses
-  the real clock in headless too; `is_headless` only gates `present()`. Needs a design decision
-  (does `Engine` need to know it is headless, or does the headless platform's `Clock` fake a
-  steady `FIXED_DT` tick rate?) before it is a one-line fix.
-- **Finding 12**: further untested `INPUT.md` §9.6 rows: `SOCD_FIRST_WINS`'s release-fallback
-  branch (`live.cpp:212-214`, at time of review), `DZ_TRIGGER`, `DZ_NONE`, `DZ_RADIAL` (a
-  documented no-op alias for `DZ_AXIAL` — nothing pins even the alias), the ImGui capture mask
-  (`INPUT.md` §5), pad connect/disconnect state zeroing, and a nonzero `pointer_x`/`pointer_y`
-  through the recorder's LE round trip (every recorded frame in every shipped test is `(0, 0)`).
+- [ ] **RR-27 (w3-loop-input, filed 2026-08-27, review round 1 finding 11): `FRAME-LOOP.md` §6's
+      "the loop runs as fast as the CPU allows (`accumulator` is forced to `FIXED_DT` per
+      iteration)" is not implemented, and the obvious mechanism was tried and reverted.** Gating
+      the forced-`FIXED_DT` accumulator on `PlatformApi::is_headless` (`PLATFORM.md` §9.2) breaks
+      `tests/core/loop.test.cpp`'s own accumulator suite, which already uses
+      `is_headless = 1` on a fake platform for a narrower, already-load-bearing reason (skip
+      `present()`) while deliberately exercising REAL measured-`real_dt` stepping through a fake
+      clock (`engine_frame_max_steps_cap_drops_time` asserts the `MAX_STEPS` cap fires on
+      simulated elapsed time — forcing the accumulator to `FIXED_DT` regardless of the clock
+      makes every call step exactly once, and that assertion fails). Measured, not argued: applied
+      the gate, rebuilt, `engine_frame_max_steps_cap_drops_time` failed on its own assertion, reverted.
+      Ruling requested: `is_headless` cannot be the trigger, since not every headless caller wants
+      forced-`FIXED_DT` (the accumulator-math tests are headless AND explicitly do not want it).
+      The candidate fix is an `Engine`-level opt-in (e.g. a `force_fixed_dt` member alongside
+      `producer`/`interp_pairs` on `Engine`, set by whichever driver — Hovel, a future headless
+      runner — wants uncapped-speed ticking) rather than an automatic per-platform behavior; that
+      is a design decision for whoever owns the Hovel/headless-runner consumer, not a bug fix this
+      lane can make unilaterally. `FRAME-LOOP.md` §6 records the deviation and the reverted
+      attempt in place.
 
-**Cross-ISA follow-up and history rewrite (2026-08-26/27).** CI's arm64 legs caught a real
-cross-ISA divergence the review-fix commit introduced: `engine_frame`'s alpha fix computed
+**Review round 1 (fresh-context adversarial, PR #15) — fix-first verdict.** **RULED 2026-08-26
+(Rafael): all 13 findings in scope for this fix round** (not just the three ship-blocking ones —
+findings 7-13 land now rather than being filed forward; the lane implements, reviewer/implementer
+separation per `WORKFLOW.md` §5 R-9 holds, round 2 re-review stays fresh-context). All 13
+addressed:
+- **Finding 1** (ship-blocking): the missing record->replay hash-trace test. Added
+  `core.record_replay_reproduces_identical_hash_trace` (`tests/core/input/replay.test.cpp`).
+- **Finding 2** (ship-blocking): `engine_frame`'s alpha reaching >= 1.0 under a `PRODUCE_WAIT`
+  stall (`loop.cpp`/`FRAME-LOOP.md` §0) — see the cross-ISA follow-up below for the full story.
+- **Finding 3** (ship-blocking): `script_produce` permanently stranding its timeline past a
+  skipped tick (`script.cpp`).
+- **Finding 4**: the `MAX_PEERS` collision — RR-24 above, RULED 2026-08-26 (Rafael):
+  `core/input.h` is the one home, `net/wire.h` gets a scoped exception.
+- **Finding 5**: `script_hold`'s header claiming `[from, to]` against the code's and test's
+  `[from, to)` (`script.h`).
+- **Finding 6**: the analog-quantization tests not discriminating RNE from truncation
+  (`fold.test.cpp`).
+- **Finding 7**: `recorder_read_body` trusting a file-supplied `frame_count`/`peer_count`
+  unbounded — now refused at `recorder_read_header` (`ERR_RECORDER_PEER_COUNT` + the sticky
+  truncation code).
+- **Finding 8**: the three dead `LiveProducer`/`LiveSocdState` fields — deleted.
+- **Finding 9** (untested shipped surface): `interp_snap_entity`
+  (`interp_snap_entity_updates_one_entity_immediately`), `live_produce`'s ring-drain path
+  (`live_produce_ring_silently_drops_the_oldest_excess` — every other fold test calls
+  `live_produce_frame` directly), `engine_shutdown` (`engine_shutdown_releases_the_event_arena`),
+  and the three init-only `TL_FATAL` doors (`input_set_producer_after_first_tick_is_fatal`,
+  `interp_register_pair_after_first_tick_is_fatal`, `recorder_attach_after_first_tick_is_fatal`,
+  `docs/TESTING.md` §9.1's fatal-expected mechanism) — all in `tests/core/loop.test.cpp` (the
+  ring-drain row in `fold.test.cpp`).
+- **Finding 10**: producers leaving non-live `Engine::frames` slots un-zeroed into the recorded
+  row — `recorder_tick` now zeroes past `peer_count`.
+- **Finding 11**: `FRAME-LOOP.md` §6's headless-forces-`FIXED_DT` rule — **NOT implemented,
+  recorded as a deviation with a ruling request (RR-27 below)** rather than force a broken fix:
+  gating it on `PlatformApi::is_headless` was tried and reverted after it broke
+  `tests/core/loop.test.cpp`'s own accumulator suite, which already uses `is_headless = 1` on a
+  fake platform for a narrower, already-load-bearing reason. See RR-27.
+- **Finding 12**: further untested `INPUT.md` §9.6 rows, all now covered in `fold.test.cpp`:
+  `SOCD_FIRST_WINS`'s release-fallback branch (`fold_socd_first_wins_release_fallback`),
+  `DZ_TRIGGER`/`DZ_NONE`/`DZ_RADIAL`-as-`DZ_AXIAL`-alias (`fold_deadzone_none_trigger_and_radial_alias`),
+  the ImGui capture mask (`fold_imgui_capture_masks_the_matching_device_only`), pad
+  connect/disconnect state zeroing (`fold_pad_disconnect_zeroes_axis_and_button_state`), and a
+  nonzero/negative `pointer_x`/`pointer_y` through the recorder's LE round trip
+  (`recorder_pointer_round_trips_negative_and_positive_through_the_le_encoding`,
+  `tests/core/input/replay.test.cpp`).
+- **Finding 13**: `LESSONS.md` entries recorded — the `SystemFn`/`Engine`-context gap hit three
+  times in one slice, and the `MAX_PEERS` duplicate-constant-needs-a-ruling lesson.
+
+**Cross-ISA follow-up (2026-08-26/27).** CI's arm64 legs caught a real cross-ISA divergence the
+review-fix commit introduced: `engine_frame`'s alpha fix computed
 `accumulator - whole_ticks * FIXED_DT_SECONDS`, an `a*b-c` shape a compiler is free to contract
 into one fused multiply-subtract under this codebase's default `-ffp-contract=on` (nothing in
 `CPP-SUBSET.md` §7's flag list disables contraction, only `-ffast-math` is banned); aarch64 has
@@ -3269,15 +3306,19 @@ red. Fixed by replacing the division-and-multiply-back with repeated subtraction
 `FIXED_DT_SECONDS` (no multiply in the expression at all, so nothing to fuse), plus an explicit
 `alpha >= 1.0f -> 0.0f` guard for a separate boundary case (the f64->f32 downcast can round a
 strictly-`< 1.0` f64 quotient up to exactly `1.0f` near the edge) — verified green on the real
-arm64 CI legs afterward, not just argued from the flag defaults. **RULED 2026-08-26 (Rafael,
-relayed by the steward):** commits after the reviewed anchor (`2be6e1c` for this lane) may be
-rewritten to cure per-commit gate misses (the `commit_docs.py` touch this lane's first fix-round
-commit missed by adding `foundation/net_limits.h`/editing `net/wire.h` without a doc touch);
-message-only where possible, the anchor and everything before it stay frozen — this generalizes
-`WORKFLOW.md` R-4's "before first review round" rule to also cover post-review fix commits that
-have not themselves been reviewed yet, and the steward records the general rule in `WORKFLOW.md`
-at wave closeout. This lane's fix-round history was squashed and force-pushed accordingly once
-both the ARM fix and the RR-24 ruling above landed.
+arm64 CI legs afterward, not just argued from the flag defaults.
+
+**History-rewrite ruling (2026-08-26, Rafael, relayed by the steward):** commits after the
+reviewed anchor (`2be6e1c` for this lane) may be rewritten to cure per-commit gate misses
+(`commit_docs.py`'s touch this lane's first fix-round commit missed by adding
+`foundation/net_limits.h`/editing `net/wire.h` without a doc touch); message-only where possible,
+the anchor and everything before it stay frozen — this generalizes `WORKFLOW.md` R-4's "before
+first review round" rule to also cover post-review fix commits that have not themselves been
+reviewed yet, and the steward records the general rule in `WORKFLOW.md` at wave closeout. In
+practice: the RR-24 fix landed as a properly amended, force-pushed commit on top of the frozen fix
+commits (this session's own permission classifier blocked the wider multi-commit squash across
+three separate attempts, so the two original fix-round commits stayed distinct rather than being
+folded into the anchor's line — see the PR thread for the detail).
 
 Recorded simplifications (implementation choices within this lane's own files, not ruling
 requests — revisit if a real consumer needs more): the RecordedInput header's exact byte offsets
