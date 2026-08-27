@@ -453,7 +453,7 @@ with `write_atomic`.
 | `prof_zero_alloc_and_tree` | 1000 frames of nested scopes: arena-offset delta 0 after the first frame; tree `parent`/`depth` match a known nesting; `t_end ≥ t_begin`; overflow at 8193 scopes counted, not crashed; two workers merge in worker order; `depth == 0` at frame end else fatal (child) |
 | `trace_json_golden` | a fixed 3-frame tree exports byte-identical to `tests/golden/trace_3frames.json` (clock stubbed) |
 | `probe_tsv_golden` | `LOG` every 3 ticks, `ON_CHANGE`, `MARK`, `ASSERT` over 20 ticks → `TL_GOLDEN_TSV("probe_basic")`; summary line values (count/changes/min/max/mean) exact; disabled key emits nothing; a `pos_t` probe prints `%.9g` of raw·2^-18 |
-| `inspector_roundtrip_per_kind` | **amended by RR-39 (2026-08-27): dropped "driven through the headless ImGui test engine"** — Dear ImGui Test Engine is not vendored (`vendor/VERSIONS` pins imgui core-only, `IMGUI_ENABLE_TEST_ENGINE` is commented out in `imconfig.h`, no `vendor/imgui_test_engine` directory exists, and vendoring a new dependency is a ruling of its own, not a drive-by — `VERSIONS`'s own words), so the row was unmeetable as written. The driving method is now the direct call the walker's own write path already establishes (`inspector_set_scalar_field`, matching `console_exec`'s identical precedent) — every other assertion is unchanged and still required: a test component with one field of every `FieldKind`; an edit of each **editable** field → one `CMD_SET_FIELD` per edit → after the barrier the column holds the value; fx edit of `1.5` into `pos_t` yields raw `0x60000` (**satisfied** — RR-38's quantizer landed and is wired into the walker; `tests/editor/inspector.test.cpp`'s `inspector_fx_field_edit_widget_writes_through_parse_and_command` asserts the parse, the barrier apply, and the column value); handle kinds **and `K_StrId`** produce no command. **Residual gap, recorded rather than silently passed over (RR-39):** with no test engine, nothing proves a real widget is wired TO the setter it calls — the setter itself is tested, the widget-to-setter edge is not; a real click-driven regression here would go undetected until a human notices in a live session. Tracked in `TODO.md` as a known post-v0 gap. |
+| `inspector_roundtrip_per_kind` | **amended by RR-39 (2026-08-27): dropped "driven through the headless ImGui test engine"** — Dear ImGui Test Engine is not vendored (`vendor/VERSIONS` pins imgui core-only, `IMGUI_ENABLE_TEST_ENGINE` is commented out in `imconfig.h`, no `vendor/imgui_test_engine` directory exists, and vendoring a new dependency is a ruling of its own, not a drive-by — `VERSIONS`'s own words), so the row was unmeetable as written. The driving method is now the direct call the walker's own write path already establishes (`inspector_set_scalar_field`, matching `console_exec`'s identical precedent) — every other assertion is unchanged and still required: a test component with one field of every `FieldKind`; an edit of each **editable** field → one `CMD_SET_FIELD` per edit → after the barrier the column holds the value; fx edit of `1.5` into `pos_t` yields raw `0x60000`, asserted via RR-38's quantizer (`fx::fx_parse_decimal_raw`, wired into the walker) by `tests/editor/inspector.test.cpp`'s `inspector_fx_field_edit_widget_writes_through_parse_and_command` (parse, barrier apply, and column value all checked); handle kinds **and `K_StrId`** produce no command. **Residual gap, recorded rather than silently passed over (RR-39):** with no test engine, nothing proves a real widget is wired TO the setter it calls — the setter itself is tested, the widget-to-setter edge is not; a real click-driven regression here would go undetected until a human notices in a live session. Tracked in `TODO.md` as a known post-v0 gap. |
 | `console_parse` | tokenizer table (quotes, escapes, comment, 17 tokens → error, unterminated quote → error); dispatch with `argc` bounds; completion returns sorted prefix matches; `SIM` cvar set is refused under a lockstep flag and accepted otherwise (as a command) |
 | `dotpath_resolve` | `player.Transform.x`, `#12.Health.hp`, `@PeerSlots.local_slot`, `a.Flags.bits[3]`; unknown entity/component/field → named errors |
 | `desync_diff_known_pair` | two worlds, identical until tick 100, then one receives a poked `Health.hp` (test hook): the diff reports exactly `{arena Health, entity e, field hp, 10, 11}` first; `max_n = 1` returns 1; fingerprint mismatch short-circuits |
@@ -467,52 +467,52 @@ with `write_atomic`.
 3. `tl_prof.h` + `prof.cpp`, `trace_export.cpp` → `prof_zero_alloc_and_tree`, `trace_json_golden`; scheduler auto-scopes.
 4. `tl_probe.h` + `probe.cpp` + `--dump-probes` → `probe_tsv_golden`. (Steps 1–4 are what the Alloy harness needs; they precede any sim code.)
 5. Panels **Log**, **Console** (+ cvars), **Inspector** → `inspector_roundtrip_per_kind`, `console_parse`, `dotpath_resolve`; **Profiler**, **Probes**, **World**; `editor/shell.cpp` + `PlatformDevApi` wiring + capture mask.
-   **RR-40 (2026-08-27): the original single "v0 editor done" bullet is SPLIT into two criteria,
-   because four of its own clauses turned out to need a running shell that cannot run yet**
+   **RR-40 (2026-08-27): the original single "v0 editor done" bullet is SPLIT (RR-43 below makes
+   it three buckets), because four of its own clauses turned out to need a running shell that
+   cannot run yet**
    (`struct PlatformDevApi` is defined nowhere in this tree; `editor_frame` is
    `TL_FATAL("unimplemented")`; `editor/shell.cpp` itself does not exist; `PLATFORM.md` §9.7 step 5
    — `imgui_backend.cpp` + `PlatformDevApi` — is not built and no lane is queued for it). Every
    clause of the original criterion is assigned below; none is left unassigned.
 
+   **RR-43 (2026-08-27, Rafael): a THIRD bucket added** — Review C found `shell v0`'s name false
+   for three of its own contents (each blocked on something a shell would not fix), and a fourth
+   clause left inside `panels v0` that the doc itself called unsatisfiable, which makes a "done"
+   gate unmeetable by construction. Each bucket's name is now a true predicate over its contents.
+   **RR-44 (2026-08-27, Rafael): criteria rows state a CONDITION, never a met/not-met status word**
+   — whether a condition holds is the PR gate's and `TODO.md`'s job, not this doc's; a status word
+   baked into a criterion is exactly the class of prose that goes stale the moment code catches up
+   without anyone touching the sentence that describes it (the "not yet satisfied"/"blocked only on
+   RR-38" instances this same PR already had to correct twice are the pattern this ruling closes).
+
    **Panels v0** — reachable without a running shell; headless-testable; `w3-editor`'s own PR gate:
    - All six panels exist and are registered (`editor_register_panel`), each callable and tested
-     directly against a null ImGui backend, with no `editor_frame`/`PlatformDevApi` involved —
-     **satisfied** (Log, Console, Inspector, Profiler, Probes, World all shipped).
+     directly against a null ImGui backend, with no `editor_frame`/`PlatformDevApi` involved
+     (Log, Console, Inspector, Profiler, Probes, World).
    - Zero heap allocation per frame outside `pool_vendor`, NARROWED to what a running shell is not
-     needed to prove: every existing panel's own `draw_fn`, called directly and repeatedly —
-     **satisfied and verified** (`tests/editor/no_stray_alloc.test.cpp`; see `TODO.md`). The
-     BROADER original reading — the whole live session, every frame, forever, including
-     `editor_frame`'s own `NewFrame`/dockspace/`Render` bracket once it exists — moves to shell v0
-     below, since there is no `editor_frame` body yet to test it against.
-   - Console's cvar `set <name> <value>` command path (`§9.3.5`: parse per kind, `FX_RAW` accepts
-     a decimal literal "quantized RNE", `SIM` → `CMD_SET_CVAR`, `ARCHIVE` → `pref_path/cvars.txt`
-     on shutdown) — text-driven, panel-local, no widget, no shell. **Not yet built; blocked only on
-     RR-38's quantizer** (filed, `TODO.md`) for the decimal-literal half — once that lands, this is
-     in scope for `w3-editor`'s own PR gate. `§9.3.5`/`§9.4` describe no SEPARATE cvar "browser"
-     widget beyond this text command — if a later reading disagrees, that is itself a doc gap to
-     raise, not an assumption to build past.
-   - Inspector's fx-field editing — **DONE (RR-38 landed, wired in the same wave)**: the
-     `1.5` → `0x60000` assertion in `inspector_roundtrip_per_kind` (RR-39, amended above) is
-     satisfied (`tests/editor/inspector.test.cpp`'s
-     `inspector_fx_field_edit_widget_writes_through_parse_and_command`). Handle-field editing
-     stays display-only at v0 — not an RR-38 dependency at all, `§9.3.4`'s own updated text notes
-     it needs its own resolution UI ("type an entity name"/"pick from the interner"), a different,
-     unscoped feature.
-   - "An edit in the inspector appears in the replay log" — re-examined against the doc rather than
-     assumed shell-blocked: recording (`core/recorder.cpp`'s `recorder_tick`, already built by
-     `loop+input`) and re-sim (`engine_tick_once`, `core/loop.cpp`) both run headlessly today, no
-     shell required (`tests/core/loop.test.cpp`'s own precedent). **This clause is panels-v0-SHAPED,
-     not shell-blocked — but it is UNSATISFIABLE as literally written until a separate, deeper gap
-     is resolved:** `core/recorder.h`'s format records only `{frames, world_hash}`, never commands,
-     so an inspector edit (a command, `CMD_SET_FIELD`, never an `InputFrame`) cannot be reproduced
-     by the seek algorithm's input-only re-sim. Filed as its own ruling request (`TODO.md`,
-     "keyframes.cpp's seek algorithm cannot reproduce an inspector edit") — tracked there, not
-     re-filed here; this row exists so the clause has a home and isn't silently dropped by the
-     shell/no-shell split.
+     needed to prove: every existing panel's own `draw_fn`, called directly and repeatedly
+     (`tests/editor/no_stray_alloc.test.cpp`). The BROADER original reading — the whole live
+     session, every frame, forever, including `editor_frame`'s own `NewFrame`/dockspace/`Render`
+     bracket once it exists — is shell v0 below, since there is no `editor_frame` body yet to test
+     it against.
+   - Console's cvar `set <name> <value>` command: parses per kind through the shared
+     `core/cvar.cpp` parser (`cvar_parse_raw`, one parser, not duplicated for the console door),
+     `FX_RAW` accepting a decimal literal RNE-quantized at the cvar's own `frac_bits` (RR-38); a
+     `CVAR_SIM`-flagged cvar routes through the sealed `CMD_SET_CVAR` door (`world_set_cvar_cmd`),
+     never a direct write; refused under a lockstep session via `CONSOLE_SIM_AFFECTING`
+     (`editor/console.cpp`'s `console_register_cvar_set`). `ARCHIVE` → `pref_path/cvars.txt` on
+     shutdown is a SEPARATE clause, moved to the deferred bucket below (it needs `pref_path`, which
+     this command does not) — `§9.3.5`/`§9.4` describe no SEPARATE cvar "browser" widget beyond
+     this text command.
+   - Inspector's fx-field editing: a typed decimal literal quantizes via `fx::fx_parse_decimal_raw`
+     (RR-38) and writes through `CMD_SET_FIELD`
+     (`inspector_fx_field_edit_widget_writes_through_parse_and_command`,
+     `tests/editor/inspector.test.cpp`). Handle-field editing stays display-only at v0 — not an
+     RR-38 dependency at all, `§9.3.4`'s own updated text notes it needs its own resolution UI
+     ("type an entity name"/"pick from the interner"), a different, unscoped feature.
 
-   **Shell v0** — needs a running `editor_frame`/real `PlatformDevApi`; deferred; NOT this PR's
-   gate; tracked in `TODO.md` as a follow-up naming its blocker so it cannot be forgotten once this
-   PR merges:
+   **Shell v0** — needs a running `editor_frame`/real `PlatformDevApi`; NOT this PR's gate; tracked
+   in `TODO.md` as a follow-up naming its blocker so it cannot be forgotten once this PR merges:
    - `editor/shell.cpp` itself (ImGui context creation, dockspace, `imgui.ini` load/save, the menu
      that calls `editor_toggle_panel`).
    - `PlatformDevApi` (`PLATFORM.md` §9.7 step 5: `imgui_backend.cpp` + the `imgui_init`/
@@ -524,14 +524,29 @@ with `write_atomic`.
      `editor_frame`, once per real frame, over a real `io.WantCaptureMouse`/`WantCaptureKeyboard`
      — the algorithm is simple, but nothing calls it outside the stubbed `editor_frame` body today.
    - `imgui.ini` persisting in `pref_path` — needs `PlatformDevApi`'s real OS pref-path mechanism
-     and a real ImGui context's own load/save lifecycle; no headless equivalent.
+     AND a real ImGui context's own load/save lifecycle; no headless equivalent (shares the
+     `pref_path` half of its blocker with the deferred bucket's `ARCHIVE` clause below, but stays
+     here because the ImGui load/save half is genuinely shell-blocked, which `ARCHIVE` is not).
    - Zero heap allocation per frame, the BROADER reading (above): the whole live session including
      `editor_frame`'s own body, once built.
+
+   **Deferred — blocked on a ruling or another lane** (RR-43; neither panels-v0 nor shell-v0; each
+   item names its own blocker so it is findable by whoever owns clearing it, not just by whoever
+   reads this doc):
+   - "An edit in the inspector appears in the replay log" — recording (`core/recorder.cpp`'s
+     `recorder_tick`) and re-sim (`engine_tick_once`, `core/loop.cpp`) both run headlessly today,
+     no shell required, but `core/recorder.h`'s format records only `{frames, world_hash}`, never
+     commands, so an inspector edit (`CMD_SET_FIELD`) cannot be reproduced by the seek algorithm's
+     input-only re-sim. Blocked on **RR-42** (`TODO.md`, `DETERMINISM.md` §6/§9.2's own caveat): a
+     taint flag on the recording plus forced keyframes at every external-chunk apply, RECORD-ONLY
+     as of this PR.
+   - Console's `ARCHIVE` → `pref_path/cvars.txt` on shutdown — blocked on `pref_path`
+     (`PLATFORM.md` §9.7 step 5), the same dependency `imgui.ini` is deferred for in shell v0 above
+     (this clause needs only `pref_path`, not a real ImGui context's load/save lifecycle, which is
+     why it sits here rather than in shell v0 itself).
    - Luau REPL hand-off (`§9.3.5`: `console.command(name, fn, usage)`) and the Console panel's
-     "Luau UI VM" data source (`§9.4`) — **NOT shell-blocked; blocked on a DIFFERENT unbuilt lane**
-     (`LUAU-LAYER.md`, `script`, not `editor`) — filed here anyway, explicitly, rather than left to
-     float on neither side of the split, per Rafael's own instruction. Post-v0 for this PR either
-     way; revisit once `script`'s Luau binding layer lands.
+     "Luau UI VM" data source (`§9.4`) — blocked on the `script` lane's Luau binding layer
+     (`LUAU-LAYER.md`), not `editor` and not a running shell; revisit once that lane lands.
 6. `core/desync_diff.cpp` + `tl_driver --diff` → `desync_diff_known_pair` (lands with the determinism harness, before netcode).
 7. `keyframes.cpp` + **Replay** panel → `replay_scrub_exact`; **Scripts** panel with the Luau layer; **Sim** panel with Milestone 2 views; **Net** panel with Hovel. **Governed by RR-42** (`TODO.md`, `DETERMINISM.md` §6/§9.2): any external-chunk command applied during a recording makes it non-reproducible via input-only re-sim with no way for the harness to detect it — the ruling requires a taint flag on the recording plus forced keyframes at every external-chunk apply; RECORD-ONLY today, binding on whoever builds this item.
 
