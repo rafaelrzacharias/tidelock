@@ -8,7 +8,7 @@
 
 ---
 
-## 1. The unit of work: one lane, one draft PR
+## 1. The unit of work: one lane, one PR
 
 - A lane works on branch `w<N>-<lane>` cut from fresh `main`, and **opens a PR at lane
   start — ready, never draft (ruled 2026-08-26)** — before substantive commits pile up. The PR
@@ -68,9 +68,14 @@
   ever arrived. (Filed after two lanes sat green, `mergeable_state: clean`, re-arming self
   check-ins that only re-confirmed they were green, while their round-3 reviews went unspawned;
   `LESSONS.md` carries the evidence.)
-- **Merging is autonomous (ruled 2026-08-25).** Once the head is CI-green on all four `CANON.md`
-  legs and §2's verdict is *ship*, the session merges without waiting for Rafael — his word is
-  not a merge precondition; both preconditions are machine-checkable facts, not judgments. What
+- **Merging is autonomous (ruled 2026-08-25; third precondition added by R-17, 2026-08-27).**
+  Once the head is CI-green on all four `CANON.md` legs, §2's verdict is *ship*, **and that
+  verdict came from a reviewer at or above the lane's `ROADMAP.md` §2 seat (§5 R-17)**, the
+  session merges without waiting for Rafael — his word is not a merge precondition. Two of the
+  three are machine-checkable: the CI legs, and that a verdict was POSTED at the required seat.
+  The verdict's *content* is a judgment — §2 spends a whole adversarial review producing it —
+  so the original wording's "both preconditions are machine-checkable facts, not judgments"
+  was never true of the second and is corrected here rather than preserved. What
   still reaches him, as multiple-choice questions wherever the surface allows: **rulings** (RRs,
   and anything a spec is silent on), a reviewer's ***redesign*** verdict, **scope changes**, and
   any edit that *creates or amends a ruling* — there his sign-off is on the ruling itself; once
@@ -304,4 +309,7 @@ completion — filed after the steward's own "I spawn it, you do not need to ask
 finished lanes silent; §6's intro lost its maintained rule count in the same pass. §7 added
 2026-08-27: the `.claude/settings.json` ownership ruling and the current allowlist, in one place. §3/§5/§6 amended 2026-08-27 evening: R-17 (a demoted steward holds the queue but never
 adjudicates above its seat) and R-18 (artifact 1 gates the label, not the work); §3's header
-corrected from three artifacts to four, which R-12 had made stale when it added the fourth.*
+corrected from three artifacts to four, which R-12 had made stale when it added the fourth. §1
+amended again the same evening by the wave sweep's area-C reviewer (D2/D3): its heading still
+advertised the draft PRs R-5 retired, and its merge bullet still enumerated two preconditions
+after R-17 added a third — the same-evening pass that fixed §3's heading had missed its sibling.*

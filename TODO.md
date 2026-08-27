@@ -6312,3 +6312,49 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > format you hash" is not violated by their absence. That makes D1 worse, not better: the
 > hand-forged rows are load-bearing with nothing beneath them. **A brief's hypothesis is a lead,
 > not a finding, and a reviewer that refutes one is doing the job.**
+
+> **AREA C REPORTED — COMPLETE, *fix first*, seven defects; and two of them are against work this
+> steward window did two hours earlier (2026-08-27 ~23:55 local).** Full text on `w3-sweep-c`.
+> **D2 and D3 are FIXED in the same turn they were read** (`docs/WORKFLOW.md`), because both are
+> in this window's own cone and D3 bites on the next lane to launch:
+> - **D2:** §1's heading still read "one lane, one **draft** PR" after R-5 retired drafts on
+>   2026-08-26. Sharper than it looks: the evening pass that corrected §3's "three artifacts →
+>   four" heading **missed its sibling three sections up**, so the fix and the miss were the same
+>   pass. A session reading the heading and stopping opens a draft PR and reproduces the split
+>   record R-5 exists to prevent.
+> - **D3:** R-17 (written by this window) made the verdict-giver's SEAT a third merge precondition
+>   and amended §5 and §6 — but not §1's merge bullet, which still enumerated "**both**
+>   preconditions", and which R-16's own neighbouring bullet calls "the one a session reads at
+>   merge time". A below-seat steward reading §1 alone would merge a Fable-seated lane on a verdict
+>   R-17 does not license, and **`alloy-substrate` is that lane** — the one R-17 was filed about.
+>   The reviewer's sub-finding is the better half and is taken: "both preconditions are
+>   machine-checkable facts, not judgments" was **never** true of the second, because §2 defines a
+>   ship verdict as the output of an adversarial review. §1 now says two of three are
+>   machine-checkable (the CI legs, and that a verdict was posted at the required seat) and that
+>   the verdict's content is a judgment. Corrected rather than preserved.
+>
+> **RR-51 (steward-allocated) — does §2's valve cover a *fix-first* fix set no reviewer endorsed?**
+> C's D1, and its central finding: C3 (`3061af2`, PR #15 round 3) was **NOT eligible** as used.
+> `WORKFLOW.md` §1 scopes the valve to "small edits that implement an already-recorded ruling";
+> `tests/core/loop.test.cpp:167` is new coverage authored in response to a reviewer's finding —
+> the artefact a review round exists to produce and then check. **The consequence is precedent,
+> not this tree** (the reviewer independently re-verified C3's fixes and found them correct): if a
+> round-N fix set is valve-eligible because its edits are individually small, every *fix first*
+> becomes "merge and defer" and §2's "re-reviewed until the verdict is *ship*" has no force left.
+> C2 is the contrast that proves the line is real — there the round-3 reviewer itself said no
+> round 4 was needed. **For Rafael:** does the valve reach an unendorsed fix set, and if so must
+> the reviewer's endorsement be a recorded precondition? §2 as written says no; C3 merged as if it
+> said yes. Note this is a finding against a predecessor steward's merge, surfaced by the sweep
+> that merge was deferred into — which is the sweep working exactly as §2 intends.
+>
+> **Routed, not fixed (outside this window's cone):** C's **D4** (`ASSETS-AND-DATA.md` §8.5's
+> bucket header claims each clause names its owning lane; two of its five bullets say no lane owns
+> them — and the reviewer measured the provenance rather than assuming it: `git show
+> 1a14424^` already carries the header, so this predates C2, which added the second falsifying
+> bullet while citing the first as precedent). **D5** — `src/core/transform.h:47` claims
+> `Transform`/`TransformPrev` are "registered by core immediately after Transform" and **nothing in
+> `src/` registers either**; the only registrations anywhere are two render test fixtures. C3
+> rewrote the second half of that sentence and left the false premise standing, which is
+> `LESSONS.md`'s "a ruling that amends four docs can still miss the header that IS the contract",
+> and `CPP-SUBSET.md` §6 makes a contract block the first thing a downstream lane reads. **D6** is
+> latent enforcement. All three land in closed lanes' cones — the ownership problem again.
