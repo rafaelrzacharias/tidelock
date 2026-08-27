@@ -6131,3 +6131,182 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > identity commits (explicitly ruled against — they stand as R-16's evidence); the `Doc debt`
 > entries; and `TOOLING.md`'s `shell v0` / build-order item 7 (correctly deferred with blockers
 > named — reopening them re-litigates RR-40/RR-43).
+
+---
+
+## W3 sweep area B — the loop+input × assets+data seam (fresh-context adversarial review, 2026-08-27, `w3-sweep-b`)
+
+> **PARTIAL — pushed in progress, per the area brief's "push early, push again".** This section is
+> appended to as the review continues; the verdict line below is the current standing verdict and
+> is revised in place if a later finding changes it.
+
+**VERDICT: fix first.** Two verified defects, both invisible to either lane reviewed alone, both
+found by running the two halves against each other. Neither is a coding slip: each is a contract
+one lane wrote that the other lane's merged code falsifies. Nothing here re-reviews either lane's
+own scope.
+
+**Environment for every claim below.** `dev-linux` preset, `-DTL_STRICT_TOOLCHAIN=OFF`, clang
+18.1.3, `origin/main` @ `1280d1a`. Baseline before any probe: `tl_tests --isolate --tag '!slow'`
+reported its own selection line — `670 selected, 667 passed, 0 failed, 0 timed out, 3 skipped,
+0 lost (696 in the list)`. `python3 tools/audit/includes.py --root .` → `191 files checked,
+0 violations`. `cmake --build out/dev-linux --target tl_audit_symbols` → `2 audited layers +
+9 data-only libs, 1 wrap libs, 0 violations`. Every probe below was built and run; a build failure
+was checked for before any test result was read (`LESSONS.md`: a revert experiment that fails to
+compile leaves the old binary in place).
+
+---
+
+### B-1 (VERIFIED, ship-blocking) A world restored from a save does not reproduce the world hash the save was taken at
+
+`src/core/save.cpp:296-300` (the `SAVE_ENC_ECS_COLUMN` apply loop) restores logical row CONTENT.
+`src/foundation/arena_registry.cpp:86-87` hashes each registered arena over `[base, used)` — the
+whole committed extent, not `[0, count)` (`LESSONS.md` already carries this exact class for
+`Array`). A column's `used` is high-water: it is a function of that column's add/remove HISTORY,
+not of its live row set. So two peers holding identical logical state hash differently whenever
+one of them got there through a save.
+
+**Why neither lane could see it.** `assets+data`'s own criterion (`ASSETS-AND-DATA.md` §8.5,
+"round-trip equality per arena") is discharged by `tests/core/save/save.test.cpp:178-186`, which
+compares FIELD VALUES. `registry_hash_all` as the lockstep trace value arrived with `loop+input`'s
+recorder (`src/core/recorder.cpp`, `recorder_tick`). The two halves first coexist in the merged
+tree, which is exactly this area's remit.
+
+**Why it matters, in the docs' own words.** `ASSETS-AND-DATA.md` §5, last paragraph:
+"Checkpoints for lockstep rejoin (`NETCODE.md` §11) use the *snapshot* path within a build and the
+*save* path across builds." That puts the save path on a lockstep path. `src/core/save.h:19-20`
+says the opposite — "not part of the deterministic sim path (a save is disk io)". **One of those
+two is wrong; that is a ruling request, not a code fix, and I have not allocated it a number.**
+
+**Failure scenario (concrete, no hypotheticals).** Peer A runs live: spawns e1/e2/e3, adds `WPos`
+to all three, then removes e2's (`column_remove` is swap-remove, so A's dense arena `used` stays at
+3 rows while `count` falls to 2). A writes a save. Peer B rejoins across a build boundary by
+loading that save into a world with the same three entities and the component never added, so B's
+dense arena `used` is 2 rows. Both worlds now hold `{e1→{1,2}, e3→{5,6}}` and nothing else. At the
+next `CHECKSUM_INTERVAL_TICKS` (`CANON.md`, 30) they exchange world hashes and desync.
+
+**Measured** (probe source at the end of this section):
+
+```
+SEAM2: A=944c5516a7f3d8c2  B(loaded)=ce097e3a42f6cd00  count=8/8
+SEAM2: arena[5] id=49a99fd68b26e505 flags=7  A=43eb3005198975d3 used=24 | B=01c27c647654f09a used=16
+SEAM2: arena[6] id=e0068c7359eeff79 flags=7  A=c501f1c4c4fea951 used=12 | B=e92d9418e415b740 used=8
+```
+
+`flags=7` is `ARENA_HASHED|ARENA_SNAPSHOT|ARENA_GROWS_AT_BARRIER`; arenas 5 and 6 are `WPos`'s
+dense and entity columns. 24 B vs 16 B is three `WPos` rows vs two; 12 B vs 8 B is three `Entity`
+slots vs two. Identical live content, different hashed extent, different hash.
+
+**Scope of the claim, stated inside it.** This is a hash divergence between a live world and a
+save-restored world on ONE `dev-linux` build. It is not a cross-target claim (nothing here is
+target-dependent — the mechanism is `used`, not layout — but I measured one target). I did NOT
+verify what `NETCODE.md` §11's checkpoint path would actually do with it, because no netcode
+consumer of `save_read` exists in the tree.
+
+**Bounding it honestly — the same-world path is CLEAN.** The path `save.h:216-219` actually
+documents ("an in-session save/reload: add the component, save, remove it, reload") DOES preserve
+the hash, because `used` never shrinks and both sides see the same high-water:
+
+```
+SEAM: h_before=a8c1e26ec1440ea5 h_after=a8c1e26ec1440ea5      (PASS)
+```
+
+So the shipped, documented v1 path is sound. What is broken is the path `ASSETS-AND-DATA.md` §5
+promises and `save.h` does not implement or refuse.
+
+**Fix directions (not applied — cone discipline).** (a) rule that a save is not a lockstep artifact
+and delete §5's rejoin clause; (b) have the load path re-establish the extent (reset the column
+arenas to exactly `row_count` rows before re-adding) and pin it with a hash-equality test; (c) hash
+`[base, base+count*stride)` for column arenas. (b) and (c) are both real designs with real costs;
+picking between them is a ruling.
+
+---
+
+### B-2 (VERIFIED, ship-blocking) `SAVE_ENC_REFLECTED` silently saves exactly one row and returns `ERR_OK`
+
+`src/core/save.cpp:101` writes `encoder_write_rows(&w, ad->info, e->arena->base, 1u)` — the row
+count is the literal `1u`. `src/core/save.cpp:295` applies with `memcpy(e->arena->base, p->rows,
+p->ad->info->size)` — one row's bytes. `SaveArenaDesc::max_rows` (`save.h:161`) is documented as
+"required for REFLECTED and ECS_COLUMN" with no statement that REFLECTED is singleton-only, and
+nothing checks it. A caller who describes a 3-row reflected arena gets `ERR_OK` from both calls and
+loses rows 1 and 2 with no error anywhere.
+
+This is the failure mode `ASSETS-AND-DATA.md` §5 names in its own bullet — "**Fail-loud**
+`LoadError` codes; no silent partial loads" — and `CLAUDE.md`'s "no silent fallbacks", and the
+class `LESSONS.md` records four times over ("a selection that matches nothing must be an error, not
+a clean run").
+
+**Measured** (probe 3 below): a `WPos` column carrying `{11,12} {21,22} {31,32}`, described as
+`kind = SAVE_ENC_REFLECTED, max_rows = 3`, zeroed, then reloaded:
+
+```
+SEAM3: save_write err=0x0000 (ERR_OK)
+SEAM3: save_read  err=0x0000 (ERR_OK)
+SEAM3: row 0 restored = {11, 12}
+SEAM3: row 1 restored = {0, 0}
+SEAM3: row 2 restored = {0, 0}
+```
+
+**Scope of the claim.** `save.h`'s own scope note says every registered arena in the tree today is
+"either an ECS column or a plain reflected singleton", and I confirmed that by reading
+`src/core/world.cpp:41-115` — so this is LATENT, with no live caller. It is ranked ship-blocking
+anyway because the guard costs one line (`TL_CHECK(ad->max_rows == 1u)` in the REFLECTED arm, or
+pass `ad->max_rows` to `encoder_write_rows` and loop the apply) and because the first consumer will
+be `alloy-substrate`'s pools — the exact case `save.h` says REFLECTED is for.
+
+**Cone note.** This defect lives inside `assets+data` alone, not in the seam. I found it while
+probing B-1 and I am FILING it, not fixing it, per the area brief.
+
+---
+
+### Reproducers
+
+Both probes are standalone `.test.cpp` files; drop either into `tests/core/save/` (the test list is
+`GLOB_RECURSE`d, `tests/CMakeLists.txt:3`, so no CMake edit is needed), build `tl_tests`, run with
+`--filter`. Both were removed from the tree before this commit — they FAIL by design and would red
+CI.
+
+B-1's probe, in full (the `registry_seal` call is required: `registry_hash_all` `TL_CHECK`s
+`sealed != 0`):
+
+```cpp
+TL_TEST(zz_seam_divergent_history_same_state, "core,save,seam") {
+    const PlatformApi* platform = platform_test_init();
+    VMemArena scratch;
+    vmem_arena_init(&scratch, "zz_s2"_id, 16u*1024u*1024u, 0u, &platform->vmem);
+    // World A: 3 spawns, 3 adds, remove the middle (swap-remove leaves used at 3 rows)
+    WorldFixture* a = wt_fixture(2); world_fixture_init(a, 1u);
+    world_register_component(&a->w, &WPos_info); world_build_schedule(&a->w);
+    Entity a1=world_spawn(&a->w), a2=world_spawn(&a->w), a3=world_spawn(&a->w);
+    world_flush(&a->w);
+    world_add<WPos>(&a->w,a1,WPos{1,2}); world_add<WPos>(&a->w,a2,WPos{9,9});
+    world_add<WPos>(&a->w,a3,WPos{5,6}); world_flush(&a->w);
+    u32 ca = world_component_id<WPos>(&a->w);
+    world_remove(&a->w, a2, (ComponentId)ca); world_flush(&a->w);
+    registry_seal(&a->reg);
+    SaveArenaDesc ad{}; ad.arena_id = a->w.comps[ca].dense_arena.id;
+    ad.kind = SAVE_ENC_ECS_COLUMN; ad.info = &WPos_info; ad.max_rows = 16u; ad.comp = (ComponentId)ca;
+    SaveDesc d{}; d.registry=&a->reg; d.world=&a->w; d.seed=1u; d.tick=0u;
+    d.arena_descs = Span<const SaveArenaDesc>{ &ad, 1u };
+    save_write(&d, platform, sv("tl_seam2.bin"), &scratch);
+    u64 pa[MAX_ARENAS]; const u64 h_a = registry_hash_all(&a->reg, pa);
+    // World B: same spawn history, component never added; the save supplies the rows
+    WorldFixture* b = wt_fixture(3); world_fixture_init(b, 1u);
+    world_register_component(&b->w, &WPos_info); world_build_schedule(&b->w);
+    world_spawn(&b->w); world_spawn(&b->w); world_spawn(&b->w); world_flush(&b->w);
+    registry_seal(&b->reg);
+    u32 cb = world_component_id<WPos>(&b->w);
+    SaveArenaDesc adb = ad; adb.arena_id = b->w.comps[cb].dense_arena.id; adb.comp = (ComponentId)cb;
+    SaveDesc db{}; db.registry=&b->reg; db.world=&b->w; db.seed=1u; db.tick=0u;
+    db.arena_descs = Span<const SaveArenaDesc>{ &adb, 1u };
+    u64 os_=0u, ot_=0u;
+    save_read(&db, platform, sv("tl_seam2.bin"), &scratch, &os_, &ot_);
+    world_flush(&b->w);
+    u64 pb[MAX_ARENAS]; const u64 h_b = registry_hash_all(&b->reg, pb);
+    TL_EXPECT_EQ(h_a, h_b);        // FAILS
+}
+```
+
+B-2's probe is the same fixture with three `WPos` rows, one `SaveArenaDesc` of
+`kind = SAVE_ENC_REFLECTED, info = &WPos_info, max_rows = 3u`, the column zeroed between write and
+read, and `TL_EXPECT_TRUE(r_err != ERR_OK || (col.data[2].x == 31 && col.data[2].y == 32))` —
+which fails with both calls returning `ERR_OK`.
