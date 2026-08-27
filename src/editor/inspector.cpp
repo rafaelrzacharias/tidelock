@@ -48,6 +48,25 @@ ImGuiDataType int_data_type(FieldKind k) {
     }
 }
 
+// The read-only display path for an int-kind field the walker will not offer an edit widget for
+// (B-6, 2026-08-27: an array element, count > 1 - CMD_SET_FIELD carries no element index, so
+// nothing here may be editable). Reads `addr` at its OWN signed/sized type - not through a
+// zero-extended u64 the way the edit path's `tmp` buffer does - so a negative i8/i16/i32/i64
+// value prints correctly rather than as a huge unsigned number.
+void draw_int_readonly(const void* addr, FieldKind kind) {
+    switch (kind) {
+        case K_i8:  { i8  v; memcpy(&v, addr, 1); ImGui::Text("%d", (int)v); break; }
+        case K_u8:  { u8  v; memcpy(&v, addr, 1); ImGui::Text("%u", (unsigned)v); break; }
+        case K_i16: { i16 v; memcpy(&v, addr, 2); ImGui::Text("%d", (int)v); break; }
+        case K_u16: { u16 v; memcpy(&v, addr, 2); ImGui::Text("%u", (unsigned)v); break; }
+        case K_i32: { i32 v; memcpy(&v, addr, 4); ImGui::Text("%d", v); break; }
+        case K_u32: { u32 v; memcpy(&v, addr, 4); ImGui::Text("%u", v); break; }
+        case K_i64: { i64 v; memcpy(&v, addr, 8); ImGui::Text("%lld", (long long)v); break; }
+        case K_u64: { u64 v; memcpy(&v, addr, 8); ImGui::Text("%llu", (unsigned long long)v); break; }
+        default:    TL_FATAL("draw_int_readonly: not an integer kind");
+    }
+}
+
 // The handle kind's display domain name (docs/TOOLING.md §9.3.4: "Text(domain #idx gN)"). Only
 // K_Entity is reachable today (reflect.h's own comment: the other eleven have no
 // tl_field_kind_<token> constant yet, so no component can declare a field of those kinds) - the
@@ -115,18 +134,30 @@ void draw_field(Editor* ed, World* w, Entity sel, ComponentId comp, const Compon
         if (is_int_kind(f.kind)) {
             u64 tmp = 0;
             memcpy(&tmp, addr, esz);
-            ImGui::InputScalar("##w", int_data_type(f.kind), &tmp);
-            if (editable && ImGui::IsItemDeactivatedAfterEdit()) {
-                (void)inspector_set_scalar_field(w, /*lockstep=*/false, sel, comp, fi, &tmp, esz);
+            if (editable) {
+                ImGui::InputScalar("##w", int_data_type(f.kind), &tmp);
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    (void)inspector_set_scalar_field(w, /*lockstep=*/false, sel, comp, fi, &tmp, esz);
+                }
+            } else {
+                // count > 1: this header's Invariants note - no editable widget, ever, for an
+                // array element (CMD_SET_FIELD carries no element index - B-6, 2026-08-27: this
+                // branch used to draw InputScalar anyway and gate only the write, so editing
+                // tags[1] gave a live, typeable widget whose value silently reverted next frame).
+                draw_int_readonly(addr, f.kind);
             }
         } else if (f.kind == K_bool) {
             u8 tmp = 0;
             memcpy(&tmp, addr, esz);
-            bool b = tmp != 0u;
-            ImGui::Checkbox("##w", &b);
-            if (editable && ImGui::IsItemDeactivatedAfterEdit()) {
-                u8 nv = b ? 1u : 0u;
-                (void)inspector_set_scalar_field(w, /*lockstep=*/false, sel, comp, fi, &nv, esz);
+            if (editable) {
+                bool b = tmp != 0u;
+                ImGui::Checkbox("##w", &b);
+                if (ImGui::IsItemDeactivatedAfterEdit()) {
+                    u8 nv = b ? 1u : 0u;
+                    (void)inspector_set_scalar_field(w, /*lockstep=*/false, sel, comp, fi, &nv, esz);
+                }
+            } else {
+                ImGui::TextUnformatted(tmp != 0u ? "true" : "false");
             }
         } else if (is_fx_kind(f.kind)) {
             i32 raw = 0;

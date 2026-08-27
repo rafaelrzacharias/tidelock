@@ -17,8 +17,14 @@
 //   element index, so a single array-element write is not representable (the same gap `editor/
 //   dotpath.cpp`'s `dotpath_set_raw` already documents and guards with `TL_CHECK(f->count == 1u)`
 //   - this file guards the same way, by simply not drawing an editable widget for `count > 1`,
-//   rather than drawing one that would silently fail or write the wrong bytes). Integer and bool
-//   kinds edit via `ImGui::InputScalar`/`Checkbox`, read back on `IsItemDeactivatedAfterEdit`.
+//   rather than drawing one that would silently fail or write the wrong bytes). Corrected
+//   2026-08-27 (B-6): the int/bool branches used to draw `InputScalar`/`Checkbox` for every array
+//   element regardless of `count`, gating only the WRITE on `editable` - a live, focusable,
+//   typeable widget on `tags[1]` whose value silently reverted next frame, exactly the shape this
+//   note already promised did not happen. Both branches now match the fx branch (which always
+//   gated the widget itself, not just the write): `count > 1` falls back to a plain read-only
+//   `ImGui::Text`/`draw_int_readonly`. Integer and bool kinds edit via `ImGui::InputScalar`/
+//   `Checkbox`, read back on `IsItemDeactivatedAfterEdit`.
 //   The nine fx palette kinds (`K_pos`..`K_scalar`) edit via a second, separate "type a new
 //   value" text box (RR-38/RR-39, 2026-08-27): parsed through `fx::fx_parse_decimal_raw`
 //   (`foundation/fx.h`) - integer-only, no float/double anywhere in the actual quantization; the
