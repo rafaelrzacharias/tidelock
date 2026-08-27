@@ -6246,6 +6246,258 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > *sim* header distinct from foundation's. Reading §14.1 turned a wrong flag into RR-46, which is
 > the real defect underneath it.
 
+## W3 wave-boundary sweep — area C verdict (fresh-context reviewer, 2026-08-27)
+
+**Status: COMPLETE.** **VERDICT: fix first.** No defect in shipped behaviour anywhere in this
+area — every `src/` line in it is a comment, the one added test assertion is correct and
+independently re-verified below, and the base merge is a clean union. What needs fixing before a
+boundary is declared is the doc surface (D2/D3/D4 below) and the valve precedent (D1). D2 and D3
+sit in `WORKFLOW.md` §1 — the text a session reads at merge time — so they mislead the next merge
+rather than merely a reader. None of the fixes are this reviewer's to make (cone discipline: §1
+is process, the steward's; `extract.cpp` is render2d's) — all are filed, none applied.
+
+Area: the three §2-valve merges whose lane review was deferred — (C1) `07e9768` /
+`de5d0ab` (PR #4, merge-autonomy); (C2) `1a14424` + `3b428e3` (PR #14 round 3); (C3)
+`3061af2` + base merge `dd11b38` (PR #15 round 3). Disjoint from the two sibling reviewers'
+areas by the brief's partition.
+
+**Range discipline.** This container cloned shallow (`git rev-parse --is-shallow-repository` →
+`true`); `git fetch --unshallow` first, after which `git log --oneline | wc -l` reports 422.
+Local `refs/heads/main` was stale at `07e9768` — the C1 merge itself — and is NOT `origin/main`;
+one docaudit run was wasted on it before that was caught. Every claim below is measured against
+`origin/main` at `de268f7`, re-fetched mid-review (it advanced `1280d1a` → `de268f7` during this
+session; `git diff --stat 1280d1a origin/main` is `TODO.md` only, so the docs read at session
+start are still current).
+
+### Verdict per valve use (the brief's central question, answered one line each)
+
+- **C1 `07e9768` / `de5d0ab` — ELIGIBLE: YES.** Two hunks, docs-only, transcribing Rafael's
+  2026-08-25 ruling (quoted verbatim in the merge's own TODO entry) into `WORKFLOW.md` §1 and the
+  §5 index as R-3, with the §2-required sweep entry filed in the same merge. Textbook use. The
+  §1 text it added has since gone stale — that is D2/D3, not an eligibility problem.
+- **C2 `1a14424` + `3b428e3` — ELIGIBLE: YES.** I expected this one to fail and the record does
+  not support it. The apparent disqualifier is that the edit does the *opposite* of ruling 2's
+  operative words ("each deferred clause naming its owning lane") by naming no owner. That
+  dissolves on reading ruling 2's own record in this file (the "§8.5 split, RULED" entry): its
+  last sentence already exercises the exception — "One clause has no owning lane at all and is
+  flagged rather than force-assigned per `CLAUDE.md`'s 'unknown constraint - say so, never invent
+  one'". C2 applies an already-ruled exception to a second clause whose factual premise a
+  reviewer had disproved. It decided nothing the ruling left open and extended nothing. Size and
+  character fit (one doc paragraph, one comment typo, one session-id redaction), the round-3
+  reviewer recommended no round 4, and the deferral is recorded. `3b428e3` is a generated-file
+  regeneration and needs no separate justification.
+- **C3 `3061af2` + `dd11b38` — ELIGIBLE: NO.** See D1. Two of the four defect fixes would have
+  been (D3 implements RR-28, which this file marks `[x]` RULED; D4 implements the recorded
+  steward-allocates-RR-ids rule). D1 is not: it is a **new test assertion** answering a round-3
+  reviewer finding, and no ruling records that coverage requirement. D2 cites RR-30/RR-31, which
+  this file itself routes to v0-integration as still-open requests, not rulings. The set merged
+  on a *fix first* verdict with — by the steward's own words — no reviewer endorsing the
+  deferral. The base merge `dd11b38` is not an "edit implementing a ruling" in any reading.
+
+### Defects, ranked
+
+**D1 — C3's valve use was not eligible as used (process; VERIFIED).**
+`WORKFLOW.md:97` scopes the valve to "small edits that *implement an already-recorded ruling*".
+`tests/core/loop.test.cpp:167` is new test coverage authored in response to a reviewer's finding
+— exactly the artefact a review round exists to produce and check. Consequence, and it is about
+precedent rather than this tree: if a round-N fix set counts as valve-eligible because its edits
+are individually small, then every "fix first" verdict becomes "merge and defer", and §2's
+"re-reviewed until the verdict is *ship*" has no remaining force. C2 is the contrast that shows
+the line is real — there the round-3 reviewer itself said no round 4 was needed. **Not a defect
+in the tree:** I re-verified D1's fix independently (below) and it is correct. Ruling request for
+the steward, unnumbered: does the valve cover a *fix-first* fix set that a reviewer has not
+endorsed, and if so must the reviewer's endorsement be recorded as a precondition? §2 as written
+says no; C3 merged as if it said yes.
+
+**D2 — `docs/WORKFLOW.md:11`: §1's heading still reads "one lane, one draft PR" (doc integrity;
+VERIFIED).**
+R-5 (`WORKFLOW.md:158`) retired drafts on 2026-08-26, and §1's own first bullet says "opens a PR
+at lane start — ready, never draft". The heading contradicts both. This is the RR-44 class
+exactly: true when written, falsified by a later ruling, structurally invisible to `docaudit`.
+The identical defect in §3's heading ("three artifacts" → "four") *was* caught and fixed in the
+2026-08-27 evening pass, whose own footer note records it — so the pass that fixed one heading
+missed its sibling three sections up. Consequence: a session that reads the heading and stops
+opens a draft PR and reproduces the split-record failure R-5 exists to prevent (the W2 ecs pilot's
+two-PR record). Fix: one word in the heading.
+
+**D3 — `docs/WORKFLOW.md:71-73`: the autonomous-merge clause enumerates "both preconditions" and
+R-17 has since added a third (doc integrity; VERIFIED).**
+C1's text: "Once the head is CI-green on all four `CANON.md` legs and §2's verdict is *ship*, the
+session merges without waiting for Rafael — his word is not a merge precondition; **both**
+preconditions are machine-checkable facts". R-17 (`WORKFLOW.md:207`, ruled 2026-08-27) makes the
+*seat of the verdict-giver* a precondition: "an R-7 closeout, a ship verdict or a ruling on a
+Fable-seated lane waits for a Fable steward. §2's higher-or-equal gate holds at the round that
+decides." §1's bullet was not amended, and R-16's neighbouring bullet explicitly calls §1 "the
+one a session reads at merge time". Consequence: a below-seat steward reading §1 alone merges a
+Fable-seated lane on a ship verdict R-17 does not license. `alloy-substrate` (Fable 5 high,
+`ROADMAP.md` §2) is the next lane where this bites, and it is the lane R-17 was filed about.
+*Sub-finding, same sentence (REASONED, not verified):* "both preconditions are machine-checkable
+facts, not judgments" is false of the second — §2 defines the ship verdict as the output of an
+adversarial review, i.e. a judgment. What is machine-checkable is that a verdict was *posted*.
+Falsified if the intended reading is "checkable without Rafael"; then say that instead, because
+as written §1 and §2 disagree about what a ship verdict is.
+
+**D4 — `docs/ASSETS-AND-DATA.md:274` and `:256`: the bucket header "Deferred, each clause naming
+its owning lane:" is falsified by two of its own five bullets (doc integrity; VERIFIED).**
+The `asset_load_font` bullet (`:281`, C2's edit) and the two-process bullet (`:295`) both say "No
+`ROADMAP.md` lane currently owns this". §8.5's intro at `:256` repeats the same false claim
+("each clause naming the lane that closes it"). The exception is itself ruled, so the fix is one
+clause in two headers, not a change of substance — and the doc's own status line already states
+it correctly ("clauses owned elsewhere **or flagged as unowned**"), which leaves the two headers
+as the only surfaces still lying. **Provenance, measured rather than assumed:** `git show
+1a14424^:docs/ASSETS-AND-DATA.md` already carries both the header and the two-process exception,
+so this predates C2. C2 added the *second* falsifying bullet and cited the first as precedent in
+the same sentence ("same as the two-process clause below") without correcting the header it was
+reading. Consequence: a lane scoping font work greps §8.5's header, reads "each clause names its
+owner", and takes the absence of an owner as an editing mistake rather than the ruled state.
+
+**D5 — `src/core/transform.h:47`: "registered by core immediately after Transform" is false, and
+C3 edited that sentence without noticing (correctness of a contract block; VERIFIED).**
+Nothing in `src/` registers either component. `grep -rn world_register_component src/` finds only
+`world.cpp`'s definition and `luacomp.cpp`'s Luau door; the only registrations of
+`Transform`/`TransformPrev` anywhere are two *render test fixtures*
+(`tests/render/extract.test.cpp:43-44`, `tests/render/sprite.test.cpp:36-37`). C3's D3 rewrote
+the *second* half of that sentence (the dense-order claim, correctly, per RR-28) and left the
+false premise in the first half standing. `CPP-SUBSET.md` §6 makes a header's contract block the
+first thing a downstream lane reads, and `LESSONS.md` already carries the general form of this
+("A ruling that amends four docs can still miss the header that IS the contract").
+
+**D6 — the enforcement `transform.h:14-17` / `:50-51` names is inert for the pair it documents,
+and the one consumer that would break is unguarded (latent; state VERIFIED, risk REASONED).**
+C3's D3 text says dense-order parity is "enforced at runtime by `interp_pingpong`'s `TL_CHECK`".
+That is true of the function (`src/core/interp.cpp:37`, and `tl_tests --filter
+interp_pingpong_dense_order_divergence_is_fatal` passes). It is not true of this pair: nothing
+calls `interp_register_pair` outside `tests/core/loop.test.cpp`, so `interp_pingpong` never sees
+Transform/TransformPrev. Meanwhile `src/render/extract.cpp:39-48` pairs `cur.data[i]` against
+`prev.data[i]` — pairing **by dense index**, which `interp.cpp`'s own round-2 comment names as
+the thing that "would silently smear entity `ent`'s current pose against a DIFFERENT entity's
+previous one" — guarded only by `TL_CHECK(prev.count == n)` (`extract.cpp:37`), which the same
+comment says is insufficient. Nothing is broken today because nothing registers the components
+either, and RR-31 is already routed to v0-integration as the lane that will call
+`interp_register_pair`. The defect is that the header states the guard in the present tense with
+no note that it does not yet apply here. **Cone: `extract.cpp` is render2d's — FILED, NOT FIXED.**
+Reproducer for v0-integration's owner: register the pair, `column_remove` one entity from
+`Transform` only, tick — `interp_pingpong`'s `TL_CHECK` fires. Then remove the registration and
+the same divergence goes silent through `extract.cpp` instead.
+
+**D7 — `WORKFLOW.md:289` and §1's autonomous merge are in tension (process; REASONED).**
+§7: "What's never in this list, on any session's request: force-push, `git reset --hard`, push to
+`main` ... Those keep prompting always." R-16 requires the merge to be a local `git merge --no-ff`
+plus a push to `main`; R-3 requires that to happen "without waiting for Rafael". In a cloud lane
+with nobody at the prompt those cannot both hold. Falsified if merging sessions run in a
+permission mode where the prompt does not block, or if a one-tap permission grant is not what R-3
+means by "merge ceremony" — but the docs say neither, and that silence is the gap. Ruling request,
+unnumbered.
+
+### Doc debt recorded, explicitly NOT charged to C2 or C3 (anachronism check run)
+
+RR-44 entered `CLAUDE.md` at `e1820a6` / `12d4957` / `95b9721`, 2026-08-27 20:51–21:02 UTC. C2 is
+11:57 and C3 is 12:19 the **same day** — roughly nine hours earlier. Neither could have complied,
+and neither is at fault. By RR-44's *current* structural test, though, `ASSETS-AND-DATA.md` §8.5's
+two bold-leading paragraphs are each followed immediately by a bullet list, so both are bucket
+blocks and their bullets are criteria rows. Several carry a status word rather than a condition:
+"Fuzzing the decoder path under ASan nightly is not yet wired into a CI leg — open"; "the
+single-process half is built (above)"; "Not blocking: both reviews already judged deferring it
+honest"; and in C2's own row, "render2d (PR #13) is merged and closed". C2's row is also a
+conditional deferral carrying no `[blocked-on: RR-nn]` tag, which RR-44 clause (2) now requires.
+Filed for §8.5's owner as debt, not as a finding against either commit. Two notes for whoever
+takes it: the lowercase "open" survives because `tools/docaudit/docaudit.py:68`'s `STALE` pattern
+is `\bOPEN\b`, uppercase-only — and per `CLAUDE.md`'s RR-44 clause the marker set must **not**
+grow to catch it, so the criteria-row rule is the fix, not a new marker.
+
+### What I checked and found CLEAN
+
+This list is the point of a disjoint split: a defect in the seam between two reviewers' areas is
+visible only where both coverage lists are published.
+
+1. **Hypothesis 1 — C3's claim "no production code changed; the only `src/` edits are comments,
+   plus one test assertion": TRUE.** Checked mechanically rather than by reading:
+   `git diff -U0 3061af2^ 3061af2 -- src/`, every added and removed line stripped of its
+   `+`/`-` and leading whitespace, filtered for anything not beginning `//` → **empty**.
+   `loop.cpp` is not in the commit's file list at all. Scope of that claim, stated inside it: it
+   covers the two `src/` files in `3061af2` (`loop.h` 28 lines, `transform.h` 10). It says nothing
+   about `docs/INPUT.md`, which the same commit also edits (one table cell) — the steward's
+   sentence did not claim otherwise, so the sentence is not wider than its command.
+2. **D1's discriminating power — re-run here rather than trusted** (`LESSONS.md`:
+   "'Revert-verified' from the party that wrote the fix is a claim, not evidence"). Configure
+   `dev-linux -DTL_STRICT_TOOLCHAIN=OFF`; **the build return code was checked at every step**
+   (all `rc=0`), per the revert-harness rule in `LESSONS.md`:
+   - baseline `tl_tests --tag loop` → `14 selected, 14 passed, 0 failed`;
+   - mutate the park value at `src/core/loop.cpp:93` to `0.0f`, rebuild → the run prints
+     `tests/core/loop.test.cpp:167: FAIL [engine_frame_produce_wait_alpha_parks_instead_of_cycling]
+     (alpha_1) == (0x1.fffffep-1f)`;
+   - restore the **pre-C3** test file (`git show 3061af2^:tests/core/loop.test.cpp`) with the
+     mutation still in place, rebuild → **PASS**. The old `alpha_1 == alpha_2` assertion genuinely
+     could not see the wrong-direction park; the added assertion can;
+   - restore both, rebuild, `--tag loop` 14/14 and full `--tag '!slow'` →
+     `670 selected, 667 passed, 0 failed, 3 skipped`; `git status --porcelain` empty.
+   The pin is spec-grounded, not a screenshot of the implementation: `docs/FRAME-LOOP.md:45`
+   carries the same literal with the comment `nextafter(1.0f, 0.0f)`.
+3. **C3's base merge `dd11b38` — the four resolutions READ, since the brief pre-verified only the
+   file *set*.** Confirmed the set independently anyway (`comm -12` over the two parents'
+   name-only diffs → `LESSONS.md`, `TODO.md`, `docs/XREF.md`, `src/core/CMakeLists.txt`).
+   - `src/core/CMakeLists.txt`: exact union — parent 1's `producers/` glob block and parent 2's
+     explicit `loaders/` list plus the `stb` link are both present, nothing dropped. CORRECT.
+   - `LESSONS.md`: exact union. I checked the arithmetic, not the file count: the merge is
+     `+2/-0` against *each* parent while the parents differ `+2/-2` from each other, and each
+     side's two additions are precisely the other side's two bullets. **No content was authored
+     in the merge.** (The numstat alone reads as if two lines were invented; that first reading
+     was wrong and the arithmetic is what settles it.) CORRECT.
+   - `TODO.md`: `+561/-0` vs parent 1, `+307/-1` vs parent 2. The single deletion is `main`'s
+     line "ruling requests (RR-25(c), RR-26) rest on premises that expired when render2d merged"
+     rewritten to "(RR-30(c), RR-31)" — D4's renumbering applied to `main`'s own prose, which is
+     both correct and necessary. CORRECT.
+   - `docs/XREF.md`: generated. Running `docaudit.py` on `origin/main` leaves
+     `git status --porcelain` empty, so the committed file equals a fresh regeneration — which
+     also retroactively validates C2's `3b428e3`. CORRECT.
+   Worth recording for this sweep's own sake: `tools/audit/commit_docs.py` passes `--no-merges`
+   deliberately and its own comment says "a merge that smuggles a NEW substantive change in its
+   resolution is a review problem, not a grep problem." The `TODO.md` renumbering above is
+   precisely such a change. It has now been reviewed, and it is correct; no gate would have seen it.
+4. **Hypothesis 4 — C2 does NOT name a plausible-sounding owner that cannot do the work.** It
+   names *no* owner, which is the honest answer, and every factual leg of its reasoning checks
+   out: `ROADMAP.md` §2's render2d Builds column is "camera, extract, queue/sort/batch, sprite,
+   debug draw, sdl backend" with no font/text/glyph; `src/render/text.cpp` is an eight-line stub
+   returning `ERR_RENDER_UNSUPPORTED`; `ASSETS-AND-DATA.md` §8.1 does keep `core/loaders/font.cpp`
+   in this lane's file table; and `src/core/CMakeLists.txt` links `stb` with no `sdl_ttf`
+   (`SDL3_ttf::SDL3_ttf` is linked only into `tl_vendor_glue`), so "a build change nobody owns" is
+   accurate. The doc is honest about the gap. The residual problem is D4 — the *header* above the
+   bullet, not the bullet.
+5. **Both gates, both green on `origin/main` @ `de268f7`, because a green one says nothing about
+   the other** (`LESSONS.md`, and the gap that turned PR #16's CI red): `docaudit.py` →
+   "27 docs, 0 errors" with the tree clean afterward; `commit_docs.py --base 07e9768` →
+   "245 commit(s) checked", no failures — a range chosen to contain every commit in all three
+   areas, since `3061af2` touches `src/core/` and needs `docs/INPUT.md` (which it has) to satisfy
+   the core module's doc list.
+6. **C1's own content:** `de5d0ab` adds exactly the §1 bullet and the §5 R-3 index entry;
+   `07e9768`'s `TODO.md` hunk files the sweep entry §2 requires. Docs-only, nothing smuggled,
+   deferral recorded rather than assumed.
+7. **Identity, checked on the commit rather than on the setting that governs it** (R-16's wider
+   rule): `git log -1 --format='%an <%ae> | %cn'` on this review's first commit reads
+   `rafaelrzacharias <rafaelrzacharias@gmail.com> | rafaelrzacharias`. `git config user.name` /
+   `user.email` were set explicitly before it — a fresh container defaults to the agent identity —
+   and `.claude/settings.json`'s `env` block also pins it; neither check alone is the fact, so the
+   commit itself was read.
+
+### What I could NOT check, and why
+
+- **The sanitizer legs.** `sanitize-linux` cannot link in this container (the ASan runtime is
+  absent — `LESSONS.md` records two prior sessions hitting the same wall). My area changes no
+  code, so nothing in it should reach a sanitizer, but I cannot prove that from here.
+- **Windows, arm64, and the `debug` / `netcode` / `ship` tiers.** Every run above is `dev-linux`.
+  `LESSONS.md` is emphatic that dev-only local validation cannot see the `TL_ASSERT`-at-`TL_DEV=0`
+  class or the large-static-temporary class; C3's added assertion is `TL_EXPECT_EQ`, which goes
+  through the runner and is live in every tier, so it is not in the first class — but the word
+  "green" above is scoped to `dev-linux` and nothing wider.
+- **Whether C3's merge was *authorised* as distinct from *eligible*.** D3 turns on R-17's seat
+  rule, and I have no record of which `ROADMAP.md` §2 seat the merging steward held at
+  2026-08-27 12:34 UTC. The steward's note says it "substituted my own verification", which is a
+  statement about method, not about seat. An honest cannot-discriminate: this needs the steward's
+  own answer, not more grepping.
+- **Whether D2/D3/D4's fixes are wanted as stated.** All three are one-clause edits to docs owned
+  outside this review's cone (`WORKFLOW.md` is process; `ASSETS-AND-DATA.md` §8.5's header belongs
+  to that doc's owner). Filed, not applied.
+
 ## Wave-boundary sweep — area A verdict (`w2-net-close` 99c9248, `w2-max-arenas` 1ddae4b)
 
 Fresh-context adversarial review of the two commits that merged under `WORKFLOW.md` §2's
