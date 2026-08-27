@@ -71,6 +71,23 @@ TL_TEST(script_table_get_geti_len_over_a_pinned_table, "script") {
     script_fixture_down(&f);
 }
 
+// Round 1 review D9: SCRIPT_VALUE_STR_MAX's overflow path (script.h: "A longer string is
+// ERR_SCRIPT_RUNTIME, not a silent truncation") had live code (to_script_value's LUA_TSTRING
+// case) but no direct test. Source length is no longer the constraint here (round 1 review D4),
+// so this exercises the VALUE bound cleanly.
+TL_TEST(script_eval_string_exceeding_str_max_is_runtime_error, "script") {
+    ScriptFixture f;
+    TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_DATA));
+
+    Result<ScriptValue> short_v = script_eval(f.vm, sv("string.rep(\"a\", 255)"));
+    TL_EXPECT_EQ(short_v.err, ERR_OK);   // one under SCRIPT_VALUE_STR_MAX (256) - not the bound itself
+
+    Result<ScriptValue> long_v = script_eval(f.vm, sv("string.rep(\"a\", 300)"));
+    TL_EXPECT_NE(long_v.err, ERR_OK);
+
+    script_fixture_down(&f);
+}
+
 TL_TEST(script_table_get_on_stale_ref_is_bad_arg, "script") {
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_DATA));
@@ -80,6 +97,56 @@ TL_TEST(script_table_get_on_stale_ref_is_bad_arg, "script") {
     TL_EXPECT_EQ(v.err, (ErrCode)ERR_SCRIPT_BAD_ARG);
     TL_EXPECT_EQ(script_table_len(f.vm, stale), 0u);
 
+    script_fixture_down(&f);
+}
+
+// Round 1 review D3: script_table_get used lua_gettable, which is metamethod-aware - a data
+// script whose row table sets __index could raise (script_panic -> TL_FATAL, no pcall wraps that
+// call) or have an absent key answered by the metamethod instead of this reader's own documented
+// "SCRIPT_VAL_NIL for absent, never an error" contract. Fixed to lua_rawget, matching
+// script_table_geti's existing lua_rawgeti choice. Completing this test (not crashing the
+// process) is itself half the fix's proof; the SCRIPT_VAL_NIL check is the other half.
+TL_TEST(script_table_get_ignores_metamethods, "script") {
+    ScriptFixture f;
+    TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_DATA));
+
+    StrView src = sv("(function() local t = setmetatable({}, "
+                     "{ __index = function() error(\"boom\") end }); return t end)()");
+    Result<ScriptValue> tbl = script_eval(f.vm, src);
+    TL_ASSERT_EQ(tbl.err, ERR_OK);
+    TL_ASSERT_EQ(tbl.value.kind, (u8)SCRIPT_VAL_TABLE);
+    ScriptTableRef ref = tbl.value.table;
+
+    // If this call reached lua_gettable's old, metamethod-aware path, the __index above would
+    // either abort the process (TL_FATAL) or hand back a synthesized value - neither is
+    // SCRIPT_VAL_NIL for a key genuinely absent from the raw table.
+    Result<ScriptValue> v = script_table_get(f.vm, ref, sv("anything"));
+    TL_ASSERT_EQ(v.err, ERR_OK);
+    TL_EXPECT_EQ(v.value.kind, (u8)SCRIPT_VAL_NIL);
+
+    script_table_unref(f.vm, ref);
+    script_fixture_down(&f);
+}
+
+// Round 1 review D9: script_table_next's table-key refusal (script.h: "a table key is
+// ERR_SCRIPT_RUNTIME, never attempted") had live code, including a hand-written unref-on-refuse
+// path (to_script_value pins a ref for the TABLE-kind key before the refusal sees it), but no
+// direct test. If that unref path were missing, script_destroy's own live_bytes == 0 assert
+// (vm.cpp) would fail inside script_fixture_down below - this test's teardown IS the leak check.
+TL_TEST(script_table_next_table_key_is_refused, "script") {
+    ScriptFixture f;
+    TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_DATA));
+
+    Result<ScriptValue> tbl = script_eval(f.vm, sv("{ [{}] = 1 }"));   // a table used as a key
+    TL_ASSERT_EQ(tbl.err, ERR_OK);
+    ScriptTableRef ref = tbl.value.table;
+
+    ScriptValue key{};
+    ScriptValue val{};
+    TL_EXPECT_FALSE(script_table_next(f.vm, ref, &key, &val));
+    TL_EXPECT_TRUE(script_last_error(f.vm)[0] != 0);   // a named refusal, not silent exhaustion
+
+    script_table_unref(f.vm, ref);
     script_fixture_down(&f);
 }
 

@@ -3345,6 +3345,135 @@ change a DECIDED design, `CLAUDE.md` rule 8).
   consumer yet either. `world_add_raw` only RECORDS; the caller must `world_flush` after
   `save_read` before the restored rows are visible.
 
+## W3 assets+data — round 1 fresh-context review fixes (2026-08-27, w3-assets-data, PR #14 @ a7a18dc)
+
+Fresh-context adversarial review round 1, verdict FIX FIRST: 4 blocking, 4 should-fix, 2 nits (PR
+#14 comment). Fixed below, D1's actual code change excepted (HELD for ruling, per the review's own
+instruction). Every item validated: `dev-linux`/`netcode-linux` both green, `tl_tests --isolate
+--tag !slow` full pass both tiers, `includes.py`/`docaudit.py`/`commit_docs.py`/symbol audit all
+clean, `selftest.py` green except the same pre-existing container-only windows-msvc layout-dump
+failures already noted in the prior entry (not a regression).
+
+- **D1, HELD FOR RULING** - whether `pairs`/`next`/`table.foreach`/`table.foreachi` stay in the
+  data VM at all (`sandbox.cpp`'s `DATA_REMOVE`). The review measured that a data script CAN reach
+  raw Luau iteration order today (a keyed staging table flattened via `pairs()` into a row array
+  before the script returns it), which two peers can compile to different bytes/hashes from
+  identical row content - RR-21's binding condition on `script_table_next` closed the C++ side
+  correctly but left this Luau-side door open. Not touched: no `DATA_REMOVE` edit, no canonical
+  sort added, per the review's explicit instruction ("do not remove them... until it lands"). This
+  decides the data-authoring contract's shape and is Rafael's call, relayed by the steward.
+- **D2 - the RR-21 pin didn't discriminate.** Its own two proofs: (a) the original test's two
+  source strings walked in IDENTICAL `script_table_next` order (Luau places a small string-keyed
+  table by key HASH, not insertion order, so varying literal field order in source text can never
+  vary the real layout - the premise was false); (b) `compile_table`'s field loop mutated to
+  assign positionally from a raw `script_table_next` walk still passed all six data tests.
+  Fixed: `tests/core/data/data_compile.test.cpp`'s `data_compile_fields_are_name_keyed_not_walk_
+  order_keyed` - a six-field row with pairwise-distinct values (so any non-identity assignment is
+  directly observable per field) plus a witness (a throwaway VM) that walks the identical row
+  table with `script_table_next` and asserts the real order is not simply the schema's declared
+  field order, so the pin cannot silently degrade the way the original did. Verified against the
+  exact defect: reproduced the reviewer's mutation locally -
+  `for (u32 f = 0; f < schema->row->field_count && script_table_next(...); ) { ...store
+  positionally...; ++f; }` in `compile_table`'s field loop (temporary, `(void)&compile_field;` to
+  silence the resulting unused-function warning) - rebuilt `dev-linux`, ran
+  `./out/dev-linux/bin/tl_tests --tag data --isolate`: `data_compile_fields_are_name_keyed_not_
+  walk_order_keyed` FAILED (`row->v2`/`v3`/`v5` mismatched their expected 22/33/55), while the
+  renamed original (`data_compile_source_field_order_does_not_affect_hash`, kept for its narrower,
+  still-true claim) kept passing under the same mutation - exactly the review's own finding.
+  Reverted the mutation; `tl_tests: 7 selected, 7 passed` restored. `docs/LUAU-LAYER.md` §1's
+  citation updated to the new test name. The "two compiles hash identically in two processes"
+  half of §8.5's wording is NOT implemented (still single-process): it would need a process-spawn
+  primitive this codebase has no platform seam for yet (`PlatformApi` has no `os.spawn`, and
+  `popen`/`fork` aren't portable/sanctioned outside `platform/`) - a genuine new capability, not a
+  test-only gap, so left as a follow-up rather than adding ad hoc, ungated process spawning under
+  review pressure. Filed here rather than silently dropped.
+- **D3 - `script_table_get` used `lua_gettable`** (metamethod-aware: a data row table with
+  `__index` could raise, unprotected -> `TL_FATAL`, or answer an absent key with a synthesized
+  value instead of `SCRIPT_VAL_NIL`). Fixed to `lua_rawget`, matching `script_table_geti`'s
+  existing `lua_rawgeti` choice. Audited the reader's other three Luau entry points as asked
+  (`vm.cpp`, inline comment on `script_table_next`): `lua_getref`/`lua_next` are both raw (no
+  metamethod call, confirmed against `vendor/luau/VM/src/lapi.cpp`/`lvm.cpp`) and `lua_next`'s
+  only own error path ("invalid key to next") is unreachable here since the key it continues from
+  is always one it itself returned; `lua_pushlstring` can only fail on allocator OOM, the same
+  class every other alloc in this VM already treats as fatal, not a new door. Test:
+  `tests/script/table_reader.test.cpp`'s `script_table_get_ignores_metamethods` (an `__index` that
+  `error()`s; the test completing at all is half the proof, `SCRIPT_VAL_NIL` the other half).
+- **D4 - data scripts capped at ~1014 bytes.** `script_eval`/`script_eval_int` staged `"return
+  (<expr>)"` into `char buf[SCRIPT_ERR_MAX]` - 1024, the ERROR-MESSAGE bound (`script.h`), reused
+  by accident as a SOURCE bound (measured failure: 21 two-field rows). Fixed at the one root for
+  both functions (`docs/CLAUDE.md` "how many sites share the bug class") via a new
+  `load_wrapped_expr` helper in `vm.cpp`. First attempt called `pool_alloc`/`pool_free` on the
+  VM's `compile_pool` directly from `vm.cpp` and failed `includes.py`'s `POOL_VERBS` gate
+  (`docs/MEMORY.md` §1.5/§8.6: "ENGINE AND SIM CODE NEVER CALL [pool_alloc/free]... only
+  mem_pool.cpp/.h and vendor_glue/" - `src/script` is engine code by that rule same as anything
+  else). Fixed properly by reusing `tl_luau_alloc` (`vendor_glue/luau_alloc.h`, already included
+  in `vm.cpp` for the VM's own Luau allocator hook) - its `ptr==nullptr`/`nsize==0` cases are
+  exactly `pool_alloc`/`pool_free` with the clean null-on-budget-refusal contract this needed, and
+  the actual `pool_*` calls live inside `luau_alloc.cpp` (`vendor_glue/`, already gate-allowed),
+  so no new surface was added. `includes.py`/symbol audit both clean afterward. Test:
+  `data_compile_source_larger_than_the_old_1024_byte_cap` (40 rows, source > 1024 B, asserted).
+- **D5 - `save_read` trusted a block's file-supplied `byte_len` against nothing.** `ByteReader` is
+  bounds-safe only WITHIN the length it is handed, so an inflated `byte_len` authorised
+  `block_r`'s reads past the real payload (measured: a 252 B file declaring `byte_len` = 64 KiB
+  and `row_count` = 48 decoded 48 rows from ~16 real bytes, `err = ERR_OK`). Fixed: bound checked
+  against `(total - 4u) - block_start` before `br_init`, `ERR_SAVE_TRUNCATED` on violation - the
+  code the doc already named for this (`save.h`: "file shorter than its own header/block lengths
+  claim"). Test: `save_read_forged_block_byte_len_refused` (CRC-corrected first, isolating this
+  check from D6's).
+- **D6 - the 160 B `SaveHeader` sat outside the crc32 window.** `seed`/`tick`/`format_version`/
+  `origin`/`name_table_len`/`arena_count` were unprotected (measured: a corrupted `tick` byte,
+  offset 80, loaded `ERR_OK` with the wrong tick). Fixed: crc32 now covers the whole file
+  (`crc32(buf, len-4)`), both `save_write` and `save_read`. `docs/ASSETS-AND-DATA.md` §8.4 (the
+  format's home doc) and `save.h`'s own comment both reconciled to the new wording in the same
+  commit (doc integrity protocol - the code and the old doc agreed, on the wrong window). Test:
+  `save_read_header_byte_corruption_is_crc_protected` (the reviewer's own repro, byte 80).
+- **D7 - a block's stored `kind` byte drove decode dispatch unchecked against the caller's
+  registered `SaveArenaDesc::kind`.** A mismatch (or a byte outside `SaveEncoderKind`'s own range,
+  previously reaching `TL_FATAL` from file content) could decode via the wrong encoder and, on
+  apply, target the wrong component through `ad->comp` (set for `ECS_COLUMN` entries only). Fixed:
+  one check, `(SaveEncoderKind)kind != ad->kind -> ERR_SAVE_KIND_MISMATCH` (new code, `save.h`
+  0x0359), right after `find_arena_desc` and before anything about the block is trusted - this
+  subsumes the out-of-range-byte case too (any byte differing from the caller's own registered
+  value is refused the same way), so the `RAW_POOL`/`CHUNK_STORE` `TL_FATAL` is now reachable only
+  by a caller registering an unimplemented kind (a real engineering bug, save_write's own existing
+  class), never file content. Test: `save_read_kind_mismatch_refused` (both the valid-but-wrong
+  and the out-of-range case).
+- **D8 - `hdr.name_table_len`'s skip loop never checked `br_ok`.** A hostile `0xFFFFFFFF` spun
+  ~4G no-op iterations (bounds-safe per-read, but each iteration still cost a loop turn) before
+  the block loop finally reported `ERR_SAVE_TRUNCATED`. Fixed: `if (!br_ok(&r)) break;` inside the
+  loop, plus an explicit post-loop check. Test: `save_read_bogus_name_table_len_refused` (pins the
+  outcome - a unit test cannot portably time-bound the stall itself, but the hostile count must
+  still end up refused).
+- **D9 - coverage gaps, `docs/ASSETS-AND-DATA.md` §8.5.** Added: `SaveDesc::aliases` (rename via
+  alias - `save_read_field_rename_via_alias_round_trip`, two same-layout-different-name
+  components), `SaveDesc::migrations` both halves (kind-change refusal with no migration -
+  `save_read_kind_change_without_migration_is_refused`; the migration fn path -
+  `save_read_kind_change_via_migration_fn`, two same-name-different-width components + a
+  hand-written `migrate_kind_widen`). **Self-found while writing the migration test, not one of
+  the reviewer's items**: `save_write` never stamped `hdr.format_version` at all - `SaveHeader{}`
+  zero-inits it and nothing set it to `SAVE_FORMAT_VERSION`, so every save this lane had written
+  was version-stamped 0 regardless of the real format. `save_read`'s `format_version >
+  SAVE_FORMAT_VERSION` check never caught it (0 is never "newer"), so no existing test saw it, but
+  `SaveComponentMigration` dispatch is keyed by this exact field and would never have seen the
+  real number - fixed in `save.cpp` in the same commit (root cause, same file, blocked this
+  coverage). Also added: `ERR_DATA_SCRIPT`/`ERR_DATA_TOO_MANY_ROWS`/`ERR_DATA_TABLE_LIMIT` direct
+  tests (`data_compile_syntax_error_named_error`/`_too_many_rows_named_error`/`_too_many_schemas_
+  named_error` - each had live code, no direct test before), `SCRIPT_VALUE_STR_MAX` overflow
+  (`script_eval_string_exceeding_str_max_is_runtime_error`), and `script_table_next`'s table-key
+  refusal + its hand-written unref-on-refuse path (`script_table_next_table_key_is_refused` - the
+  refuse path's own ref release is proven by `script_fixture_down`'s teardown NOT tripping
+  `script_destroy`'s `live_bytes == 0` assert, not a separate leak-counter read). The "two
+  processes" hash-stability form stays deferred, per D2 above.
+- **D10 - `compile_field` broadcast one Luau scalar across every element of a `count > 1`
+  integer field** (a silent wrong value - an array field wants `count` distinct values, not one
+  repeated - in a file otherwise scrupulously fail-loud). Fixed: `TL_FATAL` for `count > 1`,
+  alongside the other unsupported-kind fatals in the same function; no shipped schema has an
+  array-valued integer field yet to build the real read against (this file's own scope note).
+  No dedicated crash test added (a NIT, and the file's sibling untested-kind `TL_FATAL`s - fx-
+  literal, `StrId`, handle/reference fields - carry none either for the same "no real consumer to
+  test against yet" reason; adding the env-var-gated relaunch harness `tl_assert.test.cpp` uses
+  for exactly one more `TL_FATAL` path would be new infra for a nit, not proportionate).
+
 ## Reserved (design complete, build on first consumer — `docs/RESERVED-SEAMS.md`)
 Audio · game UI (Luau) · spatial index · tilemap · nav/AI · frame animation · replay UI/cinematics ·
 modding (Luau profiles) · game-logic substrate · streaming/cook · SDL_GPU path · editor shell.

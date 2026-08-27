@@ -88,9 +88,16 @@ ErrCode compile_field(ScriptVm* vm, ScriptTableRef row_ref, const ComponentInfo*
         i64 lo = 0, hi = 0;
         integer_range(f->kind, &lo, &hi);
         if (v.value.i < lo || v.value.i > hi) { return ERR_DATA_BAD_INT; }
-        for (u16 e = 0; e < f->count; ++e) {
-            store_scalar(dst + (u64)e * kind_scalar_size(f->kind), f->kind, v.value.i);
+        // Round 1 review D10: this used to broadcast one Luau scalar into every element of a
+        // count>1 field - a silent wrong value (an array field wants count DISTINCT values, not
+        // one repeated) in a file that is otherwise scrupulously fail-loud. No shipped schema has
+        // an array-valued integer field yet (this file's top-of-file scope note), so TL_FATAL
+        // alongside the other unsupported kinds below rather than ship a defect nothing exercises.
+        if (f->count > 1u) {
+            TL_FATAL("data_compile: array-valued integer fields are not yet supported - no Alloy "
+                     "schema exists yet to compile one against (docs/ROADMAP.md §2)");
         }
+        store_scalar(dst, f->kind, v.value.i);
         return ERR_OK;
     }
     // fx-literal rows (K_pos/K_vel/...), K_StrId, and handle/reference kinds: no consumer yet

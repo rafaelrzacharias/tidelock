@@ -56,8 +56,13 @@ the binding condition: that order is **not part of the deterministic surface** a
 feed a compiled table, a hash, or any other output two peers must agree on bit-for-bit. The
 data-table compiler's own answer is to never call it: it walks SCHEMA-ORDERED, by name
 (`script_table_get`) and by array position (`script_table_len`/`script_table_geti`), pinned by
-`tests/core/data/data_compile.test.cpp`'s `data_compile_two_field_orders_hash_identically` (two
-scripts with the same rows but swapped field-key order compile to identical bytes).
+`tests/core/data/data_compile.test.cpp`'s `data_compile_fields_are_name_keyed_not_walk_order_keyed`
+(reconciled 2026-08-27, round 1 review D2: the original pin cited here,
+`data_compile_two_field_orders_hash_identically`, did not discriminate - its two sources walked in
+identical order, since Luau places a small string-keyed table by key hash, not insertion order -
+and is kept, renamed, for the narrower, still-true claim that literal source field order does not
+affect the hash. The current pin witnesses Luau's real walk order directly and checks compiled
+field values against it, so it fails under a compiler mutated to assign fields positionally).
 
 ### 1.1 Why `pairs` is removed from the sim VM (alternatives recorded)
 

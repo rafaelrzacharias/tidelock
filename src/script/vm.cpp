@@ -223,6 +223,38 @@ ErrCode load_chunk(ScriptVm* vm, const char* chunkname, StrView source) {
     return ERR_OK;
 }
 
+// Wraps `expr` as "return (<expr>)" and loads it as chunk "eval". Round 1 review D4: the staging
+// buffer used to be `char buf[SCRIPT_ERR_MAX]` - SCRIPT_ERR_MAX (1024) is the ERROR-MESSAGE bound
+// (script.h), reused here as a SOURCE bound by accident, which capped a data script at ~1014
+// bytes (measured failure at 21 two-field rows; a real Alloy material table is tens of KB). The
+// buffer is now staged from the VM's own compile_pool - already the designated compile-time
+// scratch (load_chunk's own headroom check draws from it) - sized to the real expression, and
+// freed immediately after load_chunk returns: luau_compile has fully consumed the source
+// synchronously by then, so nothing downstream needs it to survive longer.
+//
+// Through tl_luau_alloc (vendor_glue/luau_alloc.h), not pool_alloc/pool_free directly:
+// docs/MEMORY.md §1.5/§8.6 - "ENGINE AND SIM CODE NEVER CALL [pool_alloc/free] - the CI grep
+// allows it only in mem_pool.cpp/.h and vendor_glue/" - and src/script is engine code by that
+// rule as much as anything else in src/. tl_luau_alloc is the already-included, already-audited
+// seam that forwards to pool_alloc/pool_free with the exact null-on-budget-refusal contract this
+// needs (its own ptr==nullptr/nsize==0 cases), so this reuses it rather than adding a second one.
+ErrCode load_wrapped_expr(ScriptVm* vm, StrView expr) {
+    static const char PREFIX[] = "return (";
+    enum : u32 { PREFIX_LEN = (u32)(sizeof(PREFIX) - 1u) };
+    const u64 total = (u64)PREFIX_LEN + (u64)expr.len + 2u;   // + ')' + NUL
+    char* buf = (char*)tl_luau_alloc(vm->compile_pool, nullptr, 0, (size_t)total);
+    if (buf == nullptr) {
+        return script_set_error(vm, ERR_SCRIPT_OOM, "expression too large for the compile pool");
+    }
+    memcpy(buf, PREFIX, (size_t)PREFIX_LEN);
+    memcpy(buf + PREFIX_LEN, expr.ptr, (size_t)expr.len);
+    buf[PREFIX_LEN + expr.len] = ')';
+    buf[PREFIX_LEN + expr.len + 1u] = 0;
+    const ErrCode le = load_chunk(vm, "eval", StrView{ buf, PREFIX_LEN + expr.len + 1u });
+    (void)tl_luau_alloc(vm->compile_pool, buf, (size_t)total, 0);
+    return le;
+}
+
 }  // namespace
 
 ErrCode script_set_error(ScriptVm* vm, ErrCode code, const char* msg) {
@@ -322,22 +354,10 @@ Result<i64> script_eval_int(ScriptVm* vm, StrView expr) {
     }
     // "return (<expr>)" is the whole trick: a Luau chunk is a function body, so a returned
     // expression comes back as one result with no eval() and no loadstring in the sandbox.
-    char buf[SCRIPT_ERR_MAX];
-    const char* prefix = "return (";
-    u32 n = 0;
-    while (prefix[n] != 0) { buf[n] = prefix[n]; ++n; }
-    if (expr.len + n + 2u >= (u32)sizeof(buf)) {
-        return Result<i64>{ 0, script_set_error(vm, ERR_SCRIPT_BAD_ARG, "script_eval_int: expression too long") };
-    }
-    memcpy(buf + n, expr.ptr, (size_t)expr.len);
-    n += expr.len;
-    buf[n] = ')';
-    buf[n + 1u] = 0;
-
     lua_State* L = vm->L;
     lua_pushcfunction(L, &script_traceback, "traceback");
     const int errfunc = lua_gettop(L);
-    const ErrCode le = load_chunk(vm, "eval", StrView{ buf, n + 1u });
+    const ErrCode le = load_wrapped_expr(vm, expr);
     if (le != ERR_OK) {
         lua_remove(L, errfunc);
         return Result<i64>{ 0, le };
@@ -421,24 +441,14 @@ Result<ScriptValue> script_eval(ScriptVm* vm, StrView expr) {
     if (expr.ptr == nullptr || expr.len == 0) {
         return Result<ScriptValue>{ zero, script_set_error(vm, ERR_SCRIPT_BAD_ARG, "script_eval: empty expression") };
     }
-    // "return (<expr>)" - script_eval_int's own trick, duplicated rather than factored out of
-    // already-shipped, tested code for a one-lane scoped exception (RR-21).
-    char buf[SCRIPT_ERR_MAX];
-    const char* prefix = "return (";
-    u32 n = 0;
-    while (prefix[n] != 0) { buf[n] = prefix[n]; ++n; }
-    if (expr.len + n + 2u >= (u32)sizeof(buf)) {
-        return Result<ScriptValue>{ zero, script_set_error(vm, ERR_SCRIPT_BAD_ARG, "script_eval: expression too long") };
-    }
-    memcpy(buf + n, expr.ptr, (size_t)expr.len);
-    n += expr.len;
-    buf[n] = ')';
-    buf[n + 1u] = 0;
-
+    // "return (<expr>)" - script_eval_int's own trick and, since round 1 review D4, its own
+    // load_wrapped_expr helper too (the ~1014-byte SCRIPT_ERR_MAX-as-source-bound bug this
+    // function had was the same class as script_eval_int's, fixed at the one root rather than
+    // twice; docs/CLAUDE.md "how many sites share the bug class").
     lua_State* L = vm->L;
     lua_pushcfunction(L, &script_traceback, "traceback");
     const int errfunc = lua_gettop(L);
-    const ErrCode le = load_chunk(vm, "eval", StrView{ buf, n + 1u });
+    const ErrCode le = load_wrapped_expr(vm, expr);
     if (le != ERR_OK) {
         lua_remove(L, errfunc);
         return Result<ScriptValue>{ zero, le };
@@ -465,7 +475,13 @@ Result<ScriptValue> script_table_get(ScriptVm* vm, ScriptTableRef t, StrView key
         return Result<ScriptValue>{ zero, script_set_error(vm, ERR_SCRIPT_BAD_ARG, "script_table_get: not a table") };
     }
     lua_pushlstring(L, key.ptr, (size_t)key.len);
-    lua_gettable(L, -2);
+    // Round 1 review D3: lua_gettable is metamethod-aware - a data file whose row table sets
+    // __index can raise (script_panic -> TL_FATAL, no pcall wraps this call) or synthesize a
+    // value for an absent key, both violating this function's own "SCRIPT_VAL_NIL for absent,
+    // never an error" contract (script.h). lua_rawget skips __index entirely, matching
+    // script_table_geti's existing lua_rawgeti choice and closing a second door onto D1's
+    // channel (an __index function could itself call next/pairs).
+    lua_rawget(L, -2);
     ScriptValue out{};
     const ErrCode ce = to_script_value(vm, -1, &out);
     lua_pop(L, 2);   // the looked-up value, then the table itself
@@ -521,6 +537,15 @@ bool push_script_value_key(lua_State* L, const ScriptValue* key) {
 
 }  // namespace
 
+// Round 1 review D3 asked for the same unprotected-call audit on this reader's other three Luau
+// entry points, beyond script_table_get's lua_gettable (fixed above to lua_rawget). Conclusion,
+// not a guess: lua_getref (script_table_get/geti/len/next, a lua_rawgeti(REGISTRYINDEX) macro)
+// and lua_next below are both RAW - the VM source (vendor/luau/VM/src/lapi.cpp, lvm.cpp) shows
+// neither consults a metatable, so neither can run script content or raise from one. lua_next's
+// only own error path is "invalid key to next", unreachable here because the key it is ever asked
+// to continue from is always a key IT ITSELF returned on a prior call (never one this file
+// invents). lua_pushlstring can only fail on allocator OOM, the same failure class every other
+// alloc in this VM already treats as fatal (docs/MEMORY.md), not a new door this function opens.
 bool script_table_next(ScriptVm* vm, ScriptTableRef t, ScriptValue* key, ScriptValue* out_value) {
     TL_ASSERT(vm != nullptr && vm->L != nullptr && key != nullptr && out_value != nullptr);
     script_clear_error(vm);

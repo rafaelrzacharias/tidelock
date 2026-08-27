@@ -64,6 +64,7 @@ constexpr ErrCode ERR_SAVE_FIELD_KIND    = (ErrCode)0x0355;  // a stored field's
 constexpr ErrCode ERR_SAVE_DATA_MISMATCH = (ErrCode)0x0356;  // recompiled data-table hash disagrees with the stored one
 constexpr ErrCode ERR_SAVE_IO            = (ErrCode)0x0357;  // wraps a platform FileApi failure (write_atomic/read_all)
 constexpr ErrCode ERR_SAVE_TOO_MANY_ARENAS = (ErrCode)0x0358; // more arena_descs entries than MAX_ARENAS
+constexpr ErrCode ERR_SAVE_KIND_MISMATCH = (ErrCode)0x0359;  // a block's stored kind byte does not match the caller's registered SaveArenaDesc::kind (round 1 review D7 - includes a kind byte outside SaveEncoderKind's own range, which used to reach TL_FATAL from file content)
 
 // Log-side name for a save ErrCode; "ERR_?" outside this header's codes.
 constexpr const char* err_save_name(ErrCode e) {
@@ -76,7 +77,8 @@ constexpr const char* err_save_name(ErrCode e) {
          : e == ERR_SAVE_FIELD_KIND ? "ERR_SAVE_FIELD_KIND"
          : e == ERR_SAVE_DATA_MISMATCH ? "ERR_SAVE_DATA_MISMATCH"
          : e == ERR_SAVE_IO ? "ERR_SAVE_IO"
-         : e == ERR_SAVE_TOO_MANY_ARENAS ? "ERR_SAVE_TOO_MANY_ARENAS" : "ERR_?";
+         : e == ERR_SAVE_TOO_MANY_ARENAS ? "ERR_SAVE_TOO_MANY_ARENAS"
+         : e == ERR_SAVE_KIND_MISMATCH ? "ERR_SAVE_KIND_MISMATCH" : "ERR_?";
 }
 
 constexpr u32 SAVE_FORMAT_VERSION = 1;
@@ -197,9 +199,14 @@ ErrCode save_write(const SaveDesc* desc, const PlatformApi* platform, StrView pa
                    VMemArena* scratch);
 
 // Reads `path` via platform->file.read_all into `scratch`, checks magic/version (newer than
-// SAVE_FORMAT_VERSION -> ERR_SAVE_VERSION), verifies the crc32 trailer over everything after the
-// header (ERR_SAVE_CRC_MISMATCH), decodes the name table, then per ArenaBlock: finds the matching
-// `arena_descs` entry (ERR_SAVE_ARENA_MISSING if none), and dispatches to a registered
+// SAVE_FORMAT_VERSION -> ERR_SAVE_VERSION), verifies the crc32 trailer over the whole file per
+// docs/ASSETS-AND-DATA.md §8.4's byte layout (ERR_SAVE_CRC_MISMATCH; round 1 review D6 - the
+// window used to start after the header, leaving seed/tick/format_version/origin/name_table_len/
+// arena_count unprotected), decodes the name table, then per ArenaBlock: finds the matching
+// `arena_descs` entry (ERR_SAVE_ARENA_MISSING if none) and checks the block's stored kind byte
+// against that entry's registered `kind` (ERR_SAVE_KIND_MISMATCH on any mismatch, including a
+// kind byte outside SaveEncoderKind's own range - round 1 review D7, previously unchecked and
+// reaching TL_FATAL from file content for an out-of-range byte), and dispatches to a registered
 // SaveComponentMigration (by component name hash + the FILE's format_version) if one matches,
 // else encoder_read_rows/encoder_read_column with the component's `aliases` entry (empty span if
 // none registered) - ERR_SAVE_FIELD_KIND wraps ERR_ENC_FIELD_KIND. ECS_COLUMN rows re-add through

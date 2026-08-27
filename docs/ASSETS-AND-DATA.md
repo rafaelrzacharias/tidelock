@@ -222,8 +222,16 @@ ArenaBlock × arena_count (registry order):
     reflected payload: { u32 field_count; field_count × { NameHash name; u8 kind; u8 _pad; u16 count; u32 size } ; u32 row_count; rows (packed per the field list, little-endian) }
     ECS column payload: reflected payload + entity list (u32 bits per row)
     chunk store payload (Alloy terrain): { u32 dirty_chunk_count; per chunk { i32 cx, cy; i16 sdf[128*128]; u8 material[128*128] } }
-Trailer: crc32 over everything after the header
+Trailer: crc32 over the whole file (header included; everything but the trailer's own 4 bytes)
 ```
+
+Reconciled 2026-08-27 (round 1 review D6): this used to read "crc32 over everything after the
+header", which is what `save_write`/`save_read` shipped — the 160-byte `SaveHeader` (`seed`,
+`tick`, `format_version`, `origin`, `name_table_len`, `arena_count`) sat outside the integrity
+check, so a single-bit flip in any of those fields loaded as `ERR_OK` with silently wrong values
+(measured: a corrupted `tick` byte loaded successfully with the wrong tick). This was a design
+defect in the format, not a code/doc mismatch — the doc and the code agreed, on the wrong window.
+Both are fixed to the wording above in the same commit.
 
 Reader: header checks (magic, version ≤ known, `build_id` differences allowed, `session_fingerprint`
 differences allowed — this is the cross-build path; data-script hash must match after recompiling
