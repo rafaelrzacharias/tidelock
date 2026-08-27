@@ -4661,6 +4661,11 @@ Probes/World panels). Two commits shipped this session, each validated on **both
   test — `LESSONS.md`'s "a template with no call site has never been compiled" struck again):
   nesting two scopes shadowed the for-loop control variable and failed `-Werror`. Fixed with a
   `__COUNTER__`-uniqued name; `LESSONS.md` entry filed below.
+  **CI red on the `debug` tier (all four legs) at `f592b88`, steward-caught:** `tl_prof_test_reset`
+  wrote `g_prof = ProfState{}` (a `memset`-equivalent on `dev`/`netcode` at `-O1`, but a genuine
+  ~53 MB stack temporary — instant segfault — on `debug`'s unoptimized build). This lane had only
+  been validating `dev` and `netcode` locally; **`debug` is now validated locally too, every
+  push, from here on.** Fixed with an in-place `memset`; `LESSONS.md` entry filed.
 
 **Not started this session** (parked cleanly, not half-built — the remaining `TOOLING.md` §9.6
 build-order items for whoever continues this lane): `core/console.h`/`.cpp` (§9.3.5), `core/

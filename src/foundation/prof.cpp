@@ -135,7 +135,13 @@ const ProfCounter* tl_prof_test_counter_at(u32 slot) {
 }
 
 void tl_prof_test_reset(void) {
-    g_prof = ProfState{};
+    // NOT `g_prof = ProfState{}` - that value-initializes a ~53 MB TEMPORARY ProfState (ring[60]
+    // of ProfFrame alone is 60 * 788520 B) that an unoptimized (debug tier, -O0) build actually
+    // materializes on the stack before assigning it - an instant stack overflow regardless of
+    // platform (found via a real segfault on the debug tier CI leg, docs/LESSONS.md's "a
+    // World-sized fixture on the stack" class, this time at 200x the size). memset zeroes the
+    // existing static IN PLACE, no temporary.
+    memset(&g_prof, 0, sizeof(g_prof));
     g_clock = 0;
 }
 
