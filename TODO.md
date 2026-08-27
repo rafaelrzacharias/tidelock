@@ -16,6 +16,55 @@
 > update", so that lane builds everything else and picks the header up by merging main once
 > substrate lands.
 
+> **STEWARD HANDOFF 2026-08-27 ~09:20Z — the W3 steward window retires here; PR #14 and #15 pass
+> to a fresh window (`WORKFLOW.md` §6 R-10: a window retires at a phase boundary with a
+> committed-file handoff rather than growing).** `main` is `21d030a`. render2d is MERGED and
+> closed out; its branch auto-deleted. **Nothing else is merged.** Read `LESSONS.md`'s last nine
+> entries before acting — they are this window's orchestration traps, and several were paid for
+> twice.
+>
+> **PR #15 `w3-loop-input` — head `17c45c1`, CI 23/23 GREEN, stable, lane IDLE.** Round 1 (Opus,
+> fresh context) returned *fix first* on 13 findings, 3 ship-blocking; the lane worked all 13
+> plus the D1 cross-lane `FRAME-LOOP.md` correction. **Round 2 is OWED and was deliberately not
+> spawned** — it is the next action on this PR. The lane was warned in advance that the reviewer
+> re-runs revert experiments itself, and was told to check its own 13 fixes for discriminating
+> tests first; treat its answer as a claim until re-run. Attack order for round 2: the
+> record→replay hash-trace test, the `PRODUCE_WAIT` alpha clamp, the `script_produce` cursor
+> fix, and the analog-quantization exact-value table — this module feeds netcode's lockstep
+> seam and the replay recorder, where an untested bit is a desync nobody can bisect. One
+> steward-executed reword (`850d09b`, `[docs:none]`) is already in its history, per R-13.
+>
+> **PR #14 `w3-assets-data` — head moving (`c12bfac` at 09:20), CI in flight, lane WORKING.**
+> Round 1 (Opus, fresh context) returned *fix first*: 4 blocking, 4 should-fix, 2 nits. The
+> headline is that **RR-21's determinism condition did NOT hold** — the C++ half walks
+> schema-ordered as ruled, but `DATA_REMOVE` kept `pairs`/`next`, so staging-table insertion
+> order reached compiled bytes and the hash (measured: two identical-content sources gave
+> 13341534662545686718 vs 16529001401375034206), AND the test pinning that condition did not
+> discriminate. **RULED 2026-08-27 (Rafael, via the steward): `pairs`/`next` are REMOVED from
+> the data VM**, on the D4 `math.random` precedent — same VM, same hashed-output reason. The
+> other three blockers are lane-owned: unprotected `lua_gettable` (a raising `__index` fatals
+> the process), `script_eval`'s ~1014-byte source cap from reusing `SCRIPT_ERR_MAX` as a bound,
+> and `save_read` trusting a file-supplied `byte_len` with the 160-byte header outside the CRC
+> window. Its three declared scope cuts were judged HONEST deferrals and are NOT why §8.5 is
+> unmet. Round 2 follows its fix round.
+>
+> **Standing across both:** evidence, not assertion — a lane reporting a test as
+> revert-verified must give the command and the real failure output per item, or the item is
+> unverified whatever the commit message says (this window lost three review rounds to that on
+> render2d). No maintained counts in prose. Merge needs green CI on all four legs AND a *ship*
+> verdict (`WORKFLOW.md` §1); a lane saying "ready to merge" is not a verdict.
+>
+> **Not started, and NOT to be launched without Rafael's word:** `editor` (Sonnet 5) is now
+> unblocked by render2d's merge; `net-p2` waits on #15's `InputProducer` seam; `alloy-solver` ★,
+> `luau-bindings` and the three alloy pass lanes all wait on **alloy-substrate**, a W2 lane that
+> has never launched and blocks five of the seven remaining W3 lanes — it is the critical path
+> and is scheduled for the Fable reset (Tue 2026-09-01, R-8).
+>
+> **Open ruling request for Rafael:** `ROADMAP.md` §1's graph lists a **`save` (ecs encoder)**
+> W3 lane that §2's table has no row for, while assets+data's row already covers "save v1".
+> Either §1 is stale or a lane is unscoped. `docaudit` cannot see a graph and a table
+> disagreeing — the R-12 class exactly.
+
 > **W3 render2d MERGED 2026-08-27 — `31da431` (PR #13), closeout sweep done (R-7 + R-12).**
 > Five adversarial review rounds to *ship*. Two rulings landed in it: **D1** (camera off the
 > ECS onto `RenderQueue` — as registered components its f32 bytes reached `registry_hash_all`,
