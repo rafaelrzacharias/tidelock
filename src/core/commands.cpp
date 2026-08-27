@@ -191,11 +191,15 @@ void world_set_cvar_cmd(World* w, NameHash key, u32 bits) {
     const CvarDesc* d = cvar_find(w->cvars, key);
     TL_CHECK(d != nullptr && (d->flags & CVAR_SIM) != 0u);
     // Payload = LE NameHash key, then LE u32 bits (commands.h's CMD_SET_CVAR record contract).
-    u8 head[8];
+    // Both fields go through the explicit-LE ByteWriter and one segment - the applier's
+    // ByteReader reads both back with explicit-LE br_get_u64/br_get_u32, so writer and reader
+    // must agree by construction (a record reaching hashed sim state, not a host-endian memcpy).
+    u8 head[12];
     ByteWriter bw;
     bw_init(&bw, head, sizeof(head));
     bw_put_u64(&bw, key);
-    cmd_record2(w, CMD_SET_CVAR, Entity{ 0 }, 0u, head, 8u, &bits, 4u);
+    bw_put_u32(&bw, bits);
+    cmd_record(w, CMD_SET_CVAR, Entity{ 0 }, 0u, head, 12u);
 }
 
 void world_flush(World* w) {
