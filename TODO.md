@@ -5931,3 +5931,43 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > write, not just ambiguity about who edits what. Related and belonging in the same rule: three of six
 > editor panels needed a foundation change outside the lane's cone, each individually justified — the cone
 > as drawn does not match the work the editor actually requires.
+
+> **LANE CLOSEOUT — `w3-editor` / PR #16, merged 2026-08-27 as `8b10b58` (R-7 sweep).** Merged on
+> `TOOLING.md` §9.6's `panels v0` criterion. Shipped: all six v0 panels (Log, Console, Inspector,
+> Profiler, Probes, World), the reflection walker and dotpath resolver, `core/cvar` + `CMD_SET_CVAR`,
+> `core/desync_diff`, RR-38's integer-only decimal→fx quantizer, and the Console `set <name> <value>`
+> command. Deferred with blockers named, not dropped: `shell v0` (blocked on `PLATFORM.md` §9.7 step 5)
+> and build-order item 7's Replay panel (governed by RR-42).
+> **Review shape:** three disjoint fresh-context adversarial reviews over an exhaustive partition of the
+> diff — foundation/core, panels/tests, docs/criteria — then a delta-scoped fix-check per area (R-9).
+> Verdicts: 13 + 12 + 8 defects, every area `fix first`, all resolved to `ship`. The partition earned
+> itself on one criterion: A proved the fx quantizer correct by mutation, C proved every assertion
+> survived RR-39's amendment, and B proved the test never reached the walker at all — each right within
+> its own area, each alone would have called the row satisfied. **The seam defect appeared between the
+> coverage lists, not inside any one of them** (`LESSONS.md`).
+> **Rulings produced:** RR-43 (third §9.6 bucket, amending RR-40) and RR-44 (docaudit marker set does not
+> grow; two structural rules replace it) — both recorded above, RR-44 record-only and unowned.
+> **Triage of what the lane filed** — nothing left untriaged, per R-7:
+> - RR-38/39/40/41/42 records — already in the lane's own `TODO.md`, verified present, no re-filing.
+> - Four `LESSONS.md` entries from the lane (macro nesting, inline/anonymous-namespace ODR, the
+>   `g_static = BigType{}` stack-temporary class, captured-pointer test-helper lifetime) — merged, kept.
+> - `TL_PROF_SCOPE_W` argument drop, the `test_list.inc` remove-vs-add build trap, and the unswept
+>   `X = Type{}` sites in `tests/`/`tools/` — all filed above as unowned findings with reproducers.
+> - Review B's three non-blocking nits, ACTED ON BY FILING, not dispatched: (1) `world_panel`'s
+>   `draw_entities` should clip over the list `world_panel_visible_slots` produces rather than over raw
+>   slot indices — a regression inside the clipper loop is currently invisible even though the shared
+>   predicate is covered, and the same change would fix the dead-slot-run limitation `world_panel.h`
+>   already documents; (2) the Profiler's aged-out-frame warning is drawn but not asserted, now testable
+>   with the `ContentSize.y` technique this wave established; (3) `draw_int_readonly`'s signed/sized
+>   correctness is new untested code, assertable by splitting out a `format_int(addr, kind, buf, cap)`.
+>   Owner: unassigned; all three are inside `src/editor/`, so they belong to whoever next opens that tree.
+> - Review C's standing items: RR-44 into a gate (unbuilt), `TL_CVAR`'s signature living in two homes
+>   (`CPP-SUBSET.md:245` and `TOOLING.md:242` — one should cite the other), and the `docaudit.py:13` glob
+>   leaving `TODO.md`/`LESSONS.md`/`CLAUDE.md` unscanned, which Rafael flagged as its own scoping call.
+> **R-12 doc-relevancy:** `CLAUDE.md`'s Status paragraph updated to record the merge. `TOOLING.md`'s own
+> status line ("design rev 1, DECIDED except §10") re-read and left as-is — it describes the DESIGN's
+> state, which this PR did not change; §9.6's criterion carries the build state and is now current.
+> **Not owed by this lane, still open at the wave boundary:** the #14/#15 deferred review debt (the
+> merged combination of loop+input and assets+data has had no adversarial read from anyone), the
+> merged-and-closed-lane ownership rule (seven instances across six files), and the one-tap hardening of
+> `allow_squash_merge` — still `true` in repo settings, so the merge-commit rule remains convention.

@@ -217,9 +217,10 @@ Building — W2/W3 (re-dated 2026-08-27; the live truth is `TODO.md` + `docs/ROA
 this paragraph). W0–W1 shipped and reviewed; Gate 0 run and ruled (`FX-PALETTE.md` rev 2); W2 ecs
 + net-p1 + luau-vm + vendor merged. Of the three W3 slack lanes launched early (ruled
 2026-08-26), **all three MERGED 2026-08-27** — render2d (PR #13, `31da431`), assets+data
-(PR #14, `26c9c5f`) and loop+input (PR #15, `7e0088e`). `editor` launched after those merges and
-is OPEN in review as PR #16 (all six v0 panels shipped; three disjoint adversarial reviews
-returned, fixes in flight). The `SIM_REMOVE`/`DATA_REMOVE` audit slice is released but still
+(PR #14, `26c9c5f`) and loop+input (PR #15, `7e0088e`). **`editor` MERGED 2026-08-27 (PR #16,
+`8b10b58`)** on `TOOLING.md` §9.6's `panels v0` criterion — all six v0 panels, the Console `set`
+command, and RR-38..RR-44; `shell v0` and build-order item 7 (Replay) remain deferred with their
+blockers named. The `SIM_REMOVE`/`DATA_REMOVE` audit slice is released but still
 unlaunched, pending Rafael's word; alloy-substrate launches at the weekly reset. Next: W3
 (alloy-solver ★ → v0).
 This paragraph is checked at every wave boundary (`WORKFLOW.md` §3 artifact 4, R-12).
