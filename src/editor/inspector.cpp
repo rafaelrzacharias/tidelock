@@ -13,12 +13,7 @@
 
 #include <string.h>
 
-namespace {
-
-// The nine fx palette rows' FRAC bit counts (foundation/fx_palette.h's own row constants,
-// docs/FX-PALETTE.md). Editable since RR-38 (`fx::fx_parse_decimal_raw`, `foundation/fx.h`) - see
-// this file's Invariants note for how the edit path stays float-free end to end.
-u8 fx_frac_bits(FieldKind k) {
+u8 inspector_fx_frac_bits(FieldKind k) {
     switch (k) {
         case K_pos:     return 18u;
         case K_vel:     return 20u;
@@ -29,9 +24,11 @@ u8 fx_frac_bits(FieldKind k) {
         case K_omega:   return 22u;
         case K_dt:      return 30u;
         case K_scalar:  return 16u;
-        default:        TL_FATAL("fx_frac_bits: not an fx kind");
+        default:        TL_FATAL("inspector_fx_frac_bits: not an fx kind");
     }
 }
+
+namespace {
 
 bool is_fx_kind(FieldKind k) { return k >= K_pos && k <= K_scalar; }
 bool is_int_kind(FieldKind k) { return k >= K_i8 && k <= K_u64; }
@@ -134,7 +131,7 @@ void draw_field(Editor* ed, World* w, Entity sel, ComponentId comp, const Compon
         } else if (is_fx_kind(f.kind)) {
             i32 raw = 0;
             memcpy(&raw, addr, esz);
-            const u8 frac = fx_frac_bits(f.kind);
+            const u8 frac = inspector_fx_frac_bits(f.kind);
             f64 shown = (f64)raw;
             for (u8 b = 0; b < frac; ++b) { shown *= 0.5; }
             ImGui::Text("%.9g (0x%08x)", shown, (u32)raw);

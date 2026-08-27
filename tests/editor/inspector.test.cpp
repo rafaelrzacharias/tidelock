@@ -263,7 +263,9 @@ TL_TEST(inspector_fx_field_edit_widget_writes_through_parse_and_command, "editor
     world_add<InsPos>(&f.w, e, pos);
     world_flush(&f.w);
 
-    const Result<i32> parsed = fx::fx_parse_decimal_raw(sv_lit("1.5"), 18u);
+    // frac read from the Inspector's own table (B-2, 2026-08-27) - a hardcoded 18u here would
+    // stay green even if inspector_fx_frac_bits(K_pos) drifted from pos_t's real FRAC_BITS.
+    const Result<i32> parsed = fx::fx_parse_decimal_raw(sv_lit("1.5"), inspector_fx_frac_bits(K_pos));
     TL_ASSERT_EQ(parsed.err, ERR_OK);
     TL_EXPECT_EQ(parsed.value, (i32)0x60000);
 
@@ -280,6 +282,28 @@ TL_TEST(inspector_fx_field_edit_widget_writes_through_parse_and_command, "editor
     // is provably unchanged by construction, not by a redundant assertion here.
     const Result<i32> bad = fx::fx_parse_decimal_raw(sv_lit(""), 18u);
     TL_EXPECT_EQ(bad.err, fx::ERR_FX_PARSE);
+#else
+    TL_INSPECTOR_SKIP;
+#endif
+}
+
+// B-2 (2026-08-27): inspector_fx_frac_bits(FieldKind) is the ONLY thing standing between a typed
+// decimal literal and its quantized raw value - drift here silently changes what every fx edit
+// writes, and no other Inspector test can see it (the fx widget test above sources its own frac
+// from this same table now, but that alone would not catch a table-wide mistake in a DIFFERENT
+// row than K_pos). Asserts all nine rows against foundation/fx_palette.h's own row types directly,
+// so it cannot drift out of sync with the palette the way a hand-copied literal could.
+TL_TEST(inspector_fx_frac_bits_matches_fx_palette_for_every_row, "editor,inspector,fast") {
+#if TL_DEV
+    TL_EXPECT_EQ(inspector_fx_frac_bits(K_pos), (u8)pos_t::FRAC_BITS);
+    TL_EXPECT_EQ(inspector_fx_frac_bits(K_vel), (u8)vel_t::FRAC_BITS);
+    TL_EXPECT_EQ(inspector_fx_frac_bits(K_invmass), (u8)invmass_t::FRAC_BITS);
+    TL_EXPECT_EQ(inspector_fx_frac_bits(K_stiff), (u8)stiff_t::FRAC_BITS);
+    TL_EXPECT_EQ(inspector_fx_frac_bits(K_q), (u8)q_t::FRAC_BITS);
+    TL_EXPECT_EQ(inspector_fx_frac_bits(K_angle), (u8)angle_t::FRAC_BITS);
+    TL_EXPECT_EQ(inspector_fx_frac_bits(K_omega), (u8)omega_t::FRAC_BITS);
+    TL_EXPECT_EQ(inspector_fx_frac_bits(K_dt), (u8)dt_t::FRAC_BITS);
+    TL_EXPECT_EQ(inspector_fx_frac_bits(K_scalar), (u8)scalar_t::FRAC_BITS);
 #else
     TL_INSPECTOR_SKIP;
 #endif

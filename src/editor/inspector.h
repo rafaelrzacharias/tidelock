@@ -59,3 +59,12 @@ void inspector_panel_draw(Editor* ed, World* w);
 // job, matching `dotpath_set_raw`'s identical shape).
 ErrCode inspector_set_scalar_field(World* w, bool lockstep, Entity e, ComponentId comp,
                                     u32 field_index, const void* bytes, u32 len);
+
+// The FRAC bit count `draw_field`'s fx-edit branch quantizes at for `k` (one of the nine
+// `K_pos`..`K_scalar` fx palette kinds - TL_FATAL for any other `FieldKind`). Exposed so a test
+// can assert this table against `foundation/fx_palette.h`'s own row `::FRAC_BITS` constants
+// directly (B-2, 2026-08-27) - the table drives what a typed decimal literal quantizes to and a
+// drift here would previously go undetected by every existing Inspector test, since none of them
+// reach it: `inspector_fx_field_edit_widget_writes_through_parse_and_command` calls
+// `fx::fx_parse_decimal_raw` with its OWN literal `18u`, never this table.
+u8 inspector_fx_frac_bits(FieldKind k);
