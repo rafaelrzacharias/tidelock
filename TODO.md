@@ -6540,3 +6540,98 @@ constant.
   because that table is the test TU. I did not measure `src/foundation/arena_registry.cpp`'s own
   frames; it is a caller of nothing deep and 32 KB is well inside the D2 headroom, so I judge it
   not to change D2's threshold — stated as a judgement, not a measurement.
+
+### Area A addendum — the checks that ran after the interim push
+
+**D7 — `tests/net/test_archive.test.cpp:772-774`: a comment that now describes deleted code, in
+the row that guards the rule 99c9248 replaced. VERIFIED (severity: low).** Row (b) of
+`archive_regression_log_array_is_validated` forges a repeated R6 id at two different effective
+ticks, and its comment ends "only a scan over the whole array can [see it], **which is the point
+of this row**". 99c9248 deleted that whole-array scan and replaced it with the eight seq
+counters, so the sentence names a mechanism the file no longer contains. `CLAUDE.md` rule 8
+("code that contradicts a doc is a bug in one of them; fix the right one in the same commit")
+applies to a contract comment as much as to a doc, and this is the same species of stale claim
+whose deletion caused D1 — the difference is only that here the comment survived and the code
+moved, rather than the reverse.
+
+*The row itself is fine, and that is measured, not assumed.* Reverting the per-origin seq rule on
+both sides and running it:
+
+    [R6 seq-ascent (both sides) vs the repeated-R6-id row] build OK.
+    tests/net/test_archive.test.cpp:778: FAIL [archive_regression_log_array_is_validated]
+        (ar_try_decode(seg, n, ticks, &arena)) == (ERR_NET_MALFORMED)
+    tl_tests: 1 selected, 0 passed, 1 failed
+
+So the rule swap did not retire this row — it now pins the replacement rule, correctly. Only the
+comment needs the edit. This is the answer to the brief's hypothesis 3 for the one pre-existing
+hand-spliced row that the seq rule change could plausibly have taken over: **the corpus survived
+the format change here**, which is the opposite of what happened in D1.
+
+**D8 — every one of 99c9248's three ENCODER bounds is untested. VERIFIED (severity: low, and
+pre-existing in kind).** The new rules are enforced on both sides, but only the decoder halves
+are graded: `grep -rn "TL_TEST_EXPECT_FATAL" tests/net/` returns **no matches**, so no encoder
+`TL_CHECK` contract in `src/net/archive.cpp` — new or old — has a fatal-expected row. The
+mechanism exists and is used elsewhere in the tree (`tests/foundation/registry.test.cpp` has two).
+The consequence is bounded rather than alarming, because the encoder's contract is the *caller's*
+obligation and the decoder is the side that faces an untrusted peer; but it means the claim
+"enforced by encoder AND decoder", which is the ruled wording for two of the three rules, is
+half-evidenced. 99c9248 extended a file-wide gap rather than creating one.
+
+### Additional checks that came back CLEAN
+
+- **Hypothesis 6 — the world hash's walk is UNCHANGED by the cap raise.** `registry_hash_all`
+  (`src/foundation/arena_registry.cpp:81-91`) folds `for (i = 0; i < r->count; ++i)` and returns
+  `tl_hash64(out_per_arena, (usize)r->count * 8u, TL_HASH_SEED)` — `r->count`, never
+  `MAX_ARENAS`. `registry_seal`'s fingerprint fold is `count * 8u` likewise. So for any given
+  registry the world hash **value** is bit-identical before and after 1ddae4b, and its cost is
+  O(count). `CANON.md`'s "Registration order = lockstep contract" is untouched. Corroborated by
+  the tree: 1ddae4b modified no determinism row and `registry_two_worlds_hash_identically` /
+  `registry_restore_reproduces_hash_trace` pass unchanged.
+- **What DID grow per tick, measured rather than asserted.** Two tail-zeroing loops now run
+  `MAX_ARENAS - count` iterations instead of 64: `registry_snapshot`
+  (`arena_registry.cpp:126`, all tiers) and `guard_tick_begin` (`arena_guard.cpp:18`, `#if TL_DEV`
+  only). Benchmarked at `count = 30` (`clang++ -std=c++20`, this container), with the stores kept
+  observable so they are not eliminated:
+
+  | | 64 (before) | 4096 (after) | two loops/tick vs a 16,666,667 ns tick |
+  |---|---|---|---|
+  | `-O0` (debug tier) | 65.2 ns | 9,326.4 ns | 18,522 ns — 0.111% |
+  | `-O1` (dev/netcode/ship) | 4.2 ns | 173.5 ns | 339 ns — **0.002%** |
+
+  Trivial on the tiers that ship, and now a number rather than E-2's "both trivial", which was
+  a judgement about *memory* and did not discuss per-tick cost at all. Scope: this is a
+  microbenchmark of the loop as spelled, on this container's CPU, not a measurement of
+  `registry_snapshot` in situ.
+- **No production `SnapshotRing` exists to have been mis-sized.** 1ddae4b's test needed a bigger
+  ring (4096 arenas x 64 B = 256 KB of blob against the old 64 KB slot cap). The obvious follow-on
+  risk is a production caller still sizing a ring for 64 arenas — there is none:
+  `grep -rn "ring_init\|SnapshotRing" src/` finds only the declarations plus `core/loop.cpp`'s
+  `ring_init` on the unrelated `RingBuffer<T>` template. `SnapshotRing` is `Snapshot slot[6]`, so
+  its ~197 KB is as 1ddae4b states.
+- **`registry_seal`'s `NameHash ids[MAX_ARENAS]`** (`arena_registry.cpp:63`) went from 512 B to
+  32 KB of stack. Named here because it is a real 64x growth that 1ddae4b's message does not
+  list; it does not change D2's threshold (D2's ladder exercises this path and the measured
+  break stays at 720-736 KB).
+
+### Summary of the verdict
+
+**fix first.** In order:
+
+1. **D1** — re-derive the `archive_log_record_count_is_bounded_by_the_format` forgery so exactly
+   one rule can object, and prove it by reverting the aggregate bound and watching it go red.
+   This is the only finding where a real rule guarding the chain-hashed format currently has no
+   test behind it.
+2. **D2** — take `ArenaRegistry` off the stack in `tests/foundation/registry.test.cpp` (the
+   arena-backing 1ddae4b already applied to the full-house actors), and re-run the `ulimit -s`
+   ladder to record the new threshold.
+3. **D3** — a ruling request, unnumbered: bind `MAX_ARENAS` (and the other CANON constants with a
+   C++ home) to `CANON.md` by something that actually fails — a `static_assert`, or extending
+   `docaudit`'s constant pass over headers. Today no gate compares the header to the sheet.
+4. **D4/D5/D6/D7/D8** — the low-severity items above; D6 and D7 are one-line edits.
+
+Nothing here is a *redesign*: the three ruled format rules are correctly specified, correctly
+implemented on both sides, symmetric, bounds-safe against an untrusted `origin_slot`, and
+`TL_CHECK`-tiered so they survive netcode/ship. The E-2 raise is likewise correct in the
+program — its world hash is unchanged and its per-tick cost is 0.002% of a tick. Both commits
+were validly inside §2's valve. What the valve deferred, and what this sweep found, is that the
+*evidence* behind two of these changes is weaker than their commit messages claim.
