@@ -147,6 +147,6 @@ Result<u32> console_exec(ConsoleState* s, World* w, bool lockstep, const char* l
 u32 console_complete(const ConsoleState* s, StrView prefix, const ConsoleCmd** out, u32 out_cap);
 
 // history[i] in OLDEST-to-newest order (i=0 is the oldest live line, i=hist_count-1 the most
-// recent - matching tl_log.h's tl_log_test_ring_at "write order" convention). Fatal if
+// recent - matching tl_log.h's tl_log_ring_at "write order" convention). Fatal if
 // i >= s->hist_count.
 const char* console_history_at(const ConsoleState* s, u32 i);

@@ -4880,6 +4880,45 @@ these needs that invariant lifted (rename off the `_test_` prefix, keep only the
 are `TOOLING.md`'s own) best done in the same commit as the first real consumer that needs it
 (`ROADMAP.md`'s "pulled in by a real consumer, never pushed on spec"), not pre-emptively here.
 
+### editor/log_panel: the first v0 panel (2026-08-27), and what it settled
+
+Steward's check-in named the Log panel as the most tractable next slice (`LogState` already
+existed, needed only a `draw_fn`). Built it, and it settled three things every later panel
+inherits:
+
+- **A `PanelDrawFn` owns its own `ImGui::Begin(name, ...)`/`End()`.** `editor_frame` (still a
+  stub, `editor.h`'s Status note) will do no more than call every open panel's `draw_fn` - no
+  per-panel window boilerplate of its own. Recorded in `editor.h`'s `PanelDrawFn` contract
+  comment (its real home) since nothing in `TOOLING.md` pinned this down either way.
+- **The null ImGui backend genuinely works for headless panel tests**, confirmed by building
+  against it rather than assumed from the vendor-unlock note above:
+  `vendor/imgui/backends/imgui_impl_null.cpp` compiled into `tl_tests` (debug/dev only,
+  `tests/CMakeLists.txt`), a `tests/editor/imgui_test_util.h` helper standing up one process-wide
+  `ImGuiContext`, and `ImGui::FindWindowByName`/`ImGuiWindow::DrawList` (internal API,
+  `imgui_internal.h`, test-only) verifying a panel actually drew something. One caveat found
+  building it: `ImGuiWindow::ContentSize` reads 0 on a window's FIRST frame (auto-fit metrics
+  settle from frame two) - the test checks `DrawList->VtxBuffer.Size` instead, which is real
+  immediately.
+- **`foundation/tl_log.h`'s ring accessors were test-only by explicit contract**
+  ("never called from `src/` outside tests") **- promoted** (`tl_log_test_ring_count/_head/_at`
+  -> `tl_log_ring_count/_head/_at`, `tl_log_test_reset` stays test-scoped) now that
+  `log_panel.cpp` is a real, non-test caller. Exactly the class this file flagged above for
+  `tl_prof.h`/`tl_probe.h` "whenever the first real panel or `trace_export.cpp` lands" - done
+  here for `tl_log.h` specifically, not spec­ulatively for the other two (no consumer yet).
+
+**Also found and fixed, narrow and cited rather than silent:** `tools/audit/includes.py`'s
+`BACKEND_HEADERS` dict already named `src/editor` as allowed to include `imgui` (line naming it
+explicitly), but the separate `SYS_ALLOW_DIRS` allowlist gate 1 also checks was missing the
+matching `"imgui.h"` grant for `src/editor` (only `src/vendor_glue` had it) - a same-file internal
+inconsistency, not a new policy call: `docs/TOOLING.md` §9.1's file table already plans most of
+`src/editor/` (every `*_panel.cpp`, `console.cpp`, `inspector.cpp`, `shell.cpp`) to use ImGui
+directly, so `BACKEND_HEADERS`' own grant was clearly the intended shape and `SYS_ALLOW_DIRS` had
+just never been updated to match (nothing under `src/editor/` had included a vendor header before
+`log_panel.cpp`). Added the one missing entry, cited inline at the change site. Flagging here in
+case this reads differently to the steward than it did to me - it is a one-line, narrowly-scoped,
+self-evident consistency fix, not a design decision, but `tools/audit/` is not confirmed as this
+lane's own file the way `TOOLING.md` is.
+
 ### Post-v0 render backend: multi-viewport (drag an editor panel out to its own OS window)
 
 Rafael asked in-session (2026-08-27) for this to be recorded as a planned post-v0 feature, not

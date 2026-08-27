@@ -55,9 +55,9 @@ void tl_log_write(u8 level, const char* file, u32 line, const char* fmt, ...) {
 }
 
 #if TL_DEV
-u32 tl_log_test_ring_count(void) { return g_log.count; }
-u32 tl_log_test_ring_head(void) { return g_log.head; }
-const LogRecord* tl_log_test_ring_at(u32 slot) {
+u32 tl_log_ring_count(void) { return g_log.count; }
+u32 tl_log_ring_head(void) { return g_log.head; }
+const LogRecord* tl_log_ring_at(u32 slot) {
     TL_CHECK(slot < g_log.count);
     // Write order, not ring order. `&g_log.slot[slot]` agreed with the header's "in write order"
     // only until the ring wrapped, and the wrap test could not tell the two apart because it

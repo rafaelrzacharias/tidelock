@@ -37,7 +37,12 @@ SCAN_EXT = (".h", ".hpp", ".inc", ".cpp")
 SYS_ALLOW = {"stdint.h", "stddef.h", "string.h", "limits.h"}
 SYS_ALLOW_DIRS = {                        # additional system headers, by path prefix
     "src/render": {"math.h"},
-    "src/editor": {"math.h"},
+    # BACKEND_HEADERS below already names src/editor for "imgui" (a panel's own draw_fn is real
+    # ImGui widget code, docs/TOOLING.md §9.1's editor/*_panel.cpp/console.cpp/inspector.cpp/
+    # shell.cpp rows) - this entry completes the same grant on gate 1's independent allowlist
+    # (both gates check independently, LESSONS.md; src/core/loaders' stb_image.h row above is the
+    # same shape). Added building editor/log_panel.cpp, the first file to actually need it.
+    "src/editor": {"math.h", "imgui.h"},
     "src/platform": {"math.h"},
     "src/foundation": {"rapidhash.h"},
     # Luau is vendored with its own include dirs on the target (vendor/luau/CMakeLists.txt),

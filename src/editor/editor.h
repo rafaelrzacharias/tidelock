@@ -45,8 +45,12 @@
 struct Editor;
 
 // One panel's draw function: called once per open frame with the panel's own state reached
-// through `ed`/`w` (docs/TOOLING.md §9.4's "data source" column - e.g. the Log panel reads
-// `LogState.ring` via a pointer the shell wires in, not shown here since no panel is built yet).
+// through `ed`/`w` (docs/TOOLING.md §9.4's "data source" column). Owns its own
+// `ImGui::Begin(name, ...)`/`End()` - `editor_frame` calls every open panel's `draw_fn` and
+// nothing more, no per-panel window boilerplate of its own (settled building the first panel,
+// `editor/log_panel.cpp`). That is also what makes a panel testable directly, with no `Editor`/
+// `editor_frame` involved (`docs/TOOLING.md` §9.5's "panels run ImGui headless via a null
+// backend").
 typedef void (*PanelDrawFn)(Editor* ed, World* w);
 
 enum { EDITOR_MAX_PANELS = 16, EDITOR_PANEL_NAME_CAP = 32 };

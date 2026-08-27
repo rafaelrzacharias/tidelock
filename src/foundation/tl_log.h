@@ -94,15 +94,18 @@ extern "C" void tl_log_write(u8 level, const char* file, u32 line, const char* f
 #define TL_LOG_ERR(...) tl_log_write(LOG_ERR, __FILE__, (u32)__LINE__, __VA_ARGS__)
 
 #if TL_DEV
-// Test-only introspection into the ring (docs/TESTING.md's runner links against these; never
-// called from src/ outside tests). Guarded by TL_DEV so no symbol exists in netcode/ship.
+// Ring introspection (guarded by TL_DEV so no symbol exists in netcode/ship). Originally
+// test-only; promoted to a real production API the day editor/log_panel.cpp became its first
+// non-test caller (docs/TOOLING.md §9.6 build order item 5) - docs/TESTING.md's runner also
+// links against these, unchanged. Only `tl_log_test_reset` below stays test-scoped: nothing on a
+// live path ever clears the ring.
 // Number of live records, capped at 4096 once the ring has wrapped at least once.
-u32 tl_log_test_ring_count(void);
+u32 tl_log_ring_count(void);
 // Index the NEXT write lands at (the oldest live record once the ring has wrapped).
-u32 tl_log_test_ring_head(void);
+u32 tl_log_ring_head(void);
 // Record at `slot` in WRITE order - slot 0 is the oldest live record, which after the ring has
-// wrapped is at ring index `head`, not 0. Fatal if slot >= tl_log_test_ring_count().
-const LogRecord* tl_log_test_ring_at(u32 slot);
+// wrapped is at ring index `head`, not 0. Fatal if slot >= tl_log_ring_count().
+const LogRecord* tl_log_ring_at(u32 slot);
 // Clears the ring to its zero-initialised state. Tests only - never called from a live path.
 void tl_log_test_reset(void);
 #endif
