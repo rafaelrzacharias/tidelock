@@ -50,12 +50,18 @@ void recorder_tick(Recorder* rec, World* w, const InputFrame* frames) {
     RecordedInputRow row{};
     row.world_hash = registry_hash_all(w->registry, per_arena);
     // Only [0, peer_count) is ever written back out (recorder_write/recorder_read_body both key
-    // their loops on peer_count, per this header's format) - slots beyond it are zeroed here, not
-    // memcpy'd from the caller's buffer, so the in-memory row already matches what a write/read
-    // round trip would reconstruct (RecordedInputRow row{} there is zero-init too), instead of
+    // their loops on peer_count, per this header's format) - slots at or past it stay zeroed
+    // (RecordedInputRow row{} is zero-init), not memcpy'd from the caller's buffer, so the
+    // in-memory row already matches what a write/read round trip would reconstruct instead of
     // carrying whatever a producer left in Engine::frames' non-live slots from an earlier tick
-    // (review round 1 finding 10 - no test compared a full row byte-for-byte across that seam).
-    memcpy(row.frames, frames, (u64)rec->peer_count * sizeof(InputFrame));
+    // (review round 1 finding 10). Review round 2 defect 10: the same staleness reaches WITHIN
+    // [0, peer_count) too - a producer writes only `out[live_mask bit]` slots (live.cpp,
+    // replay.cpp), so a peer_count slot outside `live_mask` still carries forward whatever an
+    // earlier tick left in `Engine::frames`. Zero those explicitly rather than trust the caller's
+    // buffer for a slot no producer promises to have written this tick.
+    for (u32 p = 0; p < rec->peer_count; ++p) {
+        if ((rec->live_mask & (1u << p)) != 0u) { row.frames[p] = frames[p]; }
+    }
     array_push(&rec->rows, row);
 }
 

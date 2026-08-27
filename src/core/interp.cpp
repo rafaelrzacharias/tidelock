@@ -25,6 +25,16 @@ void interp_pingpong(World* w, const InterpPair* pairs, u32 pair_count) {
             const Entity ent = cur->entities[d];
             void* prev_row = column_get(prv, ent);
             TL_CHECK(prev_row != nullptr);   // the two columns of a pair are added/removed together (caller's contract)
+            // review round 2 defect 3: "added/removed together" bounds PRESENCE, not DENSE ORDER -
+            // column_remove is swap-remove (column.cpp), so a column's own dense order is a function
+            // of its individual add/remove history, not registration order. A consumer that pairs
+            // `cur`/`prev` BY DENSE INDEX instead of by entity (as render/extract.cpp does, main)
+            // would silently smear entity `ent`'s current pose against a DIFFERENT entity's previous
+            // one the moment the two columns' dense orders diverge - equal `count` still holds, so
+            // that consumer's only guard passes. This function itself looks up `prev_row` by entity,
+            // so it is not itself broken by the divergence - but it is the one place that CAN see
+            // it happen, so it fails loudly here rather than let it propagate silently downstream.
+            TL_CHECK(prv->entities[d].bits == ent.bits);
             memcpy(prev_row, cur->dense + (u64)d * cur->stride, cur->stride);
         }
     }

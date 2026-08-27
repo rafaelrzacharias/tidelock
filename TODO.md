@@ -3675,41 +3675,90 @@ contract blocks):
       on core. Not this lane's file to edit (`net/`, cone discipline, `WORKFLOW.md`).~~
 
 - [ ] **RR-25 (w3-loop-input): `SystemFn`'s `void(*)(World*)` shape has no path to Engine-level
-      context — hit twice in this slice, plus a third half still open.** (a) `FRAME-LOOP.md` §4's
-      interpolation ping-pong needs a registered "which columns are interpolated" table; the
-      concrete columns (`Transform`/`TransformPrev`) are render2d's (not landed — checked at
-      slice-brief time, no consumer defines them anywhere in the tree) and a registered system
-      reading them could not reach a table living on `Engine` (only `core/loop.h` owns `Engine`;
-      a system only ever gets `World*`). `Camera2D` is dropped from this list, not left stale:
-      Rafael's D1 ruling (render2d lane, 2026-08-27) took camera state off the ECS entirely onto
-      `RenderQueue` — it was never going to be an interp-pingponged column. (b) `INPUT.md` §9.5's
-      recorder is specified as "the LAST-phase recorder SYSTEM", but it needs `Engine`-owned
-      state (the per-tick `InputFrame[MAX_PEERS]` and this lane's `Recorder`) a `World*`-only
-      system cannot reach either. Interim (both, same root cause): `core/loop.h`'s `Engine`
-      exposes `interp_register_pair`/`interp_pingpong`/`interp_snap_entity` and
-      `recorder_attach`/`recorder_tick` as ordinary functions `engine_tick_once` calls DIRECTLY
-      (never as registered systems) right after the LAST phase runs. (c), still open:
-      `FRAME-LOOP.md` §0's render-side `alpha` — `engine_frame` computes and returns it, but
-      there is no path yet for a future PRE_RENDER extraction system to read it, same limitation.
-      Ruling requested: either widen `SystemFn` to carry an opaque `void* engine_ctx` (additive,
-      `core/schedule.h` — not this lane's file), or bless the direct-call pattern above as the
-      standing answer. Filed for whoever lands render2d's PRE_RENDER extraction system next,
-      since they hit the alpha half immediately.
+      context — hit twice in this slice, plus a third half now answered in practice by a
+      different lane's precedent.** **CORRECTED 2026-08-27 (review round 2 defect 4): both (a)'s
+      and (c)'s premises expired the moment `main` merged render2d (`31da431`) — re-read against
+      the merged tree below, not left as originally filed.**
+      (a) `FRAME-LOOP.md` §4's interpolation ping-pong needs a registered "which columns are
+      interpolated" table. `Transform`/`TransformPrev` now exist (`core/transform.h`, landed by
+      render2d 2026-08-26 with a landing note addressed to this lane) — the "no consumer defines
+      them anywhere in the tree" premise is gone. What has NOT landed: nothing calls
+      `interp_register_pair(Transform, TransformPrev)` anywhere in the tree yet — `camera.h`'s own
+      comment names that registration "the future `app/wiring.cpp` lane's job", not yet built.
+      render2d's `render/extract.cpp` reads both columns directly and does its own by-index pairing
+      instead (see RR-28 below — that bypass is the substance of review round 2 defect 3). The
+      `Engine`-context gap this RR names (a registered system can't reach a table living on
+      `Engine`; only `core/loop.h` owns `Engine`, a system only ever gets `World*`) is unaffected by
+      any of this — it's about `SystemFn`'s shape, not about whether `Transform` exists. `Camera2D`
+      is not an example here: Rafael's D1 ruling (render2d lane, 2026-08-27) took camera state off
+      the ECS entirely onto `RenderQueue` — it was never going to be an interp-pingponged column.
+      (b) `INPUT.md` §9.5's recorder is specified as "the LAST-phase recorder SYSTEM", but it needs
+      `Engine`-owned state (the per-tick `InputFrame[MAX_PEERS]` and this lane's `Recorder`) a
+      `World*`-only system cannot reach either. Interim (both (a) and (b), same root cause):
+      `core/loop.h`'s `Engine` exposes `interp_register_pair`/`interp_pingpong`/`interp_snap_entity`
+      and `recorder_attach`/`recorder_tick` as ordinary functions `engine_tick_once` calls DIRECTLY
+      (never as registered systems) right after the LAST phase runs.
+      (c) **premise falsified, not just stale**: this RR originally read "there is no path yet for
+      a future PRE_RENDER extraction system to read [alpha]". `src/render/extract.cpp:32` —
+      `const f32 alpha = q->alpha;` — reads alpha off `RenderQueue` from inside a registered
+      `PRE_RENDER` system today. The actual answer render2d landed is neither of the two options
+      this RR proposed (widen `SystemFn`, or bless the direct-call pattern): `engine_frame` writes
+      `alpha` onto `RenderQueue` (a `World`-visible struct), and a registered system reads it from
+      there — sidestepping the `SystemFn`-shape gap entirely rather than closing it. That answers
+      this lane's own alpha half in practice; the `SystemFn`-widening question stays open only for
+      a future consumer that needs `Engine`-level state a `World`-visible struct can't carry (the
+      recorder/interp-registration half in (a)/(b) above), not for alpha.
 
 - [ ] **RR-26 (w3-loop-input): `core/interp.cpp`'s ping-pong is generic by construction, not the
       concrete `Transform`/`TransformPrev` `CPP-SUBSET.md` §8's own reference template names.**
-      That template is worked pseudocode (`TL_FIELDS_Transform(...) /* bit 0 = snap
-      (FRAME-LOOP.md §4) */`); no lane has landed the real component (render2d's, by
-      `FRAME-LOOP.md` §8.2 step 4's "engine components" grouping — Transform/TransformPrev/
-      Sprite together; `Camera2D` is not in that grouping and never will be — Rafael's D1 ruling,
-      render2d lane 2026-08-27, put camera state on `RenderQueue`, off the ECS). Built instead:
-      `interp_register_pair(Engine*, ComponentId
-      current, ComponentId prev)` plus a generic byte-copy ping-pong/snap over any two
-      same-stride columns; render2d registers its own pair once Transform/TransformPrev exist.
-      NOT built: `FRAME-LOOP.md` §4's "the engine auto-snaps newly realized entities" (spawn
-      detection needs a commands.cpp/ecs hook this lane does not own). Not blocking this lane's
-      own done criterion (`FRAME-LOOP.md` §8.4's test list is satisfied by the generic mechanism
-      plus a synthetic test component); flagged for whoever finishes wiring Transform.
+      **CORRECTED 2026-08-27 (review round 2 defect 4): "no lane has landed the real component...
+      checked at slice-brief time" is gone — re-read below.** That template is worked pseudocode
+      (`TL_FIELDS_Transform(...) /* bit 0 = snap (FRAME-LOOP.md §4) */`); `Transform`/`TransformPrev`
+      now exist (`core/transform.h`, render2d, 2026-08-26), by `FRAME-LOOP.md` §8.2 step 4's "engine
+      components" grouping — Transform/TransformPrev/Sprite together; `Camera2D` is not in that
+      grouping and never will be (Rafael's D1 ruling, render2d lane 2026-08-27, put camera state on
+      `RenderQueue`, off the ECS). What is still true: nothing calls
+      `interp_register_pair(Transform, TransformPrev)` — render2d's `render/extract.cpp` reads both
+      columns directly instead of going through this lane's mechanism at all, with only a COUNT
+      check (`TL_CHECK(prev.count == n)`), not an entity-identity one — see RR-28, filed below, for
+      the contract question that gap raises. `core/interp.cpp`'s own mechanism
+      (`interp_register_pair(Engine*, ComponentId current, ComponentId prev)` plus a generic
+      byte-copy ping-pong/snap over any two same-stride columns) is unused by any real caller today,
+      so this lane's own done criterion still rests on the generic mechanism plus a synthetic test
+      component — not blocking, but genuinely still open, not "resolved by landing" as a naive
+      re-read of "Transform now exists" might suggest. NOT built: `FRAME-LOOP.md` §4's "the engine
+      auto-snaps newly realized entities" (spawn detection needs a commands.cpp/ecs hook this lane
+      does not own) — `camera.h`'s own comment confirms the ADVANCE-the-ping-pong half is still
+      "the future `app/wiring.cpp` lane's job".
+
+- [x] **RR-28 (w3-loop-input, filed 2026-08-27, review round 2 defect 3): RULED 2026-08-27
+      (Rafael, via the steward) — the interp-pair contract is DENSE-ORDER PARITY.** `core/interp.cpp:26`
+      pairs rows BY ENTITY (`column_get(prv, ent)`); `render/extract.cpp:40-47` (not this lane's
+      file, `main`) pairs them BY DENSE INDEX with only `TL_CHECK(prev.count == n)` guarding it —
+      equal count, not equal order. `core/column.cpp`'s `column_remove` is swap-remove, so dense
+      order is a function of each column's own add/remove history, not registration order — two
+      columns "added/removed together" (`interp.cpp`'s own comment, the stated caller contract) is
+      NOT the same claim as "always in the same dense order". Review round 2 built the failing
+      case: two entities added to `current`/`prev` in opposite order reproduce identical `count`
+      with diverged per-index identity, undetected by either column's own check — reproduced and
+      proven fatal under the fix below (`interp_pingpong_dense_order_divergence_is_fatal`,
+      `tests/core/loop.test.cpp`: build the divergence, confirm `TL_CHECK` fires; reverted the
+      check, confirmed the same test fails without it — command and real output both ways).
+      **Ruling and reasoning (Rafael, via the steward):** the renderer's dense-index assumption was
+      lucky, not true — this ruling makes it true rather than rewriting the renderer, since editing
+      already-merged render2d code from this lane would be a cross-lane change belonging to that
+      lane's owner (`ROADMAP.md` §0 rule 2), and a per-entity rewrite of `extract.cpp` would give up
+      the O(1)-reachable property `FRAME-LOOP.md` §3 exists to promise. Implemented (already landed
+      in this round, unchanged by the ruling): `core/interp.cpp`'s `interp_pingpong` gained
+      `TL_CHECK(prv->entities[d].bits == ent.bits)` — a same-index entity-identity check, turning a
+      silent per-entity smear into a loud failure. `FRAME-LOOP.md` §3's "pointer swap, O(1)" stays
+      the stated design intent (defect 6 below records the present per-entity-copy shape as a
+      deviation, not a redesign) — the dense-order-parity `TL_CHECK` is what would make a future
+      swap for this pair sound, by guaranteeing its two columns are already in lockstep order.
+      `core/transform.h`'s contract block and `RENDER2D.md` were checked against this ruling after
+      merging `main` (`eb648e5`); both already state the dense-order/pointer-swap claim as fact, no
+      wording change is owed there (filed for the render2d lane's own scrutiny if that reading is
+      ever wrong, not edited here — cone discipline).
 
 - [ ] **RR-27 (w3-loop-input, filed 2026-08-27, review round 1 finding 11): `FRAME-LOOP.md` §6's
       "the loop runs as fast as the CPU allows (`accumulator` is forced to `FIXED_DT` per
@@ -3814,3 +3863,64 @@ axis/pad selectors (the doc's `Binding` struct has no dedicated field for either
 is applied per-axis (true 2D-joint radial deadzone needs a paired-axis concept not built); the
 pointer is an identity passthrough (window px as world-space units) until render2d's camera
 exists.
+
+**Review round 2 (fresh-context adversarial, full re-read, PR #15 @ `17c45c1`) — fix-first
+verdict, 11 defects (1-4 ship-blocking, 5-8 before merge, 9-11 minor).** All addressed:
+- **Defect 1** (ship-blocking): the round-1 hash-trace test's `TL_EXPECT_NE` guard passes even
+  with `w->input = frames` severed or the fold system reduced to a no-op (`WorldTickState`'s own
+  `{tick, seed}` moves the hash regardless of input). Replaced with an exact-value pin
+  (`WPos.x == 18`, re-derived independently: `script_hold(value 3, ticks [2,8))` holds 6 ticks *
+  3 = 18) that fails under both mutations. Also routed pass B through
+  `recorder_write` → bytes → `recorder_read_body` (was handing `ReplayProducer` pass A's in-memory
+  rows directly, bypassing the wire serialisation `INPUT.md` §9.6's row actually names).
+- **Defect 2** (ship-blocking): the round-1 alpha fix took `accumulator mod FIXED_DT_SECONDS`,
+  which cycles for as long as a `PRODUCE_WAIT` stall runs (a 0→1 sawtooth at the render rate,
+  every frame, with the sim frozen and, since `main` merged render2d, every entity and the camera
+  visibly juddering). Replaced with a clamp (`pending = min(accumulator, FIXED_DT_SECONDS)`) that
+  parks alpha at `nextafter(1.0f, 0.0f)` once the stall exceeds one tick, holding the last
+  simulated pose instead of sweeping through one every frame. `FRAME-LOOP.md` §0's pseudocode
+  updated in the same commit. New test: `engine_frame_produce_wait_alpha_parks_instead_of_cycling`
+  (two frames deep into the same stall return the identical parked alpha, not two sawtooth points).
+- **Defect 3** (ship-blocking), in-scope half only (the contract question is RR-28 below): added
+  a same-index entity-identity `TL_CHECK` inside `interp_pingpong` — "added/removed together"
+  bounds presence, not dense order (`column_remove` is swap-remove), and a dense-index consumer
+  (render2d's `extract.cpp`, not this lane's file) would silently smear one entity's pose against
+  a different entity's previous one the moment the two columns' orders diverge. New fatal test:
+  `interp_pingpong_dense_order_divergence_is_fatal`.
+- **Defect 4** (ship-blocking): merged `origin/main` (`0ae331d`, bringing in render2d's `31da431`)
+  — 33 commits behind, and defects 2/3 were only visible from that vantage point. RR-25(a)/(c) and
+  RR-26 corrected in place against the merged tree rather than left on their stale slice-brief-time
+  premises (see those entries above).
+- **Defect 5**: `INPUT.md` §9.4's `produce(tick)` wording still said `event.tick == tick` after
+  round 1's fix changed the code to `<=` — updated to match, citing finding 3.
+- **Defect 6**: `FRAME-LOOP.md` §3's "pointer swap, O(1)" contradicted the shipped per-entity
+  `memcpy` (`core/loop.h`'s own contract block already said so honestly). Recorded as a deviation
+  in §3 rather than committing to a swappable-column redesign unilaterally.
+- **Defect 7**: `script_produce` re-run of an already-produced tick (the rollback path's own
+  stated behavior) silently returned different data than the first call. Refused outright via a
+  new `ScriptProducer::last_tick`/`produced_once` pair and a `TL_CHECK`, mirroring
+  `ReplayProducer`'s own re-run refusal. New fatal test: `script_produce_rerun_same_tick_is_fatal`.
+- **Defect 8**: `FRAME-LOOP.md` §8.4's "restore-then-retick reproduces the hash trace" row had no
+  test (`tests/foundation/registry.test.cpp` proves the arena mechanism with a hand-rolled
+  `sim_step`, not `engine_tick_once`). Added `engine_restore_then_retick_reproduces_hash_trace`:
+  snapshot at tick 4, restore, re-tick 4..9 with the frames captured from the first pass fed
+  directly (never re-querying the producer — the real rollback driver's own contract), same
+  `Recorder` catches both passes' rows for direct comparison.
+- **Defect 9**: `Binding::sensitivity` had no default and no check — `Binding b{}` (the idiom
+  every axis test uses) left it `0.0f`, silently killing full stick/mouse deflection.
+  `action_bind` now `TL_CHECK`s it nonzero for `DEV_MOUSE_AXIS`/`DEV_PAD_AXIS` (the only two dev
+  kinds `live.cpp` multiplies by it). New fatal test:
+  `action_bind_pad_axis_without_sensitivity_is_fatal`.
+- **Defect 10**: `recorder_tick` (round 1's finding-10 fix) zeroed frame slots past `peer_count`
+  but still `memcpy`'d whatever a producer left in a non-live slot WITHIN `[0, peer_count)`.
+  Fixed to copy only `live_mask`-set slots, zeroing the rest. New test:
+  `recorder_tick_zeroes_non_live_frames_within_peer_count`.
+- **Defect 11**: `recorder_read_body`'s `br_ok` hoist (round 1's finding-7 fix) — reviewer
+  confirmed it **cannot be discriminated**: with `recorder_read_header`'s bound in place,
+  `frame_count * row_bytes <= remaining - 4` always holds through the sanctioned call sequence, so
+  a mid-loop overrun is unreachable. Kept as-is, no test chased for it, per the reviewer's own
+  explicit instruction.
+
+All 11 items validated per-item (the command AND the real failure output — revert/mutate, rebuild,
+confirm the named test fails, restore, confirm green again), not just asserted fixed. Full-suite
+and audit validation recorded at the round's closing commit below.

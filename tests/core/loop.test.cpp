@@ -3,7 +3,9 @@
 #include "runner/tl_test.h"
 #include "core/loop.h"
 #include "core/recorder.h"
+#include "core/producers/script.h"
 #include "core/world_test_util.h"
+#include "foundation/snapshot.h"
 
 namespace {
 
@@ -47,6 +49,14 @@ bool engine_fixture_init(EngineFixture* f, u64 seed, const PlatformApi* platform
     WorldDesc d{};
     d.seed = seed;
     return engine_init(&f->e, &f->reg, &f->scratch, &f->api, platform, &d) == ERR_OK;
+}
+
+// Folds w->input[0]'s raw action 0 value into every WPos entity's x every tick, so restore/re-tick
+// below has hashed state that actually depends on input, not just the tick/seed singleton
+// (docs/FRAME-LOOP.md §8.4's "restore-then-retick reproduces the hash trace" row).
+void sys_fold_input_into_wpos(World* w) {
+    Span<WPos> col = world_column<WPos>(w);
+    for (u32 i = 0; i < col.count; ++i) { col.data[i].x += w->input[0].actions[0].value; }
 }
 
 }  // namespace
@@ -120,6 +130,37 @@ TL_TEST(engine_frame_produce_wait_renders_without_ticking, "core,loop,producewai
     TL_EXPECT_TRUE(f.e.accumulator >= FIXED_DT_SECONDS);   // the case that actually exercises the clamp
 }
 
+// review round 2 defect 2: a plain modulus (accumulator - whole_ticks * FIXED_DT_SECONDS) satisfies
+// [0, 1) but CYCLES as accumulator keeps growing during a sustained WAIT stall - a full 0->1 alpha
+// sawtooth at the render rate, every frame, with the sim frozen. The fix clamps pending to at most
+// one tick's worth instead of taking the remainder, so alpha rises to (just below) 1.0 once and
+// PARKS there for the rest of the stall, however long it runs. Two frames deep into the same stall,
+// both past the one-tick threshold, must return the identical parked alpha - not two different
+// points on a sawtooth.
+TL_TEST(engine_frame_produce_wait_alpha_parks_instead_of_cycling, "core,loop,producewait,fast") {
+    FakeClockCtx clock_ctx{ 0u, 60u };
+    PlatformApi platform = make_fake_platform(&clock_ctx);
+    EngineFixture f;
+    TL_ASSERT_TRUE(engine_fixture_init(&f, 1u, &platform));
+    world_build_schedule(&f.e.world);
+    input_set_producer(&f.e, InputProducer{ nullptr, wait_produce });
+
+    clock_ctx.now = 90u;   // 1.5 ticks worth - past the clamp threshold
+    const f32 alpha_1 = engine_frame(&f.e);
+    TL_EXPECT_EQ(f.e.last_steps, 0u);
+    TL_EXPECT_TRUE(alpha_1 >= 0.0f && alpha_1 < 1.0f);
+
+    clock_ctx.now = 600u;   // stall continues for many more ticks' worth of elapsed time
+    const f32 alpha_2 = engine_frame(&f.e);
+    TL_EXPECT_EQ(f.e.last_steps, 0u);
+    TL_EXPECT_TRUE(alpha_2 >= 0.0f && alpha_2 < 1.0f);
+
+    // A modulus would put alpha_2 wherever ((600-90)/60) mod 1 tick lands - not equal to alpha_1
+    // in general. The clamp parks both at the same just-below-1.0 value regardless of how much
+    // further the stall runs.
+    TL_EXPECT_EQ(alpha_1, alpha_2);
+}
+
 TL_TEST(engine_barrier_order_event_and_command_visible_next_tick, "core,loop,barrier,fast") {
     EngineFixture f;
     TL_ASSERT_TRUE(engine_fixture_init(&f, 1u, nullptr));
@@ -172,6 +213,36 @@ TL_TEST(interp_pingpong_copies_current_into_prev, "core,loop,interp,fast") {
     TL_EXPECT_EQ(v->dy, 20);
 }
 
+// review round 2 defect 3: "the two columns of a pair are added/removed together" (this file's own
+// comment, the stated caller contract) bounds PRESENCE, not DENSE ORDER - column_remove is
+// swap-remove, so a column's dense order is a function of ITS OWN add/remove history. Two entities
+// added to the pair's columns in opposite order reproduce identical counts (main's
+// render/extract.cpp's only guard) while diverging per-index identity - exactly the shape that
+// would silently smear one entity's current pose against a different entity's previous one in a
+// dense-index consumer. interp_pingpong itself looks up by entity, so it does not corrupt its own
+// copy - but it is the one place that can see the divergence, so it must fail loudly here.
+TL_TEST_EXPECT_FATAL(interp_pingpong_dense_order_divergence_is_fatal, "core,loop,interp,fatal,fast") {
+    EngineFixture f;
+    TL_ASSERT_TRUE(engine_fixture_init(&f, 1u, nullptr));
+    world_register_component(&f.e.world, &WPos_info);
+    world_register_component(&f.e.world, &WVel_info);
+    world_build_schedule(&f.e.world);
+
+    const ComponentId pos_id = world_component_id<WPos>(&f.e.world);
+    const ComponentId vel_id = world_component_id<WVel>(&f.e.world);
+    interp_register_pair(&f.e, pos_id, vel_id);
+
+    Entity a = world_spawn(&f.e.world);
+    Entity b = world_spawn(&f.e.world);
+    world_add(&f.e.world, a, WPos{ 1, 1 });
+    world_add(&f.e.world, b, WPos{ 2, 2 });   // "current" dense order: a, b
+    world_add(&f.e.world, b, WVel{ 0, 0 });
+    world_add(&f.e.world, a, WVel{ 0, 0 });   // "prev" dense order: b, a - diverged from current
+    world_flush(&f.e.world);
+
+    interp_pingpong(&f.e.world, f.e.interp_pairs, f.e.interp_pair_count);   // must TL_FATAL: order mismatch at d=0
+}
+
 TL_TEST(interp_snap_entity_updates_one_entity_immediately, "core,loop,interp,snap,fast") {
     EngineFixture f;
     TL_ASSERT_TRUE(engine_fixture_init(&f, 1u, nullptr));
@@ -209,6 +280,82 @@ TL_TEST(interp_snap_entity_updates_one_entity_immediately, "core,loop,interp,sna
     TL_ASSERT_NOT_NULL(vb);
     TL_EXPECT_EQ(vb->dx, 0);
     TL_EXPECT_EQ(vb->dy, 0);
+}
+
+// review round 2 defect 8: docs/FRAME-LOOP.md §8.4's last row - "restore-then-retick reproduces
+// the hash trace" - had no test. tests/foundation/registry.test.cpp proves the arena mechanism
+// with a hand-rolled sim_step; nothing drove it through engine_tick_once, the actual barrier.
+TL_TEST(engine_restore_then_retick_reproduces_hash_trace, "core,loop,restore,determinism,fast") {
+    EngineFixture f;
+    TL_ASSERT_TRUE(engine_fixture_init(&f, 42u, nullptr));
+    world_register_component(&f.e.world, &WPos_info);
+    SystemDesc sd{};
+    sd.fn = sys_fold_input_into_wpos;
+    sd.label = "fold_input"_id;
+    sd.phase = PHASE_UPDATE;
+    sd.reads = Span<const ComponentId>{ nullptr, 0 };
+    sd.writes = Span<const ComponentId>{ nullptr, 0 };
+    sd.before = Span<const NameHash>{ nullptr, 0 };
+    sd.after = Span<const NameHash>{ nullptr, 0 };
+    sd.flags = 0;
+    world_register_system(&f.e.world, &sd);
+    world_build_schedule(&f.e.world);
+    registry_seal(&f.reg);   // registry_hash_all (recorder_tick's) requires it
+    Entity ent = world_spawn(&f.e.world);
+    world_add(&f.e.world, ent, WPos{ 0, 0 });
+    world_flush(&f.e.world);
+
+    VMemArena sp_arena;
+    TL_ASSERT_EQ(vmem_arena_init(&sp_arena, "loop.test.restore.sp"_id, 64u * 1024u, 0u, &f.api), ERR_OK);
+    ScriptProducer sp;
+    script_producer_init(&sp, &sp_arena, 8u, 0b1u);
+    script_hold(&sp, (ActionId)0u, 5, 0u, 10u, 0u);   // down (value 5) for every tick in [0, 10)
+
+    VMemArena ring_arena;
+    TL_ASSERT_EQ(vmem_arena_init(&ring_arena, "loop.test.restore.ring"_id, 32u * 1024u * 1024u, 0u, &f.api), ERR_OK);
+    SnapshotRing ring;   // ring_init reserves slot_cap_bytes * CONFIRMATION_HORIZON_TICKS (6) slots
+    TL_ASSERT_EQ(ring_init(&ring, 4u << 20, &ring_arena), ERR_OK);
+
+    VMemArena rec_arena;
+    TL_ASSERT_EQ(vmem_arena_init(&rec_arena, "loop.test.restore.rec"_id, 64u * 1024u, 0u, &f.api), ERR_OK);
+    Recorder rec;
+    u8 build_id[32] = {};
+    u8 fingerprint[32] = {};
+    recorder_init(&rec, &rec_arena, 32u, 0u, 42u, 1u, 0b1u, build_id, fingerprint);
+    recorder_attach(&f.e, &rec);   // attached once, before any tick - init-only door
+
+    u8 live_mask = 0u;
+    InputFrame captured[6][MAX_PEERS];   // ticks 4..9's frames, for the driver-fed re-tick below
+
+    for (u32 i = 0; i < 4u; ++i) {   // ticks 0..3: no snapshot yet
+        script_produce(&sp, f.e.world.state->tick, f.e.frames, &live_mask);
+        engine_tick_once(&f.e, f.e.frames);
+    }
+
+    Snapshot* snap = ring_push(&ring, f.e.world.state->tick);   // snapshot right at tick 4
+    TL_ASSERT_TRUE(snap != nullptr);
+    TL_ASSERT_EQ(registry_snapshot(&f.reg, snap, f.e.world.state->tick), ERR_OK);
+
+    for (u32 i = 0; i < 6u; ++i) {   // first run: ticks 4..9, via the producer
+        script_produce(&sp, f.e.world.state->tick, f.e.frames, &live_mask);
+        memcpy(captured[i], f.e.frames, sizeof(captured[i]));
+        engine_tick_once(&f.e, f.e.frames);
+    }
+    TL_ASSERT_EQ(rec.rows.count, 10u);
+
+    TL_ASSERT_EQ(registry_restore(&f.reg, snap), ERR_OK);
+    TL_ASSERT_EQ(f.e.world.state->tick, 4u);
+
+    // Second run: re-tick 4..9 with the frames captured above, fed directly - never re-querying
+    // the producer, matching FRAME-LOOP.md §8.3's own driver contract ("calls engine_tick_once for
+    // each tick up to the present with corrected frames - never from inside a system").
+    for (u32 i = 0; i < 6u; ++i) { engine_tick_once(&f.e, captured[i]); }
+    TL_ASSERT_EQ(rec.rows.count, 16u);
+
+    for (u32 i = 0; i < 6u; ++i) {
+        TL_EXPECT_EQ(rec.rows.data[10u + i].world_hash, rec.rows.data[4u + i].world_hash);
+        TL_EXPECT_EQ(memcmp(&rec.rows.data[10u + i].frames[0], &rec.rows.data[4u + i].frames[0], sizeof(InputFrame)), 0);
+    }
 }
 
 TL_TEST(engine_shutdown_releases_the_event_arena, "core,loop,shutdown,fast") {

@@ -38,6 +38,20 @@ TL_TEST(action_bind_stores_binding, "core,input,action_map,fast") {
     TL_EXPECT_EQ(array_at(&f.map.bindings, 0u).action, jump);
 }
 
+// review round 2 defect 9: `Binding b{}` (the idiom every axis test in this tree uses) leaves
+// `sensitivity` at 0.0f, and live.cpp's fold multiplies DEV_MOUSE_AXIS/DEV_PAD_AXIS's deadzoned
+// value by it - full stick or mouse deflection silently reads as neutral, with nothing to catch
+// it. Refused now, at bind time, rather than left as a trap only avoided because every existing
+// test happens to set it explicitly.
+TL_TEST_EXPECT_FATAL(action_bind_pad_axis_without_sensitivity_is_fatal, "core,input,action_map,fatal,fast") {
+    AmFixture f;
+    TL_ASSERT_TRUE(am_fixture_init(&f, 16u));
+    const ActionId look_x = action_register(&f.map, "look_x"_id, 0u, ACT_ANALOG, CLS_AXIS);
+    Binding b{};
+    b.action = look_x; b.dev = DEV_PAD_AXIS; b.code_neg = 0u; b.code_pos = 0u;   // no sensitivity set - stays 0.0f
+    action_bind(&f.map, b);   // must TL_FATAL
+}
+
 TL_TEST(fingerprint_changes_when_actions_change, "core,input,action_map,fingerprint,fast") {
     AmFixture a, b;
     TL_ASSERT_TRUE(am_fixture_init(&a, 4u));

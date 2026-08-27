@@ -71,26 +71,26 @@ f32 engine_frame(Engine* e) {
     e->last_steps = steps;
     // PRODUCE_WAIT breaks the loop above without consuming accumulator time, so accumulator can
     // still hold several whole ticks' worth of unconsumed time here (unboundedly, under a long
-    // stall) - alpha must stay in [0, 1) per loop.h's contract (docs/FRAME-LOOP.md section 0), so
-    // take only the fractional remainder past whatever whole ticks are stuck pending (a plain
-    // clamp to FIXED_DT_SECONDS instead of this would return exactly 1.0, not < 1.0, whenever the
-    // stall lands on a whole-tick multiple). Plain repeated subtraction, not a division + a
-    // multiply-back: a division's rounding is not guaranteed to invert exactly against
-    // FIXED_DT_SECONDS's own rounding (an off-by-one in the whole-tick count right at a
-    // boundary), and a subtraction has no multiply for the compiler to fuse into an FMA - unlike
-    // division, subtraction of the same constant is bit-identical on every CANON.md ISA under the
-    // standing -ffast-math-free, -ffp-contract-default flags (no adjacent multiply to fuse
-    // in this expression at all). Bounded in practice: WAIT is rare and adaptive delay keeps a
-    // stall short (NETCODE.md section 7.4); a few hundred iterations for a multi-second stall,
-    // once per rendered frame, is not a hot path.
-    f64 pending = e->accumulator;
-    while (pending >= FIXED_DT_SECONDS) { pending -= FIXED_DT_SECONDS; }
+    // stall). Review round 2 defect 2: the previous repeated-subtraction fix took accumulator MOD
+    // FIXED_DT_SECONDS, which is the wrong function on the path this exists for - during a stall
+    // the sim is frozen while accumulator keeps growing, so the modulus CYCLES: a full 0->1 alpha
+    // sawtooth at the render rate with every interpolated entity (and, since render2d merged,
+    // main's render/extract.cpp's camera) oscillating across a whole tick of motion, continuously,
+    // for the entire "waiting for players..." stall (NETCODE.md section 7.4). Clamping instead of
+    // taking the modulus parks alpha at (just below) 1.0 once accumulator exceeds one tick, holding
+    // entities at their last simulated pose rather than sweeping through one every render frame -
+    // this is what loop.h's [0, 1) contract is actually for. The "a plain clamp returns exactly
+    // 1.0" objection the previous fix cited is answered by capping just below the boundary: the
+    // largest finite f32 strictly less than 1.0.
+    const f64 pending = e->accumulator < FIXED_DT_SECONDS ? e->accumulator : FIXED_DT_SECONDS;
     f32 alpha = (f32)(pending / FIXED_DT_SECONDS);
-    // pending is strictly < FIXED_DT_SECONDS in f64, but the f64->f32 downcast has coarser
-    // precision near 1.0 (f32's ULP there is ~1.19e-7, f64's ~2.22e-16) - an f64 quotient closer
-    // to 1.0 than f32 can represent rounds UP to exactly 1.0f even though the f64 value was
-    // strictly less. Enforce the [0, 1) contract by construction rather than by argument.
-    if (alpha >= 1.0f) { alpha = 0.0f; }
+    // pending is strictly <= FIXED_DT_SECONDS by construction; the only way alpha reaches or
+    // exceeds 1.0f is a stall (pending == FIXED_DT_SECONDS exactly) or the f64->f32 downcast's
+    // coarser precision near 1.0 rounding a strictly-< 1.0 f64 quotient up to exactly 1.0f. Either
+    // way, [0, 1) is enforced by construction, and 0x1.fffffep-1f (nextafter(1.0f, 0.0f), the
+    // largest f32 below 1.0) - not 0.0f - is the correct fallback: 0.0f would map "one tick almost
+    // fully elapsed" to "no tick elapsed", a full-tick backward jump in the render pose.
+    if (alpha >= 1.0f) { alpha = 0x1.fffffep-1f; }
     e->last_alpha = alpha;
     run_phase(&e->world, PHASE_PRE_RENDER);
     run_phase(&e->world, PHASE_RENDER);

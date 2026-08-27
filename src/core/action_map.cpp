@@ -36,6 +36,14 @@ ActionId action_find(const ActionMap* m, NameHash name) {
 
 void action_bind(ActionMap* m, const Binding& b) {
     TL_CHECK(b.action < m->action_count);
+    // review round 2 defect 9: live.cpp's fold multiplies DEV_MOUSE_AXIS/DEV_PAD_AXIS's deadzoned
+    // value by `sensitivity` - a caller building `Binding b{}` (the idiom every test in this tree
+    // uses) leaves it at 0.0f, so full stick/mouse deflection silently reads as neutral, with no
+    // assert anywhere to catch it. DEV_KEYS_AXIS doesn't multiply by sensitivity at all (SOCD's
+    // direction is added raw), so it is not checked here.
+    if (b.dev == DEV_MOUSE_AXIS || b.dev == DEV_PAD_AXIS) {
+        TL_CHECK(b.sensitivity != 0.0f);
+    }
     array_push(&m->bindings, b);
 }
 

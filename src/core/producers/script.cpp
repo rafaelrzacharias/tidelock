@@ -38,6 +38,17 @@ void script_set(ScriptProducer* sp, ActionId action, i8 value, u64 tick, u8 slot
 ProduceResult script_produce(void* ctx, u64 tick, InputFrame* out, u8* live_mask) {
     ScriptProducer* sp = (ScriptProducer*)ctx;
 
+    // review round 2 defect 7: a re-run of an already-produced tick silently returned DIFFERENT
+    // data than the first call (a PRESS's one-tick pulse had already auto-cleared, so the second
+    // call reported AS_RELEASED where the first reported AS_DOWN|AS_PRESSED) - the rollback path
+    // (FRAME-LOOP.md §5/§8.3) explicitly re-runs already-produced ticks, and this is the producer
+    // whose entire job is reproducibility (CLAUDE.md: fail loudly, no silent fallbacks). Refuse the
+    // re-run outright, matching ReplayProducer's own `TL_CHECK(tick == base_tick + cursor)` refusal
+    // of the same shape, rather than silently returning stale/wrong data.
+    if (sp->produced_once != 0u) { TL_CHECK(tick > sp->last_tick); }
+    sp->produced_once = 1u;
+    sp->last_tick = tick;
+
     u8 prev_down[MAX_PEERS][MAX_ACTIONS];
     memcpy(prev_down, sp->down, sizeof(prev_down));
 

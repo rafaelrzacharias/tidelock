@@ -142,6 +142,36 @@ TL_TEST(recorder_tick_zeroes_frames_past_peer_count, "core,input,replay,recorder
     TL_EXPECT_EQ(memcmp(&rec.rows.data[0].frames[1], &zero, sizeof(InputFrame)), 0);
 }
 
+TL_TEST(recorder_tick_zeroes_non_live_frames_within_peer_count, "core,input,replay,recorder,fast") {
+    // Review round 2 defect 10: the same staleness round 1 fixed for slots >= peer_count also
+    // reaches WITHIN [0, peer_count) - a producer writes only its own live_mask slots (live.cpp,
+    // replay.cpp), so a peer_count slot outside live_mask still carries whatever an earlier tick
+    // left in Engine::frames. Inert while every consumer honours live_mask, but a full row
+    // byte-for-byte comparison (as INPUT.md §9.6's row requires) would see it.
+    WorldFixture* wf = wt_fixture(3);
+    TL_ASSERT_TRUE(world_fixture_init(wf, 1u));
+    world_fixture_register_std(wf);
+    world_build_schedule(&wf->w);
+    registry_seal(&wf->reg);
+
+    VMemArena rec_arena;
+    TL_ASSERT_EQ(vmem_arena_init(&rec_arena, "replay.test.zero2.rec"_id, 64u * 1024u, 0u, &wf->api), ERR_OK);
+    Recorder rec;
+    recorder_init(&rec, &rec_arena, 4u, 0u, 1u, 2u, 0b01u, g_build_id, g_fingerprint);   // peer_count = 2, only slot 0 live
+
+    InputFrame frames[MAX_PEERS];
+    for (u32 p = 0; p < MAX_PEERS; ++p) { frames[p] = input_zero_frame(); }
+    // Garbage in slot 1 - within peer_count, but NOT in live_mask (0b01 = only slot 0).
+    frames[1].tick = 999u;
+    frames[1].actions[0].value = (i8)-77;
+    frames[1].pointer_x = 12345;
+
+    recorder_tick(&rec, &wf->w, frames);
+
+    InputFrame zero = input_zero_frame();
+    TL_EXPECT_EQ(memcmp(&rec.rows.data[0].frames[1], &zero, sizeof(InputFrame)), 0);
+}
+
 TL_TEST(recorder_read_refuses_fingerprint_mismatch, "core,input,replay,recorder,fast") {
     WorldFixture* wf = wt_fixture(1);
     TL_ASSERT_TRUE(world_fixture_init(wf, 1u));
@@ -327,30 +357,63 @@ TL_TEST(record_replay_reproduces_identical_hash_trace, "core,input,replay,determ
         engine_tick_once(&a.e, a.e.frames);
     }
     TL_ASSERT_EQ(a.rec.rows.count, 12u);
-    // Input actually moved hashed state - a hash trace that never depended on input would pass
-    // the comparison below for the wrong reason.
+    // review round 2 defect 1: this NE check passes even with the fold system reduced to a no-op,
+    // because WorldTickState{tick,seed} lives in an ARENA_HASHED arena and row i's hash is already
+    // a function of tick == i alone - it does NOT prove input reached the sim. Replaced below with
+    // an exact-value pin on the folded state itself, which does. Kept as a documented non-guard,
+    // not deleted, so a future reader doesn't reintroduce it believing it discriminates.
     TL_EXPECT_NE(a.rec.rows.data[0].world_hash, a.rec.rows.data[11].world_hash);
 
-    // Pass B: a fresh Engine, same seed, driven by Replay over pass A's rows, its own recorder.
+    // The actual proof that input reached the sim: script_hold(value 3, ticks [2,8)) holds the
+    // action down for ticks 2,3,4,5,6,7 (HOLD_END at tick 8 clears it before that tick's frame is
+    // emitted - script.cpp's event loop applies every event with tick <= the current tick, in
+    // order, so HOLD_START then HOLD_END both fire on or before tick 8). That's 6 ticks * value 3
+    // folded into WPos.x by sys_fold_input_into_wpos every PHASE_UPDATE = 18. Severing
+    // `w->input = frames` (loop.cpp) or reducing the fold system to `x += 0` both leave WPos.x at
+    // its spawn value of 0, so this fails under either mutation where the NE guard above does not.
+    Span<WPos> a_pos = world_column<WPos>(&a.e.world);
+    TL_ASSERT_EQ(a_pos.count, 1u);
+    TL_EXPECT_EQ(a_pos.data[0].x, 18);
+
+    // Pass B: a fresh Engine, same seed, driven by Replay over pass A's rows - routed through
+    // recorder_write -> bytes -> recorder_read_body first, so the wire serialisation this lane
+    // ships (docs/DETERMINISM.md §9.2) is actually inside the record -> replay loop this test
+    // claims to cover (INPUT.md §9.6's row: "record -> replay -> frames identical, hashes
+    // identical"), not bypassed by handing ReplayProducer pass A's in-memory rows directly.
+    VMemArena buf_arena;
+    TL_ASSERT_EQ(vmem_arena_init(&buf_arena, "replay.test.det.buf"_id, 1024u * 1024u, 0u, &a.api), ERR_OK);
+    const u64 needed = recorder_bytes_needed(&a.rec);
+    u8* buf = (u8*)arena_push(&buf_arena, needed, 8u);
+    ByteWriter bw;
+    bw_init(&bw, buf, needed);
+    TL_ASSERT_EQ(recorder_write(&a.rec, &bw), needed);
+
+    ByteReader br;
+    br_init(&br, buf, needed);
+    RecordedInputHeader header{};
+    TL_ASSERT_EQ(recorder_read_header(&br, &header, g_fingerprint), ERR_OK);
+    TL_ASSERT_EQ(header.frame_count, a.rec.rows.count);
+    RecordedInputRow decoded_rows[12];
+    TL_ASSERT_EQ(recorder_read_body(&br, &header, decoded_rows), ERR_OK);
+
     ReplayEngineHalf b;
     TL_ASSERT_TRUE(replay_engine_half_init(&b, 1234u, "replay.test.det.b.scratch"_id, "replay.test.det.b.rec"_id));
 
-    RecordedInputHeader header{};
-    header.format_version = RECORDED_INPUT_FORMAT_VERSION;
-    header.base_tick = 0u;
-    header.frame_count = a.rec.rows.count;
-    header.peer_count = 1u;
-    header.live_mask = 0b1u;
     ReplayProducer rp;
-    replay_producer_init(&rp, &header, a.rec.rows.data);
+    replay_producer_init(&rp, &header, decoded_rows);
 
     while (replay_produce(&rp, b.e.world.state->tick, b.e.frames, &live_mask) != PRODUCE_WAIT) {
         engine_tick_once(&b.e, b.e.frames);
     }
     TL_ASSERT_EQ(b.rec.rows.count, a.rec.rows.count);
 
-    // The contract: replaying pass A's recorded frames through a fresh world reproduces the exact
-    // same per-tick frames and the exact same hash trace.
+    // Same pin on the replayed side: the folded state, not just the hash trace, reproduces.
+    Span<WPos> b_pos = world_column<WPos>(&b.e.world);
+    TL_ASSERT_EQ(b_pos.count, 1u);
+    TL_EXPECT_EQ(b_pos.data[0].x, 18);
+
+    // The contract: replaying pass A's recorded (and now wire-round-tripped) frames through a
+    // fresh world reproduces the exact same per-tick frames and the exact same hash trace.
     for (u32 i = 0; i < a.rec.rows.count; ++i) {
         TL_EXPECT_EQ(b.rec.rows.data[i].world_hash, a.rec.rows.data[i].world_hash);
         TL_EXPECT_EQ(memcmp(&b.rec.rows.data[i].frames[0], &a.rec.rows.data[i].frames[0], sizeof(InputFrame)), 0);

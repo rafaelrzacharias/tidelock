@@ -43,8 +43,10 @@ static_assert(sizeof(ScriptedEvent) == 16u, "docs/INPUT.md section 9.4, explicit
 struct ScriptProducer {
     Array<ScriptedEvent> events;   // sorted by tick (append-time TL_CHECK enforces it)
     u32 cursor;
+    u64 last_tick;                 // valid only once produced_once != 0 (review round 2 defect 7)
     u8  live_mask;                 // fixed at init (docs/INPUT.md §4)
-    u8  _pad0[3];
+    u8  produced_once;             // 0 until the first produce() call; guards last_tick's validity
+    u8  _pad0[2];
     i8  value[MAX_PEERS][MAX_ACTIONS];
     u8  down[MAX_PEERS][MAX_ACTIONS];
     u8  pending_release[MAX_PEERS][MAX_ACTIONS];   // PRESS's one-tick pulse bookkeeping

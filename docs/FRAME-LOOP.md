@@ -31,11 +31,17 @@ for (;;) {
         accumulator -= FIXED_DT_SECONDS; steps += 1;
     }
     if (steps == MAX_STEPS) accumulator = 0;                 // spiral-of-death cap: DROP time (slowdown, not spiral)
-    f64 pending = accumulator;                                // PRODUCE_WAIT can leave several whole ticks stuck in accumulator
-    while (pending >= FIXED_DT_SECONDS) pending -= FIXED_DT_SECONDS;  // fractional remainder only - subtraction, not a division:
-                                                               // no multiply for -ffp-contract to fuse into an FMA (cross-ISA bit divergence)
+    // PRODUCE_WAIT can leave several whole ticks stuck in accumulator. CLAMP to one tick, don't
+    // take the remainder - a modulus cycles for as long as the stall runs (the sim is frozen while
+    // accumulator keeps growing), a full 0→1 alpha sawtooth at the render rate. Clamping parks
+    // alpha at (just below) 1.0 once accumulator exceeds one tick, holding entities at their last
+    // simulated pose - the actual point of the [0, 1) contract during a stall (review round 2
+    // defect 2, w3-loop-input).
+    f64 pending = (accumulator < FIXED_DT_SECONDS) ? accumulator : FIXED_DT_SECONDS;
     f32 alpha = (f32)(pending / FIXED_DT_SECONDS);           // render-side float, fine
-    if (alpha >= 1.0f) alpha = 0.0f;                          // the f64->f32 downcast can still round exactly to 1.0 near the boundary
+    if (alpha >= 1.0f) alpha = 0x1.fffffep-1f;                // nextafter(1.0f, 0.0f): a stall, or the f64->f32
+                                                               // downcast rounding a strictly-<1.0 quotient up to 1.0f -
+                                                               // 0.0f would map "one tick almost elapsed" to "no tick elapsed"
     run_phases_render(&world, alpha);                        // PRE_RENDER, RENDER — reads sim, never writes
     render_present(&world);                                  // sort + batch + SDL present
     scratch_reset(&world.scratch_main);
@@ -102,7 +108,19 @@ concerns and never phases. The game runs identically regardless of host.
 
 1. Apply command buffers (chunk order) — the `GROWS_AT_BARRIER` window.
 2. Swap event buffers; clear the new write side (scratch reset covers it).
-3. Ping-pong `prev ← current` for every interpolated column (pointer swap, O(1)).
+3. Ping-pong `prev ← current` for every interpolated column (pointer swap, O(1)) — the stated
+   design intent, still reachable, not superseded. **Recorded deviation (2026-08-27, review round
+   2 defect 6):** the shipped mechanism (`core/interp.cpp`'s `interp_pingpong`, w3-loop-input) is a
+   per-entity `memcpy`, O(live entities in `current`'s column) per pair, not a pointer swap —
+   `core/loop.h`'s own contract block already states this cost honestly; this section didn't match
+   it, which is the bug this deviation note fixes (`CLAUDE.md`: a doc/code mismatch is a bug in
+   one of them). A true pointer/column swap needs the registry to own two physically
+   interchangeable buffers per interpolated column, which no lane has built; not this lane's to
+   design unilaterally (`CLAUDE.md` rule 8: one stable impl now, pulled in by a real consumer).
+   **RULED 2026-08-27 (Rafael, via the steward): the interp-pair contract is dense-order parity**
+   (`TODO.md` RR-28, ruling record) — `interp_pingpong` now `TL_CHECK`s it, which is what makes a
+   future pointer/column swap for this pair sound (a swap needs its two columns already in
+   lockstep dense order; the check is what would let render2d's `extract.cpp` trust that).
 4. Reset worker scratch.
 
 Snapshot push (for the rollback ring) happens in `LAST`, *before* this barrier, so a snapshot is

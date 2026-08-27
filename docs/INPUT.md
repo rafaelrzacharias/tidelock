@@ -211,10 +211,13 @@ struct ScriptedEvent { u64 tick; ActionId action; i8 value; u8 op /* SET, PRESS(
 struct ScriptProducer { Array<ScriptedEvent> events /* sorted by tick */; u32 cursor; ActionState cur[MAX_PEERS][MAX_ACTIONS]; };
 ```
 
-`produce(tick)`: apply all events with `event.tick == tick` (in array order) to `cur`, derive edges
-as in the fold, fill frames, `READY`. Tests build these with helpers `press(a, tick)`, `hold(a, v,
-from, to)`. `ReplayProducer` reads `RecordedInput` frames sequentially; `READY` until
-`frame_count`, then `WAIT` (the driver stops); it also exposes the recorded hashes to the harness.
+`produce(tick)`: apply all events with `event.tick <= tick` (in array order, cursor-advancing) to
+`cur`, derive edges as in the fold, fill frames, `READY` (review round 1 finding 3: `==` stranded
+every event from the first skipped tick onward permanently — a caller whose first produced tick
+isn't 0, or the rollback path re-driving an already-produced tick, needs `<=` to catch up rather
+than stall). Tests build these with helpers `press(a, tick)`, `hold(a, v, from, to)`.
+`ReplayProducer` reads `RecordedInput` frames sequentially; `READY` until `frame_count`, then
+`WAIT` (the driver stops); it also exposes the recorded hashes to the harness.
 
 ### 9.5 Recorder system (`LAST`, after checkpoint)
 

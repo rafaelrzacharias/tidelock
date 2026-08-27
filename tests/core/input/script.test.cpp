@@ -88,6 +88,21 @@ TL_TEST(script_produce_catches_up_a_skipped_tick, "core,input,script,fast") {
     TL_EXPECT_EQ(out[0].actions[4].value, (i8)1);
 }
 
+// review round 2 defect 7: a re-run of an already-produced tick used to silently return different
+// data than the first call - the rollback path (FRAME-LOOP.md §5/§8.3) explicitly re-runs
+// already-produced ticks, so a silent divergence here is a desync nobody can bisect. Refused now,
+// matching ReplayProducer's own re-run refusal.
+TL_TEST_EXPECT_FATAL(script_produce_rerun_same_tick_is_fatal, "core,input,script,fatal,fast") {
+    ScriptFixture f;
+    TL_ASSERT_TRUE(script_fixture_init(&f, 8u, 0b1u));
+    script_press(&f.sp, (ActionId)3u, 5u, 1, 0u);
+
+    InputFrame out[MAX_PEERS];
+    u8 live_mask = 0u;
+    TL_ASSERT_EQ(script_produce(&f.sp, 5u, out, &live_mask), PRODUCE_READY);
+    script_produce(&f.sp, 5u, out, &live_mask);   // must TL_FATAL: re-run of an already-produced tick
+}
+
 TL_TEST(script_multiple_slots_independent, "core,input,script,fast") {
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_init(&f, 8u, 0b11u));
