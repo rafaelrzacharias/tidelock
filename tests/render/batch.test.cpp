@@ -1,0 +1,328 @@
+// batch.test.cpp - docs/RENDER2D.md §9.6 radix_order, batch_boundaries.
+#include "runner/tl_test.h"
+#include "render/render_internal.h"
+#include "render_test_util.h"
+#include "foundation/sort.h"
+#include "foundation/vmem_test_api.h"
+#include "foundation/rng.h"
+#include "foundation/rng_systems.h"
+#include "foundation/bitset.h"
+#include "foundation/hash.h"
+#include <time.h>
+#include <math.h>
+
+template <typename K>
+static void ref_stable_insertion_sort(K* keys, u32* vals, u32 n) {
+    for (u32 i = 1; i < n; ++i) {
+        const K k = keys[i];
+        const u32 v = vals[i];
+        u32 j = i;
+        while (j > 0 && keys[j - 1] > k) { keys[j] = keys[j - 1]; vals[j] = vals[j - 1]; --j; }
+        keys[j] = k; vals[j] = v;
+    }
+}
+
+// docs/RENDER2D.md §9.6: "sorted ascending; equal keys keep submission order (ties at every
+// byte) over 1M random keys, checked against a naive stable-insertion-sort oracle on a 200-sample
+// slice; all-identical 1M keys unchanged; < 5000 ms". This is
+// sort_u64_kv (docs/CONTAINERS.md §4) exercised over render's own key format (key_pack) - the
+// containers lane's own suite (tests/foundation/sort.test.cpp) covers the primitive in general;
+// this is the render-scale/render-format instance §9.6 names explicitly. 1M-scale, so "slow"
+// tagged (docs/TESTING.md §6: PR lane runs --tag !slow) - same precedent as containers' own
+// sort_u32_kv_random_1m_vs_reference_sample.
+TL_TEST(radix_order, "render,slow") {
+    VMemApi api = test_vmem_api();
+    VMemArena data_arena{};
+    TL_ASSERT_EQ(vmem_arena_init(&data_arena, "test.render_radix_data"_id, 64ull * 1024 * 1024, 0, &api), ERR_OK);
+    Scratch s;
+    TL_ASSERT_EQ(scratch_init(&s, "test.render_radix_scratch"_id, 32ull * 1024 * 1024, &api), ERR_OK);
+
+    const u32 N = 1000000u;
+    u64* keys = (u64*)arena_push(&data_arena, (u64)N * sizeof(u64), alignof(u64));
+    u32* vals = (u32*)arena_push(&data_arena, (u64)N * sizeof(u32), alignof(u32));
+    u64* orig_keys = (u64*)arena_push(&data_arena, (u64)N * sizeof(u64), alignof(u64));
+    // A narrow (layer, depth, material) domain (4 * 1000 * 64 = 256,000 combos over 1M draws) -
+    // pigeonhole guarantees heavy duplication, so the stability check below (dup_runs > 0) is
+    // not vacuous (docs/LESSONS.md: "a seeded property test... COUNT what was tested").
+    for (u32 i = 0; i < N; ++i) {
+        const u8 layer = (u8)rng_below(rng_for(1u, 0u, RNG_SYS_LUAU_BASE, i, 0u), 4u);
+        const u32 depth = (u32)rng_below(rng_for(1u, 0u, RNG_SYS_LUAU_BASE, i, 1u), 1000u);
+        const u16 material = (u16)rng_below(rng_for(1u, 0u, RNG_SYS_LUAU_BASE, i, 2u), 64u);
+        const u64 k = key_pack(layer, 0, depth, material, 0);
+        keys[i] = k; orig_keys[i] = k; vals[i] = i;
+    }
+
+    // The sample oracle runs on a COPY of the first 200 original pairs, before the big sort
+    // (docs/LESSONS.md: "the reference implementation oracle has to consume the output under
+    // test" - both here read the SAME orig_keys sample, and the comparison is element-for-element).
+    const u32 SAMPLE = 200u;
+    u64 ref_k[SAMPLE]; u32 ref_v[SAMPLE]; u64 got_k[SAMPLE]; u32 got_v[SAMPLE];
+    for (u32 i = 0; i < SAMPLE; ++i) { ref_k[i] = orig_keys[i]; ref_v[i] = i; got_k[i] = orig_keys[i]; got_v[i] = i; }
+    ref_stable_insertion_sort<u64>(ref_k, ref_v, SAMPLE);
+    sort_u64_kv(got_k, got_v, SAMPLE, &s);
+    TL_EXPECT_SPAN_EQ(got_k, ref_k, SAMPLE);
+    TL_EXPECT_SPAN_EQ(got_v, ref_v, SAMPLE);   // stability included
+
+    const clock_t t0 = clock();
+    sort_u64_kv(keys, vals, N, &s);
+    const clock_t t1 = clock();
+    const f64 ms = (f64)(t1 - t0) * 1000.0 / (f64)CLOCKS_PER_SEC;
+    // Generous, non-strict smoke bound - WORKFLOW.md §4 owns real perf grading (the elected CI
+    // leg); this only catches a gross algorithmic regression (e.g. an accidental O(n^2)).
+    TL_EXPECT_LT(ms, 5000.0);
+
+    u32 dup_runs = 0;
+    for (u32 i = 1; i < N; ++i) {
+        TL_ASSERT_LE(keys[i - 1u], keys[i]);
+        if (keys[i] == keys[i - 1u]) { TL_ASSERT_TRUE(vals[i - 1u] < vals[i]); dup_runs += 1u; }
+    }
+    TL_EXPECT_TRUE(dup_runs > 0u);
+
+    VMemArena seen_arena{};
+    TL_ASSERT_EQ(vmem_arena_init(&seen_arena, "test.render_radix_seen"_id, 1ull * 1024 * 1024, 0, &api), ERR_OK);
+    Bitset seen;
+    bitset_init(&seen, &seen_arena, N);
+    for (u32 i = 0; i < N; ++i) {
+        TL_ASSERT_TRUE(vals[i] < N);
+        TL_ASSERT_FALSE(bitset_test(&seen, vals[i]));
+        bitset_set(&seen, vals[i]);
+    }
+    TL_EXPECT_EQ(bitset_popcount(&seen), N);
+    for (u32 i = 0; i < N; ++i) { TL_ASSERT_EQ(keys[i], orig_keys[vals[i]]); }
+
+    // all-identical 1M keys unchanged (every pass' histogram is single-bucket -> skipped).
+    u64* keys2 = (u64*)arena_push(&data_arena, (u64)N * sizeof(u64), alignof(u64));
+    u32* vals2 = (u32*)arena_push(&data_arena, (u64)N * sizeof(u32), alignof(u32));
+    const u64 same_key = key_pack(5, 0, 0, 7, 0);
+    for (u32 i = 0; i < N; ++i) { keys2[i] = same_key; vals2[i] = i; }
+    sort_u64_kv(keys2, vals2, N, &s);
+    for (u32 i = 0; i < N; ++i) {
+        TL_ASSERT_EQ(keys2[i], same_key);
+        TL_ASSERT_EQ(vals2[i], i);
+    }
+}
+
+static RenderQueue make_batch_queue(VMemArena* arena, u32 cap) {
+    RenderQueue q{};
+    array_init_fixed(&q.keys, arena, cap);
+    array_init_fixed(&q.data_index, arena, cap);
+    array_init_fixed(&q.clip_id, arena, cap);
+    array_init_fixed(&q.order, arena, cap);
+    array_init_fixed(&q.batches, arena, cap);
+    return q;
+}
+
+TL_TEST(batch_boundaries, "render") {
+    VMemApi api = test_vmem_api();
+    VMemArena arena{};
+    TL_ASSERT_EQ(vmem_arena_init(&arena, "test.render_batch_arena"_id, 4ull * 1024 * 1024, 0, &api), ERR_OK);
+    Scratch s;
+    TL_ASSERT_EQ(scratch_init(&s, "test.render_batch_scratch"_id, 1ull * 1024 * 1024, &api), ERR_OK);
+
+    // empty queue -> 0 batches.
+    {
+        RenderQueue q = make_batch_queue(&arena, 16);
+        render_sort_and_batch(&q, &s);
+        TL_EXPECT_EQ(q.batches.count, 0u);
+    }
+
+    // depth never splits a batch: two commands, same (tex, layer, blend, clip), submitted with
+    // depth in DESCENDING order so the sort must actually reorder them to prove it - if depth
+    // were (wrongly) a batch key they would land in two singleton batches regardless of order.
+    {
+        RenderQueue q = make_batch_queue(&arena, 16);
+        array_push(&q.keys, key_pack(0, 0, 200, 1, 0)); array_push(&q.clip_id, (u16)5); array_push(&q.data_index, 0u);
+        array_push(&q.keys, key_pack(0, 0, 100, 1, 0)); array_push(&q.clip_id, (u16)5); array_push(&q.data_index, 1u);
+        render_sort_and_batch(&q, &s);
+        TL_ASSERT_EQ(q.batches.count, 1u);
+        TL_EXPECT_EQ(q.batches.data[0].count, 2u);
+        TL_EXPECT_EQ(q.batches.data[0].tex, (u16)1);
+        TL_EXPECT_EQ(q.batches.data[0].clip, (u16)5);
+    }
+
+    // splits exactly on tex/clip/blend/layer changes: a base command plus four variants, each
+    // differing from the base in exactly one of the four dimensions, all at the SAME depth so
+    // depth cannot be the thing separating them. Submitted out of sorted order.
+    {
+        RenderQueue q = make_batch_queue(&arena, 16);
+        const u32 d = 100u;
+        // base: layer0 blend0 tex1 clip0
+        array_push(&q.keys, key_pack(0, 0, d, 1, 0)); array_push(&q.clip_id, (u16)0); array_push(&q.data_index, 0u);
+        // tex differs
+        array_push(&q.keys, key_pack(0, 0, d, 2, 0)); array_push(&q.clip_id, (u16)0); array_push(&q.data_index, 1u);
+        // clip differs
+        array_push(&q.keys, key_pack(0, 0, d, 1, 0)); array_push(&q.clip_id, (u16)1); array_push(&q.data_index, 2u);
+        // blend differs
+        array_push(&q.keys, key_pack(0, 1, d, 1, 0)); array_push(&q.clip_id, (u16)0); array_push(&q.data_index, 3u);
+        // layer differs
+        array_push(&q.keys, key_pack(1, 0, d, 1, 0)); array_push(&q.clip_id, (u16)0); array_push(&q.data_index, 4u);
+        const u32 n = q.keys.count;
+        render_sort_and_batch(&q, &s);
+        TL_EXPECT_EQ(q.batches.count, 5u);   // every one of the five is its own (tex,layer,blend,clip) combo
+        u32 sum = 0;
+        for (u32 i = 0; i < q.batches.count; ++i) { sum += q.batches.data[i].count; }
+        TL_EXPECT_EQ(sum, n);
+    }
+}
+
+static u32 g_texsize_calls = 0;
+static void counting_texture_size(void* ctx, TexHandle h, u16* w, u16* hh) {
+    (void)ctx; (void)h; g_texsize_calls += 1; *w = 64; *hh = 64;
+}
+
+// Review round 1 M1 (verified discriminating in round 3, A-3): render_emit_geometry hoists the
+// per-batch texture_size query above the per-command loop (batch.cpp) - the batch key already
+// fixes the texture for every command in the run, so the query is loop-invariant. Installs a
+// counting shim over the fixture's own platform (RenderQueue.platform is a caller-settable
+// `const PlatformApi*`, render.h - no platform/impl_headless/ change needed) and submits 8
+// commands sharing one (tex, layer, blend, clip) run, which render_sort_and_batch collapses into
+// exactly 1 batch.
+TL_TEST(texture_size_called_once_per_batch_not_per_command, "render") {
+    static RenderTestFixture f;
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
+    World* w = &f.world;
+    RenderQueue* q = w->render;
+
+    static PlatformApi shim;
+    shim = *f.platform;
+    shim.draw.texture_size = &counting_texture_size;
+    q->platform = &shim;
+
+    const TexHandle tex{ 1u };
+    for (u32 i = 0; i < 8u; ++i) {
+        const u32 d = render_push_data(w, (f32)i, 0.0f, 0.0f, 1.0f, 1.0f, Rect_u16{ 0, 0, 16, 16 }, 0xFFFFFFFFu, tex, DRAWFLAG_SCREEN_SPACE);
+        render_submit(w, DrawCommand{ key_pack(LAYER_UI, 0, 0, tex.bits, 0), d, 0, 0 });
+    }
+    render_sort_and_batch(q, w->scratch);
+    TL_ASSERT_EQ(q->batches.count, 1u);   // all 8 share (tex, layer, blend, clip) - one batch
+
+    g_texsize_calls = 0;
+    render_emit_geometry(q);
+    TL_EXPECT_EQ(g_texsize_calls, 1u);   // per BATCH, not per command
+
+    render_test_shutdown(&f);
+}
+
+// render_resolve_view (render_internal.h) asserted directly - review round 2 N3: the module's
+// WORLD-space path (the one place this matters) had no test at all before this round.
+TL_TEST(render_resolve_view_maps_sentinel_only, "render") {
+    RenderQueue q{};
+    q.layer_view[0] = 2u;
+    q.layer_view[1] = 0xFFu;
+    TL_EXPECT_EQ(render_resolve_view(&q, 0), (u8)2);
+    TL_EXPECT_EQ(render_resolve_view(&q, 1), (u8)0);   // only the sentinel maps to view 0
+}
+
+// Review round 2 N3: a WORLD-space command on a screen-composited layer (layer_view == 0xFF by
+// render_init default) is the module's main line per §7/§9.3.8, and round 1's D2 fix (the
+// TL_CHECK abort in rect_visible) had no test exercising it - every prior test used
+// RECT_SPACE_SCREEN. This reaches the queue at all only if render_resolve_view's 0xFF fallback
+// works; reverting it fatals here (round 2's own revert-test method).
+TL_TEST(world_space_ui_layer_reaches_the_queue, "render") {
+    static RenderTestFixture f;
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
+    World* w = &f.world;
+    w->render->view_world[0] = Rect_f32{ -1000.0f, -1000.0f, 2000.0f, 2000.0f };
+
+    render_draw_quad(w, LAYER_UI, 0, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, Rect_u16{ 0, 0, 16, 16 }, 0xFFFFFFFFu, TexHandle{}, 0);
+    TL_EXPECT_EQ(w->render->keys.count, 1u);
+    TL_EXPECT_EQ(w->render->stats_rejected, 0u);
+
+    render_test_shutdown(&f);
+}
+
+// Review round 1 M4 (verified discriminating in round 2): render_emit_geometry's pixel-snap check
+// reads q->pres[view], not q->pres[0] - Presentation is per-view (docs/RENDER2D.md §9.3.2,
+// MAX_VIEWS == 4). Routes LAYER_WORLD to view 1 with pres[1].pixel_snap = 1 while pres[0] (never
+// used by this command) stays at render_test_init's default 0 - if the emit code read pres[0] for
+// every view, this command would come out unsnapped.
+TL_TEST(pixel_snap_is_per_view_not_pres0, "render") {
+    static RenderTestFixture f;
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
+    World* w = &f.world;
+    RenderQueue* q = w->render;
+
+    q->layer_view[LAYER_WORLD] = 1u;
+    const Camera2D cam{ 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0, { 0, 0, 0 } };
+    q->view_mat[1] = view_matrix(cam, q->layout);
+    q->view_world[1] = Rect_f32{ -1000.0f, -1000.0f, 2000.0f, 2000.0f };
+    TL_ASSERT_EQ(q->pres[0].pixel_snap, (u8)0);   // render_test_init's default, restated for clarity
+    q->pres[1].pixel_snap = 1;
+
+    const f32 wx = 10.3f, wy = -4.7f;
+    render_draw_quad(w, LAYER_WORLD, 0, wx, wy, 0.0f, 0.0f, 0.0f, Rect_u16{ 0, 0, 16, 16 }, 0xFFFFFFFFu, TexHandle{}, 0);
+    TL_ASSERT_EQ(q->keys.count, 1u);
+
+    render_sort_and_batch(q, w->scratch);
+    render_emit_geometry(q);
+    TL_ASSERT_EQ(q->verts.count, 4u);
+
+    f32 ex, ey;
+    world_to_screen(q->view_mat[1], wx, wy, &ex, &ey);
+    const f32 expected_x = pixel_snap(ex);
+    const f32 expected_y = pixel_snap(ey);
+    TL_EXPECT_TRUE(expected_x != ex);   // the case is only meaningful if snapping actually moves it
+    for (u32 k = 0; k < 4u; ++k) {
+        TL_EXPECT_TRUE(fabsf(q->verts.data[k].x - expected_x) < 1e-4f);
+        TL_EXPECT_TRUE(fabsf(q->verts.data[k].y - expected_y) < 1e-4f);
+    }
+
+    render_test_shutdown(&f);
+}
+
+// Review round 2 N2 (verified discriminating in round 3, A-9): render_emit_geometry's own
+// TL_CHECK(view < MAX_VIEWS) had nothing pinning it - layer_view is public, caller-writable
+// RenderQueue state (render.h), and render_submit is the raw primitive that "never rejects,
+// validates nothing" (docs/RENDER2D.md §9.3.4), so an out-of-range (non-0xFF) layer_view value
+// reaches render_emit_geometry unguarded by rect_visible's own check.
+TL_TEST_EXPECT_FATAL(emit_out_of_range_view_fatals, "render,fatal") {
+    (void)t;
+    static RenderTestFixture f;
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
+    World* w = &f.world;
+    RenderQueue* q = w->render;
+
+    q->layer_view[LAYER_UI] = 9u;   // out of range, not the 0xFF screen-space sentinel
+    const u32 d = render_push_data(w, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, Rect_u16{ 0, 0, 16, 16 }, 0xFFFFFFFFu, TexHandle{}, 0);
+    render_submit(w, DrawCommand{ key_pack(LAYER_UI, 0, 0, 0, 0), d, 0, 0 });   // never rejects
+    render_sort_and_batch(q, w->scratch);
+    render_emit_geometry(q);   // view == 9 -> TL_FATAL
+    render_test_shutdown(&f);
+}
+
+// Review round 2 N3: render_emit_geometry's world-space branch (batch.cpp) was equally untested -
+// round 1's D3 fix (the view_mat[255] OOB read) had no discriminating test either. Poisons views
+// 1-3 with NaN so a wrong index reads garbage, not a coincidentally-plausible zero matrix, then
+// checks the emitted quad's vertices against view_mat[0]'s own projection exactly (sx = sy = 0
+// collapses all four corners onto the centre, so no hand-rotated-corner math is needed).
+TL_TEST(world_space_debug_layer_uses_view0_not_poisoned_slots, "render") {
+    static RenderTestFixture f;
+    TL_ASSERT_EQ(render_test_init(&f, 0, 0), ERR_OK);
+    World* w = &f.world;
+    RenderQueue* q = w->render;
+
+    for (u32 v = 1; v < MAX_VIEWS; ++v) {
+        for (u32 i = 0; i < 9u; ++i) { q->view_mat[v].m[i] = NAN; }
+    }
+    const Camera2D cam{ 10.0f, -5.0f, 2.0f, 0.0f, 16.0f, 0, { 0, 0, 0 } };
+    q->view_mat[0] = view_matrix(cam, q->layout);
+    q->view_world[0] = Rect_f32{ -1000.0f, -1000.0f, 2000.0f, 2000.0f };
+
+    // LAYER_DEBUG's layer_view is 0xFF by render_init default - the fallback must resolve to
+    // view 0, never index into a poisoned slot.
+    render_draw_quad(w, LAYER_DEBUG, 0, 3.0f, 4.0f, 0.0f, 0.0f, 0.0f, Rect_u16{ 0, 0, 16, 16 }, 0xFFFFFFFFu, TexHandle{}, 0);
+    TL_ASSERT_EQ(q->keys.count, 1u);
+
+    render_sort_and_batch(q, w->scratch);
+    render_emit_geometry(q);
+    TL_ASSERT_EQ(q->verts.count, 4u);
+
+    f32 ex, ey;
+    world_to_screen(q->view_mat[0], 3.0f, 4.0f, &ex, &ey);
+    for (u32 k = 0; k < 4u; ++k) {
+        TL_EXPECT_TRUE(fabsf(q->verts.data[k].x - ex) < 1e-4f);
+        TL_EXPECT_TRUE(fabsf(q->verts.data[k].y - ey) < 1e-4f);
+    }
+
+    render_test_shutdown(&f);
+}

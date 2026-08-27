@@ -51,7 +51,6 @@ W3   +-* alloy-solver     (gate0 verdict, alloy-substrate)   pass 3 promoted fro
      +-- editor           (ecs, render2d, vendor)            inspector, console, log, profiler panels
      +-- net-p2           (net-p1, platform, producer seam)  ENet, sequencer, NetworkProducer
      +-- alloy-fields | alloy-liquids-gases | alloy-chemistry   (alloy-substrate) - 3 lanes
-     +-- save             (ecs encoder)
 
 W4   +-* v0-integration   (loop, render2d, luau, assets, editor)   app/wiring.cpp, moving sprite - ONE lane
      +-- hovel-A          (net-p2, loop, mem registry)              3 machines, integer lockstep
@@ -142,3 +141,7 @@ are merged; it never starts a lane from the next wave.
 
 *Rev 1 — 2026-08-22. Revise at each wave boundary: record what actually ran in parallel and what
 blocked, one line per lane, so the next wave's cut is measured, not guessed.*
+*§1 amended 2026-08-27 (ruled, Rafael): the W3 `save (ecs encoder)` node is deleted from the
+graph. It had no §2 row, and §2's **assets+data** row already owns "save v1" — which that lane
+built (`src/core/save.*`, the REFLECTED + `ECS_COLUMN` encoder, PR #14). The node was stale, not
+an unscoped lane; §2's table is the authority on which lanes exist.*
