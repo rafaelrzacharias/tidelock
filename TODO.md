@@ -6245,3 +6245,70 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > `rng_systems.h` as created but it already exists" — as stated that was wrong; §14.1 specifies a
 > *sim* header distinct from foundation's. Reading §14.1 turned a wrong flag into RR-46, which is
 > the real defect underneath it.
+
+> **SWEEP RECEIPTS AND RULING-ID ALLOCATION (steward, 2026-08-27 ~23:45 local).** Areas A and B
+> have reported *fix first*; C is still running. **Their full findings live on `w3-sweep-a` /
+> `w3-sweep-b` and merge in with those branches — this entry ROUTES and ALLOCATES, it does not
+> restate them** (one fact, one home). All three reviewers correctly declined to allocate ruling
+> ids; the steward allocates.
+>
+> **Three source claims of B's were re-verified by the steward before acceptance** — a reviewer's
+> claim is evidence, not a verdict. `registry_hash_all` does hash `[base, used)`
+> (`arena_registry.cpp:87`); `SAVE_ENC_REFLECTED` does write a literal `1u`
+> (`save.cpp:101`, apply at `:295` is a single `memcpy` of `info->size`); and the doc
+> contradiction is verbatim and direct — `ASSETS-AND-DATA.md:130` routes lockstep rejoin across
+> builds through the **save** path, while `save.h:19` says a save is "not part of the deterministic
+> sim path". A's D3 was likewise re-run in both directions before acceptance.
+>
+> **RR-48 (steward-allocated) — is a save a lockstep artifact or not? The two homes disagree, and
+> the answer decides whether B-1 is a defect or a doc bug.** B measured that a world restored from
+> a save does not reproduce the world hash it was saved at, because the hashed extent is the
+> arena's `used` high-water — a function of add/remove HISTORY — while the save restores CONTENT.
+> Two peers with identical logical state hash differently if one arrived via a save. **Bounded
+> honestly by the reviewer and that bounding is load-bearing: the documented same-world path is
+> CLEAN, and no netcode consumer of `save_read` exists yet, so this is not a live desync today.**
+> It becomes one the moment `NETCODE.md` §11's rejoin is built on the clause that is currently
+> written. Three fix directions are on `w3-sweep-b`, and choosing between them is a ruling, not a
+> patch: (a) rule that a save is not a lockstep artifact and delete §5's rejoin clause; (b) have
+> the load path re-establish the extent; (c) hash `[base, base+count*stride)` for column arenas.
+> **For Rafael. This is the one I would put first**, because `alloy-substrate` registers nineteen
+> arenas into the same hashed set and the answer changes what its pools must guarantee.
+>
+> **RR-49 (steward-allocated) — is `SAVE_ENC_REFLECTED` singleton-only?** It saves exactly one row
+> and returns `ERR_OK` for a 3-row descriptor, losing rows silently — against `ASSETS-AND-DATA.md`
+> §5's own "no silent partial loads" and `CLAUDE.md`'s no-silent-fallbacks rule. Latent (the
+> reviewer confirmed by reading `world.cpp:41-115` that every registered arena today is a column or
+> a singleton), and ranked ship-blocking anyway because **the first consumer will be
+> `alloy-substrate`'s pools** — the exact case `save.h` says REFLECTED is for. Either
+> `TL_CHECK(max_rows == 1u)` or pass `max_rows` through and loop the apply; that choice is the
+> ruling.
+>
+> **RR-50 (steward-allocated) — `docaudit`'s constant pin binds doc↔tool and never reaches a C++
+> header.** A verified in both directions: setting the header to 512 with `CANON.md` at 4096 passes
+> green; setting `CANON.md` to 512 fails. `grep -rn "static_assert.*MAX_ARENAS" src/ tests/` finds
+> nothing, so the compiler is not checking it either — against `LESSONS.md`'s own standing rule that
+> a raw value in a doc is a claim until a `static_assert` has seen it. The narrow fix
+> (one `static_assert`) leaves the hole open for every other `CANON.md` constant with a C++ home;
+> the general fix extends `docaudit`'s constant pass over the headers CANON names. **`tools/docaudit/`
+> is nobody's cone (`WORKFLOW.md` §7), so this cannot be picked up by a lane in passing** — it
+> belongs with the RR-44 and RR-45 gate work in one `tools/` slice.
+>
+> **Defects needing an OWNER rather than a ruling — and every one lands in a merged-and-closed
+> lane's cone, which takes the ownership problem to TEN instances.** A's D1 (`w2-net-close`
+> re-broke a regression row so it pins nothing — third occurrence of that class in that one file,
+> and the commit DELETED the comment recording the previous fix for the identical trap), D2 (the
+> `MAX_ARENAS` raise cut the Windows stack margin to ~28 %, measured with a `ulimit -s` ladder:
+> the suite needs 720–736 KB against Windows' 1 MB), D5 and D6; B's B-2 fix. D1 and D2 are in
+> `src/net/` and `tests/foundation/` — net-p1 and mem, both closed — and **both defective commits
+> were STEWARD-authored**, which is the cleanest argument yet that this class is the steward's to
+> fix rather than a lane's to inherit. Item 5 of the ranked queue is no longer a tidy-up.
+>
+> **A finding worth keeping even though it is not a defect: the steward's own briefed hypothesis
+> was DISPROVED, correctly.** Area A was asked whether the new format bounds got a mutation-fuzz
+> row "or only hand-forged fixtures", treating hand-forged as the weaker instrument. A showed the
+> fuzz property is "refused OR re-encodes identically", so a rule that only ADDS refusals moves
+> cases between two passing branches and a re-encode fuzz is *structurally incapable* of grading
+> it — hand-forged rows are the correct instrument, and `LESSONS.md`'s "write the fuzz for every
+> format you hash" is not violated by their absence. That makes D1 worse, not better: the
+> hand-forged rows are load-bearing with nothing beneath them. **A brief's hypothesis is a lead,
+> not a finding, and a reviewer that refutes one is doing the job.**
