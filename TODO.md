@@ -5418,3 +5418,66 @@ fresh-context adversarial review confirms the whole v0 criterion, per the stewar
 instruction, not just the panel count. Console's cvar UI and Luau REPL hand-off, and Inspector's
 fx/handle edit widgets, remain the deferrals already recorded above — still open, not silently
 closed by reaching six-of-six panels.
+
+### Ruling request: `keyframes.cpp`'s seek algorithm cannot reproduce an inspector edit — a real gap, not a v0 scoping choice
+
+Researched `TOOLING.md` §9.6 build order item 7 (`keyframes.cpp` + Replay panel, the next item
+after all six v0 panels) before writing any code, per this lane's own slice-brief discipline. Most
+of it is buildable in-cone today: `foundation/ring.h`'s real `RingBuffer<T>`, `foundation/
+snapshot.h`'s real `Snapshot`/`registry_snapshot`/`registry_restore` (the per-slot budget is a
+real runtime formula — `ring_init`'s own `slot_cap_bytes` parameter, "T-A-03 replaces the guess" —
+not a hardcoded worst case), and `core/producers/replay.h`'s real, already-tested
+`ReplayProducer` (`cursor` is a public field, matching §9.3.10's "set the cursor to
+`kf.input_offset`"). `core/loop.cpp`'s `engine_tick_once` is real (not a stub) and already calls
+`core/recorder.cpp`'s `recorder_tick` every tick, which already computes and stores `{InputFrame
+per peer, world_hash}` per row (`RecordedInputRow`) — this is the "recorder appends... world hash"
+half of §9.3.10 verbatim, already built and tested by the **loop+input** lane (`core/recorder.h`'s
+own contract block: "any producer's output can be recorded... replaying it through the Replay
+producer and comparing the hash trace IS the determinism test"). None of this needed inventing;
+tests can drive `engine_tick_once` directly the way `tests/core/loop.test.cpp` already does, with
+no live production loop required (`app/wiring.cpp`, `W4`, still not built, is only needed for a
+REAL dev session to record itself — `editor_frame` is already stubbed pending the same `app/`/
+`platform/` wiring, so this is not a new blocker, just the existing one).
+
+**The actual gap**: `core/recorder.h`'s own contract block is explicit that the format records
+ONLY `{frames, world_hash}` — no commands. `editor/inspector.cpp`'s edits reach sim state through
+`world_set_field_cmd` (`CMD_SET_FIELD`), a command applied at the barrier, NOT an `InputFrame` —
+it is never written to `RecordedInputRow` at all. §9.3.10's seek algorithm restores the nearest
+keyframe's `Snapshot`, then re-simulates forward by feeding the `ReplayProducer` the RECORDED
+`InputFrame`s for the intervening ticks, and asserts `TL_CHECK(world_hash(T) == recorded hash)`.
+If an inspector edit happened between keyframe N and tick T, re-sim from keyframe N replays only
+inputs — never the edit — so the re-simmed world at T does NOT contain the edit, and its hash
+provably differs from the ORIGINAL run's recorded hash at T (which DID include the edit's effect).
+That is not a corner case this lane could scope around: `TL_CHECK(world_hash(T) == recorded hash)`
+would fire on essentially any scrub that crosses an inspector edit, for every world built once this
+panel exists — a real correctness defect in the spec as literally written, discovered before
+writing any of it, not after.
+
+This directly collides with `TOOLING.md` §9.6's own v0 done criterion: **"an edit in the inspector
+appears in the replay log."** Two readings, and the right build depends on which one is meant:
+1. **Strong reading** (scrub past an edit and it holds): requires `RecordedInputRow` (or a sibling
+   record) to ALSO capture commands issued between ticks, not just `InputFrame`s — a schema change
+   to `core/recorder.h`/`.cpp`, the **loop+input** lane's own file (`ROADMAP.md` §2, `W3`, PR #15,
+   already merged), squarely outside editor's cone (`ROADMAP.md` §0 rule 2) and a real design
+   decision (what a "command log" entry looks like, ordering vs. inputs, wire-format/version
+   implications for `RecordedInput` files already on disk) — not a fix this lane can make
+   unilaterally the way the `log.cpp`/`prof.cpp`/`probe.cpp` promotions were ruled in (those were
+   one-line, no-interface-change bug fixes; this is a new capability with cross-lane format
+   implications).
+2. **Weak reading** (the edit is visible in the LIVE session, immediately, before any scrub — which
+   is already true today: `world_set_field_cmd` applies at the very next barrier, and every panel
+   already reads live `World` state): needs no recorder change at all, and this lane can build
+   `keyframes.cpp`/the Replay panel exactly as specified today, with a v0 scope note that a scrub
+   crossing an inspector edit is a KNOWN, documented gap (the edit's effect is lost on re-sim,
+   `TL_CHECK` fires or the state silently reverts, depending on how loosely v0 chooses to guard it)
+   until reading 1's cross-lane schema change lands.
+
+**What needs ruling:** which reading is the v0 done criterion, and if reading 1, is the schema
+change scoped now (this lane files a cross-lane request against loop+input's merged files) or
+deferred to a later wave with reading 2 shipped as v0's honest, documented limit? Stopped here per
+`CLAUDE.md`'s slice-brief step 6 ("what would be wrong in the big picture if this slice were built
+as literally specified... stop and file a ruling request — do not build the narrow slice") rather
+than guessing past a determinism-relevant correctness gap. `core/recorder.cpp`/`.h`,
+`core/producers/replay.h`/`.cpp`, `core/loop.cpp`/`.h`, `foundation/snapshot.h`/`.cpp`,
+`foundation/ring.h` all read directly (file:line) to confirm this, not inferred from `TOOLING.md`'s
+own pseudocode, which is known (this session, repeatedly) to predate several reconciliations.
