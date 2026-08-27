@@ -75,6 +75,25 @@ TL_TEST(console_register_and_find, "core,editor,console,fast") {
 #endif
 }
 
+// B-5: dispatch/completion go through `sorted` by NAME, never `key` (console_find's own binary
+// search) - console_register still computes `key` from `name` for any future reader, so a caller
+// that leaves it zero-initialized (unlike this file's own cmd_echo/cmd_noop helpers, which happen
+// to set it correctly already) gets a real value, not a stale 0.
+TL_TEST(console_register_computes_key_from_name, "core,editor,console,fast") {
+#if TL_DEV
+    ConsoleState cs;
+    console_init(&cs);
+    ConsoleCmd c{};   // key left at its zero-init value
+    c.name = "ping"; c.usage = "ping"; c.fn = fn_noop;
+    console_register(&cs, &c);
+    const ConsoleCmd* found = console_find(&cs, sv_lit("ping"));
+    TL_ASSERT_NOT_NULL(found);
+    TL_EXPECT_EQ(found->key, fnv1a64("ping", strlen("ping")));
+#else
+    TL_CONSOLE_SKIP;
+#endif
+}
+
 TL_TEST(console_sorted_index_is_bytewise_ascending, "core,editor,console,fast") {
 #if TL_DEV
     ConsoleState cs;

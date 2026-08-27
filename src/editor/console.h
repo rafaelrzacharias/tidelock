@@ -4,18 +4,26 @@
 //
 // Spec: docs/TOOLING.md §3 (design), §9.2 (ConsoleCmd, this header's struct), §9.3.5 (tokenizer/
 //   dispatch/completion algorithm); docs/CPP-SUBSET.md §3 (Result<T>/ErrCode).
-// Purpose: `console_register("spawn", fn, "spawn <name> <x> <y>", arg_hints)` builds a name-
-//   sorted command table; `console_exec` tokenizes one line and dispatches it. Every
+// Purpose: `ConsoleCmd cmd{}; cmd.name = "spawn"; cmd.usage = "spawn <name> <x> <y>"; cmd.fn = fn;
+//   console_register(&state, &cmd);` builds a name-sorted command table (corrected 2026-08-27,
+//   B-7 - the four-argument call this comment used to show does not exist; the real signature is
+//   `console_register(ConsoleState*, const ConsoleCmd*)`); `console_exec` tokenizes one line and
+//   dispatches it. Every
 //   sim-affecting command is refused outright in a lockstep session (the caller states whether
 //   one is live via `console_exec`'s `lockstep` parameter - this module has no session concept
 //   of its own, matching cvar.h's caller-owned shape).
-// Invariants: `CONSOLE_TABLE_CAP` (512) live commands, keyed by name hash, duplicate registration
-//   is TL_FATAL (matching cvar_register/TL_COMPONENT's precedent - init-time misconfiguration).
-//   `sorted` is a name-BYTEWISE-ascending index over `cmds` (insertion sort at register time, not
-//   perf-sensitive) - completion (docs/TOOLING.md §9.3.5) walks a `lower_bound` prefix range over
-//   it; dispatch itself looks up by NAME HASH (a separate, unordered scan - CONSOLE_TABLE_CAP is
-//   512, so a linear scan is cheap and this module has no Map<K,V> dependency to keep it caller-
-//   owned/self-contained like cvar.h). Tokenizer: ASCII space/tab split; a `"`-quoted token keeps
+// Invariants: `CONSOLE_TABLE_CAP` (512) live commands, keyed by NAME (bytewise), duplicate
+//   registration is TL_FATAL (matching cvar_register/TL_COMPONENT's precedent - init-time
+//   misconfiguration). `sorted` is a name-BYTEWISE-ascending index over `cmds` (insertion sort at
+//   register time, not perf-sensitive) - completion (docs/TOOLING.md §9.3.5) walks a `lower_bound`
+//   prefix range over it; dispatch ALSO looks up through `sorted` (console_find's own binary
+//   search over the same index, by name - console_find's own comment) - corrected 2026-08-27
+//   (B-5): earlier revisions of this block, docs/TOOLING.md §9.3.5, and this file's own top
+//   comment all described dispatch as a separate name-HASH lookup (a linear scan or a `SortedMap`,
+//   depending which of the three you read); none of that was ever built. The binary search over
+//   `sorted` this module already had for completion turned out to serve dispatch too, with no
+//   hash, no collision class, and no second index to keep in sync - `ConsoleCmd::key` (below)
+//   exists but `console_find` never reads it. Tokenizer: ASCII space/tab split; a `"`-quoted token keeps
 //   spaces and honours `\"`/`\\`; `#` starts a comment (rest of the line dropped); max
 //   `CONSOLE_MAX_TOKENS` (16) tokens; an unterminated quote is a syntax error. History is a fixed
 //   64-line ring (`char[64][CONSOLE_LINE_CAP]`), not a `RingBuffer<T>` (no VMemArena dependency -
@@ -80,7 +88,10 @@ typedef Result<u32> (*ConsoleFn)(World* w, u32 argc, const StrView* argv, Span<c
 // exists yet, docs/LUAU-LAYER.md's binding layer is a different, not-yet-built lane; a call
 // through them is unreachable today, not merely untested).
 struct ConsoleCmd {
-    NameHash    key;
+    NameHash    key;            // computed from `name` by console_register (B-5, 2026-08-27) - a
+                                 // caller may leave this 0, or supply the same value itself (both
+                                 // TL_CHECK-agree if non-zero); dispatch/completion never read it,
+                                 // both go through `sorted`'s bytewise name search instead
     const char* name;
     const char* usage;
     ConsoleFn   fn;
@@ -91,8 +102,9 @@ struct ConsoleCmd {
     u32         lua_ref;
 };
 
-// docs/TOOLING.md §9.3.5: a name-sorted (bytewise) index over `cmds` for completion; dispatch
-// looks up by name hash via a linear scan (this header's contract block explains why). History
+// docs/TOOLING.md §9.3.5 (deviation recorded there, B-5): a name-sorted (bytewise) index over
+// `cmds`, used for BOTH completion (a prefix walk) and dispatch (console_find's own binary
+// search) - this header's contract block explains why no separate hash lookup exists. History
 // is a fixed ring; `hist_head` is the NEXT write slot, `hist_count` caps at CONSOLE_HISTORY_CAP.
 struct ConsoleState {
     ConsoleCmd cmds[CONSOLE_TABLE_CAP];
@@ -107,8 +119,9 @@ void console_init(ConsoleState* s);
 
 // Registers `cmd` (copied by value - the caller's `ConsoleCmd` need not outlive the call, unlike
 // cvar.h's CvarDesc-by-pointer shape, since ConsoleCmd carries no per-instance mutable state to
-// alias). TL_FATAL: table full, duplicate name hash (registration-time misconfiguration, matching
-// cvar_register's precedent).
+// alias). Computes `cmd->key` from `cmd->name` (ConsoleCmd::key's own comment) - TL_CHECK if the
+// caller supplied a non-zero key that disagrees. TL_FATAL: table full, duplicate NAME
+// (registration-time misconfiguration, matching cvar_register's precedent).
 void console_register(ConsoleState* s, const ConsoleCmd* cmd);
 
 // Binary search on `sorted` (bytewise name order) for an exact name match. Null when unknown.
@@ -164,8 +177,13 @@ void console_panel_register(Editor* ed);
 // separate console_panel.cpp - docs/TOOLING.md §9.1's file table). History (oldest to newest),
 // the most recent reply/error, then a live input line; Enter dispatches through `console_exec`
 // with `lockstep = false` - no netcode/Hovel session exists yet to ask (TODO.md: the real
-// lockstep source is a follow-up once that lands, not invented here). "cvar UI"/"Luau REPL
-// hand-off" (this header's Purpose note, `TOOLING.md` §9.1's same row) are NOT built by this
-// function - cvar UI is its own real feature, not yet scoped; the Luau binding layer this needs
-// does not exist (`docs/LUAU-LAYER.md`, a different lane).
+// lockstep source is a follow-up once that lands, not invented here). NOT built by this function
+// (list corrected 2026-08-27, B-7 - two real gaps this comment used to omit): "cvar UI"/"Luau
+// REPL hand-off" (this header's Purpose note, `TOOLING.md` §9.1's same row) - cvar UI is its own
+// real feature, not yet scoped; the Luau binding layer this needs does not exist
+// (`docs/LUAU-LAYER.md`, a different lane). Tab COMPLETION - `console_complete` exists, is well
+// tested, and is never called from this function; no Tab handling exists in the panel at all.
+// HISTORY WALK (`TOOLING.md` §9.3.5: "History: a 64-line ring... ↑/↓ walks it") - history renders
+// as a static list; ↑/↓ binds no keys and `console_history_at` is called only for display, never
+// to populate the input line.
 void console_panel_draw(Editor* ed, World* w);

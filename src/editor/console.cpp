@@ -1,5 +1,6 @@
-// console.h - tokenizer, registration (name-sorted index, linear-scan dispatch lookup),
-// completion, history, and the Console panel's draw_fn. Spec: docs/TOOLING.md §3, §9.2, §9.3.5.
+// console.h - tokenizer, registration (name-sorted index, binary-search dispatch lookup by
+// NAME - console_find's own comment; corrected 2026-08-27, B-5), completion, history, and the
+// Console panel's draw_fn. Spec: docs/TOOLING.md §3, §9.2, §9.3.5.
 #include "editor/console.h"
 #include "editor/editor.h"
 
@@ -40,6 +41,12 @@ void console_register(ConsoleState* s, const ConsoleCmd* cmd) {
 
     const u32 idx = s->count;
     s->cmds[idx] = *cmd;
+    const NameHash key = fnv1a64(cmd->name, strlen(cmd->name));
+    // A caller that leaves `key` zero gets it computed here; one that populates it must agree -
+    // console_find never reads it (B-5, 2026-08-27: dispatch is by name, not by hash), but a
+    // silently-wrong key would still be a real registration bug the day something DOES read it.
+    TL_CHECK(cmd->key == 0u || cmd->key == key);
+    s->cmds[idx].key = key;
 
     u32 pos = s->count;
     for (u32 i = 0; i < s->count; ++i) {
