@@ -17,12 +17,16 @@
 //   platform is set (a null-platform caller has no real-time frame to drive and should call
 //   `engine_tick_once` directly instead).
 // Interpolation (docs/FRAME-LOOP.md §4) is GENERIC by design: the concrete columns
-//   (Transform/TransformPrev, Camera2D) are render2d's deliverables and do not exist anywhere in
-//   the tree yet (checked at slice-brief time) - hardcoding a component name that does not exist
-//   would not compile, and the alternative (a new ComponentInfo flag in reflect.h) touches a file
-//   this lane does not own (docs/WORKFLOW.md cone discipline). `interp_register_pair` is the
-//   registration seam a future consumer calls once its columns exist; filed as a ruling request
-//   in TODO.md for confirmation/extension. The same TODO entry covers PRE_RENDER's `alpha` reach:
+//   (Transform/TransformPrev) are render2d's deliverables and do not exist anywhere in the tree
+//   yet (checked at slice-brief time) - hardcoding a component name that does not exist would not
+//   compile, and the alternative (a new ComponentInfo flag in reflect.h) touches a file this lane
+//   does not own (docs/WORKFLOW.md cone discipline). Camera state is NOT an interp-pingponged ECS
+//   column: Rafael's D1 ruling (render2d lane, 2026-08-27) took Camera2D/CameraPrev/CameraFollow
+//   off the ECS entirely (registered components' f32 bytes land in registry_hash_all; a camera pan
+//   read as a lockstep desync) onto `RenderQueue`, outside this barrier. `interp_register_pair` is
+//   the registration seam a future consumer (e.g. Transform/TransformPrev) calls once its columns
+//   exist; filed as a ruling request in TODO.md for confirmation/extension. The same TODO entry
+//   covers PRE_RENDER's `alpha` reach:
 //   `SystemFn` is `void(*)(World*)` with no alpha parameter, so today `engine_frame` returns alpha
 //   to its caller and a render-side consumer has no path to it from inside a registered system -
 //   render2d's problem to solve when it lands, not redesigned here.

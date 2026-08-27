@@ -199,9 +199,13 @@ order).
    registered in step 4, then Alloy's pools (`alloy_register_arenas`), then `data_tables`. Scratch
    arenas and the event arena are created but not registered.
 3. Interner, cvars, log sinks, profiler.
-4. Components: engine components (`Transform`, `TransformPrev`, `Sprite`, `Camera2D`,
-   `PeerSlots`, …) then the Luau sim scripts' `ecs.component` declarations (script init phase runs
-   here, in the sim VM).
+4. Components: engine components (`Transform`, `TransformPrev`, `Sprite`, `PeerSlots`, …) then
+   the Luau sim scripts' `ecs.component` declarations (script init phase runs here, in the sim
+   VM). Camera state is NOT registered here: Rafael's D1 ruling (render2d lane, 2026-08-27) took
+   `Camera2D`/`CameraPrev`/`CameraFollow` off the ECS entirely - a registered component's f32
+   bytes land in `registry_hash_all`, and a camera pan read as a lockstep desync. Camera state
+   lives on `RenderQueue` (`camera[MAX_VIEWS]`/`camera_prev[MAX_VIEWS]`/
+   `camera_follow[MAX_VIEWS]`/`camera_count`), render2d's own doc and file, outside this barrier.
 5. Events: engine event types, then Luau-declared.
 6. Systems: engine systems per phase (input fold bookkeeping, `alloy_step`, Alloy→event bridge,
    transform resolve, checkpoint, recorder, `net_receive`/`net_send` when present, render
@@ -224,7 +228,7 @@ void engine_tick_once(Engine* e, const InputFrame* frames /*[MAX_PEERS]*/) {
     for (Phase p = FIRST; p <= LAST; ++p) { run_phase(w, p); /* run_phase applies commands at its end */ }
     // LAST has run: checkpoint hashed, recorder appended, net_send sent, snapshot ring pushed
     events_swap(w);                  // barrier step 2
-    interp_pingpong(w);              // barrier step 3: prev ← current for Transform/Camera2D
+    interp_pingpong(w);              // barrier step 3: prev ← current for Transform (any interp pair)
     scratch_reset_all(e);            // barrier step 4 (workers; main scratch resets after render)
     w->tick += 1;
     guard_tick_end(&e->guard, w->registry);
