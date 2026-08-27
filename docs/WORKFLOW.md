@@ -96,7 +96,7 @@
   recorded in `TODO.md` at merge time, never assumed — the W1 sweep (2026-08-25) found real
   defects behind exactly this valve, which is why the sweep is mandatory, not ceremonial.
 
-## 3. The wave boundary — three artifacts, not a benchmark
+## 3. The wave boundary — four artifacts, not a benchmark
 
 A wave closes with: (1) the ★ lane's done criterion met (`ARCHITECTURE.md` §9); (2) a
 **wave-boundary review sweep** covering everything §2's valve deferred, verdict recorded in
@@ -108,6 +108,17 @@ contradicted constants; this pass catches the staleness it structurally cannot s
 outliving the code). Benchmarks run only
 where a gate doc defines one (`GATE0-BENCH.md`, the `ALLOY.md` test gates, `NETCODE.md` §19
 milestones) — a wave is a scheduling unit, not a measurement protocol.
+
+**Artifact 1 gates the LABEL; artifacts 2–4 are the WORK, and the work does not wait for the
+label (R-18, ruled 2026-08-27).** A ★ lane's criterion can be unreachable for weeks — W3's ★
+`alloy-solver` sits behind `alloy-substrate`, a W2 lane — while the deferred-review debt, the
+missing retro lines and the stale status prose keep ageing behind it. So artifacts 2, 3 and 4
+may be run **mid-wave, as an unlabelled sweep**, with no wave declared closed; such a run
+records why it is unlabelled and which waves remain open. Forbidden is the converse: declaring
+a boundary closed on artifact 1's letter while a lane of that wave has never launched. Closing
+W2 on gate0's met criterion with `alloy-substrate` unlaunched would have been true to §3 as
+written and false in substance — the drift `CLAUDE.md`'s doc-integrity protocol exists to
+stop, and invisible to every gate we own.
 
 ## 4. Where perf is graded (re-ruled 2026-08-25 — owned hardware retired)
 
@@ -193,6 +204,20 @@ milestones) — a wave is a scheduling unit, not a measurement protocol.
   `CLAUDE.md`'s public-repo protocol; §1 carries the mechanism at the point of use. Filed after
   PR #16 merged as `claude[bot] <…> | GitHub` — every other property of that merge was correct,
   which is why nothing caught it (§1).
+- **R-17 A demoted steward may hold the queue, never adjudicate above its seat (ruled
+  2026-08-27, Rafael):** R-8's principle is *defer, don't demote*, and it is written for lanes.
+  The steward cannot defer — deferring it means nothing is triaged, dispatched or closed out —
+  so when the weekly budget is out it runs below `ROADMAP.md` §2's seat rather than stopping.
+  That is a real demotion and it is bounded: the steward may dispatch, sweep mechanically, run
+  R-12 passes, edit docs and record rulings, but it **must not adjudicate a lane seated above
+  it** — an R-7 closeout, a ship verdict or a ruling on a Fable-seated lane waits for a Fable
+  steward. §2's higher-or-equal gate holds at the round that decides, for the steward exactly
+  as for a reviewer. Filed when this window, seated Fable and running Opus, found that
+  `alloy-substrate` (Fable 5 high) launches at the reset and would otherwise have been
+  adjudicated from below (§6).
+- **R-18 Artifact 1 gates the label, not the work (ruled 2026-08-27, Rafael):** §3's artifacts
+  2–4 may run mid-wave as an unlabelled sweep when the ★ lane's criterion is unreachable;
+  declaring a boundary closed while a lane of that wave has never launched is forbidden (§3).
 - **R-12 Doc-relevancy pass (ruled 2026-08-26, Rafael):** staleness in a status line is drift
   like any other. Every lane closeout sweep (R-7) also checks the lane's own doc — its status
   line and its claims — against what actually shipped; every wave boundary adds the pass over
@@ -211,6 +236,8 @@ policy ("never low effort on sim or netcode code") outranks every line here.
   those bounds. Deferring a Fable lane a few days is always cheaper than demoting it — the
   net-p1 review record (43 defects, five of them canonical-bytes classes feeding the §20.2.8
   hash chain) is the standing evidence that model strength at the sim/netcode gate pays.
+  **The steward is the one seat this rule cannot defer** — see §5 R-17 for what a demoted
+  steward may and may not do.
 - **R-9 — reviews.** Round 1 of any review is a fresh-context breadth pass; middle rounds
   verify fixes delta-scoped — the fix diff against the finding, not a whole-PR re-read; the
   ship-verdict round is always a full re-read. Which model runs which round is `ROADMAP.md`
@@ -275,4 +302,6 @@ election, R-4, R-5). §5/§6 amended 2026-08-26 evening: the token-budget ruling
 2026-08-26 evening: R-12, the doc-relevancy pass. §1/§5 amended 2026-08-27: R-15, observable
 completion — filed after the steward's own "I spawn it, you do not need to ask" turned two
 finished lanes silent; §6's intro lost its maintained rule count in the same pass. §7 added
-2026-08-27: the `.claude/settings.json` ownership ruling and the current allowlist, in one place.*
+2026-08-27: the `.claude/settings.json` ownership ruling and the current allowlist, in one place. §3/§5/§6 amended 2026-08-27 evening: R-17 (a demoted steward holds the queue but never
+adjudicates above its seat) and R-18 (artifact 1 gates the label, not the work); §3's header
+corrected from three artifacts to four, which R-12 had made stale when it added the fourth.*
