@@ -31,7 +31,9 @@ table (`{ name, draw_fn, default_open }`) — menus are data. Panels: **Inspecto
 views: chunk dirty map, island list, cavity graph, per-pass timings), **Net** (Hovel: peers, RTT,
 quorum, epoch, log, impairment shim controls). Layout persisted in `pref_path`. Editor input reads
 the raw event stream at render rate and masks what it captures from the Live producer
-(`INPUT.md` §5).
+(`INPUT.md` §5). **Dragging a panel out into its own OS-level window is out of scope for v0** —
+docking *within* the one OS window is unaffected, but see the corrected R-2 in §10: SDL_Renderer
+cannot back ImGui multi-viewport, so pop-out is deferred to a post-v0 backend migration.
 
 ---
 
@@ -442,8 +444,18 @@ with `write_atomic`.
 
 - **R-1 The Inspector is single-select through v0.** Multi-select edit is part of the editor-shell
   seam (`RESERVED-SEAMS.md` §12 — the selection service) and lands with it, not before.
-- **R-2 ImGui multi-viewport is on from v0** (docking branch + SDLRenderer3 backend support it;
-  zero cost).
+- **R-2 ImGui multi-viewport (drag a panel out to its own OS-level window) is NOT available at
+  v0 — corrected 2026-08-27, w3-editor.** The original claim here ("docking branch + SDLRenderer3
+  backend support it; zero cost") was wrong: `ImGuiBackendFlags_PlatformHasViewports` +
+  `...RendererHasViewports` are a real backend requirement, and SDL_Renderer (§1's v0 shell
+  backend) never implements `RendererHasViewports` upstream (SDL's own docs) — not a gap that
+  closes later on this backend, a permanent one. Docking *within* the one OS window (the docking
+  branch's other half) is unaffected and stays on for v0. Multi-viewport pop-out is deferred to
+  whichever backend migration `RENDER2D.md` §6 eventually triggers; Rafael has since expressed a
+  preference for SDL_GPU (`imgui_impl_sdlgpu3.cpp`) over raw OpenGL3 for that migration, discussed
+  in full under `TODO.md`'s "Post-v0 render backend" note — not yet a ruling on `RENDER2D.md`'s
+  own backend-trigger table, which is render2d's file, not editor's; filed as a ruling request
+  there.
 - **R-3 The driver has `--dump-probes`**: the probe TSV sink writes to a CI artifact path; same
   sink as the panel.
 

@@ -4703,6 +4703,20 @@ once `v0-integration` (W4) or a sibling lane starts depending on them.
 
 ### Ruling requests (ids are steward-allocated per `WORKFLOW.md`/the lane brief)
 
+- **RR-pending (d) — filed 2026-08-27: `RENDER2D.md` §6's backend-trigger table needs a second
+  "trigger" row.** Not this lane's file (render2d, PR #13, already merged — cone discipline bars
+  a unilateral edit). Context: `docs/TOOLING.md` §10 R-2 (corrected this lane, same commit) found
+  that ImGui multi-viewport (drag an editor panel out to its own OS window) cannot run on the v0
+  SDL_Renderer backend `RENDER2D.md` §6 names — `RendererHasViewports` is never implemented
+  upstream for that backend. `RENDER2D.md` §6's table already reserves a `SDL_GPU` column with
+  `trigger: "a shader a demo needs that SDL_Render cannot express"`; multi-viewport pop-out is a
+  second, independent trigger for that same migration and belongs in that row (one fact, one home
+  — `CLAUDE.md`'s doc-integrity protocol) rather than restated only here or in `TOOLING.md`.
+  Rafael has expressed a preference for SDL_GPU specifically (`imgui_impl_sdlgpu3.cpp`) over raw
+  OpenGL3 for this migration (in-session, 2026-08-27) — not yet a formal ruling, since the actual
+  backend-migration decision needs the render2d lane's own input (render2d's sprite/batch path
+  would move onto SDL_GPU too, not just ImGui), just the trigger-table addition editor is flagging
+  now so the next lane that reopens `RENDER2D.md` doesn't rediscover this from scratch.
 - **RR-34 (steward-allocated 2026-08-27, PR #16, "STOP: red head" message): `commit_docs.py`'s
   `MODULE_DOCS["core"]` omits `TOOLING.md`, even though `TOOLING.md` §9.1's own file table places
   `core/cvar.h` (and, by the same table, `core/dotpath.h`, `core/watch.h`, `core/desync_diff.h`,
@@ -4805,3 +4819,31 @@ same block scope and fails `-Wshadow -Werror`. No call site had ever instantiate
 before this lane's test wrote the first one. Fixed with the two-layer `__COUNTER__`/token-paste
 idiom (`TL_PROF_CONCAT`), applied to both the `TL_DEV` and compiled-out branches of both
 `TL_PROF_SCOPE` and `TL_PROF_SCOPE_W`.
+
+### Post-v0 render backend: multi-viewport (drag an editor panel out to its own OS window)
+
+Rafael asked in-session (2026-08-27) for this to be recorded as a planned post-v0 feature, not
+decided now. `vendor/imgui` is the **docking branch** (`IMGUI_HAS_DOCK`/`IMGUI_HAS_VIEWPORT`
+both defined) - docking panels within the one OS window is already in scope for v0
+(`TOOLING.md` §1) and needs no backend change. Dragging a panel OUT into a separate OS-level
+window (ImGui's *multi-viewport* feature) needs `ImGuiBackendFlags_PlatformHasViewports` +
+`...RendererHasViewports`, which the **SDL_Renderer** backend `TOOLING.md` §1 names for v0 does
+not implement upstream, ever (SDL's own docs) - so this cannot land on the v0 render path
+regardless of how much of `editor/shell.cpp` gets built.
+
+**Discussed, three options for post-v0:** (a) stay on SDL_Renderer - simplest, but a permanent
+dead end for this feature; (b) raw OpenGL3 (`imgui_impl_opengl3.cpp` + an SDL3 GL context) - full
+multi-viewport support, viable specifically because `CANON.md`'s target matrix is Windows + Linux
+only (no macOS, so OpenGL's deprecation-on-Apple problem never applies), but a second render path
+alongside whatever render2d's sprite/batch pipeline uses; (c) **SDL3_GPU** (the unified
+Vulkan/D3D12/Metal-wrapping API SDL3 itself is investing in) with ImGui's `imgui_impl_sdlgpu3.cpp`
+backend, which supports multi-viewport - the bigger lift (render2d's own sprite/batch path would
+move onto it too, not just ImGui) but the only option that isn't a legacy stopgap.
+
+**Rafael (2026-08-27, in-session): "I like that direction for sdl3_gpu and imgui_multi-viewport."**
+Recorded durably in `docs/TOOLING.md` §1 + the corrected §10 R-2 (this lane's own doc — the v0
+multi-viewport limitation and the SDL_GPU direction as recommendation). Still **not** a formal
+ruling on `RENDER2D.md` §6's own backend-trigger table (render2d's file, not editor's, and that
+table's "trigger" row currently reads "a shader a demo needs that SDL_Render cannot express" —
+multi-viewport pop-out is a second, independent trigger worth adding there) — filed as a ruling
+request below rather than edited directly (cone discipline).
