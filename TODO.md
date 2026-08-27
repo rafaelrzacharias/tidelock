@@ -4919,7 +4919,62 @@ case this reads differently to the steward than it did to me - it is a one-line,
 self-evident consistency fix, not a design decision, but `tools/audit/` is not confirmed as this
 lane's own file the way `TOOLING.md` is.
 
-### Post-v0 render backend: multi-viewport (drag an editor panel out to its own OS window)
+### `fmt_buf` implemented (2026-08-27, RULED — Rafael via the steward, narrow additive exception)
+
+Steward ruled the exception this lane flagged as blocked earlier: `foundation/fmt.h`'s `fmt_buf`
+stub named its own unblock condition (`vendor/stb_sprintf/` landing), that day came, `CONTAINERS.md`
+(the design home) is w1-containers' and that lane is merged and closed, and this lane is the real
+blocked consumer (`editor/trace_export.cpp` needs it). Conditions honoured: strictly additive
+(`src/foundation/fmt.cpp`'s `TL_FATAL` stub body replaced with the real implementation; nothing
+else in `foundation/` changed), the exception
+named in `fmt.cpp`'s own header and in `fmt.h`'s Status note, `CONTAINERS.md` §8.6b updated in the
+same commit (design home, rewritten from "ships as a stub" to record the real implementation, old
+note kept for history), `stbsp_vsnprintf` used over a hand-rolled formatter per `fmt.h`'s own
+instruction. `fmt.h`'s Determinism note now states plainly that `fmt_buf` is tooling-side only —
+`%f`/`%g` promotes a passed `float` to `double` at the call site, which `CPP-SUBSET.md` §9 bars
+from `src/sim/`/the det half of `foundation/`. Replaced `strview_interner_fmt.test.cpp`'s
+`fmt_buf_truncation` SKIP stub with a real test (fits, truncated-but-NUL-terminated with the
+untruncated length still reported, `count == 0` writes nothing).
+
+**Second `tools/audit/includes.py` touch this lane, cited for the same reason as the first:**
+`fmt.cpp` needs `<stb_sprintf.h>` (declaration-only, the real implementation TU stays
+`vendor/stb/stb_impl.c`) and `<stdarg.h>` for the varargs forward. `BACKEND_HEADERS`'s `"stb_"`
+row already named `src/core`/`src/vendor_glue`/`src/platform/impl_sdl3` — added `src/foundation`
+to the same tuple. `SYS_ALLOW_DIRS` needed both headers too, but `fmt` is deliberately NOT in
+`CMakeLists.txt`'s `TL_FOUNDATION_TOOLING` stem list (it is NONDET but not TOOLING, so it gets no
+automatic `stdio.h`/`stdlib.h`/`stdarg.h` grant the way `log.cpp`/`prof.cpp`/`probe.cpp` do) —
+scoped the grant to a `"src/foundation/fmt"` prefix rather than widening all of
+`"src/foundation"`, matching `src/core/loaders`' own narrowest-prefix precedent for
+`stb_image.h`. Both edits cited inline at their change sites.
+
+Validated on all four tiers, broad regression sweep (`--isolate --tag '!runner' --tag '!slow'`,
+589 tests) 0 failed on all four, `includes.py`/`docaudit.py`/`commit_docs.py` clean.
+
+**Still open, as the steward's ruling named:** `trace_export.cpp` now has `fmt_buf` but still
+needs `PlatformApi.file.append` for the actual disk flush (unbuilt, platform's file) — build the
+in-memory JSON-into-`fmt_buf` half next and defer the flush explicitly, rather than waiting on
+platform a second time for a feature that is otherwise ready.
+
+### `core/desync_diff.cpp` — CORRECTION received, registry half not yet built (2026-08-27)
+
+Steward corrected an earlier finding in this file: `Snapshot` was reported as not existing
+anywhere in `src/core/` — true, but the wrong place to look. It lives one module down:
+`foundation/snapshot.h` (`Snapshot`, `SnapshotRing`), `foundation/arena_registry.cpp`
+(`registry_snapshot`/`registry_restore`). `core/` sits above `foundation/` in the DAG
+(`tools/audit/includes.py`'s `MODULE_DAG["core"] = ("core", "foundation", "platform")`), so
+`core/desync_diff.cpp` may include it freely. Lesson recorded for this lane's own future blocker
+sweeps: grep the whole `src/` tree, not the module a symbol is expected to live in — a miss in
+one directory is not evidence the symbol does not exist.
+
+§9.3.8's algorithm has two halves: the **registry-order walk** over per-arena `used[]`/`blob`
+(`Snapshot`'s own layout: segments in registry order, each 64-byte aligned) against a real
+`ArenaRegistry` and `Snapshot` — buildable now — and the **`TL_POOL_ROW`/Alloy pool-table walk**,
+genuinely blocked (Alloy has not landed). The ECS-column case (`table = component info`) also
+needs cross-referencing `ArenaRegistry`'s per-arena `NameHash` ids against `World`'s registered
+`ComponentInfo` table for per-field formatting (`fmt(kind, a)`/`fmt(kind, b)`) — real work, not
+yet scoped or started. **Not built this session** (context ran out after `fmt_buf` and
+`log_panel`); the byte-level fallback case (`table = null`, raw `memcmp` + hex dump) needs neither
+Alloy nor the component lookup and is the smallest real first slice — next up.
 
 Rafael asked in-session (2026-08-27) for this to be recorded as a planned post-v0 feature, not
 decided now. `vendor/imgui` is the **docking branch** (`IMGUI_HAS_DOCK`/`IMGUI_HAS_VIEWPORT`

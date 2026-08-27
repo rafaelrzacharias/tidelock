@@ -6,6 +6,8 @@
 #include "foundation/fmt.h"
 #include "foundation/vmem_test_api.h"
 
+#include <string.h>
+
 TL_TEST(strview_eq_hash_starts_with_split, "foundation,containers,smoke,fast") {
     StrView a = sv_lit("hello");
     StrView b = sv("hello");
@@ -90,9 +92,29 @@ TL_TEST_EXPECT_FATAL(interner_collision_with_crafted_pair_is_fatal, "foundation,
 }
 
 TL_TEST(fmt_buf_truncation, "foundation,containers,fmt") {
-    // fmt.h STUB - blocked on vendor/stb_sprintf (W1 platform lane, not yet landed). See fmt.h's
-    // contract block. Replace this with a real truncation test the day the vendor tree lands.
-    TL_SKIP("fmt_buf is a TL_FATAL stub pending vendor/stb_sprintf (W1 platform lane) - see fmt.h");
+    // fmt.h/fmt.cpp implemented over stb_sprintf (docs/CONTAINERS.md §8.6b, 2026-08-27) - this
+    // replaces the SKIP stub that stood in while fmt_buf was TL_FATAL, pending vendor/stb_sprintf.
+    char buf[8];
+    Span<char> out{ buf, (u32)sizeof(buf) };
+    const u32 n = fmt_buf(out, "%s", "hello");   // fits (5 + NUL <= 8): no truncation
+    TL_ASSERT_EQ(n, 5u);
+    TL_EXPECT_EQ(strcmp(buf, "hello"), 0);
+
+    const u32 want = fmt_buf(out, "%s", "this is far too long for the buffer");
+    // "the length that WOULD have been written" - out.count(8) truncates the write but the
+    // return value reports the UNTRUNCATED length, so a caller can detect and react to it (this
+    // header's own Invariants note; stb_sprintf's own contract, not a choice made here).
+    TL_ASSERT_TRUE(want > out.count);
+    TL_EXPECT_EQ((usize)strlen(buf), (usize)(out.count - 1u));   // truncated, still NUL-terminated
+    TL_EXPECT_TRUE(strncmp(buf, "this is far too long for the buffer", out.count - 1u) == 0);
+
+    // count == 0: stbsp_vsnprintf must not write through a zero-capacity span (no NUL either -
+    // there is no room for one), only report the length that would have been written.
+    Span<char> zero{ buf, 0u };
+    buf[0] = 'X';
+    const u32 z = fmt_buf(zero, "%s", "abc");
+    TL_EXPECT_EQ(z, 3u);
+    TL_EXPECT_EQ(buf[0], 'X');   // untouched
 }
 
 // "process-stable for the run" (docs/CANON.md "Types") has an operational meaning nothing tested:

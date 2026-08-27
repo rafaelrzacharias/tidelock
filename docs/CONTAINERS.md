@@ -286,13 +286,29 @@ same commit"):
   deleted by the W1 containers review, guarded by
   `slotmap_small_cap_domain_needs_no_caller_reserve_floor`.
 
-### 8.6b `fmt_buf` ships as a stub (W1 containers, 2026-08-24)
+### 8.6b `fmt_buf` implemented over `stb_sprintf` (w3-editor, 2026-08-27)
 
-`fmt.h`/`fmt.cpp` carry the full contract (§8.6) but `fmt_buf` is `TL_FATAL("unimplemented")`:
-`vendor/CMakeLists.txt` assigns `stb_sprintf`'s arrival to the W1 platform lane ("SDL3 + stb arrive
-with the W1 platform lane"), which had not landed it as of this commit. Vendoring it from this lane
-instead was rejected — it would duplicate a decision already owned elsewhere and risk a second
-`vendor/stb_sprintf/` tree. Replace the stub the day the vendor tree lands (`TODO.md`).
+Shipped as a stub by the W1 containers lane (below, kept for history): `fmt.h`/`fmt.cpp` carried
+the full contract (§8.6) but `fmt_buf` was `TL_FATAL("unimplemented")` until `vendor/stb/
+stb_sprintf.h` landed (the W2 vendor lane). `fmt.cpp` now calls `stbsp_vsnprintf` directly — the
+contract is unchanged (truncates, never overflows `out`, returns the length that WOULD have been
+written) because that is `stb_sprintf`'s own return-value contract, verbatim.
+
+Landed under a narrow, additive exception to cone discipline (steward-relayed ruling, Rafael,
+2026-08-27, `TODO.md`/PR #16): `fmt.h`'s design home is this doc (w1-containers, merged and
+closed), but the stub's own contract had already named the unblock condition, and w3-editor was
+the blocked real consumer (`docs/ROADMAP.md`'s "pulled in by a real consumer, never pushed on
+spec" — `editor/trace_export.cpp`, `TOOLING.md` §9.3.2, needs `fmt_buf` for its Chrome-trace JSON
+export). Strictly additive: one new file (`fmt.cpp`), nothing else in `foundation/` changed.
+
+`fmt_buf` is **tooling-side only** — never call it from a sim/det TU. Its varargs accept
+`%f`/`%g`-class specifiers, which promote a passed `float` to `double` at the call site, exactly
+what `docs/CPP-SUBSET.md` §9 bars from `src/sim/` and the det half of `src/foundation/`; `fmt.h`'s
+own contract comment carries the same note. Original W1 containers stub note, kept for the
+historical record: `vendor/CMakeLists.txt` assigned `stb_sprintf`'s arrival to the W1 platform
+lane ("SDL3 + stb arrive with the W1 platform lane"), which had not landed it as of that commit;
+vendoring it from the containers lane instead was rejected as duplicating a decision already
+owned elsewhere.
 
 ### 8.7 Tests (`tests/foundation/`, flat — matching every sibling lane's layout, not the
 `containers/` subdirectory this section originally named)
@@ -304,8 +320,10 @@ quarantine, zeroed dead slot → hash equals a fresh map with the same live set)
 sequence → identical iteration), `sorted.test.cpp`, `ring.test.cpp` (wrap, overwrite flag),
 `bitset.test.cpp`, `sort.test.cpp` (stability with duplicate keys; 1M random keys vs a reference
 insertion sort on a sample; all-equal keys early-out), `strview_interner_fmt.test.cpp` (intern
-idempotence, collision fatal-expected with a crafted pair, `fmt_buf` truncation deferred — see
-§8.6b). Every file: a manual `arena_mark`-before/after check around one representative hot op per
+idempotence, collision fatal-expected with a crafted pair, `fmt_buf` truncation — real since
+§8.6b, not deferred: fits/no-truncation, truncated-but-NUL-terminated with the untruncated length
+still reported, and `count == 0` writes nothing). Every file: a manual `arena_mark`-before/after
+check around one representative hot op per
 container (the `TL_ASSERT_NO_ALLOC` macro does not compile yet — a `static_assert` stub pending
 the runner lane's `alloc_shim.cpp` wiring, `TODO.md`).
 

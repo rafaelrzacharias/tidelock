@@ -45,6 +45,14 @@ SYS_ALLOW_DIRS = {                        # additional system headers, by path p
     "src/editor": {"math.h", "imgui.h"},
     "src/platform": {"math.h"},
     "src/foundation": {"rapidhash.h"},
+    # fmt.cpp's stbsp_vsnprintf (docs/CONTAINERS.md §8.6b) - declaration-only, same shape as
+    # src/core/loaders' stb_image.h row above; the real STB_SPRINTF_IMPLEMENTATION TU stays
+    # vendor/stb/stb_impl.c. `fmt` is NOT in TL_FOUNDATION_TOOLING (CMakeLists.txt's stem list -
+    # RR-7's io/state exemption is narrower than all of NONDET, fmt.cpp is NONDET but not
+    # TOOLING), so it gets no TOOLING_SYS_ALLOW stdarg.h grant automatically; scoped to this one
+    # file rather than widening "src/foundation" (the narrowest-prefix-that-fits philosophy
+    # src/core/loaders' own row states).
+    "src/foundation/fmt": {"stb_sprintf.h", "stdarg.h"},
     # Luau is vendored with its own include dirs on the target (vendor/luau/CMakeLists.txt),
     # so its public headers are spelled bare and reach gate 1 as system includes. The set is
     # closed: lua.h (the C API), lualib.h (luaopen_*/luaL_*), luacode.h (luau_compile).
@@ -98,7 +106,9 @@ BACKEND_HEADERS = {                       # token in the include path -> allowed
     "luacode.h": ("src/script",),
     "Luau/": ("src/script",),
     "monocypher": ("src/net",),
-    "stb_": ("src/platform/impl_sdl3", "src/core", "src/vendor_glue"),
+    # fmt.cpp joins this grant the same way core/loaders/image.cpp's stb_image.h row did
+    # (docs/CONTAINERS.md §8.6b): declaration-only, the real implementation TU stays vendor/.
+    "stb_": ("src/platform/impl_sdl3", "src/core", "src/vendor_glue", "src/foundation"),
     "rapidhash": ("src/foundation",),
 }
 
