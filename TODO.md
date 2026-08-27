@@ -3318,6 +3318,40 @@ right; it is the template the others now follow.
         inside it) - correct and in the tree, just not exercised by a `tl_tests` case. Filed here
         rather than left as a silent gap; a future platform-side call-counter (if another consumer
         needs one) should close it then.
+- [ ] **RR-26 (BLOCKING, ruling request): `audits` red on `734b2c0` - a self-inflicted repeat of
+      RR-25's exact shape, and I cannot fix it forward for the same structural reason.**
+      `commit_docs.py --base <PR base>` fails: "`src/foundation/ in 734b2c074 changed but none of
+      docs/FX-PALETTE.md, docs/MEMORY.md, docs/CONTAINERS.md, docs/DETERMINISM.md, docs/JOBS.md,
+      docs/CPP-SUBSET.md did`". `734b2c0` touches `src/foundation/fx_float.h` (N5's `TEXEL_M`
+      constant) and its own commit message has no `[docs:none]` - a plain gate miss, mine, not a
+      tooling bug this time.
+      **Why it can't be fixed forward.** `commit_docs.py`'s own selftest (`tools/audit/
+      commit_docs.test.py`, confirmed passing in this same CI run's log) asserts "a later
+      `[docs:none]` does not waive an earlier commit" by design - the gate is per-commit, and no
+      new commit can retroactively satisfy it for `734b2c0`'s own SHA. Per `WORKFLOW.md` §1, a
+      lane may amend/force-push pre-review as the cure for a per-commit gate miss, but "once
+      review has begun, history is frozen" - and review round 1 landed on this PR at 2026-08-26
+      21:46 UTC, hours before `734b2c0` was even written, so this commit is squarely post-review-
+      begun by the same clock RR-25 used. I have not attempted to amend/rebase it.
+      **The actual content question, for whoever rules this.** `TEXEL_M` is not an independent
+      fact - it is `f32(TEXEL.v) * (1.0f/f32(pos_t::ONE))` with a `static_assert(TEXEL_M ==
+      1.0f/16.0f, ...)` pinning it to `TEXEL`'s existing, already-documented value
+      (`FX-PALETTE.md`); the render-side consequence of adding it (closing N5's `sprite.cpp`
+      firewall breach) is already documented in this same commit's `RENDER2D.md` §9.5 edit. On the
+      merits I believe this specific `src/foundation/` change is `[docs:none]`-eligible - no new
+      constant value, name, or rule is introduced, only a second compile-time access path to one
+      that already has a home - but I am not the owner of `commit_docs.py`'s policy or of
+      `foundation/`'s docs, so I am not unilaterally deciding that and moving on.
+      **What's needed, mirroring RR-25's own resolution:** a message-only reword of `734b2c0`
+      (add `[docs:none]` with the reasoning above, or a one-line `FX-PALETTE.md` note if the
+      ruling goes the other way) by whoever/whatever has the git permissions this session's own
+      auto-mode classifier refuses (RR-25's blocking comment, `ec12e42`, has the full detail of
+      that specific refusal - `git checkout -b`/`cherry-pick`/`apply`/`add` all categorically
+      blocked attempting the same class of operation). Posted once on PR #13 naming this; not
+      re-posting per event unless something changes. *(RR-26 is the next free number checked
+      against this branch's own `TODO.md` and `origin/main`'s, per RR-9's own caveat about
+      checking every open branch, not just those two - a true collision is possible if another
+      lane claimed it independently.)*
 
 ## Alloy (`docs/ALLOY.md` — headless-first; its own build queue in "Gates & rulings ledger")
 - [ ] **W3 alloy-liquids-gases OPENING task — the liquid design pass (the RR-10 ruling,
