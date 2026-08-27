@@ -6401,3 +6401,161 @@ it disclaims: restored dense order equals the saved dense order, exactly.
 
 Marking this as REASONED, not verified: I did not mutate the apply loop's ordering to watch a hash
 diverge. What would falsify it: an apply loop that provably cannot reorder under any future change.
+
+---
+
+### What I CHECKED and found CLEAN (the list that makes a between-reviewers defect visible)
+
+Each row names the command or the file:line that produced it, and states its own scope.
+
+1. **Both new subdirectories' current files are in the build.**
+   `grep -o '"file": "[^"]*src/core/\(loaders\|producers\)/[a-z_]*\.cpp"' out/dev-linux/compile_commands.json | sort -u`
+   returns all five: `loaders/{font,image}.cpp`, `producers/{live,replay,script}.cpp`. B-3 is about the
+   NEXT file, not these.
+2. **The two serialized formats cannot be confused.** `RecordedInputHeader`'s magic is `TLRI` at
+   offset 4 (`recorder.h:56`), `SaveHeader`'s is `TLSV` at offset 4 (`save.h:112`); both prepend
+   `format_version` at offset 0. `save.cpp:166` checks magic on the raw bytes BEFORE the CRC window;
+   `recorder.cpp:103` checks magic before version and before the body CRC. Each refuses the other's
+   file with its own named error. No field makes one decode as the other, and neither format can
+   contain the other — there is no nesting door in either.
+3. **Both wire structs' sizes and every field offset are compiler-enforced and agree with CANON.**
+   `static_assert(sizeof(RecordedInputHeader) == 128u)` (`recorder.h:68`),
+   `static_assert(sizeof(SaveHeader) == 160)` (`save.h:121`), plus a generated per-field
+   `offsetof` assert from `TL_OFFSETS_*` (`reflect.h:172`, `:232`). `CANON.md`'s wire-size table
+   (`RecordedInput` header 128 B, `SaveHeader` 160 B) matches. Neither struct contains a bit-field
+   or a `usize` (`grep -n "usize\|: *[0-9]\+;" src/core/{recorder,save,input}.h` → empty), so
+   `CPP-SUBSET.md` §5's two layout bans are respected. **Scope: compiled on
+   `x86_64-unknown-linux-gnu` only, dev and debug tiers — the other three targets are CI's.**
+4. **Attack hypothesis 3's premise is FALSE and should not be re-spent: the Script producer does not
+   use Luau.** `src/core/producers/script.cpp` is a C++ scripted-event table
+   (`ScriptedEvent{tick, action, value, op, slot}`) walked by an integer cursor; there is no `lua`
+   token in the file. `INPUT.md` §9.4 spells it that way ("a test's scripted frames ... built by the
+   harness") and §9.4's struct sketch matches. Nothing in `loop+input` opens a VM at all, so the
+   data-VM removals cannot reach it.
+5. **The `pairs`/`next` ruling's OTHER doors are swept, and they are clean.** This is the sweep
+   `LESSONS.md` demands ("a ruling that closes a nondeterminism channel closes it for ONE door
+   unless you sweep the others"). `grep -rn "lua_next\|script_table_next" src/ | grep -v vendor`:
+   the only unordered Luau walk in `src/` is `script_table_next` itself (`vm.cpp:579`), and **it has
+   no production caller.** `data_compile.cpp` names it only in comments explaining that it walks
+   schema-ordered through `script_table_len`/`script_table_geti` instead (RR-21's binding
+   condition), and `core/luacomp.cpp` — the other C++ consumer of script-declared shapes, and the
+   one that decides COMPONENT REGISTRATION ORDER, which `CANON.md` calls the lockstep contract —
+   does not iterate a Luau table at all; it walks a C++ field array. So no `src/` path carries Luau
+   hash order into hashed state or into registration order.
+6. **`CANON.md`'s data-VM removal list matches the code exactly.** `CANON.md:123-127` vs
+   `sandbox.cpp:56-60`: the same eleven names, with the same two rulings cited. Better than a doc
+   match: `script_sandbox_open` re-verifies every removal itself with a second `name_is_absent` pass
+   (`sandbox.cpp:468-474`) rather than trusting a test — "a removal that silently did nothing is a
+   hole in the sandbox."
+7. **The module firewall holds on the merged tree.** `python3 tools/audit/includes.py --root .` →
+   `191 files checked, 0 violations`. `core/input.h`'s own includes are
+   `foundation/{tl_types,tl_assert}.h`, `core/reflect.h`, `<stddef.h>` — nothing platform-side — so
+   `net/wire.h` including it pulls no transitive edge the MODULE_DAG bars.
+   `cmake --build out/dev-linux --target tl_audit_symbols` → `2 audited layers + 9 data-only libs,
+   1 wrap libs, 0 violations`.
+8. **The `MAX_PEERS` de-duplication did not open a drift channel.** `net/wire.h`'s surviving
+   `NetInputFrame` mirror and `core/input.h`'s `InputFrame` are each independently `static_assert`ed
+   against the same `INPUT.md` §1 literals (76 B; offsets 0/64/68/72; `ActionState` 2 B). The
+   handoff's two deferred cross-asserts are belt-and-braces, not a gap: changing `MAX_ACTIONS` in
+   `input.h` breaks `input.h:75` before it can reach `net`.
+9. **The barrier order and the phase set match `CANON.md`.** `phase.h` is the seven-value
+   append-only set with its guard `static_assert`. `engine_tick_once` (`loop.cpp:41-54`) runs
+   `FIRST..LAST`, then the recorder's hash, then `world_events_swap`, then `interp_pingpong`, then
+   `state->tick += 1` — CANON's steps 2 and 3 in order (step 4, worker scratch, does not exist in
+   v0 and `loop.cpp:47-49` says so). **No system is registered twice by either lane, because neither
+   lane registers any system in `src/` at all** — that is `app/wiring.cpp`'s job and it does not
+   exist yet.
+   *Named, not filed:* `CANON.md` says the per-arena hash is taken "in `LAST` *before* the barrier"
+   and `FRAME-LOOP.md` §3 makes "apply command buffers" barrier step 1 — but `ECS.md` §4 makes every
+   phase boundary its own command barrier (`schedule.cpp:167`), so no point exists after LAST's
+   systems and before LAST's commands apply. The hash therefore sits between step 1 and step 2. This
+   is a doc ambiguity with no behavioural consequence (identical code on every peer) and it predates
+   both lanes; I am naming it rather than filing it.
+10. **The alpha fix's DIRECTION is pinned, not merely its stability.** `tests/core/loop.test.cpp:167`
+    asserts `alpha_1 == 0x1.fffffep-1f` beside the `alpha_1 == alpha_2` check at `:161`, so the
+    `0.0f`-park that satisfies the equality just as well cannot come back silently. The test is in
+    the green run.
+11. **The alpha WIRING gap is a filed deferral with a named owner, not a hole.** Nothing in `src/`
+    writes `w->render->alpha`; `engine_frame` returns it and mirrors it into `e->last_alpha`
+    (documented "not hashed"). Recorded at `TODO.md` RR-32 and stated honestly in `loop.h`'s own
+    contract block. Left alone.
+12. **`interp_pingpong`'s dense-order guard is correct and live in every tier.** `interp.cpp:37`
+    compares `prv->entities[d].bits == ent.bits` per dense index while resolving `prev_row` BY
+    ENTITY — so the function is itself immune to the divergence and fails loudly on behalf of the
+    consumer that is not (`extract.cpp:39-47` pairs by dense index). `TL_CHECK` is unconditional
+    (`tl_assert.h:44`, no `TL_DEV` guard), so the guard exists in `netcode` and `ship`, which is
+    where lockstep runs. It does not check `cur->count == prv->count`, so a `prev` column LONGER
+    than `current` walks clean here — `extract.cpp:38`'s own `TL_CHECK(prev.count == n)` covers
+    exactly that shape. Between the two, the case is closed.
+13. **Command payloads are copied, not aliased — checked because only the merged tree can break it.**
+    `save_read` resets its scratch arena (`save.cpp:306`) BEFORE the caller's required
+    `world_flush`, so a command holding a pointer into that scratch would apply freed bytes.
+    `cmd_record2` (`commands.cpp:43-44`) `memcpy`s the payload into the chunk's own buffer. No
+    dangling pointer.
+14. **`save_read` is genuinely all-or-nothing on the read side.** Decode-all-into-scratch then apply,
+    two separate loops (`save.cpp:238-302`); every error path resets scratch and returns before the
+    apply loop is entered. §5's "no silent partial loads" holds for reads. (B-2 is a WRITE-side
+    truncation, a different door.)
+15. **Arena registration is centralized and in `FRAME-LOOP.md` §8.2 step 2's stated order, and
+    neither lane added one.** `world.cpp:63-68` registers `world.singletons` then the entity
+    slotmap's four columns; component columns follow at registration (`world.cpp:104-115`) with the
+    `.pages` arena correctly `SNAPSHOT`-only, out of the hash. `assets.cpp:24` creates
+    `assets.by_name.arena` and **never registers it**, so no platform-minted `TexHandle` or asset
+    refcount can reach `registry_hash_all` — the thing I most expected to find wrong.
+    `data_compile` leaves `registry_add` to the caller (`data_tables.h:150`), which keeps §8.2 step
+    2's "…then `data_tables`" ordering reachable.
+16. **`MAX_ARENAS` overflow fails loud, not silently.** `arena_registry.cpp:32-33` `TL_FATAL`s. The
+    merged tree's engine components (`Transform`, `TransformPrev`, `Sprite`, `PeerSlots`) plus the
+    world's own five put the floor at 15 of 64; each further non-singleton component costs three.
+    Worth knowing before `alloy-substrate` registers pools; not a defect.
+17. **Both tiers I could build are green, with the same selection line.** dev and debug:
+    `670 selected, 667 passed, 0 failed, 0 timed out, 3 skipped, 0 lost (696 in the list)`.
+
+**Chronology, since it is the premise this area rests on and it is checkable rather than assumed.**
+`git log`: `26c9c5f` (assets+data) merged at 2026-08-27 12:06 UTC; `w3-loop-input` pulled that main
+in at `dd11b38`, 12:34 UTC; the lane merged at `7e0088e`, 12:41 UTC, with exactly one commit
+(`73b7437`, a `LESSONS.md` line) in between. So the combination existed on a branch for seven
+minutes and one commit before it was main. The brief's "no adversarial read by anyone" is accurate.
+
+### What I could NOT check, and why
+
+- **`tools/audit/targets.py` (the cross-target layout gate) did not complete here.** First run killed
+  at 900 s having printed nothing (`exit 124`); a second run with a 2700 s budget was still going
+  when this section was written. So every layout claim above (B-2's structs included) is
+  **one-target**. The falsifier is CI's own `pr.yml:51` step, which was green on `1280d1a`.
+- **`tier_parity.py`** needs `netcode` and `ship` builds; CI runs it at `pr.yml:161`. Not duplicated
+  locally — a local pass would have proven nothing CI has not already proven on four legs.
+- **ASan/UBSan.** The ASan runtime is absent in this container (stated in the area brief and not
+  re-tested). B-1 and B-2 are logic defects, not memory defects; neither sanitizer would have found
+  either.
+- **Windows and arm64.** No local reproduction possible. Nothing in B-1..B-4 is target-dependent
+  (the mechanisms are `used`, a literal `1u`, a CMake list and a comment), but I measured one target.
+- **B-1's end-to-end lockstep consequence.** No netcode consumer of `save_read` exists
+  (`grep -rn "save_read" src/` → `src/core/save.{h,cpp}` and the tests only), so "two peers desync"
+  is derived from `ASSETS-AND-DATA.md` §5's own rejoin sentence plus the measured hash divergence,
+  not observed in a running lockstep session. What would falsify it: a ruling that the save path is
+  not a lockstep artifact — which is exactly the ruling request B-1 files.
+- **Base.** This review is against `origin/main` @ `1280d1a`. `main` has since moved (commits at
+  22:24–22:41 UTC from the other sweep areas); nothing in those touches `src/`, but I did not
+  re-review against them.
+
+### Verdict
+
+**fix first.** Ranked:
+
+| # | Severity | Status | What |
+|---|---|---|---|
+| B-1 | ship-blocking | VERIFIED | a save-restored world does not reproduce the world hash; `save.h` and `ASSETS-AND-DATA.md` §5 contradict each other about whether that matters — ruling request, unnumbered |
+| B-1(b) | ship-blocking | VERIFIED | `save_read` never restores the hashed `world.singletons` arena and no doc says the caller must |
+| B-2 | ship-blocking | VERIFIED | `SAVE_ENC_REFLECTED` silently saves one row, `ERR_OK` both ways — latent, one-line guard |
+| B-3 | medium | VERIFIED | `src/core/CMakeLists.txt`'s two idioms are not equivalent; the explicit half silently drops a new file |
+| B-4 | medium | REASONED | `save.test.cpp`'s "column order is not part of the contract" is now false; the code is right, the contract permits the bug |
+
+B-1 and B-1(b) are one decision: **is a save a lockstep artifact?** Answer that and B-4 follows
+(the ordering assertion is only worth writing if the answer is yes). B-2 and B-3 are independent and
+cheap. None of the five is a slip inside either lane's own scope; every one is a contract written by
+one lane that the other lane's merged code falsifies — which is what this area was opened to find.
+
+*Reviewer note: no RR numbers allocated (steward's). No fixes applied (cone discipline). No PR
+opened. Reproducers are in the sections above and were kept out of `tests/` because they fail by
+design.*
