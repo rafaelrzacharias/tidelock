@@ -39,6 +39,13 @@ u32 cvar_find_index(const CvarTable* t, NameHash key) {
 void cvar_register(CvarTable* t, const CvarDesc* desc) {
     if (t->count >= CVAR_TABLE_CAP) { TL_FATAL("cvar_register: CVAR_TABLE_CAP exhausted"); }
     if (cvar_find(t, desc->key) != nullptr) { TL_FATAL("cvar_register: duplicate cvar key"); }
+    // docs/CANON.md's rev-1 SIM set is float-free by ruling: cvar_sim_fold_bits hashes the raw
+    // bits of every CVAR_SIM cvar into session_fingerprint, so a CVAR_F32|CVAR_SIM cvar would put
+    // float bits (and parse_fixed_f32's f32 accumulation) into a cross-peer fingerprint - a
+    // determinism surface. This makes that ruling mechanical instead of comment-only.
+    if (desc->kind == CVAR_F32 && (desc->flags & CVAR_SIM) != 0u) {
+        TL_FATAL("cvar_register: CVAR_F32 cvar cannot be CVAR_SIM (docs/CANON.md 'Cvars')");
+    }
 
     const u32 idx = t->count;
     t->desc[idx] = desc;
@@ -214,6 +221,18 @@ bool parse_decimal_i64(const char* s, i64 lo, i64 hi, i64* out) {
 u32 fmt_fixed_f32(f32 v, char* out, u32 out_cap) {
     const bool neg = v < 0.0f;
     f32 av = neg ? -v : v;
+    // (i64)av below is UB ([conv.fpint]) for NaN, Inf, or |v| >= 2^63. The negated compare
+    // catches NaN too - any comparison against NaN is false, so `!(av < 9.2e18f)` (a bound well
+    // under i64's range, leaving headroom) is true for NaN as well as Inf and any magnitude too
+    // large to convert safely. `v != v` is the strict, portable NaN test (true only for NaN).
+    if (!(av < 9.2e18f)) {
+        const char* s = (v != v) ? "nan" : (neg ? "-inf" : "inf");
+        u32 n = 0u;
+        while (s[n] != '\0') { ++n; }
+        if (n >= out_cap) { return 0u; }
+        memcpy(out, s, n + 1u);
+        return n;
+    }
     i64 ip = (i64)av;                       // truncates toward zero (av >= 0)
     f32 frac = av - (f32)ip;
     u32 fp = (u32)(frac * 1000000.0f + 0.5f);   // 6 fractional digits, rounded
