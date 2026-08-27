@@ -60,6 +60,15 @@ inline ImGuiContext* g_imgui_test_ctx = nullptr;
 // (ImGui::DestroyContext() with no argument would destroy whatever happens to be current at exit
 // - not necessarily this one, see imgui_test_end_frame's note below).
 inline void imgui_test_teardown(void) {
+    // Deliberately does NOT call ImGui_ImplNull_Shutdown() first (B-12, 2026-08-27, checked
+    // clean by Review B): currently both harmless and load-bearing. Harmless - the null backend
+    // allocates nothing and stores no BackendPlatformUserData/BackendRendererUserData
+    // (imgui_impl_null.cpp's Init bodies), so there is nothing for Shutdown to free. Load-bearing
+    // - Shutdown needs a CURRENT context (it reads/clears ImGui::GetIO().BackendPlatformUserData
+    // et al.), and atexit ordering here runs AFTER this call has already made g_imgui_test_ctx
+    // current only for the DestroyContext call below, not before it - calling Shutdown first would
+    // need its own SetCurrentContext dance for no live state to clean up. Will need revisiting the
+    // day this backend gains real state to release.
     ImGui::DestroyContext(g_imgui_test_ctx);
     g_imgui_test_ctx = nullptr;
 }
@@ -103,5 +112,13 @@ inline void imgui_test_begin_frame(TestCtx* t) {
 // this fix, confirmed passing after - not reasoned about only on paper.
 inline void imgui_test_end_frame(void) {
     ImGui::Render();
+    // B-12 (2026-08-27): drives the renderer half of the null backend, not just the platform half
+    // - ImGui_ImplNullRender_Init (called via ImGui_ImplNull_Init above) sets
+    // ImGuiBackendFlags_RendererHasTextures, which tells ImGui a renderer will service
+    // WantCreate/WantDestroy texture status requests (the font atlas's, in particular). Nothing
+    // here ever called the one non-trivial function that services them
+    // (imgui_impl_null.cpp's own ImGui_ImplNullRender_RenderDrawData), so this harness was
+    // driving only half the backend it claims to.
+    ImGui_ImplNullRender_RenderDrawData(ImGui::GetDrawData());
     ImGui::SetCurrentContext(nullptr);
 }
