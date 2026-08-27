@@ -5630,3 +5630,45 @@ not just here.
 queued as of this entry):** `editor/shell.cpp`, `PlatformDevApi`, `editor_frame`'s real body, the
 capture-mask publish, `imgui.ini`/`pref_path` persistence, and the broader zero-alloc reading.
 Whoever picks up `PLATFORM.md` §9.7 step 5 unblocks all of it at once.
+
+### RR-38 (steward-allocated, ruled by Rafael): the integer-only decimal-to-fixed-point quantizer (2026-08-27)
+
+Built `foundation/fx.h`'s `fx_parse_decimal_raw(StrView s, u8 frac) -> Result<i32>` (the primitive
+— both real callers only know FRAC at runtime, Inspector via a `FieldKind`, Console via
+`CvarDesc::frac_bits`) and `fx_parse_decimal<R>(StrView s) -> Result<R>` (a three-line typed
+wrapper over it, for call sites that do have a compile-time row). Tracks the literal's exact
+value as an integer numerator/denominator (digit-by-digit `u64` accumulation, overflow-checked at
+every step) and rounds it once via `rne_div` — the SAME primitive `div<R>`/`fx_lit<R>` already
+use, no float/double token anywhere, additive only (no existing `fx.h` symbol's signature,
+semantics, or name touched). Full ruling rationale (why integer-only dissolves the
+float-vs-cross-peer-determinism dilemma rather than picking a horn) recorded in `FX-PALETTE.md`
+§9 R-10, added in the same commit, per the ruling's own doc-integrity condition.
+
+Malformed or oversized user text returns a named `Result` error (`ERR_FX_PARSE`/`ERR_FX_RANGE`,
+new `fx` module range `0x08xx`) rather than tripping an internal `TL_ASSERT` — the parser
+pre-validates every bound `fx_lit`'s own precondition would otherwise assert on, so untrusted text
+can never reach an assert-guarded path, matching `CLAUDE.md`'s `Result<T>`-for-failure /
+`assert`-for-bugs split exactly (a mistyped console command is not a caller bug).
+
+Eleven pinned tests (`tests/foundation/fx_decimal.test.cpp`, `FX-PALETTE.md` §10.5's new row):
+the ruling's own criterion (`1.5` into `pos_t` → raw `0x60000`), integer/negative/bare-`.`/
+trailing-`.` forms, a battery of malformed literals asserting `ERR_FX_PARSE` (never a crash, never
+a silent partial parse), out-of-range/overflow cases asserting `ERR_FX_RANGE` (never a
+`TL_FATAL`), and explicit RNE ties-to-even at `fx<i32,1>`'s hand-verifiable midpoints (`0.25`→0,
+`0.75`→2) plus a 41-point sweep at `fx<i32,3>` cross-checked against `fx_test_util.h`'s
+independent `ref_rne_div` reference (the same "two derivations checking each other" shape
+`fx_rne.test.cpp` already uses for `rne_div` itself) — the ruling's own "same evidence standard as
+the fx trace tests" bar, not a smoke test. A genuine tie at `pos_t`'s own FRAC=18 needs 19
+fractional decimal digits (`FRAC+1`), past the parser's own 18-digit cap by design (true of every
+real palette row's own resolution boundary, not a parser gap) — the low-FRAC types above give the
+same tie-breaking proof with hand-checkable two-digit literals instead.
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`) runs, 0 failed in every combination. `includes.py`/`docaudit.py`
+clean.
+
+**Still open, per the ruling's own instruction:** RR-38 lands the primitive only. Inspector's
+fx-field/handle-field editing (`inspector.cpp`) and Console's `CVAR_FX_RAW` decimal-literal branch
+(`core/cvar.cpp`) both still need wiring to call it — tracked as this lane's own immediate next
+work, not folded into this commit (one feature per commit; the primitive and its two call sites
+are three separable, independently-testable slices).

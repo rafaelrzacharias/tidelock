@@ -280,7 +280,7 @@ too: `pos2_wide_t = fx<i64,36>`, `den_wide_t = fx<i64,30>`.
 
 ---
 
-## 9. Rulings (R-1..R-6 closed 2026-08-22/23; R-7..R-9 the Gate 0 rev-2 rulings, 2026-08-25 — nothing open)
+## 9. Rulings (R-1..R-6 closed 2026-08-22/23; R-7..R-9 the Gate 0 rev-2 rulings, 2026-08-25; R-10 2026-08-27 — nothing open)
 
 - **R-1 The rows are DECIDED at the §3 values.** Gate 0 *verifies* them; it does not choose them.
   A convergence failure triggers the pre-committed ladder (§3.2) and, if a row must move, a
@@ -321,6 +321,29 @@ too: `pos2_wide_t = fx<i64,36>`, `den_wide_t = fx<i64,30>`.
   code: it quantises a unit-mass correction to 4 `pos_t` quanta and creeps a resting box 12
   quanta/tick (measured, both bindings; `tests/gate0/results/…/G01_s8_l0.csv`). `ALLOY.md`
   §14.4.3 carries the spelling.
+- **R-10 The decimal-literal quantizer is integer-only, in `fx.h`, additive (RR-38, ruled
+  2026-08-27).** `editor/inspector.cpp`'s fx-field edit widget and `core/cvar.cpp`'s `CVAR_FX_RAW`
+  `set <name> <f64>` path both needed to turn a user-typed base-10 literal into a row's raw
+  representation — a real gap (`cvar.cpp`'s own `CVAR_FX_RAW` case already documented it: "raw:
+  only... needs FX-PALETTE.md's RNE quantizer"). Two options were on the table: a `double`
+  intermediate (rejected — `fx.h` carries ZERO float/double tokens today, and one would be the
+  first, straight against `CPP-SUBSET.md`'s float ban on this path), or track the literal's exact
+  rational (integer numerator/denominator) and round it ONCE via `rne_div`, the same primitive
+  every other narrowing path in this header already uses. The second dissolves the dilemma rather
+  than picking a horn: `fx.h` stays float-free, the result is bit-exact on every ISA as a free
+  strengthening (an integer parse has no rounding-mode/rewrite freedom a compiler's `strtod`-class
+  path would), and both callers share one implementation (`fx_parse_decimal_raw(StrView, u8 frac)`
+  — a RUNTIME `frac`, since neither caller has a compile-time row type at its call site: Inspector
+  walks a runtime `FieldKind`, cvar reads `CvarDesc::frac_bits`; `fx_parse_decimal<R>` is a
+  three-line typed convenience wrapper over it for call sites that do have `R`, §10.1). Malformed
+  or oversized user text returns a named `Result<T>` error (`ERR_FX_PARSE`/`ERR_FX_RANGE`) — never
+  an assert, since untrusted text is `Result`'s job by `CLAUDE.md`'s own error-model split, not a
+  caller-bug signal. Additive only: no existing `fx.h` symbol's signature, semantics, or name
+  changed. `CMD_SET_FIELD`/`CMD_SET_CVAR` both carry the RAW value on the wire, never a decimal
+  string, so quantization happens once, locally, before the command is recorded — the quantizer
+  itself never needed to be bit-exact ACROSS PEERS (only within one process, which integer
+  arithmetic already guarantees), so this ruling did not have to weigh a cross-ISA determinism
+  cost against the float ban either.
 - **R-8 The angular constraint terms stay wide; `omega_t` is retuned to its structural cap
   (ruled 2026-08-25, Gate 0 RR-9).** (a) A body's denominator share `inv_I·(r×n)²` is computed
   and kept as the i64 frac-30 local (`w_ang30`), never narrowed into `invmass_t` — a 4096:1 plank
@@ -410,6 +433,23 @@ explicitly**; there is no deduction of the result format. `dot<R>`/`cross<R>` co
 
 Wrapping/saturating integer helpers for quanta paths live in the same header: `wrap_add/sub/mul`
 (unsigned-cast two's-complement), `sat_add/sub/mul` for `i32`/`i64`, `mulhi64`.
+
+**Decimal literal parsing (RR-38, R-10, added 2026-08-27) — integer-only, no float/double token:**
+
+```cpp
+Result<i32> fx_parse_decimal_raw(StrView s, u8 frac);   // the primitive: runtime frac (both real
+                                                          // callers only know FRAC at runtime)
+template <typename R> Result<R> fx_parse_decimal(StrView s);  // typed wrapper, R::FRAC_BITS
+```
+Grammar `[+-]?[0-9]*(\.[0-9]*)?`, at least one digit, nothing trailing. Tracks the literal as an
+exact integer numerator/denominator (accumulated digit-by-digit, `u64`, overflow-checked at every
+step — never a `double`) and rounds it once via `rne_div`, the same primitive `div<R>` above
+already uses. `ERR_FX_PARSE`: malformed text. `ERR_FX_RANGE`: more than 18 fractional digits (the
+denominator would not fit `u64`), the numerator overflows, or the rounded result does not fit
+`i32` — every one of these is caught here so untrusted text never reaches an internal `TL_ASSERT`
+(`Result` is the error-model door for text; asserts are for a caller's own logic bug,
+`CLAUDE.md`). Pinned known-answer vectors, including the criterion's own `1.5` → `pos_t` raw
+`0x60000` and explicit RNE tie cases, are `fx_decimal.test.cpp` (§10.5).
 
 ### 10.2 `fx_palette.h` — rows, constants, the op table
 
@@ -502,6 +542,7 @@ coming back even.
 | `fx_trace.test.cpp` (+ `fx_crossisa` driver job) | two ~1M-value traces, each folded into one FNV-1a 64 that is **pinned in the test**: trace A (`mul/div/mul_int/to/sqrt/sincos/atan2/normalize/rotate`) and trace B (the rest: `to` widening, `sqrt` at every shift, `rsqrt`, `lerp`, `dot/cross/len`, `mul_int` narrowing, `sat_mul`, the sat/abs/min/max/clamp tier, `mulhi64`/`sat_mul(i64)`, `isqrt32/64`, `div` at unit quotients - the W1 fx review's coverage gap); every tier, compiler and ISA must reproduce both (PR lane: clang-cl + ubuntu clang; nightly: the Pi). The driver job hashes the same traces through `tl_driver` once the runner+driver lane lands |
 | `fx_review.test.cpp` | the W1 fx adversarial review's probes, kept as regressions: the `fx_rint` band `[2^22, 2^23)`, the closed `atan2` range, `sat_mul<R>` at the clamp, the in-contract `INT32_MIN` / 2⁶² / 2⁶³ edge matrix, and (netcode/ship only) every documented release-tier error value - `div` by zero, `sqrt` of a negative, `rsqrt(0)`, `atan2(0,0)`, `normalize(0)`, NaN/±inf quantisation |
 | `fx_float.test.cpp` | `to_f32` exact below 2²⁴ raw, `to_f64` exact for every row; `from_f32/f64_quantized` RNE ties at the row quantum, clamps at the row range, round trips |
+| `fx_decimal.test.cpp` (RR-38, R-10) | pinned known-answer vectors, not property/fuzz (no float path to fuzz against): `1.5` → `pos_t` raw `0x60000` (the ruling's own criterion); integer/negative/leading-`+`/bare-`.`/trailing-`.` forms; malformed text (empty, lone sign, lone `.`, double dot, trailing garbage, embedded letters) → `ERR_FX_PARSE`, never a crash or a silent partial parse; out-of-range magnitude, >18 fractional digits, and numerator overflow → `ERR_FX_RANGE`, never a `TL_FATAL`; explicit RNE ties-to-even at `fx<i32,1>`'s exact midpoints (`0.25`→0, `0.75`→2, `1.25`→2) plus a 41-point sweep at `fx<i32,3>` cross-checked against `fx_test_util.h`'s independent `ref_rne_div`; `fx_parse_decimal_raw` verified to agree with the typed `fx_parse_decimal<R>` wrapper at every palette FRAC |
 
 `tools/fxcheck/` (exempt from the subset): `fxcheck.cpp` (C++, `long double` reference) is the
 exhaustive + differential layers — `cmake -S tools -B out/tools && cmake --build out/tools &&

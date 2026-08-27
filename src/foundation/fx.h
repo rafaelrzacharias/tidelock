@@ -19,13 +19,15 @@
 //   Left shifts of signed values are written as multiplies by a power of two (a negative left
 //   shift is UB, docs/CPP-SUBSET.md §5); right shifts of negatives are arithmetic (C++20).
 // Threading: none - pure functions over values; safe from any worker.
-// Includes: foundation/tl_types.h (widths), foundation/tl_assert.h (the range asserts).
+// Includes: foundation/tl_types.h (widths, ErrCode/Result<T>), foundation/tl_assert.h (the range
+//   asserts), foundation/strview.h (StrView - `fx_parse_decimal_raw`'s input, RR-38, §9 R-10, §10.1).
 // Rev 1: the palette instantiates Rep = i32 only; fx<i64, F> exists as a LOCAL type (widened
 //   accumulators: fx<i64,36> squared distances, fx<i64,30> solver locals) with +/-/compare, and
 //   every narrowing helper static_asserts 32-bit operands until a rung-4 row exists (§3.2).
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
 #include "foundation/tl_assert.h"
+#include "foundation/strview.h"
 
 namespace fx {
 
@@ -374,6 +376,115 @@ template <typename A>
 constexpr i64 mul_wide(A a, A b) {
     static_assert(sizeof(typename A::rep) == 4, "mul_wide widens 32-bit rows only");
     return i64(a.v) * i64(b.v);
+}
+
+// --- decimal literal parsing (RR-38, 2026-08-27; docs/FX-PALETTE.md §9 R-10, §10.1) -------------------
+// Integer-only decimal-to-raw quantizer: turns a base-10 literal a user or a save file typed
+// ("[+-]?[0-9]*(\.[0-9]*)?", at least one digit) into a row's raw representation, RNE-rounded,
+// with NO float/double token anywhere in the parse or the rounding - the exact rational the
+// literal denotes is tracked as an integer numerator/denominator pair and handed to `rne_div`,
+// the same primitive every other narrowing path in this header already uses. Serves BOTH of RR-38's
+// named callers with this one implementation: `editor/inspector.cpp`'s fx-field edit widget
+// (which only knows a runtime `FieldKind`/FRAC pair, never a compile-time row type) and
+// `core/cvar.cpp`'s `CVAR_FX_RAW` decimal-literal branch (same shape - a runtime `frac_bits`).
+// `fx_parse_decimal<R>` is a three-line convenience wrapper over the raw primitive for callers
+// that DO have a compile-time row (this file's own tests, `fx_review`-style call sites).
+
+namespace detail {
+// Accumulates up to `count` ASCII digit bytes at `s` into `*out` (u64), left to right, MSD
+// first; overflow-checked (returns false rather than wrapping). `count == 0` is a no-op success
+// (a caller may legally have zero fractional digits, e.g. "5." - not itself an error).
+inline bool fx_accum_digits(const char* s, u32 count, u64* out) {
+    u64 acc = *out;
+    for (u32 i = 0; i < count; ++i) {
+        const u8 c = (u8)s[i];
+        if (c < (u8)'0' || c > (u8)'9') { return false; }
+        const u32 d = (u32)(c - (u8)'0');
+        if (acc > (UINT64_MAX - (u64)d) / 10u) { return false; }   // would overflow u64
+        acc = acc * 10u + (u64)d;
+    }
+    *out = acc;
+    return true;
+}
+}  // namespace detail
+
+constexpr ErrCode ERR_FX_PARSE = (ErrCode)0x0801;  // malformed decimal literal - empty, no digit
+                                                     // anywhere, a stray byte, or trailing garbage
+constexpr ErrCode ERR_FX_RANGE = (ErrCode)0x0802;   // the literal's magnitude (or its rounded raw
+                                                     // result) does not fit a 32-bit row at `frac`
+// The fx module's ErrCode range is 0x08xx (mem 0x01xx, jobs 0x02xx, core 0x03xx, net 0x04xx,
+// render 0x05xx, bytes 0x06xx, script 0x07xx, alloy 0x0Axx - core/reflect.h's own citation list).
+
+// Parses `s` (`StrView`, not necessarily NUL-terminated) as a base-10 decimal literal and
+// RNE-quantizes it to a raw i32 at `frac` fractional bits - the runtime-FRAC primitive both of
+// RR-38's callers actually need (neither has a compile-time row type at the call site). Grammar:
+// an optional leading `+`/`-`, then digits, then optionally `.` and more digits - at least one
+// digit somewhere in the whole string, and nothing after the last digit. `ERR_FX_PARSE`: empty
+// input, no digit anywhere (a lone sign or a lone `.`), a non-digit/non-`.`/non-sign byte, or
+// trailing bytes past the parse. `ERR_FX_RANGE`: more than 18 fractional digits (the fractional
+// denominator `10^n` would not fit `u64`), the scaled numerator overflows `u64`, the numerator
+// does not fit `rne_div`'s own precondition at `frac` bits, or the rounded result does not fit
+// `i32` - every one of these is checked explicitly here so a malformed or oversized STRING can
+// never reach an internal `TL_ASSERT` (that is a bug-only mechanism; untrusted text is `Result`'s
+// job, `CLAUDE.md`'s error-model split). `frac` is trusted (the caller's own `FieldKind`/
+// `CvarDesc::frac_bits`, not user text) and asserted in `[0, 30]`, matching every real row.
+inline Result<i32> fx_parse_decimal_raw(StrView s, u8 frac) {
+    TL_ASSERT(frac <= 30u);
+    if (s.len == 0u) { return Result<i32>{ 0, ERR_FX_PARSE }; }
+
+    u32 i = 0;
+    bool neg = false;
+    if (s.ptr[0] == '+' || s.ptr[0] == '-') { neg = (s.ptr[0] == '-'); i = 1u; }
+
+    const u32 int_start = i;
+    while (i < s.len && s.ptr[i] >= '0' && s.ptr[i] <= '9') { ++i; }
+    const u32 int_len = i - int_start;
+
+    u32 frac_start = i;
+    u32 frac_len = 0u;
+    if (i < s.len && s.ptr[i] == '.') {
+        ++i;
+        frac_start = i;
+        while (i < s.len && s.ptr[i] >= '0' && s.ptr[i] <= '9') { ++i; }
+        frac_len = i - frac_start;
+    }
+
+    if (i != s.len) { return Result<i32>{ 0, ERR_FX_PARSE }; }                    // trailing bytes
+    if (int_len == 0u && frac_len == 0u) { return Result<i32>{ 0, ERR_FX_PARSE }; }  // no digit at all
+    if (frac_len > 18u) { return Result<i32>{ 0, ERR_FX_RANGE }; }   // 10^frac_len must fit u64
+
+    u64 int_part = 0u;
+    if (!detail::fx_accum_digits(s.ptr + int_start, int_len, &int_part)) { return Result<i32>{ 0, ERR_FX_RANGE }; }
+    u64 frac_part = 0u;
+    if (!detail::fx_accum_digits(s.ptr + frac_start, frac_len, &frac_part)) { return Result<i32>{ 0, ERR_FX_RANGE }; }
+
+    u64 den = 1u;
+    for (u32 k = 0; k < frac_len; ++k) { den *= 10u; }   // <= 10^18, fits u64 (frac_len checked above)
+
+    // num = int_part * den + frac_part, each step overflow-checked.
+    if (int_part != 0u && den > UINT64_MAX / int_part) { return Result<i32>{ 0, ERR_FX_RANGE }; }
+    const u64 scaled = int_part * den;
+    if (scaled > UINT64_MAX - frac_part) { return Result<i32>{ 0, ERR_FX_RANGE }; }
+    const u64 num = scaled + frac_part;
+
+    // rne_div(num << frac, den) must not overflow i64 - the same bound fx_lit<R> asserts
+    // (this header, above): |num| < 2^(63 - frac).
+    if (num >= (u64(1) << (63u - (u32)frac))) { return Result<i32>{ 0, ERR_FX_RANGE }; }
+
+    const i64 signed_num = neg ? -i64(num) : i64(num);
+    const i64 q = rne_div(signed_num * (i64(1) << frac), i64(den));
+    if (q < i64(INT32_MIN) || q > i64(INT32_MAX)) { return Result<i32>{ 0, ERR_FX_RANGE }; }
+    return Result<i32>{ i32(q), ERR_OK };
+}
+
+// The typed convenience wrapper over `fx_parse_decimal_raw` for a caller that DOES have a
+// compile-time row `R` (this file's own tests; any future call site that isn't reflection-driven).
+template <typename R>
+Result<R> fx_parse_decimal(StrView s) {
+    static_assert(sizeof(typename R::rep) == 4, "fx_parse_decimal_raw returns i32 - 32-bit rows only");
+    const Result<i32> r = fx_parse_decimal_raw(s, (u8)R::FRAC_BITS);
+    if (r.err != ERR_OK) { return Result<R>{ R{}, r.err }; }
+    return Result<R>{ fx_raw<R>(typename R::rep(r.value)), ERR_OK };
 }
 
 }  // namespace fx
