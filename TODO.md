@@ -6173,3 +6173,75 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > **The ship-verdict round is NOT these three.** R-9 puts it on Fable and R-17 bars this
 > Opus-seated steward from adjudicating above its seat; it waits for the reset (Tue 2026-09-01
 > 02:00 local, confirmed independently from this session's own rate-limit reset, not inherited).
+
+> **ALLOY-SUBSTRATE LAUNCH PREP (steward, 2026-08-27) — the two audits `LESSONS.md` makes
+> mandatory at lane start, run BEFORE the brief rather than five-sixths through it. Four findings,
+> one of them a day-one blocker.** Both audits exist because the project already paid for skipping
+> them: "resolve every type a spec mentions to an owning doc AND a file that exists on `main`"
+> (net-p1 lost a lane to `ByteWriter`/`ByteReader`, which no doc owned) and "check the done
+> criterion's REACHABILITY at lane start" (`TOOLING.md` §9.6 was unreachable from the day it was
+> written and the editor lane was nearly done before anyone looked).
+>
+> **RR-46 (steward-allocated 2026-08-27) — BLOCKING for step 1. `ALLOY.md` §14.1 instructs the
+> lane to create the exact parallel file `foundation/rng_systems.h` forbids by name.** §14.1's
+> layout table lists `sim/rng_systems.h` holding "`enum RngSystem : u32` — closed (§14.5)", and
+> §14.7 step 1 puts `rng_systems.h` in its *files created* column. But
+> `src/foundation/rng_systems.h` already exists (W1 rng/hash) and its own contract block says, in
+> these words: *"Alloy's SYS_BASIN..SYS_PROMOTE (`docs/ALLOY.md` §14.5, values 1..10) are the first
+> consumer and fit comfortably under the 256 reserved here; that lane adds its own names to this
+> enum when it lands (one registration each), **not a parallel file** — `docs/CANON.md` 'one fact,
+> one home' for the enum's storage."* `CANON.md` names one unqualified `rng_systems.h`.
+> **Consequence, and it is not theoretical:** §14.1's own last line lets a `src/sim/` TU include
+> `src/foundation/`, so a duplicate `enum RngSystem` is reachable in a single TU — a redefinition,
+> the same shape as the `MAX_PEERS` collision between `core/input.h` and `net/wire.h` that was
+> compiling clean until a fresh-context review included both headers, and that needed a ruling.
+> Where it does NOT collide it is worse, not better: two enums keying one `rng_for` keyspace means
+> two systems can draw the same stream, which is a determinism defect of exactly the kind the
+> closed-enum design exists to prevent. **Confidence: High that the two docs contradict (both texts
+> read directly, not inferred); High that a literal §14.1 build produces a redefinition, on the
+> measured `MAX_PEERS` precedent.** Recommendation, for Rafael: the foundation header wins — it is
+> the one that reasoned about the question — and `ALLOY.md` §14.1/§14.5/§14.7 are amended to say
+> the lane REGISTERS its ten names in `foundation/rng_systems.h`. That makes the sim lane edit a
+> foundation file, which `ROADMAP.md` §0 rule 2 forbids, so the ruling must also say who performs
+> that edit. **Not for the lane to improvise; it is step 1's first file.**
+>
+> **RR-47 (steward-allocated 2026-08-27) — `sim/solver_kernels.h` does not exist, and no §14.7 row
+> still owns creating it.** §14.1 calls it "the FLOAT-SHADOW unit; the only solver file Gate 0
+> shares", and §14.7 step 2 (Gate 0) lists it as a file that step creates. Gate 0 shipped and was
+> ruled — and it built its kernels inside `tests/gate0/` (`solver_fx.h`, `solver_dbl.h`,
+> `g0_ops.h`, `solver.cpp`), the disposable bench, exactly as that lane's own charter described.
+> `find . -name 'solver_kernels*'` returns nothing. So the promotion step that §14.7 5a and
+> `ROADMAP.md` §2 both assume ("pass 3 promoted from gate0") is unassigned work sitting between a
+> closed lane and an unlaunched one. **Not a substrate blocker** — steps 1/3/4 name no solver file,
+> verified against §14.7's own columns — but it IS a blocker for W3's ★ `alloy-solver`, and it is
+> the `TOOLING.md` §9.6 class precisely: a criterion whose predecessor row silently did not deliver.
+> File before that lane is briefed, not during.
+>
+> **FINDING — the done criterion names a path that does not exist.** §14.7's closing line requires
+> "the measurement committed to `GATE0-BENCH.md`/`docs/measurements/`". `docs/measurements/` is not
+> in the tree; Gate 0's own results went to `tests/gate0/results/`. Inside `ALLOY.md`'s cone, so
+> the substrate lane can fix it — but it must be TOLD, or it will either create a second results
+> home or quietly skip the clause.
+>
+> **FINDING — `sim/views.h` is a cross-lane obligation with nobody on the other side, and this is
+> instance EIGHT of the merged-and-closed-lane ownership problem.** render2d handled its missing
+> dependency well and said so in the code: `src/render/simview.h` forward-declares the view types
+> OPAQUE, ships an empty `simview_update`, and its header comment names the contract — "`sim/views.h`
+> is an alloy-substrate deliverable", to be included "once alloy-substrate lands on main".
+> `RENDER2D.md` §9.2 pins the view struct shapes it expects. **render2d is merged and closed**, so
+> if substrate's `views.h` diverges from §9.2, no owner exists to notice: it surfaces in W4's
+> v0-integration, the expensive way. The substrate brief must carry §9.2 as a binding input.
+>
+> **CHECKED CLEAN, recorded so the next reader does not re-run it:** §14.7's "19 empty arenas" is
+> internally consistent — §14.2 names exactly nineteen `alloy.*` arenas and §14.3's `ArenaHashView`
+> and §14.6's `t_hash_region` both say 19. `src/sim/` today holds only `CMakeLists.txt` and a
+> placeholder `sim.cpp`, which is the documented shape for an unlanded module. `MAX_ARENAS` is 4096
+> since the E-2 ruling, so nineteen more arenas is not near any cap.
+> **CONSTRAINT for the brief, not a defect:** the step "done" line requires green "under debug +
+> UBSan/ASan". The ASan runtime is ABSENT in this container family (`LESSONS.md`) — a cloud lane
+> cannot run that half locally and must treat CI's sanitize legs as the only falsifier. A brief that
+> omits this produces either a false "verified" or a lane stuck on an impossible instruction.
+> **One earlier steward flag was WITHDRAWN before it reached this record:** "§14.7 step 1 lists
+> `rng_systems.h` as created but it already exists" — as stated that was wrong; §14.1 specifies a
+> *sim* header distinct from foundation's. Reading §14.1 turned a wrong flag into RR-46, which is
+> the real defect underneath it.
