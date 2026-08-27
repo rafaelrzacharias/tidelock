@@ -3391,6 +3391,22 @@ failures already noted in the prior entry (not a regression).
     exact removal list" section is titled and scoped to the SIM VM only (verified name-for-name
     against `SIM_REMOVE` - no drift) and makes no claim about the data VM's list at all, so there
     was nothing there to fix.
+
+**CI-caught, post-push (2026-08-27): a pre-existing heap-buffer-overflow in `load_chunk`'s Luau
+compile-error path**, found by the `sanitizers` legs on commit `76461d6` (D2-D10) - `data_compile_
+syntax_error_named_error` (D9) was the first path in the whole tree to ever hand `load_chunk` a
+genuine Luau SYNTAX error (an unterminated table literal), which it had never been exercised
+against before. `luau_compile` encodes a compile error as a leading `0` byte followed by the
+message, sized exactly by `bc_size` with **no trailing NUL** - `script_set_error`'s NUL-scan loop
+(its own documented contract requires a NUL-terminated `msg`) read one byte past the malloc'd
+buffer looking for a terminator that was never there. ASan: `READ of size 1` one byte past a
+57-byte region, inside `script_set_error`, called from `load_chunk`'s compile-error branch. Fixed
+at the call site that violated the contract (not by loosening `script_set_error`'s contract for
+every other, already-NUL-terminated caller): the message is now copied into a bounded, explicitly
+NUL-terminated stack buffer before being handed to `script_set_error`. Reproduced and fixed
+locally under `sanitize-linux` (the sandbox lacked the ASan/UBSan runtime; installed
+`libclang-rt-18-dev` to get it) - full suite green under sanitizers afterward (`463 selected, 459
+passed, 0 failed`), both non-sanitized tiers rebuilt clean and green too.
 - **D2 - the RR-21 pin didn't discriminate.** Its own two proofs: (a) the original test's two
   source strings walked in IDENTICAL `script_table_next` order (Luau places a small string-keyed
   table by key HASH, not insertion order, so varying literal field order in source text can never

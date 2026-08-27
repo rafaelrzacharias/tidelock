@@ -203,9 +203,29 @@ ErrCode load_chunk(ScriptVm* vm, const char* chunkname, StrView source) {
     // A compile error is encoded IN the bytecode: a leading 0 byte, then the message
     // (docs/LUAU-LAYER.md section 10.9). It is not a null return, which is why the check above
     // is not enough on its own.
+    //
+    // Found by round 1 review D9's own new test (data_compile_syntax_error_named_error - the
+    // first path anywhere in the tree to ever hand load_chunk a genuine Luau SYNTAX error, not
+    // just a runtime one): the message bytes luau_compile encodes after the leading 0 are sized
+    // exactly by `bc_size`, with no trailing NUL - measured under ASan, "READ of size 1" one byte
+    // past a 57-byte malloc'd region, inside script_set_error's NUL-scan loop. script_set_error's
+    // own contract (vm.h) requires a NUL-terminated `msg`; this call site broke it by passing a
+    // raw slice of a non-NUL-terminated buffer. Fixed here, at the call site that violates the
+    // contract, not by loosening the contract for every other (already NUL-terminated) caller.
     if (bc_size == 0 || bc[0] == 0) {
-        const char* msg = bc_size > 1 ? bc + 1 : "(empty compile error)";
-        const ErrCode e = script_set_error(vm, ERR_SCRIPT_COMPILE, msg);
+        char msgbuf[SCRIPT_ERR_MAX];
+        if (bc_size > 1) {
+            const size_t avail = (size_t)bc_size - 1u;
+            const size_t n = avail < sizeof(msgbuf) - 1u ? avail : sizeof(msgbuf) - 1u;
+            memcpy(msgbuf, bc + 1, n);
+            msgbuf[n] = 0;
+        } else {
+            const char* empty = "(empty compile error)";
+            u32 i = 0;
+            while (empty[i] != 0) { msgbuf[i] = empty[i]; ++i; }
+            msgbuf[i] = 0;
+        }
+        const ErrCode e = script_set_error(vm, ERR_SCRIPT_COMPILE, msgbuf);
         tl_luau_compile_free(bc);
         return e;
     }
