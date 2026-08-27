@@ -179,3 +179,26 @@ TL_TEST(desync_diff_max_n_stops_early, "core,desync_diff,fast") {
     TL_EXPECT_EQ(n, 1u);
     TL_EXPECT_EQ(rec.count, 1u);
 }
+
+// The header's own contract: "out is called at most max_n times." The fingerprint-mismatch
+// branch used to sit before this check and call out unconditionally, so max_n == 0 still
+// invoked the callback once and returned 1 - this reuses the fingerprint-mismatch fixture
+// (the exact case that leaked through) with max_n = 0.
+TL_TEST(desync_diff_max_n_zero_calls_out_zero_times, "core,desync_diff,fast") {
+    WorldFixture& f = *wt_fixture(1u);   // slot reuse across tests: safe, see dotpath.test.cpp's note
+    TL_ASSERT_TRUE(world_fixture_init(&f, 1u));
+    world_build_schedule(&f.w);
+    registry_seal(&f.reg);
+
+    VMemApi api = test_vmem_api();
+    SnapPair sp;
+    TL_ASSERT_TRUE(snap_pair_init(&sp, &api));
+    TL_ASSERT_EQ(registry_snapshot(&f.reg, &sp.a, 0u), ERR_OK);
+    TL_ASSERT_EQ(registry_snapshot(&f.reg, &sp.b, 1u), ERR_OK);
+    sp.b.session_fingerprint[0] ^= 0xFFu;   // even a fingerprint mismatch must not call out
+
+    Recorded rec{};
+    const u32 n = desync_diff(&f.reg, &sp.a, &sp.b, 0u, record, &rec);
+    TL_EXPECT_EQ(n, 0u);
+    TL_EXPECT_EQ(rec.count, 0u);
+}
