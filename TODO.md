@@ -5481,3 +5481,40 @@ than guessing past a determinism-relevant correctness gap. `core/recorder.cpp`/`
 `core/producers/replay.h`/`.cpp`, `core/loop.cpp`/`.h`, `foundation/snapshot.h`/`.cpp`,
 `foundation/ring.h` all read directly (file:line) to confirm this, not inferred from `TOOLING.md`'s
 own pseudocode, which is known (this session, repeatedly) to predate several reconciliations.
+
+### editor: closing the third v0 done-criterion clause — "zero heap allocation per frame outside `pool_vendor`" (2026-08-27)
+
+With the `keyframes.cpp`/Replay clause blocked on a ruling (above), looked for other unblocked
+work on `TOOLING.md` §9.6's v0 done criterion rather than idle on it — its third clause, "zero
+heap allocation per frame outside `pool_vendor`," had not been independently verified for any of
+the six panels.
+
+Researched the mechanism before writing anything (it is subtle enough that a naive test would
+have proven nothing): `src/vendor_glue/vendor_new.cpp`'s own comment records a MEASURED fact
+about `tl_tests`'s actual link line — `operator new`/`delete` resolve to `vendor_new.cpp`'s
+pool-backed replacements, not `foundation/alloc_shim_ops.cpp`'s tripwire (`alloc_shim_ops.o` is
+never even pulled into this binary, because `vendor_new.cpp`'s occurrence in
+`libtl_vendor_glue.a` is scanned before foundation's first occurrence in every current link line
+— exactly the mechanism `src/script/vm.cpp`'s reference to `vendor_heap_install` needs, so Luau's
+Compiler has a real allocator). With no vendor heap installed (`vendor_heap_current() ==
+nullptr`), `vendor_alloc`/`vendor_free` `TL_FATAL` on ANY global `new`/`delete` — "the same
+message shape [a stray `new` from `src/` code] dies exactly as before," per the file's own
+comment. So confirming `vendor_heap_current() == nullptr` before and after running every panel's
+real `draw_fn` repeatedly, and confirming the process does not crash, is the same tripwire
+mechanism `w3-render2d`'s own lane notes already relied on for the identical clause ("every
+render test in this lane ran the real pipeline repeatedly with no tripwire fatal — the mechanism
+that exists is satisfied; there is no live counter to assert a number against," `TODO.md`, "W3
+render2d — lane notes"). ImGui itself never reaches this path — `vendor_glue/imgui_glue.cpp`
+routes every ImGui allocation through `pool_vendor()` directly, the clause's own named exemption —
+so a clean run here is checking exactly what "outside `pool_vendor`" means.
+
+New `tests/editor/no_stray_alloc.test.cpp`: one test, all six panels registered on a real
+`Editor` over a real, populated `World` (an entity with a component, a singleton set, seeded
+log/profiler/probe state so each panel's non-empty branches actually run), every registered
+panel's `draw_fn` called 20 times across 20 imgui frames, `vendor_heap_current() == nullptr`
+asserted before and after. Ran clean on all four tiers, both isolated and non-isolated
+(`--tag '!slow'`) runs, 0 failed. `includes.py`/`docaudit.py` clean.
+
+**`TOOLING.md` §9's v0 done criterion is now met on two of its three clauses: all six panels
+exist, and zero heap allocation per frame outside `pool_vendor` is verified.** Only "an edit in
+the inspector appears in the replay log" remains open, pending the ruling filed above.
