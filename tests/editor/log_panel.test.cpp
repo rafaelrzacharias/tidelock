@@ -39,7 +39,12 @@ TL_TEST(log_panel_draw_empty_ring_finds_window_no_crash, "editor,log_panel,fast"
 #endif
 }
 
-TL_TEST(log_panel_draw_renders_every_level_newest_first, "editor,log_panel,fast") {
+// B-3: FindWindowByName != nullptr and VtxBuffer.Size > 0 hold for ANY non-empty drawing, so they
+// cannot tell newest-first from oldest-first (or from a table that skips levels) - a reversed
+// draw loop left this test green under the exact name that promises otherwise. log_panel_row_at
+// (B-3, 2026-08-27) is the panel's own row-index math, factored out so this test reads the actual
+// per-row content rather than only "something got drawn".
+TL_TEST(log_panel_row_at_is_newest_first, "editor,log_panel,fast") {
 #if TL_DEV
     tl_log_test_reset();
     TL_LOG_TRACE("trace line");
@@ -51,17 +56,24 @@ TL_TEST(log_panel_draw_renders_every_level_newest_first, "editor,log_panel,fast"
     // netcode/ship: 2, INFO+ only - but this whole TU is TL_DEV-guarded, so only the debug/dev
     // case is ever compiled here) - assert against tl_log_ring_count(), not a literal 5.
     const u32 n = tl_log_ring_count();
-    TL_ASSERT_TRUE(n >= 1u);
+    TL_ASSERT_EQ(n, 5u);   // all five levels compiled in at TL_DEV=1 - real content, not >= 1u
 
+    // Row 0 is the NEWEST (the last line written, "err line"); the last row is the OLDEST (the
+    // first line written, "trace line"). A reversed loop (B's own M3 mutation) swaps these.
+    TL_EXPECT_TRUE(strcmp(log_panel_row_at(0u)->msg, "err line") == 0);
+    TL_EXPECT_TRUE(strcmp(log_panel_row_at(1u)->msg, "warn line") == 0);
+    TL_EXPECT_TRUE(strcmp(log_panel_row_at(2u)->msg, "info line") == 0);
+    TL_EXPECT_TRUE(strcmp(log_panel_row_at(3u)->msg, "debug line") == 0);
+    TL_EXPECT_TRUE(strcmp(log_panel_row_at(n - 1u)->msg, "trace line") == 0);
+    TL_EXPECT_EQ(log_panel_row_at(0u)->level, (u8)LOG_ERR);
+    TL_EXPECT_EQ(log_panel_row_at(n - 1u)->level, (u8)LOG_TRACE);
+
+    // The draw function itself uses this exact mapping, so drawing it end to end is still real
+    // coverage of the wiring, not just the pure function in isolation.
     imgui_test_begin_frame(t);
     log_panel_draw(nullptr, nullptr);
     ImGuiWindow* win = ImGui::FindWindowByName("Log");
     TL_ASSERT_TRUE(win != nullptr);
-    // Newest-first (log_panel.cpp's own contract): the last record written is ERR (always
-    // compiled in, docs/TOOLING.md §9's TL_LOG_ERR floor), so the panel drew at least one row -
-    // checked via the window's own draw list vertex count (ImGui::Text() emits real geometry
-    // immediately, unlike ContentSize/auto-fit metrics, which settle only from the SECOND frame
-    // a window is drawn - found failing on frame one before this comment existed).
     TL_EXPECT_TRUE(win->DrawList->VtxBuffer.Size > 0);
     imgui_test_end_frame();
     tl_log_test_reset();

@@ -9,6 +9,10 @@
 
 namespace {
 
+// The single predicate deciding whether slot `idx` is a live entity - `draw_entities`'s clipper
+// loop and `world_panel_visible_slots` both call this, so they cannot drift into disagreement.
+bool slot_visible(const World* w, u32 idx) { return bitset_test(&w->entities.live, idx); }
+
 void ensure_hash_buffers(Editor* ed) {
     if (ed->world_arena_hash_cur != nullptr) { return; }
     ed->world_arena_hash_cur = (u64*)arena_push(&ed->dev_arena, sizeof(u64) * MAX_ARENAS, alignof(u64));
@@ -26,7 +30,7 @@ void draw_entities(Editor* ed, World* w) {
     while (clipper.Step()) {
         for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
             const u32 idx = (u32)i;
-            if (!bitset_test(&w->entities.live, idx)) { continue; }   // dead slot in this window
+            if (!slot_visible(w, idx)) { continue; }   // dead slot in this window
             const Entity e = handle_make<Entity>(idx, w->entities.gen.data[idx]);
             const EntityRecord& rec = w->entities.slots.data[idx];
             ImGui::PushID(i);
@@ -86,6 +90,17 @@ void draw_arenas(Editor* ed, World* w) {
 }  // namespace
 
 void world_panel_register(Editor* ed) { editor_register_panel(ed, "World", world_panel_draw, true); }
+
+u32 world_panel_visible_slots(const World* w, u32* out, u32 cap) {
+    const u32 slot_cap = slotmap_slot_cap(&w->entities);
+    u32 written = 0u;
+    for (u32 idx = 0; idx < slot_cap; ++idx) {
+        if (!slot_visible(w, idx)) { continue; }
+        if (written < cap) { out[written] = idx; }
+        written += 1u;
+    }
+    return written;
+}
 
 void world_panel_rehash_arenas(Editor* ed, World* w) {
     if (w->registry->sealed == 0u) { return; }   // registry_hash_all is TL_CHECK-fatal until

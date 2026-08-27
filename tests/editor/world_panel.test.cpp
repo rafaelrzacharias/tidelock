@@ -111,6 +111,23 @@ TL_TEST(world_panel_draw_live_and_dead_slots_and_singleton_no_crash, "editor,wor
     world_singleton_set_cmd(&f.w, world_component_id<WCfg>(&f.w), &cfg);
     world_flush(&f.w);
 
+    // B-3/B-10: the panel's one non-trivial invariant, asserted directly rather than only "the
+    // panel drew something" - world_panel_visible_slots is the SAME predicate draw_entities' own
+    // clipper loop uses (world_panel.cpp's slot_visible), so this discriminates a real regression
+    // in the shared code, not just a copy of it. b's slot must be excluded; a's and c's included.
+    u32 visible[16];
+    const u32 visible_n = world_panel_visible_slots(&f.w, visible, 16u);
+    TL_ASSERT_EQ(visible_n, 2u);
+    bool saw_a = false, saw_b = false, saw_c = false;
+    for (u32 i = 0; i < visible_n; ++i) {
+        if (visible[i] == handle_index(a)) { saw_a = true; }
+        if (visible[i] == handle_index(b)) { saw_b = true; }
+        if (visible[i] == handle_index(c)) { saw_c = true; }
+    }
+    TL_EXPECT_TRUE(saw_a);
+    TL_EXPECT_TRUE(!saw_b);   // the destroyed slot must NOT appear
+    TL_EXPECT_TRUE(saw_c);
+
     Editor ed;
     TL_ASSERT_TRUE(make_editor(&ed));
     ed.sel = a;   // what the row's own "select" button would set

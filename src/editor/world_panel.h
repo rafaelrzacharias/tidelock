@@ -65,3 +65,13 @@ void world_panel_draw(Editor* ed, World* w);
 // into `_prev` (so the panel can flag "changed since last rehash") before recomputing `_cur` via
 // `registry_hash_all`.
 void world_panel_rehash_arenas(Editor* ed, World* w);
+
+// The live entity slot indices `draw_entities` (this file's own row-producing loop) walks and
+// draws, in slot order (`0..slotmap_slot_cap()`, skipping dead slots per this header's Purpose
+// note - never `0..live_count`). Writes up to `cap` indices into `out`; returns the TOTAL live
+// count (`w->entities.live_count`) regardless of `cap`, so a caller can detect truncation by
+// comparing the return value against `cap`. Factored out so a test can assert the panel's single
+// non-trivial invariant - a destroyed slot is excluded - directly (B-3, 2026-08-27), rather than
+// only that the panel drew something. `draw_entities` calls the same per-slot predicate this
+// function does, so the two cannot drift out of sync with each other.
+u32 world_panel_visible_slots(const World* w, u32* out, u32 cap);

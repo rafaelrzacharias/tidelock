@@ -18,9 +18,11 @@
 //   last value, last tick.
 // Determinism: dev UI only (`TOOLING.md` §0). Never touches sim state.
 // Threading: none - single-threaded dev UI, matching every other panel this lane has built.
-// Includes: editor/editor.h (Editor, World forward decl).
+// Includes: editor/editor.h (Editor, World forward decl); foundation/tl_probe.h (ProbeKey, for
+//   probes_panel_mean's parameter type - B-3, 2026-08-27).
 // ---------------------------------------------------------------------------------------------
 #include "editor/editor.h"
+#include "foundation/tl_probe.h"
 
 // Registers the Probes panel on `ed` (`editor_register_panel(ed, "Probes", probes_panel_draw,
 // true)`).
@@ -29,3 +31,9 @@ void probes_panel_register(Editor* ed);
 // The panel's own content. `w` is unused (`ProbeState` is one process-wide `foundation/probe.cpp`
 // global, not per-`World` state) - kept in the signature only because `PanelDrawFn` is uniform.
 void probes_panel_draw(Editor* ed, World* w);
+
+// The mean the panel's summary row shows for `k`: `k->sum / k->count`, or 0.0 for a never-called
+// key (`k->count == 0`) rather than a 0/0 NaN. Factored out so a test can assert the panel's one
+// non-trivial computed value directly (B-3, 2026-08-27) rather than only that the panel drew
+// something.
+f64 probes_panel_mean(const ProbeKey* k);

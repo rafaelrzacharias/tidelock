@@ -15,9 +15,11 @@
 // Determinism: dev UI only (`TOOLING.md` §0 "ImGui is dev UI only") - never touches sim state,
 //   never on a sim path.
 // Threading: none - single-threaded dev UI, matching `editor.h`.
-// Includes: editor/editor.h (PanelDrawFn, Editor, World forward decl).
+// Includes: editor/editor.h (PanelDrawFn, Editor, World forward decl); foundation/tl_log.h
+//   (LogRecord, for log_panel_row_at's return type - B-3, 2026-08-27).
 // ---------------------------------------------------------------------------------------------
 #include "editor/editor.h"
+#include "foundation/tl_log.h"
 
 // Registers the Log panel on `ed` (`editor_register_panel(ed, "Log", log_panel_draw, true)` -
 // open by default, matching a console/log panel's usual role as the first thing a dev looks at).
@@ -28,3 +30,9 @@ void log_panel_register(Editor* ed);
 // per-`World` state); kept in the signature only because `PanelDrawFn` is uniform across every
 // panel (`editor.h`).
 void log_panel_draw(Editor* ed, World* w);
+
+// The record the panel draws at display row `row` (0 = newest, matching this file's own "newest
+// first" convention) - the exact index math `log_panel_draw`'s loop runs, factored out so a test
+// can assert ordering directly (B-3, 2026-08-27) rather than only that SOMETHING was drawn. `row`
+// must be `< tl_log_ring_count()` (TL_CHECK).
+const LogRecord* log_panel_row_at(u32 row);

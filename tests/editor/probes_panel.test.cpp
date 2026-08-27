@@ -96,6 +96,25 @@ TL_TEST(probes_panel_draw_every_kind_no_crash, "editor,probes_panel,fast") {
 #endif
 }
 
+// B-3: FindWindowByName != nullptr and VtxBuffer.Size > 0 hold for any non-empty drawing, so they
+// cannot tell a correct mean from a wrong one. probes_panel_mean (B-3, 2026-08-27) is the panel's
+// one non-trivial computed value - factored out so this test can assert the formula AND its
+// divide-by-zero guard directly, as a plain unit test over ProbeKey (a trivial aggregate,
+// foundation/tl_probe.h) rather than through the throttle machinery.
+TL_TEST(probes_panel_mean_matches_sum_over_count, "editor,probes_panel,fast") {
+#if TL_DEV
+    ProbeKey k{};
+    k.count = 4u;
+    k.sum = 10.0;
+    TL_EXPECT_EQ(probes_panel_mean(&k), 2.5);
+
+    ProbeKey never_called{};   // count == 0 - must read 0.0, not a 0/0 NaN
+    TL_EXPECT_EQ(probes_panel_mean(&never_called), 0.0);
+#else
+    TL_PROBES_PANEL_SKIP;
+#endif
+}
+
 TL_TEST(probes_panel_draw_disabled_key_shown_no_crash, "editor,probes_panel,fast") {
 #if TL_DEV
     tl_probe_test_reset();

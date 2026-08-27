@@ -18,6 +18,8 @@ const char* kind_label(u8 kind) {
 
 void probes_panel_register(Editor* ed) { editor_register_panel(ed, "Probes", probes_panel_draw, true); }
 
+f64 probes_panel_mean(const ProbeKey* k) { return (k->count != 0u) ? (k->sum / (f64)k->count) : 0.0; }
+
 void probes_panel_draw(Editor* /*ed*/, World* /*w*/) {
     if (!ImGui::Begin("Probes")) { ImGui::End(); return; }
 
@@ -27,7 +29,7 @@ void probes_panel_draw(Editor* /*ed*/, World* /*w*/) {
 
     for (u32 i = 0; i < n; ++i) {
         const ProbeKey* k = tl_probe_key_at(i);
-        const f64 mean = (k->count != 0u) ? (k->sum / (f64)k->count) : 0.0;
+        const f64 mean = probes_panel_mean(k);
         ImGui::PushID((int)i);
         ImGui::Text("%s [%s]%s", k->name, kind_label(k->kind), k->enabled ? "" : " (disabled)");
         ImGui::Text("  count=%llu changes=%llu min=%.9g max=%.9g mean=%.9g last=%.9g tick=%llu",
