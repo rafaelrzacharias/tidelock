@@ -34,7 +34,8 @@
 > seam and the replay recorder, where an untested bit is a desync nobody can bisect. One
 > steward-executed reword (`850d09b`, `[docs:none]`) is already in its history, per R-13.
 >
-> **PR #14 `w3-assets-data` — head moving (`c12bfac` at 09:20), CI in flight, lane WORKING.**
+> **PR #14 `w3-assets-data` — head `c12bfac`, CI 23/23 GREEN, `mergeable_state: clean`, round 1's
+> fix set COMPLETE, lane idle. Round 2 is OWED and was not spawned.**
 > Round 1 (Opus, fresh context) returned *fix first*: 4 blocking, 4 should-fix, 2 nits. The
 > headline is that **RR-21's determinism condition did NOT hold** — the C++ half walks
 > schema-ordered as ruled, but `DATA_REMOVE` kept `pairs`/`next`, so staging-table insertion
@@ -48,6 +49,22 @@
 > window. Its three declared scope cuts were judged HONEST deferrals and are NOT why §8.5 is
 > unmet. Round 2 follows its fix round.
 >
+> Round 1's fixes shipped with per-item evidence to the standard this window imposed. Notable:
+> the lane grepped for reachable `pairs(`/`next(` before removing them and found its own
+> `sandbox_data_vm_removals` test asserting `pairs ~= nil`; it verified the removal by reverting
+> `DATA_REMOVE`'s four names and watching that test fail, and verified D2's rewritten pin by
+> reproducing the reviewer's positional-walk mutation and watching the NEW test fail while the
+> old one still passed — proving the old pin's inadequacy directly. It also checked `CANON.md`
+> against the code rather than assuming (its removal list is sim-VM-scoped, so nothing was
+> owed there) and found `LUAU-LAYER.md` §10.2's list had independently drifted. **Two
+> self-found bugs neither review caught:** `save_write` never stamped `hdr.format_version`
+> (always 0), which would have made version-keyed migration dispatch unreachable; and the
+> sanitizer legs caught a real pre-existing heap-buffer-overflow in `load_chunk`'s compile-error
+> path — `luau_compile`'s error buffer is not NUL-terminated and `script_set_error` assumed it
+> was, first reached by the lane's own new syntax-error test. Round 2 should verify both.
+> **Still deferred, honestly:** §8.5's "two processes" half (no process-spawn primitive exists
+> in the codebase yet) and D10's array-broadcast fatal (no crash test, matching sibling
+> untested-kind fatals).
 > **Standing across both:** evidence, not assertion — a lane reporting a test as
 > revert-verified must give the command and the real failure output per item, or the item is
 > unverified whatever the commit message says (this window lost three review rounds to that on
