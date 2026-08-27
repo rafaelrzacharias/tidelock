@@ -235,7 +235,11 @@ Both are fixed to the wording above in the same commit.
 
 Reader: header checks (magic, version ≤ known, `build_id` differences allowed, `session_fingerprint`
 differences allowed — this is the cross-build path; data-script hash must match after recompiling
-the tables, else `ERR_SAVE_DATA_MISMATCH`); per block, decode by name: for each stored field find
+the tables, else `ERR_SAVE_DATA_MISMATCH`; the header's own `arena_count` checked against
+`MAX_ARENAS`, `ERR_SAVE_TOO_MANY_ARENAS` on excess — added 2026-08-27, round 2 review R1: this
+file-supplied count drives the per-block decode loop into a fixed `MAX_ARENAS`-sized scratch
+array, and the bound guarding it had only ever been enforced on the WRITER's `arena_descs.count`,
+never on the reader's own file-supplied field); per block, decode by name: for each stored field find
 the live field by `name` (then by alias table `{old_hash → new_hash}` registered per component);
 kind mismatch → `ERR_SAVE_FIELD_KIND` (a versioned migration function may be registered for
 `(component, format_version)` and runs instead); missing live field → skipped; missing stored field

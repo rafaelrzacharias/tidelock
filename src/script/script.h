@@ -203,6 +203,14 @@ u32 script_table_len(ScriptVm* vm, ScriptTableRef t);
 // keys can be (a table key is ERR_SCRIPT_RUNTIME, never attempted: reconstructing "the same
 // table object" from a copy would silently desync `lua_next`'s own walk).
 //
+// A non-nil `*key` that is not actually present in `t` right now is ALSO ERR_SCRIPT_RUNTIME
+// (false return, never a crash) rather than attempted: `lua_next` raises "invalid key to next"
+// for one (round 2 review R2), and since other Luau code can run between two calls (the sentence
+// above), a key this reader itself yielded can stop being present by the next call - removed and
+// the table rehashed, or simply a foreign/reused key. This can happen honestly (interleaved
+// script content mutating the table), so check `script_last_error` rather than treating false as
+// only "walk complete".
+//
 // THE WALK ORDER IS NOT PART OF THE DETERMINISTIC SURFACE (docs/LUAU-LAYER.md §1, the binding
 // condition RR-21's ruling attached): it is Luau's internal hash-table order, a function of the
 // table's insertion history and its implementation, not of its final contents - two tables built

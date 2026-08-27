@@ -180,6 +180,14 @@ ErrCode save_read(const SaveDesc* desc, const PlatformApi* platform, StrView pat
     ErrCode hdr_err = wire_read_SaveHeader(&hr, &hdr);
     if (hdr_err != ERR_OK) { arena_reset_to(scratch, mark); return ERR_SAVE_TRUNCATED; }
     if (hdr.format_version > SAVE_FORMAT_VERSION) { arena_reset_to(scratch, mark); return ERR_SAVE_VERSION; }
+    // Round 2 review R1: hdr.arena_count is a file-supplied u32 that drives the block loop below,
+    // which writes one Pending record per block into a fixed MAX_PENDING (== MAX_ARENAS)-sized
+    // array with no bound of its own - the D5/D7 hunk deleted the TL_CHECK that used to guard
+    // this (present at the round-1 anchor, gone by c12bfac). Bounded here, up front, exactly
+    // parallel to D8's name_table_len treatment, and as a named ErrCode rather than a restored
+    // TL_CHECK: a fatal on file content is the class D7's own fix argues against, and
+    // docs/CPP-SUBSET.md §3 makes malformed input an ErrCode, not a process death.
+    if (hdr.arena_count > MAX_ARENAS) { arena_reset_to(scratch, mark); return ERR_SAVE_TOO_MANY_ARENAS; }
 
     ByteReader r;
     br_init(&r, buf, total - 4u);   // exclude the trailer from the block walk

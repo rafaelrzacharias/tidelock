@@ -577,3 +577,50 @@ TL_TEST(save_read_kind_change_via_migration_fn, "core,save") {
     remove(SAVE_PATH);
     platform_test_shutdown(platform);
 }
+
+// Round 2 review R2: hdr.arena_count is a file-supplied u32 that drives the block loop, which
+// writes one Pending record per block into a fixed MAX_PENDING (== MAX_ARENAS)-sized array. The
+// TL_CHECK that used to guard this (present at the round-1 anchor a7a18dc) was deleted by the
+// D5/D7 hunk in 76461d6 - no real replicated blocks are needed to prove the gap: a valid
+// single-block file with ONLY its arena_count field inflated past MAX_ARENAS must be refused
+// before the block loop ever runs, not merely once real bytes run out.
+TL_TEST(save_read_forged_arena_count_refused, "core,save") {
+    const PlatformApi* platform = platform_test_init();
+    TL_ASSERT_NOT_NULL(platform);
+    VMemArena scratch;
+    TL_ASSERT_EQ(vmem_arena_init(&scratch, "save_test_scratch13"_id, 16u * 1024u * 1024u, 0u, &platform->vmem), ERR_OK);
+
+    WorldFixture* f = wt_fixture(3);
+    TL_ASSERT_TRUE(world_fixture_init(f, 1u));
+    world_register_component(&f->w, &WCfg_info);
+    world_build_schedule(&f->w);
+
+    u32 wcfg_id = world_component_id<WCfg>(&f->w);
+    SaveArenaDesc ad{};
+    ad.arena_id = f->w.comps[wcfg_id].dense_arena.id;
+    ad.kind = SAVE_ENC_REFLECTED;
+    ad.info = &WCfg_info;
+    ad.max_rows = 1u;
+
+    SaveDesc d = base_desc(&f->reg, &f->w);
+    d.arena_descs = Span<const SaveArenaDesc>{ &ad, 1u };
+    TL_ASSERT_EQ(save_write(&d, platform, sv(SAVE_PATH), &scratch), ERR_OK);
+
+    u8 buf[512];
+    usize n = read_raw(SAVE_PATH, buf, sizeof buf);
+    TL_ASSERT_TRUE(n > 164u);
+    // arena_count, TL_OFFSETS_SaveHeader(arena_count, 100): MAX_ARENAS (4096) + 1 - still just a
+    // u32 field, no real blocks need to exist for the bound to be the first thing that trips.
+    u32 forged = 4096u + 1u;
+    buf[100] = (u8)(forged & 0xFFu);
+    buf[101] = (u8)((forged >> 8) & 0xFFu);
+    buf[102] = (u8)((forged >> 16) & 0xFFu);
+    buf[103] = (u8)((forged >> 24) & 0xFFu);
+    recrc_and_write(t, SAVE_PATH, buf, n);
+
+    u64 out_seed = 0u, out_tick = 0u;
+    TL_EXPECT_EQ(save_read(&d, platform, sv(SAVE_PATH), &scratch, &out_seed, &out_tick), ERR_SAVE_TOO_MANY_ARENAS);
+
+    remove(SAVE_PATH);
+    platform_test_shutdown(platform);
+}

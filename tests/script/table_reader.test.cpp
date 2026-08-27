@@ -150,6 +150,63 @@ TL_TEST(script_table_next_table_key_is_refused, "script") {
     script_fixture_down(&f);
 }
 
+// Round 2 review R2: script_table_next used to fatal the process (TL_FATAL, via lua_next's own
+// "invalid key to 'next'" raise) when the cursor key it was asked to continue from was not
+// actually present in the table - reachable from an ordinary foreign key, not just a contrived
+// interleaving. Fixed with a raw existence check before calling lua_next.
+TL_TEST(script_table_next_foreign_key_is_refused, "script") {
+    ScriptFixture f;
+    TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_DATA));
+
+    Result<ScriptValue> a = script_eval(f.vm, sv("{ apple = 1 }"));
+    TL_ASSERT_EQ(a.err, ERR_OK);
+    Result<ScriptValue> b = script_eval(f.vm, sv("{ banana = 2 }"));
+    TL_ASSERT_EQ(b.err, ERR_OK);
+
+    // Walk `a` once for a real key, then continue as if walking `b` with it - `b` has no "apple".
+    ScriptValue key{};
+    ScriptValue val{};
+    TL_ASSERT_TRUE(script_table_next(f.vm, a.value.table, &key, &val));
+    TL_ASSERT_EQ(key.kind, (u8)SCRIPT_VAL_STRING);
+
+    TL_EXPECT_FALSE(script_table_next(f.vm, b.value.table, &key, &val));
+    TL_EXPECT_TRUE(strstr(script_last_error(f.vm), "not in the table") != nullptr);
+
+    script_table_unref(f.vm, a.value.table);
+    script_table_unref(f.vm, b.value.table);
+    script_fixture_down(&f);
+}
+
+// Round 2 review R2, the scenario script_table_next's OWN design rationale names as the reason
+// the cursor round-trips through Luau every call rather than staying parked on the stack: other
+// Luau content runs between two calls and removes the yielded key. All eight original keys are
+// cleared (guaranteed to include whichever was yielded first, since the order is Luau's own hash
+// layout, not something this test controls) and 64 new ones are inserted to force a rehash -
+// removal alone or a rehash alone each survive lua_next; this reproduces needing both.
+TL_TEST(script_table_next_key_removed_and_rehashed_between_calls_is_refused, "script") {
+    ScriptFixture f;
+    TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_DATA));
+
+    TL_ASSERT_TRUE(script_ok(f.vm, "T = { a=1, b=2, c=3, d=4, e=5, f=6, g=7, h=8 }"));
+    Result<ScriptValue> tbl = script_eval(f.vm, sv("T"));
+    TL_ASSERT_EQ(tbl.err, ERR_OK);
+    ScriptTableRef ref = tbl.value.table;
+
+    ScriptValue key{};
+    ScriptValue val{};
+    TL_ASSERT_TRUE(script_table_next(f.vm, ref, &key, &val));   // first key, order unknown
+
+    TL_ASSERT_TRUE(script_ok(f.vm,
+        "T.a=nil T.b=nil T.c=nil T.d=nil T.e=nil T.f=nil T.g=nil T.h=nil\n"
+        "for i = 1, 64 do T['k' .. i] = i end\n"));
+
+    TL_EXPECT_FALSE(script_table_next(f.vm, ref, &key, &val));
+    TL_EXPECT_TRUE(strstr(script_last_error(f.vm), "not in the table") != nullptr);
+
+    script_table_unref(f.vm, ref);
+    script_fixture_down(&f);
+}
+
 TL_TEST(script_table_next_walks_every_pair_exactly_once, "script") {
     ScriptFixture f;
     TL_ASSERT_TRUE(script_fixture_up(&f, SCRIPT_VM_DATA));

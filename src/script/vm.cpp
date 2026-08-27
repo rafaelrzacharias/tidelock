@@ -558,14 +558,24 @@ bool push_script_value_key(lua_State* L, const ScriptValue* key) {
 }  // namespace
 
 // Round 1 review D3 asked for the same unprotected-call audit on this reader's other three Luau
-// entry points, beyond script_table_get's lua_gettable (fixed above to lua_rawget). Conclusion,
-// not a guess: lua_getref (script_table_get/geti/len/next, a lua_rawgeti(REGISTRYINDEX) macro)
-// and lua_next below are both RAW - the VM source (vendor/luau/VM/src/lapi.cpp, lvm.cpp) shows
-// neither consults a metatable, so neither can run script content or raise from one. lua_next's
-// only own error path is "invalid key to next", unreachable here because the key it is ever asked
-// to continue from is always a key IT ITSELF returned on a prior call (never one this file
-// invents). lua_pushlstring can only fail on allocator OOM, the same failure class every other
-// alloc in this VM already treats as fatal (docs/MEMORY.md), not a new door this function opens.
+// entry points, beyond script_table_get's lua_gettable (fixed above to lua_rawget).
+// lua_getref (script_table_get/geti/len/next, a lua_rawgeti(REGISTRYINDEX) macro) is RAW - the VM
+// source (vendor/luau/VM/src/lapi.cpp) shows it consults no metatable, so it cannot run script
+// content or raise from one. lua_pushlstring can only fail on allocator OOM, the same failure
+// class every other alloc in this VM already treats as fatal (docs/MEMORY.md), not a new door
+// this function opens.
+//
+// lua_next below is NOT safe by the same reasoning, and an earlier version of this comment was
+// wrong to say so (round 2 review R2, 2026-08-27): it raises "invalid key to 'next'"
+// (vendor/luau/VM/src/ltable.cpp) whenever the key it is asked to continue from is not actually
+// present in the table at that moment - which this reader's own cursor-as-value design makes
+// reachable, not merely theoretical. The design note two lines below explains why the cursor
+// round-trips through Luau every call rather than staying parked on the stack: "this VM may run
+// OTHER Luau code between two separate calls into this function" - and content that removes the
+// yielded key and forces a rehash (either alone survives; both together do not) is exactly such
+// code. A foreign or reused key reaches the same raise trivially. Measured, both ways, in review.
+// Fixed below with a raw existence check before calling lua_next, rather than trusting the
+// caller to keep the key valid.
 bool script_table_next(ScriptVm* vm, ScriptTableRef t, ScriptValue* key, ScriptValue* out_value) {
     TL_ASSERT(vm != nullptr && vm->L != nullptr && key != nullptr && out_value != nullptr);
     script_clear_error(vm);
@@ -585,6 +595,24 @@ bool script_table_next(ScriptVm* vm, ScriptTableRef t, ScriptValue* key, ScriptV
         lua_pop(L, 1);   // the table
         (void)script_set_error(vm, ERR_SCRIPT_RUNTIME, "script_table_next: table keys are not supported");
         return false;
+    }
+    // A nil key (SCRIPT_VAL_NIL) is "begin", never a continuation - lua_next always accepts it for
+    // a non-empty table, so only a non-nil key needs the existence check. A raw lookup: nil means
+    // "not present right now", the same reading script_table_get already gives an absent key -
+    // whether it never existed, was removed by other Luau code, or (the mid-walk t[k]=nil-alone
+    // case Luau itself permits during traversal) was cleared since it was yielded. Refusing that
+    // last case too is a deliberate, safe trade: this reader promises nothing about resuming a
+    // walk through a value a caller already cleared, and the alternative is the raise above.
+    if (key->kind != SCRIPT_VAL_NIL) {
+        lua_pushvalue(L, -1);          // table, key, key
+        lua_rawget(L, -3);             // table, key, table[key]
+        const bool present = !lua_isnil(L, -1);
+        lua_pop(L, 1);                 // table, key
+        if (!present) {
+            lua_pop(L, 2);   // key, table
+            (void)script_set_error(vm, ERR_SCRIPT_RUNTIME, "script_table_next: cursor key is not in the table");
+            return false;
+        }
     }
     const int has_more = lua_next(L, -2);
     if (!has_more) {

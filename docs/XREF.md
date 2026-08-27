@@ -169,7 +169,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 
 ## LUAU-LAYER.md
 - `ASSETS-AND-DATA.md` -> §1, §10
-- `CANON.md` -> §10.2
+- `CANON.md` -> §1, §10.2
 - `CPP-SUBSET.md` -> §10.9
 - `DETERMINISM.md` -> §2, §10.6
 - `ECS.md` -> §3, §4, §10.6

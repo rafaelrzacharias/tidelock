@@ -44,7 +44,7 @@ Persistent script state = a component (Luau-declared, `ECS.md` §6.1) or a singl
 |---|---|---|---|---|
 | **sim** | `ipairs`, `sortedpairs` (ours), `table` (array ops), `string` (pure fns only), `fx` (det math bindings), engine bindings (§3). **Removed:** `math` (stock), `os`, `io`, `debug`, `pairs`/`next`, `coroutine`, `string.rep`, `require` beyond the init phase, `loadstring` | inside the lockstep contract; bytecode in the fingerprint | own `mem_pool`, budgeted | **interpreter only** (native codegen is another codegen surface) |
 | **ui/editor** | stock Luau + ImGui/draw/text bindings + read-only world access; `pairs` allowed | free | own pool | NCG allowed |
-| **data** | stock Luau minus `os`/`io` **and minus `math.random`/`math.randomseed`** (ruled 2026-08-26 — Luau seeds its PCG from `uintptr_t(L) ^ time(NULL) ^ clock()`, and this VM's output is hashed, so a single draw makes a peer-divergent table that surfaces as a fingerprint mismatch instead of an error at the mistake), **and minus `pairs`/`next`/`table.foreach`/`table.foreachi`** (ruled 2026-08-27, round 1 review of PR #14, amending RR-21 — the same reasoning as `math.random`, through a different door: Luau places a table by KEY HASH, a function of insertion history and the implementation, not of the key set's content, so raw iteration order over a hash-keyed table is not a pure function of the source text; `ipairs` remains, deterministic by integer order), **and with `tostring`/`string.format` of a reference raising** rather than printing an address (ruled 2026-08-26, same reasoning through a different door — §10.2 step 5); used once per table compile then destroyed (`ASSETS-AND-DATA.md` §3) | its *output* is hashed | throwaway | — |
+| **data** | stock Luau minus the exact removal list in `CANON.md` "Luau data VM" (reconciled here 2026-08-27, round 2 review of PR #14, R4 — this row and §10.2 step 4 had drifted into two homes for one fact; `CANON.md` is now the home, cited from both), **and with `tostring`/`string.format` of a reference raising** rather than printing an address (ruled 2026-08-26, same reasoning through a different door — §10.2 step 5); used once per table compile then destroyed (`ASSETS-AND-DATA.md` §3) | its *output* is hashed | throwaway | — |
 
 The sim VM and the UI VM never share a `lua_State`; the UI VM reads the world through the same
 read bindings the inspector uses and can only *write* by issuing commands (which are sealed).
@@ -272,11 +272,11 @@ returns `Result<ScriptVm*>` with `ERR_SCRIPT_*` codes; no partial VM survives.
    The "asserted absent afterwards" check runs in `script_sandbox_open` itself, not only in the
    test: a removal that silently did nothing is a hole in the sandbox, and a hole found by a test
    nobody ran is not a gate (`LESSONS.md`). VM creation fails with `ERR_SCRIPT_SANDBOX`. `_G.require` is installed
-   in step 7 and removed at the end of init (§10.9). Data VM removes `os`, `io`, `loadstring`,
-   `getfenv`, `setfenv`, `math.random`, `math.randomseed` (**ruled 2026-08-26**, §1's data-VM row),
-   and `pairs`, `next`, `table.foreach`, `table.foreachi` (**added 2026-08-27, round 1 review of
-   PR #14, amending RR-21** — this line had drifted from §1's data-VM row the same way `CANON.md`'s
-   sim list drifted before it; both now agree). UI VM removes nothing.
+   in step 7 and removed at the end of init (§10.9). Data VM removes the exact list in `CANON.md`
+   "Luau data VM" (**reconciled 2026-08-27, round 2 review of PR #14, R4** — this line and §1's
+   data-VM row had drifted into two homes for one fact, the same class `CANON.md`'s own sim list
+   drifted before it; `CANON.md` is now the one home, cited here and from §1). UI VM removes
+   nothing.
 5. **Replacements (sim and data VMs):** neither may see an address — the sim VM because a script
    could branch on one, the data VM because its *output* is hashed (§1) — but they answer it
    differently:

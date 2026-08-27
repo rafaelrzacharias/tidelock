@@ -3519,6 +3519,111 @@ passed, 0 failed`), both non-sanitized tiers rebuilt clean and green too.
   test against yet" reason; adding the env-var-gated relaunch harness `tl_assert.test.cpp` uses
   for exactly one more `TL_FATAL` path would be new infra for a nit, not proportionate).
 
+## W3 assets+data — round 2 fresh-context review fixes (2026-08-27, w3-assets-data, PR #14 @ c12bfac)
+
+Fresh-context adversarial review round 2 (delta + full re-read), verdict FIX FIRST: round 1's ten
+findings genuinely landed (nine of ten discriminate under the reviewer's own reverts; D8/D10 are
+honest non-discriminations the lane itself declared, which the reviewer credited as worth more
+than a "verified" it would have had to re-check). Two new BLOCKING findings, both in code round 1
+touched; one NIT (doc homes); one SHOULD-FIX (`gcinfo`) held for ruling alongside the §8.5 scoping
+question, per the steward's explicit instruction not to act on either.
+
+- **R1 - `save_read` trusted `hdr.arena_count`.** The `TL_CHECK(pend_count < MAX_PENDING)` guard
+  present at the round-1 anchor (`a7a18dc`) was deleted by the D5/D7 hunk in `76461d6` - a
+  file-supplied `arena_count` drove the block loop, writing one `Pending` record per block into a
+  fixed `MAX_PENDING` (== `MAX_ARENAS` == 4096)-sized array with no bound left anywhere. Measured
+  by the reviewer: a forged file (a valid block replicated 5000 times, `arena_count = 5000`,
+  re-CRC'd) loaded with `ERR_OK`, writing 904 records past the array's end into memory the same
+  scratch arena had reserved for `out_rows`/`out_entities` - invisible to ASan because the
+  overflow lands inside that arena's own reservation. Fixed: `hdr.arena_count > MAX_ARENAS` is
+  checked up front, right after the header decodes, returning the already-declared
+  `ERR_SAVE_TOO_MANY_ARENAS` (0x0358, previously only reachable from `save_write`'s caller-side
+  `arena_descs.count` check) - a named code, not a restored `TL_CHECK`, per the reviewer's own
+  instruction ("a fatal on file content is exactly what D7's own fix argues against"). Test:
+  `save_read_forged_arena_count_refused` (a valid single-block file with only its `arena_count`
+  header field inflated past `MAX_ARENAS` - no real replicated blocks needed, since the bound is
+  checked before the block loop ever runs). Verified against the exact defect: reverted the check
+  locally, rebuilt, ran `./out/dev-linux/bin/tl_tests --tag save --isolate`:
+  `save_read_forged_arena_count_refused` FAILED (`(save_read(...)) == (ERR_SAVE_TOO_MANY_ARENAS)`,
+  actual `ERR_OK`), `12 passed, 1 failed`. Restored, rebuilt, reran: `13 passed, 0 failed`.
+- **R2 - `script_table_next` still fataled the process, and the D3 follow-up audit note (`vm.cpp`)
+  asserted it could not.** The note reasoned about the CALLER ("the key it is ever asked to
+  continue from is always a key IT ITSELF returned on a prior call"), but `script_table_next` is
+  public surface in `script.h` with nothing in the signature tying `ScriptValue* key` to the
+  `ScriptTableRef t` it came from - `lua_next` raises "invalid key to 'next'"
+  (`vendor/luau/VM/src/ltable.cpp`) whenever the continuation key is not actually present in the
+  table, reached two ways the reviewer measured directly: (a) an ordinary foreign or reused key;
+  (b) the exact interleaving `script.h`'s own design rationale names as the reason the cursor is a
+  value rather than a parked stack slot - remove the yielded key AND force a rehash between two
+  calls (removal alone, or a rehash alone, each survive; both together do not). Fixed: a raw
+  `lua_rawget` existence check on the non-nil cursor key before calling `lua_next`, returning
+  `false` + `ERR_SCRIPT_RUNTIME` ("cursor key is not in the table") when absent - the
+  false-return-with-`last_error` shape the function already had for a refused table-kind key. The
+  wrong audit note (stated as "Conclusion, not a guess") is replaced, not merely appended to, per
+  the reviewer's instruction that a wrong conclusion is worse than no note. `script.h`'s own
+  contract comment for `script_table_next` updated to document the new refusal case. This is not
+  an RR-21 breach (the reviewer grepped `src/`: `data_compile` never calls
+  `script_table_next` - only comments mention it). Tests:
+  `script_table_next_foreign_key_is_refused` (two independent tables, a key from one continued
+  against the other) and `script_table_next_key_removed_and_rehashed_between_calls_is_refused`
+  (the reviewer's own repro shape - all eight original keys cleared, guaranteed to include
+  whichever was yielded first since the order is Luau's own hash layout, then 64 new keys
+  inserted to force a rehash). Verified against the exact defect: reverted the existence check
+  locally, rebuilt, ran `--tag script --isolate`: both new tests **crashed the test process**
+  exactly as the reviewer's own repro did - `TL_FATAL origin=TL_FATAL .../vm.cpp:63: unprotected
+  Luau error - every call into a VM must be protected`, preceded by `ERR .../vm.cpp:61: script:
+  unprotected Luau error: invalid key to 'next'` - reported by the isolated runner as
+  `FAIL script.script_table_next_foreign_key_is_refused` /
+  `FAIL script.script_table_next_key_removed_and_rehashed_between_calls_is_refused`,
+  `33 passed, 2 failed` (isolation kept the crash from taking down the rest of the suite).
+  Restored, rebuilt, reran: `35 passed, 0 failed`.
+- **R3, HELD for ruling** - `gcinfo` is present in the data VM (`SIM_REMOVE` has it, `DATA_REMOVE`
+  did not), returning the VM heap's size in KB: host state reaching a hashed output, the same
+  shape as the `math.random`/`pairs` rulings, one door further. The reviewer could not demonstrate
+  actual divergence (three fresh data VMs running an identical script gave identical readings
+  every time, in-container) and stated High confidence it is an unaudited asymmetry but only
+  Medium confidence it is a real cross-ISA channel, naming what would raise that confidence (an
+  arm64-vs-x86-64 reading). Per the steward's explicit instruction, not acted on this round -
+  awaiting the ruling alongside RR-22 below.
+- **R4 - the data VM's removal list had two homes**, `LUAU-LAYER.md` §1's table row and §10.2 step
+  4 - and §10.2 step 4 having drifted from §1 once already (missing `math.random`/
+  `math.randomseed` until round 1 caught it) is exactly what "one fact, one home" exists to
+  prevent. The reviewer confirmed round 1's own check was right (`CANON.md`'s existing "Luau sim
+  VM" section is titled and scoped to the sim VM only and owed the data VM nothing) but filed the
+  fix as crossing into `CANON.md`, not something to build unilaterally. Fixed: a new `CANON.md`
+  section, "Luau data VM — the exact removal list", beside the existing sim one, carrying the full
+  list once; `LUAU-LAYER.md` §1's table row and §10.2 step 4 both now cite it instead of
+  restating it. `docaudit.py` clean afterward.
+
+**RR-22 (ruling request), filed per the steward's explicit instruction: does `ASSETS-AND-DATA.md`
+§8.5 hold for this lane's scope, and if not, how should the doc say so?** The reviewer's own
+finding: §8.5 is written as a done criterion for the WHOLE spec and names, by name, four things
+that do not exist in this lane's scope:
+- "two compiles of the same scripts hash identically **in two processes**" - not implemented
+  (single-process only); no process-spawn primitive exists anywhere in this codebase yet
+  (`PlatformApi` has no `os.spawn`; `popen`/`fork` are neither portable nor sanctioned outside
+  `platform/`) - a genuine new platform capability, not a test-only gap.
+- "fx literal acceptance/rejection table" - fx-literal fields are a declared, `TL_FATAL`'d scope
+  cut (no Alloy schema exists to compile a real one against).
+- "reference resolution incl. forward refs" - handle/reference fields are the same declared cut.
+- "reload emits the sealed command" - script reload (`§10.8`) is a different lane's surface
+  entirely; this lane's `data_compile` has no reload path of its own yet.
+Correspondingly three error codes this lane's own header declares have no fixture anywhere:
+`ERR_DATA_BAD_FX_LITERAL`, `ERR_DATA_DANGLING_REF`, `ERR_DATA_VALIDATOR` - and cannot get one
+while the code behind them is a `TL_FATAL`, which round 1 and round 2 both independently judged
+the CORRECT choice over guessing a schema (`alloy-substrate` unlaunched - the Layr trap).
+**The scope cuts are not the failure; §8.5 stating one done criterion for a spec section three
+different lanes jointly own is.** Options, not yet chosen between - awaiting the ruling:
+(a) split §8.5 into the subset this lane owns (integer/bool fields, `default_row`, the named
+error codes this lane's code can actually raise, the single-process hash-identity form) and a
+second list explicitly deferred to `alloy-substrate`/`luau-bindings`/`render2d`'s reload work,
+each item tagged with which lane closes it; (b) leave §8.5 as one list but add a status column
+(`shipped` / `deferred - lane X`) per line rather than splitting into two lists; (c) something
+else Rafael prefers. Recommend (a) - a done criterion a future reader can check against code that
+actually exists, matching this doc's own "no speculative breadth" principle applied to spec
+prose rather than code. Not built against yet; `ASSETS-AND-DATA.md` is unedited pending the
+ruling, so a future reader is not told a criterion was met when four of its clauses were deferred.
+
 ## Reserved (design complete, build on first consumer — `docs/RESERVED-SEAMS.md`)
 Audio · game UI (Luau) · spatial index · tilemap · nav/AI · frame animation · replay UI/cinematics ·
 modding (Luau profiles) · game-logic substrate · streaming/cook · SDL_GPU path · editor shell.

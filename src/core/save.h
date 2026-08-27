@@ -202,7 +202,11 @@ ErrCode save_write(const SaveDesc* desc, const PlatformApi* platform, StrView pa
 // SAVE_FORMAT_VERSION -> ERR_SAVE_VERSION), verifies the crc32 trailer over the whole file per
 // docs/ASSETS-AND-DATA.md §8.4's byte layout (ERR_SAVE_CRC_MISMATCH; round 1 review D6 - the
 // window used to start after the header, leaving seed/tick/format_version/origin/name_table_len/
-// arena_count unprotected), decodes the name table, then per ArenaBlock: finds the matching
+// arena_count unprotected), checks the header's own `arena_count` against MAX_ARENAS
+// (ERR_SAVE_TOO_MANY_ARENAS - round 2 review R1: this file-supplied count drives the per-block
+// decode loop into a fixed MAX_ARENAS-sized scratch array, and the bound guarding it was
+// previously only enforced on `arena_descs.count` at write time, not read time), decodes the name
+// table, then per ArenaBlock: finds the matching
 // `arena_descs` entry (ERR_SAVE_ARENA_MISSING if none) and checks the block's stored kind byte
 // against that entry's registered `kind` (ERR_SAVE_KIND_MISMATCH on any mismatch, including a
 // kind byte outside SaveEncoderKind's own range - round 1 review D7, previously unchecked and
