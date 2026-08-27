@@ -5518,3 +5518,32 @@ asserted before and after. Ran clean on all four tiers, both isolated and non-is
 **`TOOLING.md` §9's v0 done criterion is now met on two of its three clauses: all six panels
 exist, and zero heap allocation per frame outside `pool_vendor` is verified.** Only "an edit in
 the inspector appears in the replay log" remains open, pending the ruling filed above.
+
+### RR-41 (steward-allocated, ruled by Rafael): document the `VMemApi` lifetime-capture contract (2026-08-27)
+
+Steward's own sweep, following on from the `make_editor()` dangling-pointer fix above, found this
+is the FOURTH independent encounter of the same hazard in this tree, not the first: `platform/
+impl_headless/init.cpp`'s `state->arena.os = &state->vmem_table;` ("repoint off the about-to-die
+local") and `headless_state.h`'s `VMemApi vmem_table;` ("stored here so its address is
+arena-owned, not a global") had already solved it twice, silently, with no doc trail; `dotpath.
+test.cpp`/`inspector.test.cpp`'s `Interner` setup a third time; `make_editor()` a fourth. Four
+local workarounds, zero documentation — past the "third special case is patching symptoms" line
+`CLAUDE.md` names.
+
+**Ruling: comment-only, narrow cone exception.** Added the lifetime-capture contract to
+`foundation/vmem_arena.h`'s `vmem_arena_init` (citing the `init.cpp` repoint as in-tree
+precedent, not a hypothetical) and to `editor/editor.h`'s `editor_init` (which forwards the same
+`os` into `ed->dev_arena`). No signature, semantic, or codegen change in either file — comment
+only, per the ruling's own binding condition. Validated on all four tiers (both isolated and
+non-isolated `--tag '!slow'` runs, 0 failed — a pure comment change touching two widely-included
+headers still gets the full sweep, since a stray syntax slip in a comment block can still break a
+build). `includes.py`/`docaudit.py` clean.
+
+**Explicitly NOT done, per the ruling's own warning against overcorrecting:** the many other
+`VMemApi api = test_vmem_api();` locals across `tests/` (data_tables, desync_diff, fold, array,
+and more) are NOT touched — most are safe plain locals whose arena dies at the same closing
+brace as the local. The hazard is specifically "a helper that returns while an arena initialised
+from the local lives on in the caller," not "every `VMemApi` local" — blanket-`static`-ing the
+rest would be a wrong, over-broad fix for a narrower bug class, exactly what this ruling warned
+against. Not this lane's files to touch either way (`tests/foundation/`, `tests/core/` — outside
+`editor`'s cone).

@@ -110,6 +110,13 @@ struct Editor {
 // Zero-initializes `ed`, reserves `dev_arena_reserve` bytes (0 = a documented default, TODO.md -
 // no consumer has sized one yet) for the dev arena. Does NOT create an ImGui context (that is
 // `editor_frame`'s first call's job, gated on `PlatformDevApi` per this header's Status note).
+// `os` IS CAPTURED, NOT COPIED: forwarded straight into `vmem_arena_init(&ed->dev_arena, ...,
+// os)`, whose own contract comment (`foundation/vmem_arena.h`) is the authority on this - `os`
+// must outlive `ed`. RR-41 (2026-08-27): a caller that builds `os` as a local and lets it go out
+// of scope before `ed` is freed leaves `ed->dev_arena.os` dangling (found via a real segfault,
+// six panel test files' shared `make_editor()` helper - fixed by making the local `static`, the
+// correct fix ONLY when the helper itself returns while the arena lives on in the caller, not a
+// reason to make every `VMemApi` local `static`).
 ErrCode editor_init(Editor* ed, const VMemApi* os, u64 dev_arena_reserve);
 
 // Registers one panel (copies `name`, truncated at EDITOR_PANEL_NAME_CAP-1 - TL_CHECK it fits).
