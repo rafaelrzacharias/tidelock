@@ -6559,3 +6559,34 @@ one lane that the other lane's merged code falsifies — which is what this area
 *Reviewer note: no RR numbers allocated (steward's). No fixes applied (cone discipline). No PR
 opened. Reproducers are in the sections above and were kept out of `tests/` because they fail by
 design.*
+
+---
+
+### B-1, sharpened after reading `column_remove` (same conclusion, a different fix)
+
+Written after the verdict above, because the mechanism matters more than the symptom and a reader
+could otherwise fix the wrong thing.
+
+`src/core/column.cpp:98-101` already **zeroes the vacated tail row and entity slot** on every
+remove, with the reason in a comment: "leaving bytes would make the hash a function of removal
+history" (the `Array<T>` ruling `LESSONS.md` records). That discipline is correct and it holds —
+within one world, removal history does not move the hash.
+
+So B-1 is **not** stale bytes. It is the hashed EXTENT'S LENGTH. `registry_hash_all` hashes
+`[base, used)` (`arena_registry.cpp:87`) and `used` never shrinks: peer A's column is three rows
+(two live plus one zeroed tail), peer B's restored column is two. `tl_hash64` over 24 zeroed-tail
+bytes is not `tl_hash64` over 16 bytes, and that is the whole of the divergence.
+
+Two consequences for whoever takes the ruling:
+
+- **The save format cannot currently fix this on the write side.** `ArenaBlock` records the rows,
+  not the arena's high-water; there is nothing in the file for a loader to restore the extent FROM.
+  Recording it would be a format change (and a `SAVE_FORMAT_VERSION` bump).
+- **The cheap fix is on the hash side, and it is the one that also removes the whole class:** hash a
+  column's live extent, `[base, base + count * stride)`, rather than `[base, used)`. Every byte
+  above `count` is already guaranteed zero by `column_remove`, so this changes no live information —
+  it only stops a peer's allocation high-water from being part of its state. It would also make
+  fix (b) from the verdict above (re-establishing the extent on load) unnecessary.
+
+I am not choosing between them — that is the ruling. But "zero the tail harder" is NOT a fix here,
+and the tree already does it.
