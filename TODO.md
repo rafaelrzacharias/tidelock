@@ -7055,3 +7055,34 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > `recorder_tick` folds it into the per-tick hash. B checked the code is NOT order-nondeterministic
 > today — so this is "a contract that permits the bug", not a bug. A future batched or parallel
 > apply loop would be legal by that comment and would silently desync.
+
+> **CORRECTION BY THE STEWARD, AGAINST ITSELF (2026-08-28 ~00:35 local) — the sweep's scope was
+> "six deferrals" in the dispatch record and in every report. It is SEVEN, and the seventh is not
+> a review.** Found by running a completeness check over `TODO.md`'s deferral phrasings instead of
+> trusting the set already in hand — the "what's missing: a modality not run, a claim unverified?"
+> pass. Line 328's item: **`asset_load_font` and the two-process compile check have no owning lane
+> in `ROADMAP.md`**, and `tl_core` links `stb` rather than the vendored `sdl_ttf`, so the font half
+> needs a build change nobody owns; PR #14's closeout **"Held for the wave-boundary sweep as a
+> scoping item."** Areas A/B/C were partitioned over the *review* deferrals and this one is a
+> SCOPING decision, so an exhaustive-and-disjoint partition of the reviews was still not
+> exhaustive over what §3 owes.
+> **This is the claim-width class again, third time this week and second time by a steward** — the
+> command (grep for `§2 valve` entries) was correct and the sentence built on it was wider than
+> its range. The rule that was supposed to catch it — check the SENTENCE's scope against the
+> command's range before it leaves the turn — was written INTO the three reviewer briefs by the
+> same steward that then didn't apply it to its own dispatch record. Recording that plainly: a
+> rule you brief to others is not a rule you have applied.
+> **What partly rescued it: reviewer C independently found the symptom from the other side.** Its
+> D4 flagged that `ASSETS-AND-DATA.md` §8.5's bucket header claims "each clause naming its owning
+> lane" while two of its five bullets say no lane owns them. C was reviewing the doc; the scoping
+> item is the same fact seen from the plan. Neither view alone names the work.
+>
+> **RR-52 (steward-allocated) — who owns text/font work, and does it need a lane?** Not a review
+> finding and not fixable by a lane in passing: `ROADMAP.md` §2's table is the authority on which
+> lanes exist, so giving `asset_load_font` an owner is a **scope change**, which `WORKFLOW.md` §1
+> routes to Rafael by name. The concrete asks: (a) does a text/fonts lane get cut in W3/W4, or does
+> the work fold into an existing row; (b) `tl_core` links `stb` and not the vendored `sdl_ttf`, so
+> whoever takes it needs a build change — and `vendor/` plus the CMake wiring is nobody's cone
+> (`WORKFLOW.md` §7); (c) the two-process compile check needs a process-spawn primitive that does
+> not exist in the codebase. Until this is ruled, `ASSETS-AND-DATA.md` §8.5's deferred clauses name
+> no owner and C's D4 header fix can only say "unowned" honestly rather than name anyone.
