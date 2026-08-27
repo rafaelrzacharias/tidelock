@@ -3375,6 +3375,20 @@ right; it is the template the others now follow.
       commit_docs.py --base origin/main`, this lane's forward-commit range) before pushing, and
       the real webhook CI run is the actual arbiter - reported honestly either way, not assumed
       green because the steward said "by construction."
+      **CONFIRMED (Rafael, relayed by the steward, correcting the "by construction" line above):**
+      the local `commit_docs.py --base origin/main` finding was right - reverting a forward commit
+      cannot clear an earlier commit's own gate obligation, ever; that obligation is fixed the
+      instant the commit is written (`LESSONS.md`'s new entry on this). `[docs:none]` IS confirmed
+      as the honest cure for `734b2c0` specifically: `TEXEL_M` was `static_assert`-pinned to the
+      already-documented `TEXEL`, so it introduced no new foundation fact even before the ruling
+      removed the constant entirely - `[docs:none]` there was never a rubber stamp. Sequencing:
+      this lane's in-cone fix (the revert + `RENDER2D.md` §9.5 amendment) lands first as its own
+      forward commit (done, both tiers green, `docaudit`/`includes.py` clean); the steward then
+      performs a single message-only reword of `734b2c0` adding `[docs:none]`, mirroring RR-25's
+      own mechanism (tree-identical check, anchor preserved, expected-SHA lease) - after this
+      lane's fix rather than before, so only one `git reset --hard` is needed instead of two and no
+      force-push lands under work in progress. `audits` should read green once that reword lands;
+      not assuming so without a fresh CI run's confirmation.
 
 ## Alloy (`docs/ALLOY.md` — headless-first; its own build queue in "Gates & rulings ledger")
 - [ ] **W3 alloy-liquids-gases OPENING task — the liquid design pass (the RR-10 ruling,
