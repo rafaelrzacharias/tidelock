@@ -4820,6 +4820,57 @@ before this lane's test wrote the first one. Fixed with the two-layer `__COUNTER
 idiom (`TL_PROF_CONCAT`), applied to both the `TL_DEV` and compiled-out branches of both
 `TL_PROF_SCOPE` and `TL_PROF_SCOPE_W`.
 
+### Vendor unlocks found this session (2026-08-27) and what they do/don't unblock
+
+Checking what's next in the `TOOLING.md` §9.6 build-order queue (item 5: panels) turned up two
+vendor trees that were empty/absent earlier this session and are now populated — neither landed
+by this lane, both change what's buildable:
+
+- **`vendor/imgui/backends/`** now carries every upstream backend TU, including
+  `imgui_impl_sdlrenderer3.cpp` (the v0 backend `TOOLING.md` §1 names) and, notably,
+  `imgui_impl_null.{h,cpp}` — a real blind/headless ImGui platform+renderer pair
+  (`ImGui_ImplNull_Init`/`_NewFrame`, sets `io.DisplaySize`/`DeltaTime`, no window, no real
+  output). `TOOLING.md` §9.5's "panel tests run ImGui headless via a null backend" line names
+  exactly this and is now buildable — it wasn't when `editor.cpp`'s `editor_frame` was stubbed
+  earlier this session (`vendor/imgui/CMakeLists.txt` still only builds the four core TUs;
+  backends are vendored but unbuilt until a lane's own CMakeLists adds the one it needs, per that
+  file's own comment). **Not yet acted on**: whether a panel's `draw_fn` can be built and tested
+  today, independent of `editor_frame`'s real per-frame loop (still correctly blocked on
+  `PlatformDevApi`, `PLATFORM.md` §9.2/§9.7 step 5, unbuilt), by standing up an ImGui context
+  directly in test code via the null backend — this is a real seam question (does a panel draw
+  function take an already-active ImGui frame with no platform dependency, callable both from
+  `editor_frame` later and from a headless test today?) that wants a short design pass before the
+  first panel is built, not a decision made in passing here.
+- **`vendor/stb/stb_sprintf.h`** is now vendored (`vendor/VERSIONS`: stb pulls `stb_image.h` +
+  `stb_sprintf.h`). `foundation/fmt.h`'s `fmt_buf` is a `TL_FATAL("unimplemented")` STUB whose own
+  contract comment names exactly this as the unblock condition ("the body is filled in the day
+  `vendor/stb_sprintf/` lands") — that day has come. **Not this lane's file**: `fmt.h`'s design
+  doc is `CONTAINERS.md` §5/§8.6, not `TOOLING.md`, so implementing the body is CONTAINERS.md's
+  (w1-containers') call, not editor's, per cone discipline — flagging it here rather than touching
+  it, since nothing else in this file currently points at the fact that its blocker cleared.
+
+**What this does NOT unblock, checked and still blocked:** `editor/trace_export.cpp`
+(`TOOLING.md` §9.6 build order item 3's remaining piece, §9.3.2's fully-specified Chrome-trace
+JSON algorithm) needs `fmt_buf` for its formatting (§9.3.2: "Written with `fmt_buf` into a 1 MB
+staging buffer") — still a stub — AND `PlatformApi.file.append` for the actual disk flush,
+neither of which editor can substitute for: `editor/` is not on the `TL_FOUNDATION_TOOLING`
+`<stdio.h>` exemption (`CPP-SUBSET.md` §9 R-4 scopes that to `src/foundation/` only), so reaching
+for raw `stdio.h` in `trace_export.cpp` the way `probe.cpp`/`log.cpp` do would be a real
+CPP-SUBSET violation, not a workaround. Hand-rolling a formatter to route around `fmt_buf` would
+also violate `fmt.h`'s own stub comment ("would violate the doc's explicit 'over stb_sprintf' and
+duplicate a vendoring decision"). `trace_export.cpp` stays queued, genuinely blocked on
+`fmt_buf` landing first, not attempted this session.
+
+Also noted in passing, for whenever the first real panel or `trace_export.cpp` DOES land:
+`foundation/tl_prof.h`'s `tl_prof_test_ring_count`/`_ring_at`/`_counter_count`/`_counter_at` (and
+the same shape in `tl_log.h`/`tl_probe.h`) are the only read access to each ring, but their own
+contract comments state "Test-only introspection... never called from `src/` outside tests" —
+an explicit invariant, not just a naming choice. A real panel or `trace_export.cpp` consuming
+these needs that invariant lifted (rename off the `_test_` prefix, keep only the `_reset`/
+`_set_*` mutators genuinely test-scoped) — a small, mechanical, in-cone fix (these three headers
+are `TOOLING.md`'s own) best done in the same commit as the first real consumer that needs it
+(`ROADMAP.md`'s "pulled in by a real consumer, never pushed on spec"), not pre-emptively here.
+
 ### Post-v0 render backend: multi-viewport (drag an editor panel out to its own OS window)
 
 Rafael asked in-session (2026-08-27) for this to be recorded as a planned post-v0 feature, not
