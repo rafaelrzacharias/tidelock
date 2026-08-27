@@ -1,6 +1,9 @@
 // console.h - tokenizer, registration (name-sorted index, linear-scan dispatch lookup),
-// completion, history. Spec: docs/TOOLING.md §3, §9.2, §9.3.5.
+// completion, history, and the Console panel's draw_fn. Spec: docs/TOOLING.md §3, §9.2, §9.3.5.
 #include "editor/console.h"
+#include "editor/editor.h"
+
+#include <imgui.h>
 
 #include <string.h>
 
@@ -153,4 +156,43 @@ const char* console_history_at(const ConsoleState* s, u32 i) {
     // wrapped, exactly hist_head itself - the standard ring "oldest = head - count" identity).
     const u32 idx = (s->hist_head + CONSOLE_HISTORY_CAP - s->hist_count + i) % CONSOLE_HISTORY_CAP;
     return s->history[idx];
+}
+
+void console_panel_register(Editor* ed) { editor_register_panel(ed, "Console", console_panel_draw, true); }
+
+void console_panel_draw(Editor* ed, World* w) {
+    if (!ImGui::Begin("Console")) { ImGui::End(); return; }
+
+    ImGui::BeginChild("##console_history", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 2), true);
+    for (u32 i = 0; i < ed->console.hist_count; ++i) {
+        ImGui::TextUnformatted(console_history_at(&ed->console, i));
+    }
+    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) { ImGui::SetScrollHereY(1.0f); }
+    ImGui::EndChild();
+
+    if (ed->console_last_reply[0] != '\0' || ed->console_last_err != ERR_OK) {
+        ImGui::TextUnformatted(console_err_name(ed->console_last_err));
+        ImGui::SameLine();
+        ImGui::TextUnformatted(ed->console_last_reply);
+    }
+
+    ImGui::SetNextItemWidth(-1);
+    const bool submitted = ImGui::InputText("##console_input", ed->console_input, sizeof(ed->console_input),
+                                             ImGuiInputTextFlags_EnterReturnsTrue);
+    if (submitted && ed->console_input[0] != '\0') {
+        // No netcode/Hovel session exists yet to ask, so lockstep is always false here - the real
+        // source is a follow-up once that lands (TODO.md), not invented in this panel. Zeroed in
+        // full, not just [0]: a ConsoleFn's Result<u32>.value is "bytes written", with no promise
+        // of a trailing NUL past that, so the buffer must already be NUL past whatever it writes.
+        char reply[sizeof(ed->console_last_reply)];
+        memset(reply, 0, sizeof(reply));
+        const Result<u32> r = console_exec(&ed->console, w, /*lockstep=*/false, ed->console_input,
+                                            Span<char>{ reply, (u32)(sizeof(reply) - 1u) });
+        ed->console_last_err = r.err;
+        memcpy(ed->console_last_reply, reply, sizeof(reply));
+        ed->console_input[0] = '\0';
+        ImGui::SetKeyboardFocusHere(-1);
+    }
+
+    ImGui::End();
 }

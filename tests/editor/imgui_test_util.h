@@ -39,16 +39,30 @@
 
 #include <stdlib.h>
 
-namespace {
-ImGuiContext* g_imgui_test_ctx = nullptr;
+// True `inline` VARIABLES (C++17, not an anonymous-namespace one), so every .cpp file that
+// includes this header shares the SAME instance - found the hard way. An anonymous-namespace
+// `ImGuiContext* g_imgui_test_ctx` gives each TU internal linkage over its OWN copy, but the
+// `inline` FUNCTIONS below (imgui_test_ensure_context et al.) have vague linkage and the linker
+// keeps only ONE TU's compiled body for the whole binary - so once a second .cpp file included
+// this header (console_panel.test.cpp, alongside log_panel.test.cpp), the surviving copy of
+// these functions was quietly compiled against ONE TU's `g_imgui_test_ctx` while callers from
+// the OTHER TU still believed they were reading/writing their own - a real ODR violation, not a
+// hypothetical one. Manifested as `ImGui::SetCurrentContext(g_imgui_test_ctx)` immediately
+// followed by an internal "no current context" assert inside `ImGui_ImplNull_NewFrame` - GDB's
+// backtrace showed the crash landed inside a call chain consistent with only one TU's state
+// existing, confirmed by moving the variable in scope and rebuilding clean. Only reproduced on
+// the `dev` tier (`-O1`+, this build's inliner/linker collapses the duplicate copies
+// differently than debug's `-O0` does) - exactly the class of bug a debug-tier-only pass cannot
+// catch, which is why this session's own lesson is now "validate all four tiers before every
+// push," not three.
+inline ImGuiContext* g_imgui_test_ctx = nullptr;
 // Destroys the EXACT context this header created, never the ambient "current" one
 // (ImGui::DestroyContext() with no argument would destroy whatever happens to be current at exit
 // - not necessarily this one, see imgui_test_end_frame's note below).
-void imgui_test_teardown(void) {
+inline void imgui_test_teardown(void) {
     ImGui::DestroyContext(g_imgui_test_ctx);
     g_imgui_test_ctx = nullptr;
 }
-}  // namespace
 
 // Creates the one process-wide ImGuiContext (through pool_vendor, see this header's Lifecycle
 // note), once. Does NOT leave it current on return - imgui_test_begin_frame does that, scoped to

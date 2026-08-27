@@ -36,11 +36,15 @@
 //   manually-set `io`, no platform backend) and does not itself need `PlatformDevApi` either;
 //   only the real windowed integration inside `editor_frame` does.
 // Includes: foundation/tl_types.h, foundation/vmem_arena.h, core/world.h (Entity, World* for
-//   panel draw functions).
+//   panel draw functions), editor/console.h (ConsoleState - the Console panel's registry/history
+//   is real, caller-owned state per console.h's own contract, not a hidden static the way
+//   foundation/'s RR-7 tooling rings are; `Editor` is that caller, the same role it already plays
+//   for `sel`).
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
 #include "foundation/vmem_arena.h"
 #include "core/world.h"
+#include "editor/console.h"
 
 struct Editor;
 
@@ -79,6 +83,10 @@ struct Editor {
     u32   capture_mask;  // published every frame (docs/TOOLING.md §9.3.7): bit0 mouse, bit1 kbd
     VMemArena dev_arena; // permanent, non-registered: panel state (never sim state)
     void* imgui_ctx;     // ImGuiContext* - opaque here so this header never includes <imgui.h>
+    ConsoleState console;                 // the Console panel's registry + history (console.h)
+    char    console_input[CONSOLE_LINE_CAP];       // the live input line, edited in place by ImGui
+    char    console_last_reply[256];               // the most recent ConsoleFn's reply text
+    ErrCode console_last_err;                       // ERR_OK or the most recent dispatch/exec failure
     u8    initialized;
     u8    _pad0[7];
 };

@@ -150,3 +150,22 @@ u32 console_complete(const ConsoleState* s, StrView prefix, const ConsoleCmd** o
 // recent - matching tl_log.h's tl_log_ring_at "write order" convention). Fatal if
 // i >= s->hist_count.
 const char* console_history_at(const ConsoleState* s, u32 i);
+
+struct Editor;   // editor/editor.h - forward-declared only, this header stays World/ImGui-free
+                 // beyond the panel entry points below (matches log_panel.h's shape).
+
+// Registers the Console panel on `ed` (`editor_register_panel(ed, "Console", console_panel_draw,
+// true)`). Registers no commands of its own - a bare console with nothing to run is a legitimate
+// state; whoever wires up the real command set (the game layer, this module's own future
+// built-ins) calls `console_register` separately, same as any other `ConsoleFn` caller.
+void console_panel_register(Editor* ed);
+
+// The panel's own content (see this header's Purpose note on why editor/console.cpp, not a
+// separate console_panel.cpp - docs/TOOLING.md §9.1's file table). History (oldest to newest),
+// the most recent reply/error, then a live input line; Enter dispatches through `console_exec`
+// with `lockstep = false` - no netcode/Hovel session exists yet to ask (TODO.md: the real
+// lockstep source is a follow-up once that lands, not invented here). "cvar UI"/"Luau REPL
+// hand-off" (this header's Purpose note, `TOOLING.md` §9.1's same row) are NOT built by this
+// function - cvar UI is its own real feature, not yet scoped; the Luau binding layer this needs
+// does not exist (`docs/LUAU-LAYER.md`, a different lane).
+void console_panel_draw(Editor* ed, World* w);

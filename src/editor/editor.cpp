@@ -21,6 +21,8 @@ ErrCode editor_init(Editor* ed, const VMemApi* os, u64 dev_arena_reserve) {
     const u64 reserve = (dev_arena_reserve != 0u) ? dev_arena_reserve : (16u * 1024u * 1024u);
     const ErrCode err = vmem_arena_init(&ed->dev_arena, "editor.dev"_id, reserve, 0u, os);
     if (err != ERR_OK) { return err; }
+    console_init(&ed->console);   // redundant after the memset above, but matches console.h's own
+                                   // contract rather than relying on a caller knowing that
     ed->initialized = 1;
     return ERR_OK;
 }

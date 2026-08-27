@@ -5067,3 +5067,45 @@ ruling on `RENDER2D.md` §6's own backend-trigger table (render2d's file, not ed
 table's "trigger" row currently reads "a shader a demo needs that SDL_Render cannot express" —
 multi-viewport pop-out is a second, independent trigger worth adding there) — filed as a ruling
 request below rather than edited directly (cone discipline).
+
+### editor/console: the Console panel (2026-08-27), and a real ODR bug found validating it
+
+Built `console_panel_register`/`console_panel_draw` directly into `console.h`/`.cpp` (not a
+separate `console_panel.cpp`) — `TOOLING.md` §9.1's file table places "registry, tokenizer,
+completion, history, cvar UI, Luau REPL hand-off" all in `editor/console.cpp` itself, unlike
+Log/Profiler/Probes/World's own separate `*_panel.cpp` files. `Editor` gained the panel's real
+state — `ConsoleState console`, a live input-line buffer, the most recent reply/error — the same
+"caller-owned, not a hidden static" shape `console.h`'s own contract already insists on (matching
+`sel`'s existing precedent on the same struct). Scope: the command REPL only. "cvar UI" and "Luau
+REPL hand-off" (the same file-table row) are NOT built here — cvar UI is its own real feature not
+yet scoped, and the Luau binding layer this needs does not exist (`docs/LUAU-LAYER.md`, a
+different lane) — both explicitly deferred, not silently skipped. Lockstep is hardcoded `false`
+in the panel's submit path since no netcode/Hovel session exists yet to ask; the real source is a
+follow-up once that lands.
+
+Four tests, matching `log_panel.test.cpp`'s precedent, with the same honest limit stated up
+front: nothing in this tree can simulate a real keystroke through the null ImGui backend (no
+`imgui_test_engine` vendored, the same gap that blocked `inspector_roundtrip_per_kind` earlier
+this session), so the "Enter submits" path is exercised by calling `console_exec` directly (what
+the draw function's own submit branch does) rather than through a simulated widget interaction,
+and the tests check that DRAWING the resulting state doesn't crash and renders something.
+
+**Validating on `dev` tier (not just `debug`) surfaced a real ODR bug in `imgui_test_util.h`
+itself, not in the Console panel's own code — recorded in full in `LESSONS.md`.** Short version:
+`g_imgui_test_ctx` lived in an anonymous namespace (internal linkage, one copy per `.cpp` file),
+but the `inline` functions reading/writing it (`imgui_test_ensure_context` et al.) have vague
+linkage, so the linker keeps only ONE translation unit's compiled body for the whole binary. With
+only `log_panel.test.cpp` including the header this was invisible (one TU, no conflict); the
+moment `console_panel.test.cpp` became a SECOND consumer, calls from either file could run
+through whichever TU's copy survived linking, silently touching a different `g_imgui_test_ctx`
+than the caller believed. Passed on `debug` (`-O0`), aborted on `dev` (`-O1`+) inside
+`ImGui_ImplNull_NewFrame`'s own internal "no current context" assert — diagnosed with `fprintf`
+breadcrumbs plus a GDB backtrace, not guessed. Fixed by making the variable a real `inline`
+variable (C++17, external/merged linkage) instead of an anonymous-namespace one, matching what
+the `inline` functions around it were already assuming.
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`, matching the sanitizer job's own invocation shape - now standard
+practice for this lane after the earlier CI-red fix taught the same lesson from the other
+direction) — 598/616 selected (tier-dependent), 0 failed in every combination.
+`includes.py`/`docaudit.py` clean.
