@@ -6131,3 +6131,45 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > identity commits (explicitly ruled against — they stand as R-16's evidence); the `Doc debt`
 > entries; and `TOOLING.md`'s `shell v0` / build-order item 7 (correctly deferred with blockers
 > named — reopening them re-litigates RR-40/RR-43).
+
+> **W3 SWEEP DISPATCHED 2026-08-27 ~22:22 local — three fresh-context adversarial reviewers, Opus,
+> disjoint and exhaustive over the six deferrals. IN FLIGHT as this is written.** Recorded here
+> because a session's own transcript is not a durable channel: if this steward window ends, this
+> paragraph is the only thing that says three reviewers exist.
+> - **Area A → branch `w3-sweep-a`.** The two W2 *steward-authored* valve commits, neither ever
+>   reviewed: `99c9248` (merged `b1b1f12`, PR #10, w2-net-close — §20.2.3 per-origin seq ascent and
+>   §20.2.9's two format bounds; 5 files, 167+/26−) and `1ddae4b` (merged `9718d2e`, PR #8,
+>   w2-max-arenas — `MAX_ARENAS` 64→4096; 6 files, 40+/22−). Briefed to test the archive's new
+>   bounds with mutation fuzz + re-encode rather than hand-forged rows (it is a format whose bytes
+>   are hashed into `ChainEntry.log_segment_hash`), to prove each refusal row by reverting the one
+>   rule it names, and to check whether the 96 KB `sizeof(ArenaRegistry)` now interacts with the
+>   `X = Type{}` stack-temporary class at `registry.test.cpp`'s four sites.
+> - **Area B → branch `w3-sweep-b`.** The `loop+input` × `assets+data` **seam** — the item this
+>   file's own closeout named as having "had no adversarial read by anyone". Scoped explicitly to
+>   the seam, NOT to the two lanes: each had three rounds already, and their combined diff
+>   (19 files/+3160 and 25 files/+3100 under `src/`+`tests/`) is larger than PR #16 entire, so
+>   reading it as two lanes would spend the context on covered ground and miss the only uncovered
+>   thing. Their sole literal file overlap is `src/core/CMakeLists.txt`.
+> - **Area C → branch `w3-sweep-c`.** The valve-legitimacy audit — `07e9768` (PR #4), `1a14424`
+>   + `3b428e3` (PR #14 round 3), `3061af2` + `dd11b38` (PR #15 round 3). Its central question is
+>   whether each edit actually met §2's "small edits that implement an already-recorded ruling",
+>   with a separate yes/no verdict per valve use. C3's is the one no reviewer endorsed.
+>
+> **Two claims re-derived by the steward before briefing, so no reviewer spends a cycle on them,
+> and both VERIFIED:** `dd11b38`'s resolution surface is exactly `LESSONS.md`, `TODO.md`,
+> `docs/XREF.md`, `src/core/CMakeLists.txt` (`comm -12` over the two parent diffs — the previous
+> steward's claim holds); and `interp_pingpong` does carry the dense-order-parity `TL_CHECK`
+> (`src/core/interp.cpp:37`). Existence checked, not correctness — the reviewers still judge both.
+> **One hypothesis was DROPPED before briefing rather than shipped as a lead**: "both lanes
+> register arenas, so registration order is a merge hazard" — arena registration is centralized in
+> `src/core/world.cpp`, so the premise is false and briefing it would have sent a reviewer down it.
+>
+> **Reporting is by PUSH, per R-15** — each reviewer appends its verdict to this file on its own
+> branch; no child→steward channel exists and every brief says so in those words. Watched by a
+> background `git ls-remote` monitor over the three branch heads (re-armed on every 30-minute
+> timeout, per `LESSONS.md`), plus a `send_later` backstop for the one thing a branch watch cannot
+> see: a child that died without ever pushing. Verdicts merge back with append conflicts resolved
+> by keeping both sides — the documented, accepted cost.
+> **The ship-verdict round is NOT these three.** R-9 puts it on Fable and R-17 bars this
+> Opus-seated steward from adjudicating above its seat; it waits for the reset (Tue 2026-09-01
+> 02:00 local, confirmed independently from this session's own rate-limit reset, not inherited).
