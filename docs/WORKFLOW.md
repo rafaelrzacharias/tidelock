@@ -215,6 +215,44 @@ policy ("never low effort on sim or netcode code") outranks every line here.
   copy; terse commits and no narrative recaps (§1 R-6 already forbids status stops); broad
   searches go to cheap subagents. Every lane brief cites this rule.
 
+## 7. Pre-authorized automation (`.claude/settings.json`, ruled 2026-08-27)
+
+`.claude/settings.json`'s `permissions.allow` list is the one durable record of which commands a
+Claude Code session runs without a permission prompt — every entry, from every session, lives
+here, not scattered across commit messages. Read it before asking Rafael to widen it; grep the
+file itself for the exact current list (this section explains, the file is authoritative on
+what's live).
+
+- **Ownership (ruled 2026-08-27, Rafael, via the steward, `w3-editor` PR #16):**
+  `.claude/settings.json` is shared repo configuration — like `.github/workflows/`,
+  `tools/audit/`, `tools/docaudit/`, `.gitattributes` — belonging to no lane. A session that
+  wants a new entry files a ruling request and waits; it does not edit the file on its own
+  judgment, however narrow or obviously safe the entry looks. **Permissions specifically also
+  need Rafael's explicit sign-off regardless of how read-only an entry looks**, because the
+  decision is "what may any future session do without being asked," not "is this one command
+  safe." (`w3-editor`'s first settings commit, `1cbf742`, added three read-only audit/PR-status
+  entries on its own judgment, following a permission-prompt-reduction skill's own instructions
+  without waiting for that ruling; the entries were approved retroactively on the merits, but the
+  process was corrected going forward — this section is that correction, recorded once.)
+- **What's currently allowed, by category (see the file for the literal patterns):**
+  read-only audit/status checks (`commit_docs.py`, `includes.py`, PR/CI status reads) — safe by
+  construction, no file mutation; local build/configure (`cmake` configure and build, `ninja`) —
+  writes land only in the gitignored `out/` dir, fully reversible; running the compiled
+  `tl_tests` binary — touches no git state; `git commit` (any form) and `git push` scoped to
+  exactly one lane branch at a time — never `main`, never `--force`, never any other branch;
+  `docaudit.py` (it regenerates `docs/XREF.md`, a generated file, so it's a write, unlike the
+  two audit checks above) and `git merge origin/main` into a lane branch (brings in upstream,
+  never destructive). Each category was asked and decided explicitly by Rafael, not assumed —
+  build/test, commit/push, and docaudit/merge were each their own separate question with its own
+  recommendation.
+- **What's never in this list, on any session's request:** force-push, `git reset --hard`, push
+  to `main`, branch deletion, or any other destructive/irreversible operation. Those keep
+  prompting always; asking to auto-allow one is itself a ruling request, not a settings edit.
+- **Keeping this current:** when a ruling changes the allowlist, update the bullet above in the
+  same commit that edits `.claude/settings.json`, so the doc and the file never drift — one
+  fact (this list of granted categories), one home (this section; the file itself is the literal
+  patterns, this section is why).
+
 *Rev 1 — 2026-08-25; §1/§4 amended same day by the slice's own adversarial review (D4/D6: the
 PR-fallback actor named, absolute grading pinned to the PC rev-2 record until the Deck). This
 doc shipped as the first §1-governed PR — opened via the App grant, review verdict recorded on
@@ -222,4 +260,5 @@ it. §1/§4/§5 amended 2026-08-26 by the morning ruling pass after the W2 auton
 election, R-4, R-5). §5/§6 amended 2026-08-26 evening: the token-budget rulings R-8..R-11. §1/§3/§5 amended
 2026-08-26 evening: R-12, the doc-relevancy pass. §1/§5 amended 2026-08-27: R-15, observable
 completion — filed after the steward's own "I spawn it, you do not need to ask" turned two
-finished lanes silent; §6's intro lost its maintained rule count in the same pass.*
+finished lanes silent; §6's intro lost its maintained rule count in the same pass. §7 added
+2026-08-27: the `.claude/settings.json` ownership ruling and the current allowlist, in one place.*
