@@ -216,10 +216,11 @@ failures are `Result<T>`/`ErrCode` in the `ERR_RENDER_*` range. Draw verbs are t
 | `extract.cpp` | `sys_extract` (`PRE_RENDER`): fx→f32, lerp, packet, camera | all |
 | `queue.h/.cpp` | `DrawCommand`, key pack/unpack, `DrawData` SoA, `ClipTable`, submit, reject | all |
 | `batch.cpp` | key sort (calls `sort_u64_kv`), scan-batching, vertex/index emission | all |
-| `sprite.cpp` | `Sprite` component + `sys_sprite_render` (`RENDER`) | all |
+| `render_internal.h` | `render_sort_and_batch`/`render_emit_geometry` declarations shared between `batch.cpp` and `backend_sdl.cpp` - NOT part of `tl_render`'s public surface (`render.h` is); `render_resolve_view` also lives here | all |
+| `sprite.h/.cpp` | `Sprite` component + `sys_sprite_render` (`RENDER`) | all |
 | `simview.h/.cpp` | material LUT, chunk/body/particle/basin writers over `sim/views.h`, `simview_texel_to_world` | all (Milestone 2; v0 ships the header + an empty update) |
 | `debugdraw.h/.cpp` | immediate lines/rects/circles, persistent list, tessellation | all — the `foundation/tl_prof.h`/`tl_probe.h` precedent (`CPP-SUBSET.md` §7b): the TU itself builds and is tested in every tier; only a call site that goes through the `TL_DBG_*` macros pays for it, and outside `TL_DEV` those expand to `((void)0)`, argument list unevaluated |
-| `text.cpp` | reserved stub: `text_layout()` returns `ERR_RENDER_UNSUPPORTED` | all |
+| `text.h/.cpp` | reserved stub: `text_layout()` returns `ERR_RENDER_UNSUPPORTED` | all |
 | `backend_sdl.cpp` | `render_present`: sort → batch → `DrawApi` verbs. Includes `platform/platform.h` only; the name records the SDL_Render-shaped verb set. A future `backend_gpu.cpp` replaces this one TU | all |
 
 `tl_render` links into `tidelock` and into `tl_tests` (with `tl_platform_headless`) for
@@ -290,7 +291,7 @@ struct RenderQueue {
     f32 alpha; u32 stats_submitted, stats_rejected, stats_draw_calls, stats_batches; };
 ```
 This is the spec-pinned minimum, not the exhaustive shipped shape (review round 3 A-11) - `render.h`
-carries two fields beyond it, each with its own contract-block note there rather than restated
+carries two more entries beyond it, each with its own contract-block note there rather than restated
 here (one fact, one home): `platform` (the `PlatformApi*` `render_present` needs; render.h's own
 SIGNATURE NOTE), and `dbg_ring`/`dbg_ring_count`/`dbg_ring_next` (the persistent debug-draw ring,
 §7/§9.3.8 - opaque here because its element type is `debugdraw.h`'s and `debugdraw.h` includes

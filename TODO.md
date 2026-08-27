@@ -3274,9 +3274,15 @@ right; it is the template the others now follow.
 - [x] **Review round 2's discriminating-test sweep, CORRECTED in round 3 (A-2, A-3, A-6): D7 and
       M1 were wrongly recorded as not practically unit-testable - both are, and round 3's reviewer
       wrote and ran both tests. M2 was wrongly recorded as verified - no test can verify it, for a
-      different reason than D6/D7/M1's class. Fifteen of sixteen round-1 fixes (D2-D5, D7, D10, M1,
-      M4, M5 plus D1/N1's own N-round tests) now have a revert-verified discriminating test; only
-      D6 (half) and M2 do not, for reasons intrinsic to what each actually is:**
+      different reason than D6/D7/M1's class. **CORRECTED again in round 4 (R4-1): the sentence
+      this same commit wrote to fix the round-2 test-count error stated a new, differently wrong
+      count** - "fifteen ... only [two] do not" is arithmetically seventeen against sixteen total,
+      its own parenthetical lists ten items not fifteen, and it silently swept D8/D9/D11 (doc-route
+      fixes) and M3 (a record fix) - none of which ever had or could have a discriminating test -
+      into "have one". Ten of the sixteen round-1 findings have a revert-verified discriminating
+      test (D1-D5, D7, D10, M1, M4, M5). D8, D9, D11 and M3 were doc- or record-route fixes with no
+      runtime observable to test. D6 is pinned at link only; M2 has no behavioural delta to observe
+      at all - two different reasons, detailed below:**
       - **D6 (`simview.cpp` did not exist) - still half-pinned, correctly.** The fix IS a file
         existing and its two declared functions being defined - `simview_texel_to_world`/
         `simview_update` were forward-declared in `simview.h` but had no `.cpp` TU, so the module
