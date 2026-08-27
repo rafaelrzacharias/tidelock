@@ -3624,6 +3624,14 @@ actually exists, matching this doc's own "no speculative breadth" principle appl
 prose rather than code. Not built against yet; `ASSETS-AND-DATA.md` is unedited pending the
 ruling, so a future reader is not told a criterion was met when four of its clauses were deferred.
 
+**Orchestration note (2026-08-27):** the steward session (`session_01CnFUALGkrJNZa5jeVAce3W`,
+"Tidelock W3 orchestrator handoff") that relayed round 1/round 2's reviews and rulings is now
+archived (`status_bucket: COMPLETED`) - poking it for round 2's results failed with "session is
+archived; only active sessions can be bound to triggers". PR #14's body carries the same note.
+This lane continues driving the PR to green autonomously per the standing rules (`WORKFLOW.md`
+§1 R-6) rather than stalling on a poke target that no longer exists; a fresh steward session, or
+Rafael directly, can pick up review/ruling duties from the PR and this file's own record.
+
 ## Reserved (design complete, build on first consumer — `docs/RESERVED-SEAMS.md`)
 Audio · game UI (Luau) · spatial index · tilemap · nav/AI · frame animation · replay UI/cinematics ·
 modding (Luau profiles) · game-logic substrate · streaming/cook · SDL_GPU path · editor shell.
