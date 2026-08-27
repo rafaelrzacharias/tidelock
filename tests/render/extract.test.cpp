@@ -1,0 +1,240 @@
+// extract.test.cpp - docs/RENDER2D.md §9.6 extract_snap_and_arc.
+#include "runner/tl_test.h"
+#include "core/transform.h"
+#include "render/render.h"
+#include "foundation/vmem_test_api.h"
+#include "foundation/fx.h"
+#include <string.h>
+#include <math.h>
+
+// A real (non-headless-platform) ECS World: sys_extract only touches w->render (a manually-
+// built RenderQueue - no PlatformApi/DrawApi call anywhere in extract.cpp) and the Transform/
+// TransformPrev columns (camera state lives on RenderQueue itself, not the ECS - review round 1
+// D1), so the lighter tests/core-style fixture (docs/ECS.md, mirrored from
+// tests/core/world_test_util.h) is the right tool, not tests/render/render_test_util.h's
+// headless-platform-backed one.
+struct ExtractFixture {
+    VMemApi api;
+    ArenaRegistry reg;
+    Scratch scratch;
+    World w;
+    RenderQueue rq;
+};
+
+// World carries comps[1024] (~100s of KB) - a caller-owned static, never the stack
+// (docs/LESSONS.md "a World-sized fixture on the stack is a Windows-only crash").
+static ExtractFixture* et_fixture() {
+    static ExtractFixture f;
+    return &f;
+}
+
+// Returns the first failing call's ErrCode (the jobs_test_util.h/world_test_util.h idiom - TODO.md,
+// docs/LESSONS.md: TL_ASSERT wrapping a call expression directly compiles the call itself away at
+// TL_DEV=0, not just the check, since the macro argument never appears in that tier's expansion).
+static ErrCode et_init(ExtractFixture* f) {
+    f->api = test_vmem_api();
+    memset(&f->reg, 0, sizeof(f->reg));
+    ErrCode e = scratch_init(&f->scratch, "et.scratch"_id, 16u * 1024u * 1024u, &f->api);
+    if (e != ERR_OK) { return e; }
+    WorldDesc d{};
+    d.seed = 1;
+    e = world_init(&f->w, &f->reg, &f->scratch, &f->api, &d);
+    if (e != ERR_OK) { return e; }
+    world_register_component(&f->w, &Transform_info);
+    world_register_component(&f->w, &TransformPrev_info);
+    world_build_schedule(&f->w);
+
+    memset(&f->rq, 0, sizeof(f->rq));
+    f->rq.layout.internal_w = 320;
+    f->rq.layout.internal_h = 180;
+    f->w.render = &f->rq;
+    return ERR_OK;
+}
+
+TL_TEST(extract_snap_and_arc, "render") {
+    ExtractFixture* f = et_fixture();
+    TL_ASSERT_EQ(et_init(f), ERR_OK);
+    World* w = &f->w;
+
+    // snap bit forces a = 1: prev at 0, cur at 10, flags carries TRANSFORM_SNAP.
+    Transform t_cur{}; t_cur.x = fx::fx_int<pos_t>(10); t_cur.y = fx::fx_int<pos_t>(0); t_cur.rot = fx::fx_int<angle_t>(0);
+    t_cur.flags = TRANSFORM_SNAP;
+    TransformPrev t_prev{}; t_prev.x = fx::fx_int<pos_t>(0); t_prev.y = fx::fx_int<pos_t>(0); t_prev.rot = fx::fx_int<angle_t>(0); t_prev.flags = 0;
+    const Entity e_snap = world_spawn(w);
+    world_add<Transform>(w, e_snap, t_cur);
+    world_add<TransformPrev>(w, e_snap, t_prev);
+
+    // rotation 0.9 -> 0.1 turns: the shortest arc goes FORWARD through 1.0 (+0.2), not backward
+    // through 0.5 (-0.8) or the naive direct lerp toward 0.5 (docs/RENDER2D.md §9.3.3).
+    Transform t_cur2{}; t_cur2.x = fx::fx_int<pos_t>(0); t_cur2.y = fx::fx_int<pos_t>(0); t_cur2.rot = fx::fx_lit<angle_t>(1, 10); t_cur2.flags = 0;
+    TransformPrev t_prev2{}; t_prev2.x = fx::fx_int<pos_t>(0); t_prev2.y = fx::fx_int<pos_t>(0); t_prev2.rot = fx::fx_lit<angle_t>(9, 10); t_prev2.flags = 0;
+    const Entity e_arc = world_spawn(w);
+    world_add<Transform>(w, e_arc, t_cur2);
+    world_add<TransformPrev>(w, e_arc, t_prev2);
+
+    world_flush(w);
+
+    f->rq.alpha = 0.5f;
+    sys_extract(w);
+
+    // packet index == Transform dense index (docs/RENDER2D.md §9.2 RenderPacket comment); both
+    // entities were added in spawn order with nothing removed, so dense index == spawn order.
+    TL_ASSERT_EQ(f->rq.packet.count, 2u);
+    TL_EXPECT_TRUE(fabsf(f->rq.packet.x[0] - 10.0f) < 1e-5f);   // snap: a = 1, not alpha = 0.5 (would be 5.0)
+    TL_EXPECT_TRUE(fabsf(f->rq.packet.y[0] - 0.0f) < 1e-5f);
+
+    // 0.9 + shortest_arc(0.9, 0.1) * 0.5 = 0.9 + 0.2 * 0.5 = 1.0 (through the wrap), not
+    // 0.9 + (0.1 - 0.9) * 0.5 = 0.5 (the naive direct lerp, going the wrong way).
+    TL_EXPECT_TRUE(fabsf(f->rq.packet.rot_turns[1] - 1.0f) < 1e-5f);
+    TL_EXPECT_TRUE(fabsf(f->rq.packet.rot_turns[1] - 0.5f) > 0.1f);   // not the naive answer
+}
+
+// Review round 1 D1's failing repro, now passing: a camera pan (or a follow retarget, or a
+// window resize feeding a different zoom) is not sim state, so it must not move
+// registry_hash_all - two peers with identical sim state but different camera positions must
+// still agree. Before the fix, Camera2D/CameraPrev/CameraFollow were registered ECS components
+// (an empty-field ComponentInfo workaround) and their raw f32 bytes were hashed regardless of the
+// empty field table (registry_hash_all is arena-level - it hashes bytes, never consults a field
+// table). Fixed by moving camera state onto RenderQueue (camera.h's Determinism note) - it never
+// touches a registered arena, so this invariant now holds by construction, not by convention.
+TL_TEST(camera_state_is_not_hashed, "render") {
+    ExtractFixture* f = et_fixture();
+    TL_ASSERT_EQ(et_init(f), ERR_OK);
+    World* w = &f->w;
+
+    // Positive control (review round 3 A-1): every assertion below - "the hash does not move" -
+    // holds trivially for ANY memory that is never hashed, including a plain BSS field never
+    // touching a registered arena. Without this, the test cannot distinguish "camera state is
+    // structurally excluded from registry_hash_all" from "registry_hash_all doesn't hash anything
+    // at all". Spawn a registered Transform and confirm the hash DOES move when ITS bytes change,
+    // proving the hash is live and reaches arena bytes, before relying on it staying still for
+    // camera state below.
+    Transform tr{}; tr.x = fx::fx_int<pos_t>(0); tr.y = fx::fx_int<pos_t>(0); tr.rot = fx::fx_int<angle_t>(0); tr.flags = 0;
+    const Entity e = world_spawn(w);
+    world_add<Transform>(w, e, tr);
+    world_flush(w);
+    registry_seal(&f->reg);   // registry_hash_all requires it (foundation/arena_registry.h)
+
+    u64 per_arena[MAX_ARENAS];
+    const u64 h_before_control = registry_hash_all(&f->reg, per_arena);
+    Span<Transform> col = world_column<Transform>(w);
+    col.data[0].x = fx::fx_int<pos_t>(2);   // a real sim-state mutation, unlike the camera writes below
+    const u64 h_after_control = registry_hash_all(&f->reg, per_arena);
+    TL_EXPECT_TRUE(h_after_control != h_before_control);   // the hash IS live and reaches arena bytes
+
+    render_camera_init(w, 0, Camera2D{ 0.0f, 0.0f, 1.0f, 0.0f, 16.0f, 0, {0, 0, 0} });
+
+    const u64 h0 = registry_hash_all(&f->reg, per_arena);
+
+    f->rq.camera[0].cx = 1.0f;   // a camera pan - no sim value changed
+    const u64 h1 = registry_hash_all(&f->reg, per_arena);
+    TL_EXPECT_EQ(h1, h0);
+
+    f->rq.camera[0].cx = 0.0f;
+    f->rq.camera[0].cy = 0.0f;
+    const u64 h2 = registry_hash_all(&f->reg, per_arena);
+    TL_EXPECT_EQ(h2, h0);
+
+    f->rq.camera[0].cy = -0.0f;   // +0.0f/-0.0f are byte-distinct but float-equal - still no move
+    const u64 h3 = registry_hash_all(&f->reg, per_arena);
+    TL_EXPECT_EQ(h3, h0);
+
+    f->rq.camera_follow[0] = CameraFollow{ Entity{}, 0.0f, 0.0f };   // a follow retarget too
+    f->rq.camera_follow[0].off_x = 5.0f;
+    const u64 h4 = registry_hash_all(&f->reg, per_arena);
+    TL_EXPECT_EQ(h4, h0);
+}
+
+// Review round 2 N1's exact repro, now fixed: render_init's own zero-fill leaves alpha == 0.0f by
+// default, and a raw camera[v] write (camera_prev[v] left zeroed) made the very first
+// sys_extract() call abort - interp.ppu lerped to 0 (p.ppu == 0, alpha == 0), so view_matrix built
+// a singular matrix and screen_to_world's TL_CHECK(det != 0) fired three calls deep. render_camera_init
+// seeds camera_prev[v] to camera[v] on first setup, so this must not abort, and the first frame's
+// view_mat must reflect the REAL camera, not a degenerate one.
+TL_TEST(camera_init_survives_first_frame_at_alpha_zero, "render") {
+    ExtractFixture* f = et_fixture();
+    TL_ASSERT_EQ(et_init(f), ERR_OK);
+    World* w = &f->w;
+
+    render_camera_init(w, 0, Camera2D{ 0.0f, 0.0f, 1.0f, 0.0f, 16.0f, 0, {0, 0, 0} });
+    TL_ASSERT_EQ(f->rq.alpha, 0.0f);   // render_init's own zero-fill default - not set here on purpose
+    world_flush(w);
+    sys_extract(w);   // must not abort
+
+    // ppu_eff = cam.ppu * cam.zoom = 16 * 1 = 16; m[0] = ppu_eff * cos(0) = 16, never 0.
+    TL_EXPECT_TRUE(fabsf(f->rq.view_mat[0].m[0] - 16.0f) < 1e-5f);
+}
+
+// Rafael's ruling on N1 (2026-08-27, relayed by the steward): render_camera_init seeds
+// camera_prev = camera at set time, so the first frame's lerp is prev == cur - the identity -
+// regardless of alpha, not just at alpha == 0. Checks alpha == 0.5 gives the SAME result as
+// alpha == 0 (proving no interpolation artifact on the seeded frame, the ruling's own reasoning),
+// then a real camera change on the NEXT frame (camera_prev now stale on purpose, camera_count
+// unchanged - a view "set after init" in the ruling's words) interpolates normally.
+TL_TEST(camera_init_first_frame_is_alpha_independent, "render") {
+    ExtractFixture* f = et_fixture();
+    TL_ASSERT_EQ(et_init(f), ERR_OK);
+    World* w = &f->w;
+
+    render_camera_init(w, 0, Camera2D{ 10.0f, -5.0f, 2.0f, 0.0f, 16.0f, 0, { 0, 0, 0 } });
+    world_flush(w);
+
+    f->rq.alpha = 0.5f;
+    sys_extract(w);   // must not abort, and must not lerp toward a zeroed prev
+    const f32 m0_at_half = f->rq.view_mat[0].m[0];   // ppu_eff = 16*2 = 32 if the seed held
+
+    f->rq.alpha = 0.0f;
+    sys_extract(w);
+    TL_EXPECT_TRUE(fabsf(f->rq.view_mat[0].m[0] - m0_at_half) < 1e-5f);   // identical: prev == cur
+    TL_EXPECT_TRUE(fabsf(m0_at_half - 32.0f) < 1e-4f);                    // and it is the REAL camera, not 0
+
+    // A genuine update on a later tick DOES interpolate (camera_prev is now stale, on purpose -
+    // this is what a per-tick `camera[view] = ...` write plus the future barrier's advance is
+    // for; render_camera_init is only ever the FIRST value). zoom stays 2.0 throughout (cur ==
+    // prev), so only ppu's own lerp moves: interp.ppu = lerp(16, 32, 0.5) = 24; ppu_eff =
+    // interp.ppu * interp.zoom = 24 * 2 = 48 - not 32 (no change) and not 64 (full change).
+    f->rq.camera[0].ppu = 32.0f;   // camera_prev[0].ppu stays 16 (unchanged) - a real delta now
+    f->rq.alpha = 0.5f;
+    sys_extract(w);
+    TL_EXPECT_TRUE(fabsf(f->rq.view_mat[0].m[0] - 48.0f) < 1e-3f);
+}
+
+// The degenerate cases the ruling names explicitly: camera_count == 0 (no camera configured at
+// all - must be a no-op, not a crash) and a view configured AFTER render_init/world_flush have
+// already run (render_camera_init has no ordering requirement relative to them).
+TL_TEST(camera_extract_degenerate_cases, "render") {
+    ExtractFixture* f = et_fixture();
+    TL_ASSERT_EQ(et_init(f), ERR_OK);
+    World* w = &f->w;
+
+    // camera_count == 0: sys_extract must not touch view_mat/view_world at all, let alone abort.
+    TL_ASSERT_EQ(f->rq.camera_count, (u8)0);
+    world_flush(w);
+    f->rq.alpha = 0.3f;
+    sys_extract(w);   // must not abort
+    TL_EXPECT_EQ(f->rq.camera_count, (u8)0);   // still nothing configured
+
+    // A view set AFTER world_flush - render_camera_init has no ordering dependency on the ECS
+    // barrier (camera is not an ECS component, review round 1 D1).
+    render_camera_init(w, 0, Camera2D{ 0.0f, 0.0f, 1.0f, 0.0f, 16.0f, 0, { 0, 0, 0 } });
+    sys_extract(w);   // must not abort
+    TL_EXPECT_TRUE(fabsf(f->rq.view_mat[0].m[0] - 16.0f) < 1e-5f);
+}
+
+// Review round 1 D5 (verified discriminating in round 2): sys_extract's Transform/TransformPrev
+// count-match guard is TL_CHECK (live in every tier), not TL_ASSERT (netcode/ship compiles it
+// away) - a mismatch (an entity with Transform but no TransformPrev, or the reverse) would
+// otherwise read out of bounds in the interpolation loop below it.
+TL_TEST_EXPECT_FATAL(extract_transform_prev_count_mismatch, "render,fatal") {
+    (void)t;
+    ExtractFixture* f = et_fixture();
+    TL_ASSERT_EQ(et_init(f), ERR_OK);
+    World* w = &f->w;
+
+    Transform tr{}; tr.x = fx::fx_int<pos_t>(0); tr.y = fx::fx_int<pos_t>(0); tr.rot = fx::fx_int<angle_t>(0); tr.flags = 0;
+    const Entity e = world_spawn(w);
+    world_add<Transform>(w, e, tr);   // no TransformPrev - cur.count (1) != prev.count (0)
+    world_flush(w);
+
+    sys_extract(w);   // TL_FATAL: prev.count == n
+}

@@ -34,7 +34,7 @@ contributions are not accepted: issues and pull requests from outside will be cl
 
 ## Status
 
-**Building — W2 of the wave plan (status re-dated 2026-08-26; `TODO.md` and `docs/ROADMAP.md`
+**Building — W2/W3 of the wave plan (status re-dated 2026-08-27; `TODO.md` and `docs/ROADMAP.md`
 are the live truth, this paragraph is only a pointer).** The design corpus is complete
 (`docs/PIVOT-DESIGN.md` is the founding ruling; `docs/README.md` is the map). Shipped: the W0
 skeleton and audits; the full W1 foundation (fx palette + det math, arenas/registry,
@@ -42,9 +42,10 @@ containers, RNG/hash, headless platform, test runner, tooling runtimes, jobs); G
 ruled (`FX-PALETTE.md` rev 2, 2026-08-25); the W2 ECS and netcode Phase 1 merges; the W2
 luau-vm and vendor merges (2026-08-26 — Luau 0.696, SDL3, SDL_ttf + FreeType, ImGui, ENet,
 Monocypher and stb, every allocator pooled and gated); four-leg hosted CI ({Windows, Linux} ×
-{x86-64, arm64}) green on `main`. In flight: the W3 slack lanes loop+input, assets+data and render2d (launched early
-on the spare non-Fable budget, ruled 2026-08-26); alloy-substrate launches at the weekly
-reset.
+{x86-64, arm64}) green on `main`; and the W3 **render2d** lane (merged 2026-08-27, PR #13 —
+camera, extract, queue/sort/batch, sprite and debug draw, the SDL present path). In flight: the
+W3 slack lanes loop+input and assets+data (launched early on the spare non-Fable budget, ruled
+2026-08-26); editor chains after render2d; alloy-substrate launches at the weekly reset.
 Next: W3 — alloy-solver ★ and the v0 lanes.
 
 ## Lineage
