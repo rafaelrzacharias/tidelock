@@ -3191,6 +3191,21 @@ right; it is the template the others now follow.
       holding D1 rather than building it out of the ruled sequence, since folding it in after an
       unresolved rewrite would need yet another rewrite later to converge cleanly. Posted this
       finding as a PR #13 comment and to the steward; parked here pending direction.
+      **RESOLVED 2026-08-27: the rewrite was executed by the STEWARD, not this lane** - this
+      lane's own tooling could not perform it, per the block above. From the steward's container,
+      under Rafael's RR-25 option-(a) ruling and an explicit expected-SHA lease: message-only
+      reword of the four violating commits via `git filter-branch --msg-filter` over
+      `e59f32f..HEAD`, appending `[docs:none]` to `1da56f8`/`0005038`/`d683e41`/`1734144`.
+      Verified by the steward before pushing (`git diff origin/w3-render2d fixbranch --stat`
+      empty - trees bit-identical, no code changed; anchor `e59f32f` unchanged at `fixbranch~9`;
+      `commit_docs.py --base origin/main` exits 0, 17 commits checked), pushed with
+      `--force-with-lease=w3-render2d:ec12e42`. Branch head moved `ec12e42` -> `37387bd` (all nine
+      post-anchor commits carry new SHAs, by construction of rewriting descendants - content
+      unchanged). Re-verified independently after `git fetch && git reset --hard
+      origin/w3-render2d`: anchor SHA `e59f32fd69591607b185cd9243c4137bfe54e7a2` unchanged, all six
+      `src/render/`-touching commits now carry either `[docs:none]` or a `docs/RENDER2D.md` touch.
+      D1 proceeds now as normal forward commits on the new head (fold-after-rewrite sequencing
+      satisfied).
 
 ## Alloy (`docs/ALLOY.md` — headless-first; its own build queue in "Gates & rulings ledger")
 - [ ] **W3 alloy-liquids-gases OPENING task — the liquid design pass (the RR-10 ruling,
