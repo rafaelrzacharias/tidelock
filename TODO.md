@@ -4717,3 +4717,67 @@ and audit validation recorded at the round's closing commit below.
 > `log.cpp` until an unrelated struct grew 53 KB nearby and tipped it. Sweep and kill the class rather
 > than triaging case by case. Owner: unassigned — `tests/render` and `tests/foundation` are outside the
 > editor lane's cone and this blocks nothing, so it is filed with the reproducer rather than dispatched.
+
+> **RR-43 (Rafael, 2026-08-27) — `TOOLING.md` §9.6 gains a THIRD bucket, amending RR-40.** RR-40 split
+> the v0 editor criterion into `panels v0` / `shell v0`. Review C found the two-bucket shape structurally
+> unsound: `shell v0` is defined as "needs a running `editor_frame`/real `PlatformDevApi`", and three of
+> its contents are not shell-blocked at all — the inspector-edit-in-replay-log clause (blocked on RR-42),
+> Console's `ARCHIVE` → `pref_path/cvars.txt` on shutdown (blocked on `pref_path`, the SAME dependency
+> `imgui.ini` is deferred for in the row four bullets down), and the Luau REPL hand-off plus Console's
+> "Luau UI VM" data source (blocked on the `script` lane). Consequences: `shell v0` can be denied
+> incorrectly by someone who lands the shell and finds it still unmet, and the `script` lane has no
+> reason to look in the editor doc's shell bucket. RULED: add **"Deferred — blocked on a ruling or
+> another lane"**, each item naming its own blocker, so every bucket's name is a true predicate over its
+> contents. `panels v0` then reduces to a claimable gate. Executed by the `w3-editor` lane in PR #16.
+
+> **RR-44 (Rafael, 2026-08-27) — the `docaudit` stale-marker set does NOT grow; two structural rules
+> replace it.** Review C argued against expanding the word list on evidence: neither of PR #16's blocking
+> doc defects contains a marker word, because both were statements TRUE when written that became false
+> when code caught up ("blocked only on RR-38's quantizer", falsified by RR-38 landing in the same PR).
+> No vocabulary catches that. RULED, two rules instead: **(a) status words are banned from criteria rows**
+> — a done criterion states a CONDITION; whether it is met belongs to the PR gate and this file, not to
+> the criterion. `TOOLING.md` §9.6 embedded "satisfied" four times, which is `LESSONS.md`'s
+> fastest-rotting surface written directly into the contract that judges the work; it is a plain regex to
+> enforce, and it applies "one fact, one home" to STATUS, not just to values. **(b) conditional deferrals
+> in criteria must carry a resolvable referent**, `[blocked-on: RR-nn]`, and `docaudit` errors when the
+> named ruling is recorded as ruled/landed — the condition is met, so the clause must be re-read. Rule (b)
+> would have fired automatically inside the very PR that landed RR-38.
+> **NOT BUILT — RECORD ONLY.** The enforcement lives in `tools/docaudit/docaudit.py`, a shared gate over
+> every doc in the repo and outside the `w3-editor` cone; enabling (a) also requires the §9.6 status-word
+> strip to land first (it did, in PR #16, under RR-43). Owner: unassigned. Whoever takes it should also
+> weigh Review C's separate finding that `docaudit.py:13` globs `docs/*.md` ONLY — `TODO.md`, `LESSONS.md`
+> and `CLAUDE.md` are never scanned, which was 1,125 of PR #16's 1,395 added prose lines. Rafael flagged
+> extending that glob as a scoping call in its own right, since it would surface a large existing backlog
+> of lowercase "still open" prose.
+
+> **FINDING (Review A, PR #16, 2026-08-27) — `TL_PROF_SCOPE_W` drops its arguments outside `TL_DEV`.**
+> The non-`TL_DEV` expansion never evaluates `(scr)` or `(job)` while the `TL_DEV` one does, so a caller
+> passing an expression with side effects gets different behaviour per tier. **Pre-existing at `f66cb7f`**
+> — not introduced by PR #16 — so it was ruled OUT of that PR's scope (`CLAUDE.md` rule 3: fix Y only if
+> it blocks X; it blocks nothing) and filed here instead. The fix is one `(void)` cast away. Owner:
+> unassigned. Whoever takes it should sweep the other `TL_*` macro pairs for the same asymmetry rather
+> than fixing this one instance — the repo has already paid three times for treating a bug class as a
+> bug.
+
+> **FINDING (Review B, PR #16, 2026-08-27) — the generated test list regenerates on file ADD but not on
+> file REMOVE; clean builds pass while incremental builds fail.** `tests/CMakeLists.txt`'s
+> `CONFIGURE_DEPENDS` glob feeds a generated `test_list.inc`. Deleting a `tests/**/*.test.cpp` leaves
+> ninja reporting `[0/2] Re-checking globbed directories...` and then linking against a `test_list.inc`
+> that still references the removed file, failing with `undefined reference to test_*`. Re-running
+> `cmake --preset <p>` does NOT fix it; the reviewer had to delete
+> `out/<preset>/tests/generated/test_list.inc` and `runner/main.cpp.o` by hand. Adding a file regenerates
+> correctly. Pre-existing infra, untouched by PR #16, and it only bites someone who deletes a test file —
+> which is exactly what an adversarial reviewer does after planting a probe test. Owner: unassigned.
+
+> **STEWARD NOTE (2026-08-27) — the merged-and-closed-lane ownership problem is at SEVEN instances, and
+> the seventh carried a live memory-corruption defect.** The recurring shape: work owned by a lane that
+> merged and closed, so absent a steward ruling it belongs to nobody — `transform.h`, `asset_load_font`,
+> `CMD_SET_CVAR`, `fmt_buf`, `log.cpp`, `recorder.h`, and now `fmt_buf` again in its own right. Review A
+> found that `fmt_buf` writes a NUL at `buf[-1]` whenever `out.count == 0` (`stbsp_vsnprintf` takes its
+> `else` branch whenever `buf != NULL`, regardless of count), so `fmt.h`'s stated invariant "never
+> overflows `out`" had been false since it was written, at a boundary that is the ordinary end-state of
+> incremental formatting. No owner existed to catch it. The wave-boundary item "a rule for work owned by
+> merged-and-closed lanes" should cite all seven and note that the class has now produced an out-of-bounds
+> write, not just ambiguity about who edits what. Related and belonging in the same rule: three of six
+> editor panels needed a foundation change outside the lane's cone, each individually justified — the cone
+> as drawn does not match the work the editor actually requires.
