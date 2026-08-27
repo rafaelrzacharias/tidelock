@@ -6246,6 +6246,396 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > *sim* header distinct from foundation's. Reading §14.1 turned a wrong flag into RR-46, which is
 > the real defect underneath it.
 
+## Wave-boundary sweep — area A verdict (`w2-net-close` 99c9248, `w2-max-arenas` 1ddae4b)
+
+Fresh-context adversarial review of the two commits that merged under `WORKFLOW.md` §2's
+post-review-edit valve. Reviewer: cloud session, area A of a three-way disjoint partition.
+Every claim below names the command that produced it; the scope of each claim is the range of
+that command and no wider.
+
+**VERDICT: fix first.** One confirmed defect in `w2-net-close`'s test change (D1) that leaves a
+pre-existing regression row pinning nothing, and one confirmed margin regression in
+`w2-max-arenas` (D2) on the platform this repo has already gone CI-red on three times for that
+exact class. Neither commit's *shipped behaviour* is wrong: all three of `w2-net-close`'s new
+format rules are correctly enforced by encoder and decoder, and I could not construct an input
+that defeats them. The defects are in what GUARDS them.
+
+**Environment.** `git rev-parse --is-shallow-repository` returned `true` on entry;
+`git fetch --unshallow` brought the history to the full graph before any claim about history
+was made. Measurements were taken on tree `1280d1a`; `main` advanced to `de268f7` during the
+review, and `git diff --stat 1280d1a..de268f7` is `TODO.md` only, +114 lines, no code — so
+every measurement below still describes `main`'s code.
+
+### First job — valve eligibility (§2: "small edits that IMPLEMENT AN ALREADY-RECORDED RULING")
+
+Both commits are eligible. Neither extended its ruling, and neither decided anything its ruling
+left open. Checked by reading each ruling's text at the commit's own parent
+(`git show <sha>^:TODO.md`), not at today's `TODO.md`:
+
+- **99c9248** implements three ruled clauses and exactly three. The `(C) — BOTH rules` ruling
+  supplies §20.2.3's per-origin `seq` ascent and §20.2.9's `tick_count <= CHECKPOINT_HOT_TICKS`;
+  the `(A)` ruling supplies the per-tick log-record bound "enforced in encoder AND decoder".
+  Both ruling records name `w2-net-close` as the implementing slice by name. The code carries
+  three new rules, on both sides, and no fourth.
+- **1ddae4b** implements E-2's `(a)` verbatim. E-2's ruling text names the sweep explicitly —
+  "`CANON.md` edit + the code sweep (`arena_registry.h`, docaudit's constant pin, `MEMORY.md`'s
+  inline value)" — and the diff touches those four and nothing else besides the test.
+- Both recorded the deferral in `TODO.md` **in the merge commit itself**, as §2 requires
+  ("recorded at merge time, never assumed"). Verified in `git show <sha> -- TODO.md`.
+
+### Defects, ranked
+
+**D1 — `tests/net/test_archive.test.cpp:1002-1033`: `w2-net-close` re-broke a regression row so
+that it no longer pins the rule it is named for. VERIFIED (severity: high).**
+`archive_log_record_count_is_bounded_by_the_format` exists to pin the aggregate format bound
+(`log_record_count <= MAX_LOG_RECORDS_PER_PACKET * tick_count`, `src/net/archive.cpp:407`).
+99c9248 changed its fixture from 100 records at one tick to
+`effective_tick = 1000u + (u64)(i / MAX_LOG_RECORDS_PER_PACKET)` — 100 records spread over
+**13** tick offsets (0..12) — and then shrinks `tick_count` to `narrow = 12`. Offsets 12 and up
+are outside the shrunk range, so the per-record `effective_tick` range check
+(`src/net/archive.cpp:669`) refuses the same bytes with the same `ERR_NET_MALFORMED` the row
+asserts. The row's own comment claims "ONLY the format bound can refuse this"; that claim is
+false.
+
+*Failure scenario.* Delete the aggregate bound entirely and the archive decoder accepts a
+segment declaring more log records than its tick span can hold, in the format whose bytes are
+hashed into `ChainEntry.log_segment_hash` (§20.2.8) — and the suite stays green.
+
+*Evidence (revert experiment, `out/debug-linux`, `-O0`, build checked before any test result was
+interpreted).* Reverting the aggregate bound alone:
+
+    [R4 decoder AGGREGATE bound] build OK. Running: archive_log_record_count_is_bounded_by_the_format
+    PASS net.archive_log_record_count_is_bounded_by_the_format (0.2 ms)
+    tl_tests: 1 selected, 1 passed, 0 failed, 0 timed out, 0 skipped, 0 lost
+
+Reverting the aggregate bound **and** the per-record `effective_tick` range check together:
+
+    [R5 aggregate AND range disabled] build OK.
+    tests/net/test_archive.test.cpp:1033: FAIL [archive_log_record_count_is_bounded_by_the_format]
+        (archive_decode_segment(&wr, &wh, wgot, wide, wout, many, &wrc)) == (ERR_NET_MALFORMED)
+    tl_tests: 1 selected, 0 passed, 1 failed
+
+That pair identifies the real refuser as the range check, not the bound the row names.
+
+*What makes this worse than an ordinary miss.* The comment 99c9248 **deleted** from this row
+said, in the tree, exactly what would go wrong: "Spreading them over ticks made the
+effective_tick RANGE check fire when tick_count shrank, so the row passed without testing the
+bound." That comment was the record of a previous fix for this identical trap. `LESSONS.md`
+carries the class twice for this one file ("A negative test can be refused for the wrong reason,
+and then it pins nothing"; "A wire-format change retires the test corpus that guarded the old
+one, silently"). This is the third occurrence, introduced by the commit whose stated job was to
+implement rulings on this file.
+
+*Fix.* Re-derive the forgery so exactly one rule can object. The row needs 100 records that all
+sit inside the shrunk range: at 8 per tick the aggregate binds at `tick_count = 12` while
+records occupy offsets 0..11 only if the count is <= 96 — so either drop to 96 records and shrink
+`tick_count` to 11, or keep 100 and shrink to a value that still contains offset 12. Then re-run
+the revert to watch the row go red.
+
+**D2 — `w2-max-arenas` cut the Windows stack margin of `tests/foundation/registry.test.cpp` by a
+factor of 40, into the band that has already produced three CI-red instances of this class in
+this repo. VERIFIED (severity: medium).**
+`MAX_ARENAS` 64 -> 4096 makes `sizeof(ArenaRegistry)` ~96 KB, and the registry test holds
+`ArenaRegistry` by value in `TestWorld` (`registry.test.cpp:33`) and as plain locals
+(lines 141, 169, 178, 534, 548, 566). Measured per-function frames with `-fstack-usage` under the
+debug tier's own compile line (`-O0`, taken from `out/debug-linux/compile_commands.json`), same
+flags on both sides, the parent tree supplied by `git worktree add --detach <sp> 1ddae4b^`:
+
+| function | at `MAX_ARENAS = 64` | at 4096 |
+|---|---|---|
+| `registry_restore_refuses_wrong_ids_before_app_fingerprint` (:152) | 10,536 B | **591,144 B** |
+| `registry_edges_tick0_empty_and_max_arenas` (:268) | 14,824 B | **590,904 B** |
+| `registry_restore_gates_on_fingerprint_and_count` (:115) | 9,032 B | **492,872 B** |
+| `registry_two_worlds_hash_identically` | 8,504 B | **460,088 B** |
+| `world_init` (:36) | (below the top 8) | **98,440 B** |
+
+`world_init` is called *from* those frames, so the peak is additive: ~689 KB before the test
+runner's own frames underneath it.
+
+*Is it live?* No — and that is measured, not assumed. Reproducing the Windows constraint the way
+`LESSONS.md` prescribes (`ulimit -s`, rather than guessing at it), `tl_tests --tag mem` on
+`out/debug-linux`:
+
+    stack=1024KB : 47 selected, 47 passed, 0 failed        <- Windows' default
+    stack= 768KB : 47 selected, 47 passed, 0 failed
+    stack= 736KB : 47 selected, 47 passed, 0 failed
+    stack= 720KB : <CRASH, no output>                       <- Segmentation fault, EXIT=139
+
+So the suite needs 720-736 KB and Windows gives 1 MB: **~28% headroom**, down from a margin that
+was effectively the whole stack. The zero-output segfault is the exact signature `LESSONS.md`
+names for this class ("a stack overflow segfaults before any of the test's own assertions run").
+
+*Failure scenario.* Any future growth of ~290 KB anywhere below these frames — one more
+`ArenaRegistry`-by-value local, a struct in the runner, a deeper call — turns every Windows CI
+leg red with no failure text. That is precisely how the `log.cpp` instance in `LESSONS.md`
+landed: a ~1 MB temporary that "fit" until an unrelated `ConsoleState` grew nearby.
+
+*Also inside this finding.* `registry.test.cpp:38` is `w->reg = ArenaRegistry{};` — the
+`g_x = T{}` value-initialized-temporary pattern `LESSONS.md` carries **three** confirmed
+instances of, now materializing a ~96 KB temporary at `-O0` where it used to materialize ~1.5 KB.
+Note why the existing defence missed it: the grep `LESSONS.md` mandates for this class is
+written `grep -rn '= [A-Za-z_][A-Za-z0-9_]*{};' src/` — scoped to `src/`, so it **structurally
+cannot match a file under `tests/`**. That scope is itself the third-instance lesson's own
+correction ("grep the pattern against the WHOLE tree, not a directory that merely contained the
+last instance found") not being applied to its own recall. Same shape at lines 289, 290, 298
+(`*e1 = ArenaRegistry{}` etc.), where the destination is arena-backed but the temporary is not.
+
+*Fix.* The arena-backing 1ddae4b already applied to the full-house actors is the right shape;
+apply it to `TestWorld::reg` and to the by-value locals, or construct in place / `memset` rather
+than assigning a value-initialized temporary. Then re-run the `ulimit -s` ladder above and record
+the new threshold.
+
+**D3 — docaudit's constant pin does not pin the header, and `w2-max-arenas`'s own record says it
+does. VERIFIED (severity: medium; the hole is pre-existing, the false claim is this commit's).**
+1ddae4b's message and its `TODO.md` valve entry both describe the constant's "four homes" moving
+together, naming `arena_registry.h` and "docaudit's constant pin" among them. `docaudit.py`
+builds `files` from `glob(docs/*.md)` and scans nothing else: its `CANON` list is compared
+against **doc prose only**, never against a C++ header. Verified in both directions:
+
+    # header set to 512, CANON.md left at 4096:
+    $ python3 tools/docaudit/docaudit.py
+    docaudit: 27 docs, 0 errors        EXIT=0        <- passes
+
+    # CANON.md set to 512, header left at 4096:
+    $ python3 tools/docaudit/docaudit.py
+    ERROR CANON.md: MAX_ARENAS = 512, CANON says 4096
+    docaudit: 27 docs, 1 errors        EXIT=1        <- fails
+
+So the pin binds doc-to-tool and tool-to-doc; the header — the one home that decides what the
+program actually does — is bound by nothing. `grep -rn "static_assert.*MAX_ARENAS" src/ tests/`
+returns no matches, so the compiler is not checking it either, against `LESSONS.md`'s own
+standing rule ("Let the compiler check every documented constant ... a raw value in a doc is a
+claim until a `static_assert` has seen it").
+
+*Failure scenario.* A future edit sets `arena_registry.h`'s `MAX_ARENAS` to any value while
+`CANON.md` keeps 4096. `docaudit` is green, CI is green, and `CANON.md`'s "Registration order =
+lockstep contract" row is describing a program that no longer exists. Two peers built from two
+such trees hash different worlds.
+
+*Fix (a ruling request, unnumbered — ids are steward-allocated).* Either give
+`arena_registry.h` a `static_assert(MAX_ARENAS == 4096, "docs/CANON.md")`, or — better, since it
+generalizes past this one constant — extend `docaudit`'s constant pass over the headers CANON
+names, so the value in the tree is compared to the value in the sheet rather than only prose to
+prose. The narrow fix leaves the same hole for every other CANON constant with a C++ home.
+
+**D4 — the two new §20.2.9/§20.2.3 rules are invisible to the archive's mutation fuzz, so the
+three hand-forged rows are their only guard. VERIFIED (severity: low — see the qualifier).**
+Reverting each new rule **on both sides** (encoder `TL_CHECK` + decoder refusal, so no artificial
+asymmetry is introduced) and running every fuzz row including the 1,000,000-case slow one:
+
+    # per-origin seq ascent fully reverted:
+    PASS net.archive_mutated_segments_are_refused_or_canonical (85.1 ms)
+    PASS net.archive_structurally_mutated_segments_are_refused_or_canonical (100.1 ms)
+    PASS net.archive_mutated_segments_are_refused_or_canonical_million (29818.6 ms)
+    tl_tests: 3 selected, 3 passed, 0 failed
+
+    # per-tick record bound fully reverted:
+    PASS net.archive_mutated_segments_are_refused_or_canonical (85.8 ms)
+    PASS net.archive_structurally_mutated_segments_are_refused_or_canonical (96.7 ms)
+    PASS net.archive_mutated_segments_are_refused_or_canonical_million (29645.6 ms)
+    tl_tests: 3 selected, 3 passed, 0 failed
+
+*The qualifier, and it matters — this partly DISPROVES the hypothesis it was sent to test.* The
+brief asked whether the new bounds got "a mutation-fuzz row with a re-encode comparison, or only
+hand-forged fixtures", treating the hand-forged row as the weaker instrument. For these three
+rules it is not: the fuzz property is "refused OR re-encodes identically", and a rule that only
+ever **adds refusals** cannot create a second spelling — it moves cases from the accepted branch
+to the refused branch, and both branches pass. A re-encode fuzz is structurally incapable of
+grading a pure-refusal rule, so hand-forged rows are the correct instrument here and
+`LESSONS.md`'s "write the fuzz for every format you hash" is not violated by their absence.
+What the result does establish is that the hand-forged rows are load-bearing with no net beneath
+them — which is why D1's non-discriminating row matters more than it otherwise would, and why I
+verified all three new rows individually (below).
+
+A second, narrower gap is real: the fuzz corpus caps log records at four per segment
+(`LogRecord lr[4]`, `lr_count = (seed >> 40) % 5u`, `test_archive.test.cpp:447-448`) and assigns
+`origin_slot = i % MAX_PEERS`, i.e. a distinct origin per record. The per-tick bound is 8, so
+**no mutation of any byte can make that corpus reach it**. This is `LESSONS.md`'s "a fuzz corpus
+can be overwhelmingly one shape and still look broad", already recorded against this same file.
+
+**D5 — `w2-max-arenas` grew an unconditional scratch allocation 64x in a consumer its audit did
+not name. VERIFIED not live (severity: low).** `src/core/save.cpp:209-210` is
+`enum : u32 { MAX_PENDING = MAX_ARENAS };` followed by an unconditional
+`arena_push(scratch, MAX_PENDING * sizeof(Pending), ...)` on every `save_read`. `Pending` is
+6 members (`NameHash`, `SaveEncoderKind`, three pointers, `u32`), so the push went from ~3 KB to
+~192 KB. 1ddae4b's message audits `Snapshot`, `ArenaGuard`, `SnapshotRing` and `ArenaRegistry`
+and does not name this one. Not live: every caller in `tests/core/save/save.test.cpp` initialises
+its scratch at 1 MB or 16 MB (`grep -n "vmem_arena_init(&scratch" tests/core/save/save.test.cpp`),
+and the full suite is green. Worth recording because the sizing is also needless — `hdr.arena_count`
+is already bounded against `MAX_ARENAS` at `save.cpp:189`, so the array could be sized from the
+count actually declared.
+
+**D6 — a hand-copied constant in the archive test is now a silent duplicate of a real one.
+VERIFIED (severity: low).** `tests/net/test_archive.test.cpp:19` declares
+`AR_SEG_TICKS = 300u, // CHECKPOINT_HOT_TICKS (docs/CANON.md)`. Before 99c9248 that was a
+transcription with no C++ home to cite; 99c9248 created the home (`net/wire.h:80`) and left the
+copy in place. The fixture now sits exactly *at* the new format cap, so if `CHECKPOINT_HOT_TICKS`
+ever moves down, `AR_SEG_TICKS` silently becomes an over-cap value and the fixtures built from it
+start being refused for a reason no row names. One fact, one home: the test should cite the
+constant.
+
+### What I checked and found CLEAN (this is the seam, not padding)
+
+- **Hypothesis 4 — `TL_ASSERT` vs `TL_CHECK`: disproved.** Every one of 99c9248's new encoder
+  bounds is `TL_CHECK` (`archive.cpp:273`, `:292`, `:302`), which `foundation/tl_assert.h:44`
+  defines unconditionally in all tiers; the decoder's three are ordinary runtime
+  `return ERR_NET_MALFORMED`. `grep -n "TL_ASSERT" src/net/archive.cpp` shows the file's
+  remaining `TL_ASSERT`s are all pre-existing null/API-contract checks, none of them a new bound.
+  Nothing this commit added vanishes on netcode/ship.
+- **Stack safety of the eight counters against an untrusted `origin_slot`: clean, both sides.**
+  The new `enc_last_seq[MAX_PEERS]` / `dec_last_seq[MAX_PEERS]` arrays are indexed by a wire byte.
+  The encoder validates `records[i].origin_slot < MAX_PEERS` at `archive.cpp:283` before the index
+  at `:291`; the decoder refuses `rec->origin_slot >= MAX_PEERS` at `:662` before the index at
+  `:692`. A hostile `origin_slot` of 255 cannot reach either array. This was the highest-severity
+  thing I went looking for and it is not there.
+- **Encoder and decoder rule sets are exactly symmetric for all three new rules** — checked
+  clause by clause, and demonstrated: an artificial one-sided revert made the fuzz's re-encode
+  step abort on the *encoder's* `TL_CHECK` (`archive.cpp:292`) rather than fail a test, which is
+  the designed behaviour and confirms the two sides are what the fuzz round-trips between.
+- **All three rows of the new `archive_ruled_bounds_are_enforced` discriminate**, verified
+  individually with the build checked before each result:
+  - per-tick bound reverted -> `test_archive.test.cpp:1072: FAIL ... == (ERR_NET_MALFORMED)`
+  - per-origin seq reverted -> `test_archive.test.cpp:1096: FAIL ... == (ERR_NET_MALFORMED)`
+  - `tick_count` cap reverted -> `test_archive.test.cpp:1107: FAIL ... == (ERR_NET_MALFORMED)`
+  Row (c) is well built in a way worth naming: `tick_count = 301` against a 4-tick capacity would
+  return `ERR_NET_CAPACITY` without the cap, and the row asserts `ERR_NET_MALFORMED`, so the two
+  possible objectors are told apart by the *code*, not merely by the refusal.
+- **`CHECKPOINT_HOT_TICKS` has exactly one C++ home.**
+  `grep -rn "CHECKPOINT_HOT_TICKS" src/ tests/ tools/` shows one declaration (`net/wire.h:80`)
+  and uses. This is the `MAX_PEERS`-in-two-headers collision class from `LESSONS.md` and
+  99c9248 did **not** reintroduce it. Its value agrees with `CANON.md`'s row (300).
+- **Ordering premise of the run counter holds.** The per-tick run counter is only correct if
+  same-tick records are contiguous. The encoder `TL_CHECK`s the full
+  `(effective_tick, origin_slot, seq)` ordering at `archive.cpp:260-267`, before the counting
+  loop; the decoder enforces the same adjacency at `:678-684`. The counter's premise is
+  enforced, not assumed.
+- **Decoder check ordering is right.** `tick_count > CHECKPOINT_HOT_TICKS` is tested at
+  `archive.cpp:392`, ahead of both capacity checks and the payload CRC, so nothing sized by an
+  untrusted `tick_count` is touched first — which is what the ruling bought.
+- **Baseline suite, `out/debug-linux` (`-O0`, `-DTL_STRICT_TOOLCHAIN=OFF`):**
+  `tl_tests --tag '!slow'` reports `670 selected, 667 passed, 0 failed, 0 timed out, 3 skipped,
+  0 lost`. Re-run after every revert experiment was restored: identical. The tree is
+  `git status --short`-clean; no experiment leaked.
+- **`w2-max-arenas`'s own audited list re-derived, not taken on trust.** `Snapshot.used[]`,
+  `ArenaGuard.used_at_start[]` (both `u64[MAX_ARENAS]` = 32 KB) and `ArenaRegistry`
+  (`ArenaEntry e[4096]`, 24 B each = ~96 KB) are as the commit message states.
+
+### What I could NOT check, and why
+
+- **The other three CI legs.** Everything above is `linux-x86-64`, `debug` tier, in this
+  container. D2's numbers are a *model* of Windows (`ulimit -s 1024` reproducing a 1 MB stack),
+  not a Windows run; the frame sizes are real but clang-cl's `-O0` frame layout may differ.
+  Falsifier: a `build-test (windows-*, debug)` leg.
+- **The sanitizer leg.** `cmake --preset sanitize-linux` cannot link in this container (the ASan
+  runtime is absent — `LESSONS.md` records two prior sessions hitting this). No ASan/UBSan claim
+  is made here.
+- **Whether the per-origin `seq` ascent is true of the real sequencer.** The ruling asserts it as
+  a restatement of protocol behaviour ("the frontier only grows"), and Phase 2's sequencer is not
+  built, so no test in the tree can exercise the claim end to end — the archive rules are
+  currently graded only against hand-built record arrays. This is not a defect in either commit,
+  which implement the ruling as ruled; it is a note that the ruling's premise is unfalsified
+  rather than verified, and the place it will first be testable is the Phase 2 coordinator.
+- **`registry_seal`'s `NameHash ids[MAX_ARENAS]` (`arena_registry.cpp:63`)** is a 32 KB stack
+  local after the raise (512 B before). It does not appear in the `-fstack-usage` table above
+  because that table is the test TU. I did not measure `src/foundation/arena_registry.cpp`'s own
+  frames; it is a caller of nothing deep and 32 KB is well inside the D2 headroom, so I judge it
+  not to change D2's threshold — stated as a judgement, not a measurement.
+
+### Area A addendum — the checks that ran after the interim push
+
+**D7 — `tests/net/test_archive.test.cpp:772-774`: a comment that now describes deleted code, in
+the row that guards the rule 99c9248 replaced. VERIFIED (severity: low).** Row (b) of
+`archive_regression_log_array_is_validated` forges a repeated R6 id at two different effective
+ticks, and its comment ends "only a scan over the whole array can [see it], **which is the point
+of this row**". 99c9248 deleted that whole-array scan and replaced it with the eight seq
+counters, so the sentence names a mechanism the file no longer contains. `CLAUDE.md` rule 8
+("code that contradicts a doc is a bug in one of them; fix the right one in the same commit")
+applies to a contract comment as much as to a doc, and this is the same species of stale claim
+whose deletion caused D1 — the difference is only that here the comment survived and the code
+moved, rather than the reverse.
+
+*The row itself is fine, and that is measured, not assumed.* Reverting the per-origin seq rule on
+both sides and running it:
+
+    [R6 seq-ascent (both sides) vs the repeated-R6-id row] build OK.
+    tests/net/test_archive.test.cpp:778: FAIL [archive_regression_log_array_is_validated]
+        (ar_try_decode(seg, n, ticks, &arena)) == (ERR_NET_MALFORMED)
+    tl_tests: 1 selected, 0 passed, 1 failed
+
+So the rule swap did not retire this row — it now pins the replacement rule, correctly. Only the
+comment needs the edit. This is the answer to the brief's hypothesis 3 for the one pre-existing
+hand-spliced row that the seq rule change could plausibly have taken over: **the corpus survived
+the format change here**, which is the opposite of what happened in D1.
+
+**D8 — every one of 99c9248's three ENCODER bounds is untested. VERIFIED (severity: low, and
+pre-existing in kind).** The new rules are enforced on both sides, but only the decoder halves
+are graded: `grep -rn "TL_TEST_EXPECT_FATAL" tests/net/` returns **no matches**, so no encoder
+`TL_CHECK` contract in `src/net/archive.cpp` — new or old — has a fatal-expected row. The
+mechanism exists and is used elsewhere in the tree (`tests/foundation/registry.test.cpp` has two).
+The consequence is bounded rather than alarming, because the encoder's contract is the *caller's*
+obligation and the decoder is the side that faces an untrusted peer; but it means the claim
+"enforced by encoder AND decoder", which is the ruled wording for two of the three rules, is
+half-evidenced. 99c9248 extended a file-wide gap rather than creating one.
+
+### Additional checks that came back CLEAN
+
+- **Hypothesis 6 — the world hash's walk is UNCHANGED by the cap raise.** `registry_hash_all`
+  (`src/foundation/arena_registry.cpp:81-91`) folds `for (i = 0; i < r->count; ++i)` and returns
+  `tl_hash64(out_per_arena, (usize)r->count * 8u, TL_HASH_SEED)` — `r->count`, never
+  `MAX_ARENAS`. `registry_seal`'s fingerprint fold is `count * 8u` likewise. So for any given
+  registry the world hash **value** is bit-identical before and after 1ddae4b, and its cost is
+  O(count). `CANON.md`'s "Registration order = lockstep contract" is untouched. Corroborated by
+  the tree: 1ddae4b modified no determinism row and `registry_two_worlds_hash_identically` /
+  `registry_restore_reproduces_hash_trace` pass unchanged.
+- **What DID grow per tick, measured rather than asserted.** Two tail-zeroing loops now run
+  `MAX_ARENAS - count` iterations instead of 64: `registry_snapshot`
+  (`arena_registry.cpp:126`, all tiers) and `guard_tick_begin` (`arena_guard.cpp:18`, `#if TL_DEV`
+  only). Benchmarked at `count = 30` (`clang++ -std=c++20`, this container), with the stores kept
+  observable so they are not eliminated:
+
+  | | 64 (before) | 4096 (after) | two loops/tick vs a 16,666,667 ns tick |
+  |---|---|---|---|
+  | `-O0` (debug tier) | 65.2 ns | 9,326.4 ns | 18,522 ns — 0.111% |
+  | `-O1` (dev/netcode/ship) | 4.2 ns | 173.5 ns | 339 ns — **0.002%** |
+
+  Trivial on the tiers that ship, and now a number rather than E-2's "both trivial", which was
+  a judgement about *memory* and did not discuss per-tick cost at all. Scope: this is a
+  microbenchmark of the loop as spelled, on this container's CPU, not a measurement of
+  `registry_snapshot` in situ.
+- **No production `SnapshotRing` exists to have been mis-sized.** 1ddae4b's test needed a bigger
+  ring (4096 arenas x 64 B = 256 KB of blob against the old 64 KB slot cap). The obvious follow-on
+  risk is a production caller still sizing a ring for 64 arenas — there is none:
+  `grep -rn "ring_init\|SnapshotRing" src/` finds only the declarations plus `core/loop.cpp`'s
+  `ring_init` on the unrelated `RingBuffer<T>` template. `SnapshotRing` is `Snapshot slot[6]`, so
+  its ~197 KB is as 1ddae4b states.
+- **`registry_seal`'s `NameHash ids[MAX_ARENAS]`** (`arena_registry.cpp:63`) went from 512 B to
+  32 KB of stack. Named here because it is a real 64x growth that 1ddae4b's message does not
+  list; it does not change D2's threshold (D2's ladder exercises this path and the measured
+  break stays at 720-736 KB).
+
+### Summary of the verdict
+
+**fix first.** In order:
+
+1. **D1** — re-derive the `archive_log_record_count_is_bounded_by_the_format` forgery so exactly
+   one rule can object, and prove it by reverting the aggregate bound and watching it go red.
+   This is the only finding where a real rule guarding the chain-hashed format currently has no
+   test behind it.
+2. **D2** — take `ArenaRegistry` off the stack in `tests/foundation/registry.test.cpp` (the
+   arena-backing 1ddae4b already applied to the full-house actors), and re-run the `ulimit -s`
+   ladder to record the new threshold.
+3. **D3** — a ruling request, unnumbered: bind `MAX_ARENAS` (and the other CANON constants with a
+   C++ home) to `CANON.md` by something that actually fails — a `static_assert`, or extending
+   `docaudit`'s constant pass over headers. Today no gate compares the header to the sheet.
+4. **D4/D5/D6/D7/D8** — the low-severity items above; D6 and D7 are one-line edits.
+
+Nothing here is a *redesign*: the three ruled format rules are correctly specified, correctly
+implemented on both sides, symmetric, bounds-safe against an untrusted `origin_slot`, and
+`TL_CHECK`-tiered so they survive netcode/ship. The E-2 raise is likewise correct in the
+program — its world hash is unchanged and its per-tick cost is 0.002% of a tick. Both commits
+were validly inside §2's valve. What the valve deferred, and what this sweep found, is that the
+*evidence* behind two of these changes is weaker than their commit messages claim.
+
 > **SWEEP RECEIPTS AND RULING-ID ALLOCATION (steward, 2026-08-27 ~23:45 local).** Areas A and B
 > have reported *fix first*; C is still running. **Their full findings live on `w3-sweep-a` /
 > `w3-sweep-b` and merge in with those branches — this entry ROUTES and ALLOCATES, it does not
