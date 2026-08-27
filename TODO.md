@@ -3354,14 +3354,43 @@ instruction). Every item validated: `dev-linux`/`netcode-linux` both green, `tl_
 clean, `selftest.py` green except the same pre-existing container-only windows-msvc layout-dump
 failures already noted in the prior entry (not a regression).
 
-- **D1, HELD FOR RULING** - whether `pairs`/`next`/`table.foreach`/`table.foreachi` stay in the
-  data VM at all (`sandbox.cpp`'s `DATA_REMOVE`). The review measured that a data script CAN reach
-  raw Luau iteration order today (a keyed staging table flattened via `pairs()` into a row array
-  before the script returns it), which two peers can compile to different bytes/hashes from
-  identical row content - RR-21's binding condition on `script_table_next` closed the C++ side
-  correctly but left this Luau-side door open. Not touched: no `DATA_REMOVE` edit, no canonical
-  sort added, per the review's explicit instruction ("do not remove them... until it lands"). This
-  decides the data-authoring contract's shape and is Rafael's call, relayed by the steward.
+- **D1, RULED 2026-08-27** (Rafael, relayed by the steward, amending RR-21 rather than a new RR,
+  since it closes the condition RR-21 already attached): **`pairs`/`next`/`table.foreach`/
+  `table.foreachi` are removed from the data VM** (`sandbox.cpp`'s `DATA_REMOVE`) - the exact
+  precedent as the W2 luau-vm lane's D4 `math.random` removal on this same VM for this same
+  reason, through a different door: Luau places a table by KEY HASH, a function of insertion
+  history and the implementation, not of the key set's content, so a data script that flattens a
+  keyed staging table via `pairs()` before returning it is peer-divergent the same way a
+  `math.random()` draw is. Removing rather than documenting makes the breach UNREPRESENTABLE
+  instead of merely untested. `ipairs` verified still present and working (deterministic integer
+  order - the authors' replacement).
+  - Code: `DATA_REMOVE` in `sandbox.cpp` gained the four names, with the ruling's reasoning inline.
+  - Grepped the tree (`src/script`, `tests/`, no `.lua` fixture files exist yet anywhere in the
+    repo) for `pairs(`/`next(` reachable by the data VM before pushing, per the ruling's caution:
+    found one, `tests/script/sandbox.test.cpp`'s `sandbox_data_vm_removals`, which asserted
+    `pairs ~= nil` in the data VM - fixed to assert the four names are `nil`, `ipairs` still works
+    (a 3-element `ipairs` sum), and that calling `pairs` fails CLEANLY (`script_ok` false) without
+    taking the VM down (a follow-up call still succeeds).
+  - Verified BOTH required mutations, per the ruling's "make both mutations yourself, watch both
+    fail" instruction:
+    (a) D2's own pin (see D2 above) - already verified when D2 was written, unaffected by this
+    change (it exercises `data_compile`'s C++ walk, not the VM's library set); re-confirmed still
+    green after this change (`tl_tests --tag data --isolate`: 11/11 pass).
+    (b) the removal itself - reverted `DATA_REMOVE`'s four new names locally (kept
+    `math.random`/`math.randomseed`), rebuilt `dev-linux`, ran
+    `./out/dev-linux/bin/tl_tests --tag script --isolate`: **`sandbox_data_vm_removals` FAILED**,
+    both new assertion blocks (`tests/script/sandbox.test.cpp:162` - `pairs == nil` etc - and
+    `:166` - `!(script_ok(..., "for _ in pairs(...) do end"))`) - `32 passed, 1 failed`. Restored
+    `DATA_REMOVE`, rebuilt, reran: `33 passed, 0 failed`.
+  - Docs, at their homes (one fact, one home): `LUAU-LAYER.md`'s status line, §1's data-VM table
+    row, §1's RR-21 paragraph (a new paragraph explains the Luau-side channel D1 closes, distinct
+    from the C++-side channel D2's paragraph already covered), and §10.2 step 4's "Data VM
+    removes" sentence (which had ALSO drifted from §1 even before this ruling - it never carried
+    `math.random`/`math.randomseed` either - fixed to carry the full, current list, same drift
+    class `CANON.md`'s F-2 finding named). `CANON.md` checked, not assumed: its "Luau sim VM - the
+    exact removal list" section is titled and scoped to the SIM VM only (verified name-for-name
+    against `SIM_REMOVE` - no drift) and makes no claim about the data VM's list at all, so there
+    was nothing there to fix.
 - **D2 - the RR-21 pin didn't discriminate.** Its own two proofs: (a) the original test's two
   source strings walked in IDENTICAL `script_table_next` order (Luau places a small string-keyed
   table by key HASH, not insertion order, so varying literal field order in source text can never
