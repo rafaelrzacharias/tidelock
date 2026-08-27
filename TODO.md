@@ -6132,6 +6132,434 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > entries; and `TOOLING.md`'s `shell v0` / build-order item 7 (correctly deferred with blockers
 > named — reopening them re-litigates RR-40/RR-43).
 
+---
+
+## W3 sweep area B — the loop+input × assets+data seam (fresh-context adversarial review, 2026-08-27, `w3-sweep-b`)
+
+> **PARTIAL — pushed in progress, per the area brief's "push early, push again".** This section is
+> appended to as the review continues; the verdict line below is the current standing verdict and
+> is revised in place if a later finding changes it.
+
+**VERDICT: fix first.** Two verified defects, both invisible to either lane reviewed alone, both
+found by running the two halves against each other. Neither is a coding slip: each is a contract
+one lane wrote that the other lane's merged code falsifies. Nothing here re-reviews either lane's
+own scope.
+
+**Environment for every claim below.** `dev-linux` preset, `-DTL_STRICT_TOOLCHAIN=OFF`, clang
+18.1.3, `origin/main` @ `1280d1a`. Baseline before any probe: `tl_tests --isolate --tag '!slow'`
+reported its own selection line — `670 selected, 667 passed, 0 failed, 0 timed out, 3 skipped,
+0 lost (696 in the list)`. `python3 tools/audit/includes.py --root .` → `191 files checked,
+0 violations`. `cmake --build out/dev-linux --target tl_audit_symbols` → `2 audited layers +
+9 data-only libs, 1 wrap libs, 0 violations`. Every probe below was built and run; a build failure
+was checked for before any test result was read (`LESSONS.md`: a revert experiment that fails to
+compile leaves the old binary in place).
+
+---
+
+### B-1 (VERIFIED, ship-blocking) A world restored from a save does not reproduce the world hash the save was taken at
+
+`src/core/save.cpp:296-300` (the `SAVE_ENC_ECS_COLUMN` apply loop) restores logical row CONTENT.
+`src/foundation/arena_registry.cpp:86-87` hashes each registered arena over `[base, used)` — the
+whole committed extent, not `[0, count)` (`LESSONS.md` already carries this exact class for
+`Array`). A column's `used` is high-water: it is a function of that column's add/remove HISTORY,
+not of its live row set. So two peers holding identical logical state hash differently whenever
+one of them got there through a save.
+
+**Why neither lane could see it.** `assets+data`'s own criterion (`ASSETS-AND-DATA.md` §8.5,
+"round-trip equality per arena") is discharged by `tests/core/save/save.test.cpp:178-186`, which
+compares FIELD VALUES. `registry_hash_all` as the lockstep trace value arrived with `loop+input`'s
+recorder (`src/core/recorder.cpp`, `recorder_tick`). The two halves first coexist in the merged
+tree, which is exactly this area's remit.
+
+**Why it matters, in the docs' own words.** `ASSETS-AND-DATA.md` §5, last paragraph:
+"Checkpoints for lockstep rejoin (`NETCODE.md` §11) use the *snapshot* path within a build and the
+*save* path across builds." That puts the save path on a lockstep path. `src/core/save.h:19-20`
+says the opposite — "not part of the deterministic sim path (a save is disk io)". **One of those
+two is wrong; that is a ruling request, not a code fix, and I have not allocated it a number.**
+
+**Failure scenario (concrete, no hypotheticals).** Peer A runs live: spawns e1/e2/e3, adds `WPos`
+to all three, then removes e2's (`column_remove` is swap-remove, so A's dense arena `used` stays at
+3 rows while `count` falls to 2). A writes a save. Peer B rejoins across a build boundary by
+loading that save into a world with the same three entities and the component never added, so B's
+dense arena `used` is 2 rows. Both worlds now hold `{e1→{1,2}, e3→{5,6}}` and nothing else. At the
+next `CHECKSUM_INTERVAL_TICKS` (`CANON.md`, 30) they exchange world hashes and desync.
+
+**Measured** (probe source at the end of this section):
+
+```
+SEAM2: A=944c5516a7f3d8c2  B(loaded)=ce097e3a42f6cd00  count=8/8
+SEAM2: arena[5] id=49a99fd68b26e505 flags=7  A=43eb3005198975d3 used=24 | B=01c27c647654f09a used=16
+SEAM2: arena[6] id=e0068c7359eeff79 flags=7  A=c501f1c4c4fea951 used=12 | B=e92d9418e415b740 used=8
+```
+
+`flags=7` is `ARENA_HASHED|ARENA_SNAPSHOT|ARENA_GROWS_AT_BARRIER`; arenas 5 and 6 are `WPos`'s
+dense and entity columns. 24 B vs 16 B is three `WPos` rows vs two; 12 B vs 8 B is three `Entity`
+slots vs two. Identical live content, different hashed extent, different hash.
+
+**Scope of the claim, stated inside it.** This is a hash divergence between a live world and a
+save-restored world on ONE `dev-linux` build. It is not a cross-target claim (nothing here is
+target-dependent — the mechanism is `used`, not layout — but I measured one target). I did NOT
+verify what `NETCODE.md` §11's checkpoint path would actually do with it, because no netcode
+consumer of `save_read` exists in the tree.
+
+**Bounding it honestly — the same-world path is CLEAN.** The path `save.h:216-219` actually
+documents ("an in-session save/reload: add the component, save, remove it, reload") DOES preserve
+the hash, because `used` never shrinks and both sides see the same high-water:
+
+```
+SEAM: h_before=a8c1e26ec1440ea5 h_after=a8c1e26ec1440ea5      (PASS)
+```
+
+So the shipped, documented v1 path is sound. What is broken is the path `ASSETS-AND-DATA.md` §5
+promises and `save.h` does not implement or refuse.
+
+**Fix directions (not applied — cone discipline).** (a) rule that a save is not a lockstep artifact
+and delete §5's rejoin clause; (b) have the load path re-establish the extent (reset the column
+arenas to exactly `row_count` rows before re-adding) and pin it with a hash-equality test; (c) hash
+`[base, base+count*stride)` for column arenas. (b) and (c) are both real designs with real costs;
+picking between them is a ruling.
+
+---
+
+### B-2 (VERIFIED, ship-blocking) `SAVE_ENC_REFLECTED` silently saves exactly one row and returns `ERR_OK`
+
+`src/core/save.cpp:101` writes `encoder_write_rows(&w, ad->info, e->arena->base, 1u)` — the row
+count is the literal `1u`. `src/core/save.cpp:295` applies with `memcpy(e->arena->base, p->rows,
+p->ad->info->size)` — one row's bytes. `SaveArenaDesc::max_rows` (`save.h:161`) is documented as
+"required for REFLECTED and ECS_COLUMN" with no statement that REFLECTED is singleton-only, and
+nothing checks it. A caller who describes a 3-row reflected arena gets `ERR_OK` from both calls and
+loses rows 1 and 2 with no error anywhere.
+
+This is the failure mode `ASSETS-AND-DATA.md` §5 names in its own bullet — "**Fail-loud**
+`LoadError` codes; no silent partial loads" — and `CLAUDE.md`'s "no silent fallbacks", and the
+class `LESSONS.md` records four times over ("a selection that matches nothing must be an error, not
+a clean run").
+
+**Measured** (probe 3 below): a `WPos` column carrying `{11,12} {21,22} {31,32}`, described as
+`kind = SAVE_ENC_REFLECTED, max_rows = 3`, zeroed, then reloaded:
+
+```
+SEAM3: save_write err=0x0000 (ERR_OK)
+SEAM3: save_read  err=0x0000 (ERR_OK)
+SEAM3: row 0 restored = {11, 12}
+SEAM3: row 1 restored = {0, 0}
+SEAM3: row 2 restored = {0, 0}
+```
+
+**Scope of the claim.** `save.h`'s own scope note says every registered arena in the tree today is
+"either an ECS column or a plain reflected singleton", and I confirmed that by reading
+`src/core/world.cpp:41-115` — so this is LATENT, with no live caller. It is ranked ship-blocking
+anyway because the guard costs one line (`TL_CHECK(ad->max_rows == 1u)` in the REFLECTED arm, or
+pass `ad->max_rows` to `encoder_write_rows` and loop the apply) and because the first consumer will
+be `alloy-substrate`'s pools — the exact case `save.h` says REFLECTED is for.
+
+**Cone note.** This defect lives inside `assets+data` alone, not in the seam. I found it while
+probing B-1 and I am FILING it, not fixing it, per the area brief.
+
+---
+
+### Reproducers
+
+Both probes are standalone `.test.cpp` files; drop either into `tests/core/save/` (the test list is
+`GLOB_RECURSE`d, `tests/CMakeLists.txt:3`, so no CMake edit is needed), build `tl_tests`, run with
+`--filter`. Both were removed from the tree before this commit — they FAIL by design and would red
+CI.
+
+B-1's probe, in full (the `registry_seal` call is required: `registry_hash_all` `TL_CHECK`s
+`sealed != 0`):
+
+```cpp
+TL_TEST(zz_seam_divergent_history_same_state, "core,save,seam") {
+    const PlatformApi* platform = platform_test_init();
+    VMemArena scratch;
+    vmem_arena_init(&scratch, "zz_s2"_id, 16u*1024u*1024u, 0u, &platform->vmem);
+    // World A: 3 spawns, 3 adds, remove the middle (swap-remove leaves used at 3 rows)
+    WorldFixture* a = wt_fixture(2); world_fixture_init(a, 1u);
+    world_register_component(&a->w, &WPos_info); world_build_schedule(&a->w);
+    Entity a1=world_spawn(&a->w), a2=world_spawn(&a->w), a3=world_spawn(&a->w);
+    world_flush(&a->w);
+    world_add<WPos>(&a->w,a1,WPos{1,2}); world_add<WPos>(&a->w,a2,WPos{9,9});
+    world_add<WPos>(&a->w,a3,WPos{5,6}); world_flush(&a->w);
+    u32 ca = world_component_id<WPos>(&a->w);
+    world_remove(&a->w, a2, (ComponentId)ca); world_flush(&a->w);
+    registry_seal(&a->reg);
+    SaveArenaDesc ad{}; ad.arena_id = a->w.comps[ca].dense_arena.id;
+    ad.kind = SAVE_ENC_ECS_COLUMN; ad.info = &WPos_info; ad.max_rows = 16u; ad.comp = (ComponentId)ca;
+    SaveDesc d{}; d.registry=&a->reg; d.world=&a->w; d.seed=1u; d.tick=0u;
+    d.arena_descs = Span<const SaveArenaDesc>{ &ad, 1u };
+    save_write(&d, platform, sv("tl_seam2.bin"), &scratch);
+    u64 pa[MAX_ARENAS]; const u64 h_a = registry_hash_all(&a->reg, pa);
+    // World B: same spawn history, component never added; the save supplies the rows
+    WorldFixture* b = wt_fixture(3); world_fixture_init(b, 1u);
+    world_register_component(&b->w, &WPos_info); world_build_schedule(&b->w);
+    world_spawn(&b->w); world_spawn(&b->w); world_spawn(&b->w); world_flush(&b->w);
+    registry_seal(&b->reg);
+    u32 cb = world_component_id<WPos>(&b->w);
+    SaveArenaDesc adb = ad; adb.arena_id = b->w.comps[cb].dense_arena.id; adb.comp = (ComponentId)cb;
+    SaveDesc db{}; db.registry=&b->reg; db.world=&b->w; db.seed=1u; db.tick=0u;
+    db.arena_descs = Span<const SaveArenaDesc>{ &adb, 1u };
+    u64 os_=0u, ot_=0u;
+    save_read(&db, platform, sv("tl_seam2.bin"), &scratch, &os_, &ot_);
+    world_flush(&b->w);
+    u64 pb[MAX_ARENAS]; const u64 h_b = registry_hash_all(&b->reg, pb);
+    TL_EXPECT_EQ(h_a, h_b);        // FAILS
+}
+```
+
+B-2's probe is the same fixture with three `WPos` rows, one `SaveArenaDesc` of
+`kind = SAVE_ENC_REFLECTED, info = &WPos_info, max_rows = 3u`, the column zeroed between write and
+read, and `TL_EXPECT_TRUE(r_err != ERR_OK || (col.data[2].x == 31 && col.data[2].y == 32))` —
+which fails with both calls returning `ERR_OK`.
+
+---
+
+### B-1(b) (VERIFIED, folded into B-1) `save_read` leaves the hashed `world.singletons` arena untouched, and no doc says a caller must fix it
+
+`src/core/save.cpp:304-305` writes the decoded seed and tick into `*out_seed`/`*out_tick` and
+nothing else. `src/core/world.cpp:63` registers `world.singletons` — the arena holding
+`WorldTickState{tick, seed}` — as `ARENA_HASHED | ARENA_SNAPSHOT`. So a world restored from a save
+carries the OLD tick in a HASHED arena until some caller writes the out-params back, and no such
+caller exists in the tree. There is also no `ComponentInfo` for `WorldTickState` anywhere
+(`grep -rn "WorldTickState" src tests`), so `world.singletons` cannot even be listed as a
+`SAVE_ENC_REFLECTED` entry in `SaveDesc::arena_descs` — the save path has no route to it at all.
+
+`save.h`'s out-param contract is defensible on its own. What is missing is the sentence that makes
+it safe: **restoring a save means writing `out_tick`/`out_seed` into `w->state` before the next
+tick, or the singleton arena hashes stale bytes.** Nothing in `save.h`, `ASSETS-AND-DATA.md` §5/
+§8.4, or `FRAME-LOOP.md` §8.2 step 10 (which names `registry_restore` from a checkpoint, not
+`save_read`) says it. The failure mode is a silent hash divergence, not an error.
+
+**Measured** (probe 4, same harness as B-1): a world at tick 456 saved, its tick reset to 0 to
+stand in for a fresh process, then loaded:
+
+```
+SEAM4: out_tick=456  w->state->tick after save_read = 0
+SEAM4: singletons arena[0] id=d66f0857601be00d  at_save=984d072c8d0d8809  after_load=8357cd4d56e50ab6
+SEAM4: world hash at_save=a921aeb840d2fddf after_load=64b0eefec294a714
+```
+
+---
+
+### B-3 (VERIFIED, medium) `src/core/CMakeLists.txt`'s two idioms disagree, and the explicit half silently drops a new file
+
+The one file both lanes edited carries a `file(GLOB ... CONFIGURE_DEPENDS producers/*.cpp)` for
+`loop+input`'s subdirectory and a hand-written two-entry `target_sources` list for `assets+data`'s
+(`src/core/CMakeLists.txt:10-11` vs `:19-22`). `TODO.md` RR-32 already records that the two idioms
+coexist; what it does not record is that they are not equivalent.
+
+**Measured.** I dropped a one-line `.cpp` into each subdirectory, each referencing an undefined
+symbol so that being compiled would be unmissable, and built `tl_core`:
+
+```
+[1/2] Building CXX object src/core/CMakeFiles/tl_core.dir/producers/zz_probe.cpp.o
+[2/2] Linking CXX static library lib/libtl_core.a
+$ grep -o "core/[a-z]*/zz_probe.cpp" out/dev-linux/compile_commands.json | sort -u
+core/producers/zz_probe.cpp
+```
+
+`producers/zz_probe.cpp` was picked up and compiled. `loaders/zz_probe.cpp` was not compiled, not
+mentioned, and did not appear in `compile_commands.json` — a clean, green build of a file that is
+not in the build. Both probe files were removed afterwards; `git status` is clean.
+
+**Honest severity.** I am ranking this medium, not ship-blocking, and I want the reason on the
+record because it is the half a reviewer usually skips: for anything a caller actually
+*references*, the miss is LOUD at link, and `CPP-SUBSET.md` §1's ban on mutable statics and
+dynamic initialisers closes the silent-self-registration path that would make it deadly. The
+genuinely silent case is a new loader that nothing yet calls — which is precisely the shape
+`ASSETS-AND-DATA.md` §8.5 already schedules (`asset_load_font`'s real body, currently a `TL_FATAL`
+stub, and whatever audio/atlas loader follows). The tree today is CORRECT: all five files under the
+two subdirectories are in `compile_commands.json` (`loaders/{font,image}.cpp`,
+`producers/{live,replay,script}.cpp`).
+
+**Fix direction (not applied).** One idiom, and give it the zero-check `LESSONS.md` demands four
+occurrences over: glob both subdirectories with `CONFIGURE_DEPENDS` and `if(NOT TL_CORE_LOADERS)
+message(FATAL_ERROR ...)` beside each, so a selection that matches nothing is an error rather than
+a clean run.
+
+---
+
+### B-4 (medium, doc) `save.test.cpp`'s "column order is not part of the contract" is false in the merged tree
+
+`tests/core/save/save.test.cpp:185-186` accepts either dense order after a load:
+
+```cpp
+TL_EXPECT_TRUE((p1->x == 1 && p1->y == 2 && p2->x == 3 && p2->y == 4) ||
+               (p1->x == 3 && p1->y == 4 && p2->x == 1 && p2->y == 2));   // column order is not part of the contract
+```
+
+That comment was true when `assets+data` was reviewed against `main`. It is false now: the column's
+dense arena is `ARENA_HASHED` (`src/core/world.cpp:108-110`) and `loop+input`'s
+`recorder_tick` folds exactly those arenas into the per-tick `world_hash` that the replay-trace
+determinism test compares. Dense order IS byte order IS the hash.
+
+I checked whether the CODE is actually order-nondeterministic and it is not: `save.cpp:296-300`
+re-adds in stored order, stored order is `encoder_write_column`'s dense walk, and command
+application is chunk-ordered. So this is not a live bug — it is a **contract that permits the bug**.
+A future refactor of the apply loop (batching by chunk, parallel re-add, sorting by entity id) would
+be legal by the comment and would silently desync. The comment should be replaced by the assertion
+it disclaims: restored dense order equals the saved dense order, exactly.
+
+Marking this as REASONED, not verified: I did not mutate the apply loop's ordering to watch a hash
+diverge. What would falsify it: an apply loop that provably cannot reorder under any future change.
+
+---
+
+### What I CHECKED and found CLEAN (the list that makes a between-reviewers defect visible)
+
+Each row names the command or the file:line that produced it, and states its own scope.
+
+1. **Both new subdirectories' current files are in the build.**
+   `grep -o '"file": "[^"]*src/core/\(loaders\|producers\)/[a-z_]*\.cpp"' out/dev-linux/compile_commands.json | sort -u`
+   returns all five: `loaders/{font,image}.cpp`, `producers/{live,replay,script}.cpp`. B-3 is about the
+   NEXT file, not these.
+2. **The two serialized formats cannot be confused.** `RecordedInputHeader`'s magic is `TLRI` at
+   offset 4 (`recorder.h:56`), `SaveHeader`'s is `TLSV` at offset 4 (`save.h:112`); both prepend
+   `format_version` at offset 0. `save.cpp:166` checks magic on the raw bytes BEFORE the CRC window;
+   `recorder.cpp:103` checks magic before version and before the body CRC. Each refuses the other's
+   file with its own named error. No field makes one decode as the other, and neither format can
+   contain the other — there is no nesting door in either.
+3. **Both wire structs' sizes and every field offset are compiler-enforced and agree with CANON.**
+   `static_assert(sizeof(RecordedInputHeader) == 128u)` (`recorder.h:68`),
+   `static_assert(sizeof(SaveHeader) == 160)` (`save.h:121`), plus a generated per-field
+   `offsetof` assert from `TL_OFFSETS_*` (`reflect.h:172`, `:232`). `CANON.md`'s wire-size table
+   (`RecordedInput` header 128 B, `SaveHeader` 160 B) matches. Neither struct contains a bit-field
+   or a `usize` (`grep -n "usize\|: *[0-9]\+;" src/core/{recorder,save,input}.h` → empty), so
+   `CPP-SUBSET.md` §5's two layout bans are respected. **Scope: compiled on
+   `x86_64-unknown-linux-gnu` only, dev and debug tiers — the other three targets are CI's.**
+4. **Attack hypothesis 3's premise is FALSE and should not be re-spent: the Script producer does not
+   use Luau.** `src/core/producers/script.cpp` is a C++ scripted-event table
+   (`ScriptedEvent{tick, action, value, op, slot}`) walked by an integer cursor; there is no `lua`
+   token in the file. `INPUT.md` §9.4 spells it that way ("a test's scripted frames ... built by the
+   harness") and §9.4's struct sketch matches. Nothing in `loop+input` opens a VM at all, so the
+   data-VM removals cannot reach it.
+5. **The `pairs`/`next` ruling's OTHER doors are swept, and they are clean.** This is the sweep
+   `LESSONS.md` demands ("a ruling that closes a nondeterminism channel closes it for ONE door
+   unless you sweep the others"). `grep -rn "lua_next\|script_table_next" src/ | grep -v vendor`:
+   the only unordered Luau walk in `src/` is `script_table_next` itself (`vm.cpp:579`), and **it has
+   no production caller.** `data_compile.cpp` names it only in comments explaining that it walks
+   schema-ordered through `script_table_len`/`script_table_geti` instead (RR-21's binding
+   condition), and `core/luacomp.cpp` — the other C++ consumer of script-declared shapes, and the
+   one that decides COMPONENT REGISTRATION ORDER, which `CANON.md` calls the lockstep contract —
+   does not iterate a Luau table at all; it walks a C++ field array. So no `src/` path carries Luau
+   hash order into hashed state or into registration order.
+6. **`CANON.md`'s data-VM removal list matches the code exactly.** `CANON.md:123-127` vs
+   `sandbox.cpp:56-60`: the same eleven names, with the same two rulings cited. Better than a doc
+   match: `script_sandbox_open` re-verifies every removal itself with a second `name_is_absent` pass
+   (`sandbox.cpp:468-474`) rather than trusting a test — "a removal that silently did nothing is a
+   hole in the sandbox."
+7. **The module firewall holds on the merged tree.** `python3 tools/audit/includes.py --root .` →
+   `191 files checked, 0 violations`. `core/input.h`'s own includes are
+   `foundation/{tl_types,tl_assert}.h`, `core/reflect.h`, `<stddef.h>` — nothing platform-side — so
+   `net/wire.h` including it pulls no transitive edge the MODULE_DAG bars.
+   `cmake --build out/dev-linux --target tl_audit_symbols` → `2 audited layers + 9 data-only libs,
+   1 wrap libs, 0 violations`.
+8. **The `MAX_PEERS` de-duplication did not open a drift channel.** `net/wire.h`'s surviving
+   `NetInputFrame` mirror and `core/input.h`'s `InputFrame` are each independently `static_assert`ed
+   against the same `INPUT.md` §1 literals (76 B; offsets 0/64/68/72; `ActionState` 2 B). The
+   handoff's two deferred cross-asserts are belt-and-braces, not a gap: changing `MAX_ACTIONS` in
+   `input.h` breaks `input.h:75` before it can reach `net`.
+9. **The barrier order and the phase set match `CANON.md`.** `phase.h` is the seven-value
+   append-only set with its guard `static_assert`. `engine_tick_once` (`loop.cpp:41-54`) runs
+   `FIRST..LAST`, then the recorder's hash, then `world_events_swap`, then `interp_pingpong`, then
+   `state->tick += 1` — CANON's steps 2 and 3 in order (step 4, worker scratch, does not exist in
+   v0 and `loop.cpp:47-49` says so). **No system is registered twice by either lane, because neither
+   lane registers any system in `src/` at all** — that is `app/wiring.cpp`'s job and it does not
+   exist yet.
+   *Named, not filed:* `CANON.md` says the per-arena hash is taken "in `LAST` *before* the barrier"
+   and `FRAME-LOOP.md` §3 makes "apply command buffers" barrier step 1 — but `ECS.md` §4 makes every
+   phase boundary its own command barrier (`schedule.cpp:167`), so no point exists after LAST's
+   systems and before LAST's commands apply. The hash therefore sits between step 1 and step 2. This
+   is a doc ambiguity with no behavioural consequence (identical code on every peer) and it predates
+   both lanes; I am naming it rather than filing it.
+10. **The alpha fix's DIRECTION is pinned, not merely its stability.** `tests/core/loop.test.cpp:167`
+    asserts `alpha_1 == 0x1.fffffep-1f` beside the `alpha_1 == alpha_2` check at `:161`, so the
+    `0.0f`-park that satisfies the equality just as well cannot come back silently. The test is in
+    the green run.
+11. **The alpha WIRING gap is a filed deferral with a named owner, not a hole.** Nothing in `src/`
+    writes `w->render->alpha`; `engine_frame` returns it and mirrors it into `e->last_alpha`
+    (documented "not hashed"). Recorded at `TODO.md` RR-32 and stated honestly in `loop.h`'s own
+    contract block. Left alone.
+12. **`interp_pingpong`'s dense-order guard is correct and live in every tier.** `interp.cpp:37`
+    compares `prv->entities[d].bits == ent.bits` per dense index while resolving `prev_row` BY
+    ENTITY — so the function is itself immune to the divergence and fails loudly on behalf of the
+    consumer that is not (`extract.cpp:39-47` pairs by dense index). `TL_CHECK` is unconditional
+    (`tl_assert.h:44`, no `TL_DEV` guard), so the guard exists in `netcode` and `ship`, which is
+    where lockstep runs. It does not check `cur->count == prv->count`, so a `prev` column LONGER
+    than `current` walks clean here — `extract.cpp:38`'s own `TL_CHECK(prev.count == n)` covers
+    exactly that shape. Between the two, the case is closed.
+13. **Command payloads are copied, not aliased — checked because only the merged tree can break it.**
+    `save_read` resets its scratch arena (`save.cpp:306`) BEFORE the caller's required
+    `world_flush`, so a command holding a pointer into that scratch would apply freed bytes.
+    `cmd_record2` (`commands.cpp:43-44`) `memcpy`s the payload into the chunk's own buffer. No
+    dangling pointer.
+14. **`save_read` is genuinely all-or-nothing on the read side.** Decode-all-into-scratch then apply,
+    two separate loops (`save.cpp:238-302`); every error path resets scratch and returns before the
+    apply loop is entered. §5's "no silent partial loads" holds for reads. (B-2 is a WRITE-side
+    truncation, a different door.)
+15. **Arena registration is centralized and in `FRAME-LOOP.md` §8.2 step 2's stated order, and
+    neither lane added one.** `world.cpp:63-68` registers `world.singletons` then the entity
+    slotmap's four columns; component columns follow at registration (`world.cpp:104-115`) with the
+    `.pages` arena correctly `SNAPSHOT`-only, out of the hash. `assets.cpp:24` creates
+    `assets.by_name.arena` and **never registers it**, so no platform-minted `TexHandle` or asset
+    refcount can reach `registry_hash_all` — the thing I most expected to find wrong.
+    `data_compile` leaves `registry_add` to the caller (`data_tables.h:150`), which keeps §8.2 step
+    2's "…then `data_tables`" ordering reachable.
+16. **`MAX_ARENAS` overflow fails loud, not silently.** `arena_registry.cpp:32-33` `TL_FATAL`s. The
+    merged tree's engine components (`Transform`, `TransformPrev`, `Sprite`, `PeerSlots`) plus the
+    world's own five put the floor at 15 of 64; each further non-singleton component costs three.
+    Worth knowing before `alloy-substrate` registers pools; not a defect.
+17. **Both tiers I could build are green, with the same selection line.** dev and debug:
+    `670 selected, 667 passed, 0 failed, 0 timed out, 3 skipped, 0 lost (696 in the list)`.
+
+**Chronology, since it is the premise this area rests on and it is checkable rather than assumed.**
+`git log`: `26c9c5f` (assets+data) merged at 2026-08-27 12:06 UTC; `w3-loop-input` pulled that main
+in at `dd11b38`, 12:34 UTC; the lane merged at `7e0088e`, 12:41 UTC, with exactly one commit
+(`73b7437`, a `LESSONS.md` line) in between. So the combination existed on a branch for seven
+minutes and one commit before it was main. The brief's "no adversarial read by anyone" is accurate.
+
+### What I could NOT check, and why
+
+- **`tools/audit/targets.py` (the cross-target layout gate) did not complete here.** First run killed
+  at 900 s having printed nothing (`exit 124`); a second run with a 2700 s budget was still going
+  when this section was written. So every layout claim above (B-2's structs included) is
+  **one-target**. The falsifier is CI's own `pr.yml:51` step, which was green on `1280d1a`.
+- **`tier_parity.py`** needs `netcode` and `ship` builds; CI runs it at `pr.yml:161`. Not duplicated
+  locally — a local pass would have proven nothing CI has not already proven on four legs.
+- **ASan/UBSan.** The ASan runtime is absent in this container (stated in the area brief and not
+  re-tested). B-1 and B-2 are logic defects, not memory defects; neither sanitizer would have found
+  either.
+- **Windows and arm64.** No local reproduction possible. Nothing in B-1..B-4 is target-dependent
+  (the mechanisms are `used`, a literal `1u`, a CMake list and a comment), but I measured one target.
+- **B-1's end-to-end lockstep consequence.** No netcode consumer of `save_read` exists
+  (`grep -rn "save_read" src/` → `src/core/save.{h,cpp}` and the tests only), so "two peers desync"
+  is derived from `ASSETS-AND-DATA.md` §5's own rejoin sentence plus the measured hash divergence,
+  not observed in a running lockstep session. What would falsify it: a ruling that the save path is
+  not a lockstep artifact — which is exactly the ruling request B-1 files.
+- **Base.** This review is against `origin/main` @ `1280d1a`. `main` has since moved (commits at
+  22:24–22:41 UTC from the other sweep areas); nothing in those touches `src/`, but I did not
+  re-review against them.
+
+### Verdict
+
+**fix first.** Ranked:
+
+| # | Severity | Status | What |
+|---|---|---|---|
+| B-1 | ship-blocking | VERIFIED | a save-restored world does not reproduce the world hash; `save.h` and `ASSETS-AND-DATA.md` §5 contradict each other about whether that matters — ruling request, unnumbered |
+| B-1(b) | ship-blocking | VERIFIED | `save_read` never restores the hashed `world.singletons` arena and no doc says the caller must |
+| B-2 | ship-blocking | VERIFIED | `SAVE_ENC_REFLECTED` silently saves one row, `ERR_OK` both ways — latent, one-line guard |
+| B-3 | medium | VERIFIED | `src/core/CMakeLists.txt`'s two idioms are not equivalent; the explicit half silently drops a new file |
+| B-4 | medium | REASONED | `save.test.cpp`'s "column order is not part of the contract" is now false; the code is right, the contract permits the bug |
+
+B-1 and B-1(b) are one decision: **is a save a lockstep artifact?** Answer that and B-4 follows
+(the ordering assertion is only worth writing if the answer is yes). B-2 and B-3 are independent and
+cheap. None of the five is a slip inside either lane's own scope; every one is a contract written by
+one lane that the other lane's merged code falsifies — which is what this area was opened to find.
+
+*Reviewer note: no RR numbers allocated (steward's). No fixes applied (cone discipline). No PR
+opened. Reproducers are in the sections above and were kept out of `tests/` because they fail by
+design.*
+
 > **W3 SWEEP DISPATCHED 2026-08-27 ~22:22 local — three fresh-context adversarial reviewers, Opus,
 > disjoint and exhaustive over the six deferrals. IN FLIGHT as this is written.** Recorded here
 > because a session's own transcript is not a durable channel: if this steward window ends, this
