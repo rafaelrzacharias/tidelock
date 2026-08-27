@@ -233,7 +233,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 ## PLATFORM.md
 - `ASSETS-AND-DATA.md` -> §3
 - `DETERMINISM.md` -> §5
-- `FRAME-LOOP.md` -> §3, §6
+- `FRAME-LOOP.md` -> §3, §6, §9.2
 - `JOBS.md` -> §6, §9.2, §9.3
 - `LUAU-LAYER.md` -> §9.5
 - `MEMORY.md` -> §4, §9.2, §9.5

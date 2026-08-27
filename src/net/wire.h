@@ -21,12 +21,17 @@
 //   (docs/NETCODE.md §20.3(a)) and byte-identical on every target in the CANON.md matrix.
 // Threading: values only; one writer/reader per thread. `net` is outside the sim boundary
 //   (docs/NETCODE.md §20) - nothing here is hashed into world state.
-// Includes: foundation/tl_types.h, foundation/bytes.h, foundation/tl_assert.h, core/reflect.h.
+// Includes: foundation/tl_types.h, foundation/bytes.h, foundation/tl_assert.h, core/reflect.h,
+//   core/input.h (MAX_PEERS - a scoped exception ruled 2026-08-26 by Rafael, TODO.md RR-24: core
+//   is the constant's one C++ home, and this is the one line plus this include that reaches it;
+//   nothing else about the InputFrame/WireFrame handoff below changes - that stays Phase 2's,
+//   RR-17).
 // ---------------------------------------------------------------------------------------------
 #include "foundation/tl_types.h"
 #include "foundation/tl_assert.h"
 #include "foundation/bytes.h"
 #include "core/reflect.h"
+#include "core/input.h"
 
 // --- ErrCode range ---------------------------------------------------------------------------
 // net holds 0x04xx (docs/NETCODE.md §20; mem 0x01xx, jobs 0x02xx, bytes 0x06xx, alloy 0x0Axx).
@@ -60,8 +65,9 @@ constexpr const char* err_net_name(ErrCode e) {
 }
 
 // --- constants (docs/NETCODE.md §20 preamble; the tunables' doc home is docs/CANON.md) --------
+// MAX_PEERS is core/input.h's (included above; scoped exception, TODO.md RR-24) - not redeclared
+// here, but still asserted here (below) since this file's own invariants depend on it.
 constexpr u32 NET_FORMAT_VERSION = 1u;    // every wire struct's field 0
-constexpr u32 MAX_PEERS          = 8u;    // docs/CANON.md; the slot_mask/hold bitmaps are one byte
 constexpr u32 SLOT_RING_TICKS    = 32u;   // per-slot frame ring, power of two
 
 // The redundancy window and the confirmation horizon the ring must cover (docs/CANON.md).
@@ -86,16 +92,16 @@ static_assert(MAX_PEERS <= 8u, "slot_mask, live_mask and the hold bitmaps are on
 static_assert(MIN_TICKS_PER_PACKET <= MAX_TICKS_PER_PACKET, "");
 
 // --- the input-frame geometry (docs/INPUT.md §1) ----------------------------------------------
-// core/input.h is the W3 loop+input lane's file and is NOT defined here (RR-17 ruling,
-// 2026-08-26): net-p1 builds the column codec against a GEOMETRY MIRROR of docs/INPUT.md §1's
-// InputFrame, pinned field-for-field to that section's numbers, and the tests supply their own
-// frame fixtures. The mirror carries net-scoped names so that when core/input.h lands there is
-// no redeclaration to unpick - the handoff is one line:
+// core/input.h is included above (RR-24's scoped exception, MAX_PEERS only) but its InputFrame
+// is NOT used here yet (RR-17 ruling, 2026-08-26): net-p1 builds the column codec against a
+// GEOMETRY MIRROR of docs/INPUT.md §1's InputFrame, pinned field-for-field to that section's
+// numbers, and the tests supply their own frame fixtures. The mirror carries net-scoped names so
+// that when the InputFrame/WireFrame handoff lands there is no redeclaration to unpick - the
+// handoff is one line (RR-24's include already done):
 //
-//     W3: #include "core/input.h"
-//         static_assert(sizeof(InputFrame) == NET_FRAME_BYTES);
-//         static_assert(MAX_ACTIONS == NET_FRAME_MAX_ACTIONS);
-//         using WireFrame = InputFrame;     // replaces the mirror; delete NetInputFrame
+//     static_assert(sizeof(InputFrame) == NET_FRAME_BYTES);
+//     static_assert(MAX_ACTIONS == NET_FRAME_MAX_ACTIONS);
+//     using WireFrame = InputFrame;     // replaces the mirror; delete NetInputFrame
 //
 // Until then WireFrame is the mirror, and every net TU speaks WireFrame, never the mirror's own
 // name, so that swap touches exactly this block. The numbers are docs/INPUT.md §1's and

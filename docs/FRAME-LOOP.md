@@ -1,8 +1,15 @@
 # Frame loop, time, phases, interpolation (tidelock, rev 1)
 
 > **Status:** design rev 1, 2026-08-22. **DECIDED** except §7. Carries foundry CORE §3, D7, D10,
-> D11's knobs, FOUNDRY-API §2 into C++ + fixed point.
-> **Owns:** `src/core/loop.h`, `time.h`, `phase.h`, `interp.h`; `app/main.cpp` instantiates it.
+> D11's knobs, FOUNDRY-API §2 into C++ + fixed point. **§8 (loop.h/.cpp, time.h, interp.cpp)
+> implemented by w3-loop-input, 2026-08-26/27** — declarations for the interpolation ping-pong
+> live in `loop.h` (no separate `interp.h`; `interp.cpp` is a pure implementation split, matching
+> this doc's own §8.1 file list, which never named one). Three filed, non-blocking ruling
+> requests from that lane are in `TODO.md` (`RR-24`..`RR-26`): the generic (not `Transform`-
+> named) interpolation registration API, the LAST-phase recorder as a direct call rather than a
+> registered system (`SystemFn` has no path to `Engine`-level state), and the same gap for §0's
+> render-side `alpha`.
+> **Owns:** `src/core/loop.h`, `time.h`, `phase.h`; `app/main.cpp` instantiates it.
 
 ---
 
@@ -24,7 +31,17 @@ for (;;) {
         accumulator -= FIXED_DT_SECONDS; steps += 1;
     }
     if (steps == MAX_STEPS) accumulator = 0;                 // spiral-of-death cap: DROP time (slowdown, not spiral)
-    f32 alpha = (f32)(accumulator / FIXED_DT_SECONDS);       // render-side float, fine
+    // PRODUCE_WAIT can leave several whole ticks stuck in accumulator. CLAMP to one tick, don't
+    // take the remainder - a modulus cycles for as long as the stall runs (the sim is frozen while
+    // accumulator keeps growing), a full 0→1 alpha sawtooth at the render rate. Clamping parks
+    // alpha at (just below) 1.0 once accumulator exceeds one tick, holding entities at their last
+    // simulated pose - the actual point of the [0, 1) contract during a stall (review round 2
+    // defect 2, w3-loop-input).
+    f64 pending = (accumulator < FIXED_DT_SECONDS) ? accumulator : FIXED_DT_SECONDS;
+    f32 alpha = (f32)(pending / FIXED_DT_SECONDS);           // render-side float, fine
+    if (alpha >= 1.0f) alpha = 0x1.fffffep-1f;                // nextafter(1.0f, 0.0f): a stall, or the f64->f32
+                                                               // downcast rounding a strictly-<1.0 quotient up to 1.0f -
+                                                               // 0.0f would map "one tick almost elapsed" to "no tick elapsed"
     run_phases_render(&world, alpha);                        // PRE_RENDER, RENDER — reads sim, never writes
     render_present(&world);                                  // sort + batch + SDL present
     scratch_reset(&world.scratch_main);
@@ -91,7 +108,19 @@ concerns and never phases. The game runs identically regardless of host.
 
 1. Apply command buffers (chunk order) — the `GROWS_AT_BARRIER` window.
 2. Swap event buffers; clear the new write side (scratch reset covers it).
-3. Ping-pong `prev ← current` for every interpolated column (pointer swap, O(1)).
+3. Ping-pong `prev ← current` for every interpolated column (pointer swap, O(1)) — the stated
+   design intent, still reachable, not superseded. **Recorded deviation (2026-08-27, review round
+   2 defect 6):** the shipped mechanism (`core/interp.cpp`'s `interp_pingpong`, w3-loop-input) is a
+   per-entity `memcpy`, O(live entities in `current`'s column) per pair, not a pointer swap —
+   `core/loop.h`'s own contract block already states this cost honestly; this section didn't match
+   it, which is the bug this deviation note fixes (`CLAUDE.md`: a doc/code mismatch is a bug in
+   one of them). A true pointer/column swap needs the registry to own two physically
+   interchangeable buffers per interpolated column, which no lane has built; not this lane's to
+   design unilaterally (`CLAUDE.md` rule 8: one stable impl now, pulled in by a real consumer).
+   **RULED 2026-08-27 (Rafael, via the steward): the interp-pair contract is dense-order parity**
+   (`TODO.md` RR-28, ruling record) — `interp_pingpong` now `TL_CHECK`s it, which is what makes a
+   future pointer/column swap for this pair sound (a swap needs its two columns already in
+   lockstep dense order; the check is what would let render2d's `extract.cpp` trust that).
 4. Reset worker scratch.
 
 Snapshot push (for the rollback ring) happens in `LAST`, *before* this barrier, so a snapshot is
@@ -140,6 +169,21 @@ no-op, the `Script` producer feeds frames, `run_phases_render` runs with a null 
 is skipped entirely for sim-only tests), and the loop runs as fast as the CPU allows
 (`accumulator` is forced to `FIXED_DT` per iteration). This is `tests/` and Hovel.
 
+**Recorded deviation (w3-loop-input, 2026-08-27, review round 1 finding 11, `TODO.md` RR-27):**
+the forced-`FIXED_DT` accumulator is NOT implemented. `PlatformApi::is_headless` (`PLATFORM.md`
+§9.2) is the only headless signal `engine_frame` can see, and it already means something narrower
+and already load-bearing: "skip `present()`" - `tests/core/loop.test.cpp`'s own accumulator suite
+(`engine_frame_max_steps_cap_drops_time` et al.) sets `is_headless = 1` on its fake platform
+specifically so it can drive `engine_frame` with a fake clock and assert on the REAL measured
+`real_dt`-based stepping (steps-per-frame, the `MAX_STEPS` cap). Gating this section's
+forced-`FIXED_DT` behavior on that same flag was tried and reverted: it made every accumulator
+test headless mode already uses see exactly one simulated tick per call regardless of the fake
+clock's reading, breaking `engine_frame_max_steps_cap_drops_time` (measured, not argued - the row
+failed on the test's own assertion). Closing this needs a mechanism distinct from `is_headless` -
+an `Engine`-level opt-in (e.g. a `force_fixed_dt` member alongside `producer`/`interp_pairs`,
+set by the driver that wants it) rather than a blanket per-platform behavior every headless caller
+inherits whether it wants it or not - which is a design decision, not a bug fix.
+
 ---
 
 ## 7. Rulings (closed 2026-08-22 — nothing open)
@@ -173,9 +217,13 @@ order).
    registered in step 4, then Alloy's pools (`alloy_register_arenas`), then `data_tables`. Scratch
    arenas and the event arena are created but not registered.
 3. Interner, cvars, log sinks, profiler.
-4. Components: engine components (`Transform`, `TransformPrev`, `Sprite`, `Camera2D`,
-   `PeerSlots`, …) then the Luau sim scripts' `ecs.component` declarations (script init phase runs
-   here, in the sim VM).
+4. Components: engine components (`Transform`, `TransformPrev`, `Sprite`, `PeerSlots`, …) then
+   the Luau sim scripts' `ecs.component` declarations (script init phase runs here, in the sim
+   VM). Camera state is NOT registered here: Rafael's D1 ruling (render2d lane, 2026-08-27) took
+   `Camera2D`/`CameraPrev`/`CameraFollow` off the ECS entirely - a registered component's f32
+   bytes land in `registry_hash_all`, and a camera pan read as a lockstep desync. Camera state
+   lives on `RenderQueue` (`camera[MAX_VIEWS]`/`camera_prev[MAX_VIEWS]`/
+   `camera_follow[MAX_VIEWS]`/`camera_count`), render2d's own doc and file, outside this barrier.
 5. Events: engine event types, then Luau-declared.
 6. Systems: engine systems per phase (input fold bookkeeping, `alloy_step`, Alloy→event bridge,
    transform resolve, checkpoint, recorder, `net_receive`/`net_send` when present, render
@@ -198,7 +246,7 @@ void engine_tick_once(Engine* e, const InputFrame* frames /*[MAX_PEERS]*/) {
     for (Phase p = FIRST; p <= LAST; ++p) { run_phase(w, p); /* run_phase applies commands at its end */ }
     // LAST has run: checkpoint hashed, recorder appended, net_send sent, snapshot ring pushed
     events_swap(w);                  // barrier step 2
-    interp_pingpong(w);              // barrier step 3: prev ← current for Transform/Camera2D
+    interp_pingpong(w);              // barrier step 3: prev ← current for Transform (any interp pair)
     scratch_reset_all(e);            // barrier step 4 (workers; main scratch resets after render)
     w->tick += 1;
     guard_tick_end(&e->guard, w->registry);

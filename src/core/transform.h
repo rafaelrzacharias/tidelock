@@ -10,7 +10,10 @@
 //   barrier (docs/FRAME-LOOP.md §3 step 3). render/extract.cpp is the one reader of both columns
 //   together (fx -> float, lerp by alpha) - nothing else needs them side by side.
 // Invariants: identical field lists by design (FRAME-LOOP.md §4 "double-buffer the resolved
-//   world transform"), so a ping-pong is a pointer/column swap, never a per-field copy.
+//   world transform"). The ping-pong itself is a per-field copy, not a pointer/column swap
+//   (FRAME-LOOP.md §3's recorded deviation, TODO.md RR-28's ruling record: the interp-pair
+//   contract is dense-order parity, enforced by `interp_pingpong`'s `TL_CHECK`, not a pointer
+//   swap between two physically interchangeable buffers - no lane has built that).
 //   `flags` bit 0 = TRANSFORM_SNAP (spawn/teleport: prev = current for one frame - the engine
 //   auto-snaps newly realized entities; render/extract.cpp READS the bit, never writes it; the
 //   barrier clears it); bits 1..31 are zero. TransformPrev is COMP_HIDDEN (not the generic
@@ -42,7 +45,10 @@ enum : u32 { TRANSFORM_SNAP = 1u << 0 };   // bits 1..31 reserved, zero (docs/FR
 TL_COMPONENT(Transform)
 
 // TransformPrev - identical field list (docs/RENDER2D.md §9.2), COMP_HIDDEN, registered by core
-// immediately after Transform so both columns share one dense order (add/removed together).
+// immediately after Transform. Registration order alone does not guarantee dense order stays in
+// lockstep after add/remove (column_remove is swap-remove) - dense-order parity is the ruled
+// interp-pair contract (TODO.md RR-28), enforced at runtime by `interp_pingpong`'s `TL_CHECK`,
+// not a structural consequence of "added/removed together".
 #define TL_FIELDS_TransformPrev(X, XA, XH) \
     X(pos_t, x) X(pos_t, y) X(angle_t, rot) X(u32, flags)
 TL_COMPONENT_FLAGS(TransformPrev, COMP_HIDDEN)

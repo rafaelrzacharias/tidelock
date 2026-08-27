@@ -1,7 +1,14 @@
 # Input — the action map and the `InputFrame` airlock (tidelock, rev 1)
 
 > **Status:** design rev 1, 2026-08-22. **DECIDED** except §8. Carries D13 / E2 into C++; the
-> frame is now all-integer and `MAX_ACTIONS = 32` is ruled.
+> frame is now all-integer and `MAX_ACTIONS = 32` is ruled. **Implemented by w3-loop-input,
+> 2026-08-26/27** (§9's files: input.h, action_map.h/.cpp, producers/{live,script,replay},
+> recorder.h/.cpp) — `input_set_producer` lives on `Engine` (`core/loop.h`), not `World*` as §4
+> literally spells it (the producer is never registered/hashed/snapshotted; see `core/input.h`'s
+> contract block). `MAX_PEERS`'s C++ symbol is defined in `core/input.h` rather than `net/`
+> (module-DAG reason: `TODO.md` RR-24) — **RULED 2026-08-26 (Rafael)**: `net/wire.h` gets a
+> scoped exception, `#include "core/input.h"` for the constant, rather than carrying its own copy.
+> Two non-blocking ruling requests remain open: `TODO.md` `RR-25`..`RR-26`.
 > **Owns:** `src/core/input.h`, `action_map.h`, `producers/{live,script,replay}.h`
 > (`network` lives in `src/net/`).
 
@@ -96,7 +103,7 @@ the loop calls before `FIRST` (`FRAME-LOOP.md` §0). Four producers, one mechani
 | Producer | Frames come from | Built |
 |---|---|---|
 | **Live** | `fold_tick` over the platform's raw event buffer: continuous state (down/axis) persists, edges are derived prev↔current, analog quantized, pointer projected + quantized, dev-only ImGui capture mask applied first | v0 |
-| **Script** | a test's scripted frames (`press("jump", tick=10)`, `hold("move_x", 127, 0..30)`), built by the harness | v0 (headless tests) |
+| **Script** | a test's scripted frames (`press("jump", tick=10)`, `hold("move_x", 127, from=0, to=30)` — down over `[0, 30)`, `script.h`'s ruled half-open range), built by the harness | v0 (headless tests) |
 | **Replay** | a recorded stream (`RecordedInput` = header + tick-stamped frames + per-tick hashes) | v0 (the determinism guard) |
 | **Network** | the sequencer's confirmed frames for all live slots (`NETCODE.md`) | Hovel |
 
@@ -204,10 +211,13 @@ struct ScriptedEvent { u64 tick; ActionId action; i8 value; u8 op /* SET, PRESS(
 struct ScriptProducer { Array<ScriptedEvent> events /* sorted by tick */; u32 cursor; ActionState cur[MAX_PEERS][MAX_ACTIONS]; };
 ```
 
-`produce(tick)`: apply all events with `event.tick == tick` (in array order) to `cur`, derive edges
-as in the fold, fill frames, `READY`. Tests build these with helpers `press(a, tick)`, `hold(a, v,
-from, to)`. `ReplayProducer` reads `RecordedInput` frames sequentially; `READY` until
-`frame_count`, then `WAIT` (the driver stops); it also exposes the recorded hashes to the harness.
+`produce(tick)`: apply all events with `event.tick <= tick` (in array order, cursor-advancing) to
+`cur`, derive edges as in the fold, fill frames, `READY` (review round 1 finding 3: `==` stranded
+every event from the first skipped tick onward permanently — a caller whose first produced tick
+isn't 0, or the rollback path re-driving an already-produced tick, needs `<=` to catch up rather
+than stall). Tests build these with helpers `press(a, tick)`, `hold(a, v, from, to)`.
+`ReplayProducer` reads `RecordedInput` frames sequentially; `READY` until `frame_count`, then
+`WAIT` (the driver stops); it also exposes the recorded hashes to the harness.
 
 ### 9.5 Recorder system (`LAST`, after checkpoint)
 
