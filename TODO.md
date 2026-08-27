@@ -5869,18 +5869,25 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > in criteria must carry a resolvable referent**, `[blocked-on: RR-nn]`, and `docaudit` errors when the
 > named ruling is recorded as ruled/landed — the condition is met, so the clause must be re-read. Rule (b)
 > would have fired automatically inside the very PR that landed RR-38.
-> **SCOPE — a "criteria row" is a bullet line INSIDE a bucket block, delimited by the `**<Bucket name>**`
-> headers.** Ruling prose above or between those blocks is out of scope by construction. This is the
-> whole definition and it is deliberately structural: RR-44's own text must quote the phrases it bans in
-> order to explain them, and rule (b)'s record must name the `[blocked-on:]` tag without being parsed as
-> a deferral. The alternative — scoping to "every line in §9.6" plus an exemption mechanism — is worse,
-> because an exemption mechanism is itself a hole: anything can be exempted, and the first inconvenient
-> flag is where it gets used. Likewise (b) applies to a TAG IN A CRITERION ROW, never to any prose
-> mention of an RR, so RR-43's text citing RR-42 is out of scope by construction rather than by pardon.
+> **SCOPE — the operative definition lives in `CLAUDE.md`'s doc-integrity protocol, beside the
+> stale-marker sentence RR-44 supersedes; this record CITES it and does not restate it.** One home,
+> because the scope clause is the part of this ruling most likely to be refined once someone implements
+> it, and two copies would drift on the first refinement. WHY it is structural rather than an exemption
+> list, which the implementer needs and `CLAUDE.md` does not carry: RR-44's own text must quote the
+> phrases it bans in order to explain them, and rule (b)'s record must name the `[blocked-on:]` tag
+> without being parsed as a deferral — so the scope must exclude ruling prose BY CONSTRUCTION. The
+> alternative, scoping to "every line in §9.6" plus an exemption mechanism, is worse: an exemption
+> mechanism is itself a hole, since anything can be exempted and the first inconvenient flag is where it
+> gets used. A case the scope handles badly is a bug in the scope, and is fixed in `CLAUDE.md`.
 > *(Scope added 2026-08-27: the steward had recorded self-reference as an implementation note for
 > whoever builds the gate; Review C's fix-check argued it is a scoping gap in the RULING, since the
 > implementer would otherwise settle it silently and an exemption mechanism would be the likely choice.
-> Correct, and taken.)*
+> Correct, and taken. Two implementation ambiguities C then found in the first draft — a header pattern
+> written for short names silently missing the one full-phrase bucket header, and an undefined block END
+> where the last block terminates on a numbered item rather than a header — are fixed in `CLAUDE.md`'s
+> definition, along with "bullet" meaning the whole logical bullet including continuation lines. The
+> restatement between the two files was C's NEW-C1; resolved in favour of `CLAUDE.md` as the operative
+> home, since that is what authors read every session.)*
 > **NOT BUILT — RECORD ONLY.** The enforcement lives in `tools/docaudit/docaudit.py`, a shared gate over
 > every doc in the repo and outside the `w3-editor` cone; enabling (a) also requires the §9.6 status-word
 > strip to land first (it did, in PR #16, under RR-43). Owner: unassigned. Whoever takes it should also

@@ -87,9 +87,20 @@ narrow slice at a time. Two rules, one tool:
   gate that will enforce them is unbuilt and unowned**: (1) no met/not-met status word in a criteria row
   — whether a condition holds belongs to the PR gate and `TODO.md`, not to the criterion that judges the
   work; name the witness instead. (2) A conditional deferral in a criterion carries a resolvable
-  referent, `[blocked-on: RR-nn]`, so the clause is re-read when that ruling lands. A "criteria row" is
-  a bullet inside a bucket block delimited by its `**<Bucket name>**` header; ruling prose is out of
-  scope by construction, not by exemption. Full record and rationale: `TODO.md`, RR-44.
+  referent, `[blocked-on: RR-nn]`, so the clause is re-read when that ruling lands — a TAG in a row,
+  never a prose mention of an RR. **Scope (this is the operative definition; `TODO.md`'s RR-44 record
+  cites it rather than restating it).** A **criteria row** is one whole bullet — its lead line plus
+  every continuation line, since these bullets wrap — inside a **bucket block**. A bucket block opens
+  on a bold header line standing alone as a paragraph (`**Panels v0** …`, `**Shell v0** …`,
+  `**Deferred — blocked on a ruling or another lane** …` — match the whole header LINE, not a short
+  name: one of the three is a full phrase and a pattern written for short names silently misses it,
+  under-enforcing on exactly the bucket where deferral prose collects) and closes at the next such
+  header **or at the end of the enclosing numbered item, whichever comes first** — the last block in a
+  section terminates on a numbered item, not on a header. Everything outside a bucket block — ruling
+  prose above or between them — is out of scope **by construction**. There is deliberately no exemption
+  mechanism: an exemption is a hole, since anything can be exempted and the first inconvenient flag is
+  where it gets used. A case the scope handles badly is a bug in the scope, to be fixed here.
+  Rationale, evidence, provenance, enforcement status and owner: `TODO.md`, RR-44.
 
 ### Working boundaries
 - **Single-hat rule.** Don't plan architecture, write code, and write tests in one turn. Stage:
