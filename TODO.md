@@ -4804,6 +4804,16 @@ once `v0-integration` (W4) or a sibling lane starts depending on them.
   directory)?** `commit_docs.py` is very likely `ci-matrix`'s or `governance`'s file (both W3,
   neither confirmed merged/closed as of this lane's launch) — cone discipline bars editor from
   editing it unilaterally either way.
+  **Addendum (2026-08-27, editor/profiler_panel commit): the same gap exists for `foundation/`,**
+  not just `core/` — `MODULE_DOCS["foundation"]` lists `FX-PALETTE.md`/`MEMORY.md`/
+  `CONTAINERS.md`/`DETERMINISM.md`/`JOBS.md`/`CPP-SUBSET.md`, never `TOOLING.md`, even though
+  `tl_log.h`/`tl_prof.h`/`tl_probe.h`/`tl_assert.h` are `TOOLING.md`-owned files that merely live
+  under `src/foundation/` (its own header comments cite `TOOLING.md` sections throughout, never
+  one of the six listed docs). The `tl_log_ring_count`/`_at` promotion (`log_panel` commit) and
+  this commit's `tl_prof_ring_count`/`_at`/`counter_count`/`counter_at` promotion both genuinely
+  documented their change in `TOOLING.md` (§9.4's Profiler row, this commit) yet both still needed
+  `[docs:none]` to pass the gate for the `foundation/` half of the diff — same shape as the `core/`
+  case above, same fix either widens `MODULE_DOCS["foundation"]` too.
 - **RR-33 (steward-allocated 2026-08-27, PR #16) — RULED 2026-08-27 (Rafael, via the steward):
   option (i), a narrow additive exception. Implemented — see RR-35 below for the shipped shape
   and tests, both ruled and landed together.** Original filing: `CMD_SET_CVAR` does not exist in
@@ -5254,3 +5264,42 @@ first) own the decimal-to-fixed-point RNE quantizer `FX-PALETTE.md`/`cvar.cpp`'s
 helper both callers use? Either answer unblocks fx-field editing in the Inspector and `set
 <name> <f64>` in the Console cvar UI at once — currently two independent TODOs pointing at the
 same missing primitive.
+
+### editor/profiler_panel: the Profiler panel (2026-08-27)
+
+Sixth item in `TOOLING.md` §9.6 build order item 5's panel list, after Inspector. New
+`editor/profiler_panel.h`/`.cpp`: reads `foundation/tl_prof.h`'s ring (the latest completed frame,
+or a paused view slot) and prints a depth-indented text list of every `ProfNode` (name, tick
+delta, worker, job id where tagged) plus the counter table.
+
+`tl_prof.h`'s `tl_prof_test_ring_count`/`_ring_at`/`_counter_count`/`_counter_at` are renamed to
+`tl_prof_ring_count`/`_ring_at`/`_counter_count`/`_counter_at` — promoted from test-only to a real
+production API now that `profiler_panel.cpp` is a real, non-test caller, the exact same move
+`log_panel.cpp` made for `tl_log_ring_count`/`_at` earlier this lane. `tl_prof_test_reset` stays
+test-scoped (nothing on a live path ever clears the ring). `tests/foundation/tl_prof.test.cpp`'s
+existing call sites were mechanically renamed to match; no behavior changed, only the promoted
+functions' names (`prof.cpp`'s own bodies are untouched).
+
+Scope, narrower than `TOOLING.md` §9.4's Profiler row as originally written (now corrected in the
+same commit): the node tree draws as a **text list, not a rendered flame graph** — no rectangle/
+timeline widget exists in this tree, and building one is a real feature on its own, not a
+byproduct of the first panel to read `ProfState`. "Pause" freezes the **panel's own view**
+(`Editor::prof_paused`/`prof_view_slot`, two new fields), never `ProfState.head` — freezing the
+shared ring would stop every other reader (a future trace export, a second `Editor`) from seeing
+live frames for one panel's convenience, and `prof.cpp` gained no pause concept of its own.
+`dump` (`TOOLING.md` §9.3.2) is not wired — `trace_export.cpp` is still blocked on `fmt_buf`'s
+disk-flush half (`PlatformApi.file.append`, §9.6 build order item 3), so there is nothing to call.
+
+Five tests (`tests/editor/profiler_panel.test.cpp`): registration, empty-ring no-crash, one frame
+with nested scopes + a counter (renders something, `DrawList->VtxBuffer.Size > 0`), a paused view
+slot driven directly (`ed->prof_paused`/`prof_view_slot` set the way the panel's own checkbox/
+slider would, matching every other panel's "drive the write path directly, nothing here can
+simulate a widget drag" precedent), and a stale paused slot past the current ring count — proves
+`profiler_panel_draw`'s own clamp-to-0 guard rather than handing a stale index straight to
+`tl_prof_ring_at` (which is `TL_CHECK`-fatal past `ring_count`).
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`) runs, 0 failed in every combination. `includes.py`/`docaudit.py`
+clean. `[docs:none]` on the `foundation/` half of this diff per the RR-34 addendum above —
+`TOOLING.md` §9.4 genuinely documents the promotion and the v0 scope narrowing in this same
+commit, but `commit_docs.py`'s `MODULE_DOCS["foundation"]` does not credit `TOOLING.md` for it.

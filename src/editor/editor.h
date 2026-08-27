@@ -87,8 +87,14 @@ struct Editor {
     char    console_input[CONSOLE_LINE_CAP];       // the live input line, edited in place by ImGui
     char    console_last_reply[256];               // the most recent ConsoleFn's reply text
     ErrCode console_last_err;                       // ERR_OK or the most recent dispatch/exec failure
+    u32   prof_view_slot;   // the Profiler panel's own view index (docs/TOOLING.md §9.3.1's ring,
+                             // `tl_prof_ring_at`'s `slots_back`) - meaningful only when paused;
+                             // freezing the VIEW, never the ring itself (nothing stops `prof.cpp`
+                             // from advancing underneath a paused panel - every other reader, a
+                             // future trace export included, keeps seeing live frames)
+    u8    prof_paused;      // Profiler panel: true = hold on prof_view_slot; false = always slot 0
     u8    initialized;
-    u8    _pad0[7];
+    u8    _pad0[6];
 };
 
 // Zero-initializes `ed`, reserves `dev_arena_reserve` bytes (0 = a documented default, TODO.md -

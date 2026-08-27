@@ -126,17 +126,23 @@ void tl_prof_counter(NameHash key, const char* name, i64 value, u8 add);
 // header's placeholder `ticks()` - not read internally).
 void tl_prof_frame_end(u64 tick);
 
-// Test-only introspection (guarded by TL_DEV, matching tl_log.h/tl_probe.h's precedent).
+// Ring/counter introspection (guarded by TL_DEV so no symbol exists in netcode/ship). Originally
+// test-only; promoted to a real production API the day editor/profiler_panel.cpp became its
+// first non-test caller (docs/TOOLING.md §9.6 build order item 5), matching tl_log.h's own
+// tl_log_ring_count/_at promotion the day editor/log_panel.cpp needed it. Only `tl_prof_test_reset`
+// below stays test-scoped: nothing on a live path ever clears the ring.
 // The number of complete, ready-to-read ring frames (capped at PROF_RING_FRAMES once wrapped).
-u32 tl_prof_test_ring_count(void);
+u32 tl_prof_ring_count(void);
 // The ring frame `slots_back` frames before the most recently completed one (0 = the latest).
-// Fatal if slots_back >= tl_prof_test_ring_count().
-const ProfFrame* tl_prof_test_ring_at(u32 slots_back);
+// Fatal if slots_back >= tl_prof_ring_count().
+const ProfFrame* tl_prof_ring_at(u32 slots_back);
 // The registered counter count (registration order).
-u32 tl_prof_test_counter_count(void);
-// The counter at `slot` (registration order). Fatal if slot >= tl_prof_test_counter_count().
-const ProfCounter* tl_prof_test_counter_at(u32 slot);
-// Clears every worker, the ring, and every counter to their zero-initialised state.
+u32 tl_prof_counter_count(void);
+// The counter at `slot` (registration order). Fatal if slot >= tl_prof_counter_count().
+const ProfCounter* tl_prof_counter_at(u32 slot);
+// Clears every worker, the ring, and every counter to their zero-initialised state. Tests only -
+// never called from a live path (freezing the Profiler panel's own view is the panel's job, over
+// its own paused-slot index - it never stops the ring from advancing underneath it).
 void tl_prof_test_reset(void);
 
 #endif  // TL_DEV

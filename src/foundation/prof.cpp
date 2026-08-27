@@ -117,9 +117,9 @@ void tl_prof_frame_end(u64 tick) {
     if (g_prof.count < PROF_RING_FRAMES) { g_prof.count += 1u; }
 }
 
-u32 tl_prof_test_ring_count(void) { return g_prof.count; }
+u32 tl_prof_ring_count(void) { return g_prof.count; }
 
-const ProfFrame* tl_prof_test_ring_at(u32 slots_back) {
+const ProfFrame* tl_prof_ring_at(u32 slots_back) {
     TL_CHECK(slots_back < g_prof.count);
     // head points at the NEXT write slot; the most recently completed frame is head-1.
     const u32 latest = (g_prof.head + PROF_RING_FRAMES - 1u) % PROF_RING_FRAMES;
@@ -127,9 +127,9 @@ const ProfFrame* tl_prof_test_ring_at(u32 slots_back) {
     return &g_prof.ring[idx];
 }
 
-u32 tl_prof_test_counter_count(void) { return g_prof.counter_count; }
+u32 tl_prof_counter_count(void) { return g_prof.counter_count; }
 
-const ProfCounter* tl_prof_test_counter_at(u32 slot) {
+const ProfCounter* tl_prof_counter_at(u32 slot) {
     TL_CHECK(slot < g_prof.counter_count);
     return &g_prof.counters[slot];
 }

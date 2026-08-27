@@ -12,8 +12,8 @@ TL_TEST(prof_begin_end_records_one_node, "foundation") {
     tl_prof_end(0);
     tl_prof_frame_end(7u);
 
-    TL_ASSERT_EQ(tl_prof_test_ring_count(), 1u);
-    const ProfFrame* f = tl_prof_test_ring_at(0);
+    TL_ASSERT_EQ(tl_prof_ring_count(), 1u);
+    const ProfFrame* f = tl_prof_ring_at(0);
     TL_ASSERT_EQ(f->node_count, 1u);
     TL_EXPECT_EQ(f->tick, 7u);
     TL_EXPECT_EQ(f->nodes[0].key, "scope.a"_id);
@@ -41,7 +41,7 @@ TL_TEST(prof_nested_scopes_build_correct_tree, "foundation") {
     tl_prof_end(0);
     tl_prof_frame_end(0);
 
-    const ProfFrame* f = tl_prof_test_ring_at(0);
+    const ProfFrame* f = tl_prof_ring_at(0);
     TL_ASSERT_EQ(f->node_count, 4u);
     // Recorded in begin-order: outer(0) inner_a(1) inner_b(2) innermost(3).
     TL_EXPECT_EQ(f->nodes[0].key, "outer"_id);
@@ -72,7 +72,7 @@ TL_TEST(prof_scope_macro_matches_manual_begin_end, "foundation") {
     tl_prof_test_reset();
     TL_PROF_SCOPE("macro.scope") { TL_PROF_SCOPE("macro.child") {} }
     tl_prof_frame_end(0);
-    const ProfFrame* f = tl_prof_test_ring_at(0);
+    const ProfFrame* f = tl_prof_ring_at(0);
     TL_ASSERT_EQ(f->node_count, 2u);
     TL_EXPECT_EQ(f->nodes[0].key, "macro.scope"_id);
     TL_EXPECT_EQ(f->nodes[1].key, "macro.child"_id);
@@ -95,11 +95,11 @@ TL_TEST(prof_1000_frames_ring_wraps_and_stays_balanced, "foundation") {
     }
     // The ring holds at most PROF_RING_FRAMES (60) frames - it must not grow past that even
     // after 1000 frames (no allocation, fixed buffers - docs/TOOLING.md section 9.3.1).
-    TL_ASSERT_EQ(tl_prof_test_ring_count(), (u32)PROF_RING_FRAMES);
-    const ProfFrame* latest = tl_prof_test_ring_at(0);
+    TL_ASSERT_EQ(tl_prof_ring_count(), (u32)PROF_RING_FRAMES);
+    const ProfFrame* latest = tl_prof_ring_at(0);
     TL_EXPECT_EQ(latest->tick, 999u);
     TL_EXPECT_EQ(latest->node_count, 2u);
-    const ProfFrame* older = tl_prof_test_ring_at((u32)PROF_RING_FRAMES - 1u);
+    const ProfFrame* older = tl_prof_ring_at((u32)PROF_RING_FRAMES - 1u);
     TL_EXPECT_EQ(older->tick, (u64)(1000u - PROF_RING_FRAMES));
     tl_prof_test_reset();
 #else
@@ -117,7 +117,7 @@ TL_TEST(prof_worker_overflow_caps_node_count_without_crashing, "foundation") {
         tl_prof_end(0);
     }
     tl_prof_frame_end(0);
-    const ProfFrame* f = tl_prof_test_ring_at(0);
+    const ProfFrame* f = tl_prof_ring_at(0);
     TL_EXPECT_EQ(f->node_count, (u32)PROF_WORKER_NODES_CAP);   // capped, not 8200
     TL_EXPECT_EQ(f->dropped, 0u);   // frame-level cap (16384) never reached by one worker
     tl_prof_test_reset();
@@ -138,7 +138,7 @@ TL_TEST(prof_two_workers_merge_in_worker_order, "foundation") {
     tl_prof_end(0);
     tl_prof_frame_end(0);
 
-    const ProfFrame* f = tl_prof_test_ring_at(0);
+    const ProfFrame* f = tl_prof_ring_at(0);
     TL_ASSERT_EQ(f->node_count, 2u);
     TL_EXPECT_EQ(f->nodes[0].key, "w0.scope"_id);
     TL_EXPECT_EQ(f->nodes[0].worker, (u8)0);
@@ -156,12 +156,12 @@ TL_TEST(prof_counters_set_and_add, "foundation") {
     tl_prof_counter("draw_calls"_id, "draw_calls", 10, 0);
     tl_prof_counter("draw_calls"_id, "draw_calls", 5, 1);   // ADD: 10 + 5 = 15
     tl_prof_counter("particles"_id, "particles", 3, 0);
-    TL_ASSERT_EQ(tl_prof_test_counter_count(), 2u);
-    TL_EXPECT_EQ(tl_prof_test_counter_at(0)->value, (i64)15);
-    TL_EXPECT_EQ(tl_prof_test_counter_at(1)->value, (i64)3);
+    TL_ASSERT_EQ(tl_prof_counter_count(), 2u);
+    TL_EXPECT_EQ(tl_prof_counter_at(0)->value, (i64)15);
+    TL_EXPECT_EQ(tl_prof_counter_at(1)->value, (i64)3);
 
     tl_prof_frame_end(0);
-    const ProfFrame* f = tl_prof_test_ring_at(0);
+    const ProfFrame* f = tl_prof_ring_at(0);
     TL_EXPECT_EQ(f->counters[0], (i64)15);
     TL_EXPECT_EQ(f->counters[1], (i64)3);
     tl_prof_test_reset();
