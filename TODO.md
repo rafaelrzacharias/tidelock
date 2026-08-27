@@ -4719,8 +4719,10 @@ once `v0-integration` (W4) or a sibling lane starts depending on them.
   directory)?** `commit_docs.py` is very likely `ci-matrix`'s or `governance`'s file (both W3,
   neither confirmed merged/closed as of this lane's launch) — cone discipline bars editor from
   editing it unilaterally either way.
-- **RR-33 (steward-allocated 2026-08-27, PR #16): `CMD_SET_CVAR` does not exist in
-  `core/commands.h`, so no `CVAR_SIM` cvar can be written end to end.** `TOOLING.md` §3 requires
+- **RR-33 (steward-allocated 2026-08-27, PR #16) — RULED 2026-08-27 (Rafael, via the steward):
+  option (i), a narrow additive exception. Implemented — see RR-35 below for the shipped shape
+  and tests, both ruled and landed together.** Original filing: `CMD_SET_CVAR` does not exist in
+  `core/commands.h`, so no `CVAR_SIM` cvar can be written end to end. `TOOLING.md` §3 requires
   a `CVAR_SIM`-flagged cvar's write to be a sealed, tick-stamped command so a lockstep session can
   refuse it (`CANON.md` "Cvars": SIM cvars fold into `session_fingerprint`). `core/commands.h`'s
   `CmdKind` enum and `core/commands.cpp`'s `apply_commands` are `ecs`-lane files (merged, closed —
@@ -4736,17 +4738,32 @@ once `v0-integration` (W4) or a sibling lane starts depending on them.
   `ecs` behavior changes, or (ii) it waits for a dedicated follow-up lane/session against
   `commands.h`, and `editor`'s `CVAR_SIM` support stays refuse-only (as it does today) until
   then.
-- **RR-pending (b): should `CvarTable` live inside `World`?** `TOOLING.md` §9.1 says "`CvarTable`
-  in `World` (non-registered arena)" but `core/world.h` (ecs, merged/closed) has no `cvars` field,
-  and adding one is the same cone-discipline question as (a) above (`world.h` already carries
-  forward-declared pointers for every OTHER W3 consumer — `Editor* editor`, `AlloyWorld* sim`,
-  `RenderQueue* render` — added by each of those lanes; `CvarTable* cvars` would be the same
-  one-line shape). `core/cvar.h` deliberately does NOT assume this and is fully usable
-  caller-owned (every test in `tests/core/cvar.test.cpp` constructs its own `CvarTable`) — but
-  `core/console.h`'s future `set <cvar>`/completion and RR-33's applier both need SOME
-  way to reach the live table from wherever they run, and "who owns the one real `CvarTable`
-  instance" is a design question this lane should not decide unilaterally by editing `world.h`.
-- **RR-pending (c): `core/crash_report.cpp` is blocked on `platform/`'s crash OS-half, which is
+- **RR-35 (steward-allocated 2026-08-27, PR #16, "RR-33 RULED" message) — RULED TOGETHER WITH
+  RR-33, same message, same reasoning: `CvarTable* cvars` (nullable) added to `core/world.h`.**
+  Originally filed as "should `CvarTable` live inside `World`?" — `TOOLING.md` §9.1 says
+  "`CvarTable` in `World` (non-registered arena)" but `core/world.h` (ecs, merged/closed) had no
+  `cvars` field. **RULED 2026-08-27 (Rafael, via the steward): part of the same narrow, additive
+  cone-discipline exception as RR-33** (`docs/ROADMAP.md` §0 rule 2). The precedent that made
+  this grantable: `world.h` already carries forward-declared pointers for every OTHER W3
+  consumer — `Editor* editor`, `AlloyWorld* sim`, `RenderQueue* render` — each added by the lane
+  that needed it, never by `ecs` itself; `CvarTable* cvars` is the identical shape, found and
+  named by this lane before the ruling landed. **Implemented**: `core/world.h` gains `struct
+  CvarTable;` (forward decl) + `CvarTable* cvars;` (nullable, caller-still-owns-the-instance -
+  no change to who allocates one); `core/commands.h` gains the `CMD_SET_CVAR` row (appended, so
+  every existing `CmdKind` value is unchanged) with an applier case in `core/commands.cpp` that
+  calls `cvar_apply_sim_raw` and `TL_CHECK`s it returns `ERR_OK`; `world_set_cvar_cmd(World*,
+  NameHash, u32)` is the new recording door (`core/world.h`/`commands.cpp`), `TL_CHECK`-refusing
+  a null `w->cvars`, an unregistered key, or a non-`CVAR_SIM` cvar (those still go through
+  `cvar_set_raw` directly, never a command). Tests: `tests/core/commands_cvar.test.cpp` (record →
+  barrier → applied; last-record-wins within one window; the two `TL_CHECK` refusals as
+  `TL_TEST_EXPECT_FATAL` rows). **Rejected alternatives, per the ruling:** deferring to a
+  follow-up lane against `commands.h` (leaves `TOOLING.md` §3's sealed-command requirement unmet
+  through this merge, scheduled nowhere); folding it into `v0-integration` (grows that lane's
+  scope again and still ships this lane's console `set <cvar>` incomplete). Kept strictly
+  additive per the ruling's own condition — no behavior change to anything already in
+  `commands.h`/`world.h`.
+- **RR-36 (renumbered from "RR-pending (c)", steward-allocated 2026-08-27, PR #16, "RR-33 RULED"
+  message): `core/crash_report.cpp` is blocked on `platform/`'s crash OS-half, which is
   still a stub.** `platform.h`'s `CrashApi::install`/`raise_fatal` are real seam members, but
   every implementation (`impl_headless/init.cpp`'s `crash_install_stub`/`crash_raise_fatal_stub`)
   is `TL_FATAL("PlatformApi.crash is not implemented yet (docs/PLATFORM.md §9.7 step 5,
