@@ -3274,12 +3274,13 @@ right; it is the template the others now follow.
 - [x] **Review round 2's discriminating-test sweep, CORRECTED in round 3 (A-2, A-3, A-6): D7 and
       M1 were wrongly recorded as not practically unit-testable - both are, and round 3's reviewer
       wrote and ran both tests. M2 was wrongly recorded as verified - no test can verify it, for a
-      different reason than D6/D7/M1's class. **CORRECTED again in round 4 (R4-1) and then a
-      fourth time on the same sentence (round 4's own standing rule, below): a maintained count of
-      "how many of sixteen" is the class of thing that goes stale or is simply wrong when written -
-      this section restated one three times running (20, then 15, then 22 against a tree that
-      already had 33, then an arithmetically-impossible "fifteen ... only two do not") and is not
-      trying a fourth number. Categorically, not by count: every round-1 finding with a runtime
+      different reason than D6/D7/M1's class. **CORRECTED again in round 4 (R4-1), then once more
+      on the same sentence (round 4's own standing rule, below, R5-1): a maintained count of "how
+      many of sixteen" is the class of thing that goes stale or is simply wrong when written -
+      this section restated one in every round since (20, then 15, then 22 against a tree that
+      already had 33, then an arithmetically-impossible "fifteen ... only two do not" - the first
+      three were test totals, the last a ratio of findings) and is not trying another number.
+      Categorically, not by count: every round-1 finding with a runtime
       observable (D1-D5, D7, D10, M1, M4, M5) has a revert-verified discriminating test - run
       `tl_tests --tag render` for the live list, never a number copied into this file. D8, D9 and
       D11 were doc-route fixes and M3 was a record fix; none of the four has a runtime observable a
