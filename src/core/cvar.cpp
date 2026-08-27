@@ -112,16 +112,14 @@ ErrCode cvar_set_raw(CvarTable* t, NameHash key, u32 bits) {
     const CvarDesc* d = t->desc[idx];
     if (d->flags & CVAR_READONLY) { return ERR_CVAR_READONLY; }
     if (d->flags & CVAR_SIM) { return ERR_CVAR_SIM_UNROUTED; }
-    t->bits[idx] = bits;
-    return ERR_OK;
+    return cvar_set_bits_unchecked(t, key, bits);
 }
 
 ErrCode cvar_apply_sim_raw(CvarTable* t, NameHash key, u32 bits) {
     const u32 idx = cvar_find_index(t, key);
     if (idx >= t->count) { return ERR_CVAR_NOT_FOUND; }
     if (t->desc[idx]->flags & CVAR_READONLY) { return ERR_CVAR_READONLY; }
-    t->bits[idx] = bits;
-    return ERR_OK;
+    return cvar_set_bits_unchecked(t, key, bits);
 }
 
 ErrCode cvar_set_i32(CvarTable* t, NameHash key, i32 v) {

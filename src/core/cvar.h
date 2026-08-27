@@ -32,15 +32,16 @@
 // Determinism: a SIM-flagged cvar's raw bits are part of session_fingerprint (docs/CANON.md
 //   "Cvars"); folding them into that hash is NOT this module's job (docs/BUILD.md §5 owns the
 //   fingerprint, not built yet) - this module only exposes `cvar_sim_fold_bits` as the seam a
-//   future fingerprint pass calls, in registration order. `cvar_set_raw` (the ordinary path)
-//   REFUSES a SIM-flagged key outright (ERR_CVAR_SIM_UNROUTED): docs/TOOLING.md §3 says a SIM
-//   cvar's change must be a sealed, tick-stamped command (`CMD_SET_CVAR`) so a lockstep session
-//   can refuse it and every peer stays byte-identical - but `CMD_SET_CVAR` does not exist in
-//   core/commands.h yet (that enum and its applier are an ecs-lane file, out of this lane's
-//   cone; the addition is filed as a ruling request in TODO.md). `cvar_apply_sim_raw` is the
-//   seam a future `CMD_SET_CVAR` applier calls once that command exists - naming makes plain
-//   that no other caller may reach it. A non-SIM cvar is ordinary config and never enters any
-//   hash. No cvar value is ever read on a sim path outside the sealed-command boundary above.
+//   future fingerprint pass calls, in `sorted` (key-ascending) order - a pure function of the
+//   cvar SET, independent of registration order, so a cross-peer fingerprint cannot depend on
+//   registration sequence (see cvar_sim_fold_bits's own comment below). `cvar_set_raw` (the
+//   ordinary path) REFUSES a SIM-flagged key outright (ERR_CVAR_SIM_UNROUTED): docs/TOOLING.md
+//   §3 says a SIM cvar's change must be a sealed, tick-stamped command (`CMD_SET_CVAR`) so a
+//   lockstep session can refuse it and every peer stays byte-identical - `CMD_SET_CVAR` now
+//   exists in core/commands.h (RR-33/RR-35's ruled exception) and its applier calls
+//   `cvar_apply_sim_raw`, the seam this header names below - naming makes plain that no other
+//   caller may reach it. A non-SIM cvar is ordinary config and never enters any hash. No cvar
+//   value is ever read on a sim path outside the sealed-command boundary above.
 // Threading: none - a CvarTable is caller-owned; the caller supplies (and, if it matters to the
 //   caller, synchronizes) its own instance, exactly like ConsoleCmd's table.
 // Includes: foundation/tl_types.h, foundation/tl_assert.h, foundation/hash.h.
