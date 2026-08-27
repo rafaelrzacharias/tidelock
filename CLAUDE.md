@@ -91,7 +91,14 @@ narrow slice at a time. Two rules, one tool:
   never a prose mention of an RR. **Scope (this is the operative definition; `TODO.md`'s RR-44 record
   cites it rather than restating it).** A **criteria row** is one whole bullet — its lead line plus
   every continuation line, since these bullets wrap — inside a **bucket block**. A bucket block opens
-  on a bold header line standing alone as a paragraph (`**Panels v0** …`, `**Shell v0** …`,
+  on a bold-leading paragraph **whose immediately following sibling is a bullet list**; a bold-leading
+  paragraph followed by more prose is ruling text and opens nothing. That discriminator is load-bearing,
+  not decorative: §9.6 holds three ruling headers (`**RR-40 …**`, `**RR-43 …**`, `**RR-44 …**`)
+  indented identically to the three bucket headers, so a pattern keyed only on "bold line alone in a
+  paragraph" opens a block on RR-44's own ruling prose and flags the phrases it quotes to explain
+  itself. Prefer the structural test to listing the bucket names: RR-43 has already shown the bucket
+  set changes, and a name list would fail silently the next time one is added or renamed. The headers
+  today are (`**Panels v0** …`, `**Shell v0** …`,
   `**Deferred — blocked on a ruling or another lane** …` — match the whole header LINE, not a short
   name: one of the three is a full phrase and a pattern written for short names silently misses it,
   under-enforcing on exactly the bucket where deferral prose collects) and closes at the next such
