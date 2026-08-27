@@ -5978,10 +5978,29 @@ PALETTE.md` §9 R-10/§10.1/§10.5, `TOOLING.md` §9.3.4, this file) all done.**
 > server-side under the API token's identity and signs it. Result on `main`:
 > `author: claude[bot] <209825114+claude[bot]@users.noreply.github.com>`, `committer: GitHub`,
 > `verified: true` — a bot identity wearing a green badge, which `CLAUDE.md`'s public-repo protocol
-> names as the one outcome never to produce. PRs #13/#14/#15 were clean because they were merged with
-> a local `git merge` and a push; nothing recorded that, so the steward inherited "merge commit, never
-> squash or rebase", verified the METHOD scrupulously, and never checked the IDENTITY the method would
-> produce. Every other property of the merge was correct — real merge commit, two parents, not
+> names as the one outcome never to produce. Nothing recorded that the clean merges were clean because
+> they were done locally, so the steward inherited "merge commit, never squash or rebase", verified the
+> METHOD scrupulously, and never checked the IDENTITY the method would produce.
+> **SCOPE, measured over the whole of `main` rather than the three most recent merges — the steward
+> first reported this as "the only break in the pattern" after checking PRs #13/#14/#15, which was a
+> claim stated wider than the range it measured, the same error `LESSONS.md` already carries twice.**
+> `git log main --format='%an|%cn' | sort -u` finds FOUR identity shapes, not one:
+> - `claude[bot] <…> | GitHub` — **three instances, two of them predating this steward**: PR #6
+>   (`821cdb1`, W2 ecs, 2026-08-25), PR #9 (`3c15ea3`, W2 net-p1, 2026-08-26), and PR #16 (fixed).
+>   So this is a RECURRING failure that PRs #13/#14/#15 happened to avoid, not a one-off — which is
+>   the strongest argument for R-16 existing at all.
+> - `Claude <noreply@anthropic.com>` — one instance, `f21fc24` (2026-08-25): the container's DEFAULT
+>   git identity, unset by that session. It is the commit that added the public-repo protocol.
+>   Second lesson hiding in that: a fresh container's `user.name`/`user.email` are not Rafael's, and
+>   nothing prompts you — set them before the first commit, every session.
+> - `rafaelrzacharias <…> | GitHub <noreply@github.com>` — seven instances: author correct, committer
+>   the web UI or API. Materially milder (the identity rule is about authorship) but the same cause.
+> - `Rafael Zacharias` vs `rafaelrzacharias` — a name-spelling variant on one email; cosmetic.
+> **`821cdb1`, `3c15ea3` and `f21fc24` are NOT being rewritten.** They are deep in a public history
+> that every clone and both machines share; rewriting ~140 commits to correct four is far worse than
+> the defect, and unlike PR #16's merge the window closed months of commits ago. They stand as the
+> evidence for R-16. Any detection gate therefore needs a baseline commit, not a whole-history sweep,
+> or it fails forever on four commits nobody intends to fix. Every other property of the merge was correct — real merge commit, two parents, not
 > squashed, branch auto-deleted, and all 72 commits inside the PR correctly authored — which is
 > precisely why nothing caught it.
 > RULED, and now recorded in three places by design rather than by drift:

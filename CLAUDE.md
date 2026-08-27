@@ -184,6 +184,12 @@ Developed on two PCs synced via git; per-machine auto-memory does not sync.
   after every merge: `git log -1 --format='%an <%ae> | %cn'` on `main` must read Rafael, twice. If it
   does not, rebuilding the merge locally from the same two parents reproduces a bit-identical tree,
   but fixing it means force-pushing `main` — **Rafael's call, never an agent's**.
+  **Also set the identity before the FIRST commit of every session**: `git config user.name` /
+  `user.email` in a fresh container default to the agent's, not Rafael's, and nothing prompts you.
+  `main` carries one commit authored `Claude <noreply@anthropic.com>` from a session that missed this
+  (`f21fc24` — the commit that added this very protocol) and two bot-identity merges from before R-16
+  (`821cdb1`, `3c15ea3`). Those four stand as evidence and are deliberately NOT rewritten: correcting
+  deep public history costs more than the defect. The rule is forward-looking — check yours.
 - Line endings: `.gitattributes` is the authority (`*.bat`/`*.cmd` CRLF, else LF);
   `git config --local core.autocrlf false` per clone.
 
