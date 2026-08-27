@@ -5344,3 +5344,77 @@ Validated on all four tiers, both isolated and non-isolated (`--tag '!slow'`) ru
 every combination. `includes.py`/`docaudit.py` clean. `[docs:none]` on the `foundation/` half of
 this diff, same RR-34-addendum reasoning as the Profiler commit above — `TOOLING.md` §9.4 is
 genuinely updated in this same commit.
+
+### editor/world_panel: the World panel (2026-08-27) — the sixth and final v0 panel, and a dangling-pointer bug in a helper shared by all six
+
+Last panel in `TOOLING.md` §9.6 build order item 5's list. New `editor/world_panel.h`/`.cpp`:
+the entity slot walk (`World.entities`, a `SlotMap<EntityRecord, Entity>` — walked
+`0..slotmap_slot_cap()` skipping dead slots per `CONTAINERS.md` §2, never `0..live_count`,
+virtualized via `ImGuiListClipper`), the singleton component name list (reusing
+`inspector.cpp`'s own `w->comps[]`/`COMP_SINGLETON` walk), and the registered arena set
+(`World::registry`).
+
+Scope, narrower than `TOOLING.md` §9.4's original World row (corrected in this same commit):
+**"last per-arena hashes" was not a stored field anywhere in this tree** — `ArenaEntry` carries
+only `{id, arena*, flags}`, no cached hash. `registry_hash_all` is real and does compute one, but
+it rehashes every `ARENA_HASHED` entry's full `[base,used)` on every call — a cost that scales
+with world size, unlike every other panel's fixed-cost reads. v0 computes it on an explicit
+"rehash arenas" click instead of every frame, keeping the previous click's set
+(`Editor::world_arena_hash_cur`/`_prev`, two new fields, dev_arena-backed pointers — NOT inline
+array members, to avoid growing `sizeof(Editor)` by the ~64 KB two `MAX_ARENAS`-sized arrays would
+cost, the same class of stack-growth risk this lane's own stack-temporary bugs already taught) to
+flag which arenas changed since the last click. No readable arena NAME exists anywhere either
+(`ArenaEntry::id` is an opaque `NameHash`, no reverse lookup) — arenas display by hex id.
+
+**Found mid-build that `registry_hash_all` is `TL_CHECK`-fatal on an unsealed registry**
+(`arena_registry.cpp`), and `registry_seal` is never called anywhere in this tree today —
+sealing is the registry owner's job, `app/`'s (`W4`, not built), the identical "blocked on app/"
+shape `editor.h`'s own Status note already carries for `editor_frame`. Shipping the button
+unconditionally would TL_FATAL the whole dev session on the first click in any world this lane's
+editor can reach today. Guarded instead: the arena section hides the button entirely (shows
+"registry not sealed yet") until `w->registry->sealed`, and `world_panel_rehash_arenas` itself
+checks again and no-ops rather than TL_FATALing, so a caller that reaches it directly (a future
+`app/`, or a test) is also safe. This lane's own tests seal their fixture registry explicitly
+(`registry_seal(&f.reg)`) to exercise the real hash path, and a dedicated test proves the
+unsealed-registry no-op holds too.
+
+**Found and fixed a real dangling-pointer bug in `make_editor()`, the `Editor` construction
+helper duplicated across every one of this lane's six panel test files** (Log, Console,
+Inspector, Profiler, Probes, and this commit's own World): `VMemApi api = test_vmem_api();
+editor_init(ed, &api, 0u);` — `api` is a plain LOCAL, but `editor_init` → `vmem_arena_init`
+STORES the raw `VMemApi*` pointer into `ed->dev_arena.os` rather than copying its contents. The
+moment `make_editor` returns, that pointer dangles. None of the first five panels ever noticed
+because none of them ever called `arena_push` on `ed->dev_arena` — this commit's "rehash arenas"
+feature was the first to do so, and it segfaulted with a confusing backtrace (the faulting PC's
+value matched `ed`'s own address, because a later stack frame had reused `api`'s old stack slot).
+This is the exact same root shape `dotpath.test.cpp`'s `dp_fixture`/`inspector.test.cpp`'s
+`ins_fixture` had already found and fixed for a DIFFERENT stored pointer (their own `Interner`
+setup, both explicitly commented "api MUST be static too") — but that fix was never generalized
+to `make_editor()`, because nothing connected the two until this file's feature happened to be
+the first to exercise the dangling path. Fixed by making every `make_editor()`'s `VMemApi api` a
+`static` local (six test files: `console_panel`, `editor`, `inspector`, `log_panel`,
+`probes_panel`, `profiler_panel`, plus this commit's own `world_panel` — `test_vmem_api()` is a
+pure, stateless value-returning function, so a single process-lifetime copy is exactly as correct
+as a fresh one per call). Full lesson, generalized past "make this one helper static" to the
+actual rule (grep an `init`-shaped function's contract for "stores"/"pointer to" before assuming
+a local argument is safe), recorded in `LESSONS.md`.
+
+Six tests (`tests/editor/world_panel.test.cpp`): registration, empty-world no-crash, null-world
+no-crash, a populated world with live AND dead (destroyed) entity slots plus a singleton drawn
+together, `world_panel_rehash_arenas` computing and correctly flagging a changed arena across two
+clicks (driven directly — nothing in this tree can simulate a real button click), and the
+unsealed-registry no-op path.
+
+Validated on all four tiers, both isolated (`--isolate --tag '!runner' --tag '!slow'`) and
+non-isolated (`--tag '!slow'`) runs, 0 failed in every combination — including the five sibling
+test files whose `make_editor()` this commit also touched. `includes.py`/`docaudit.py` clean.
+
+**`TOOLING.md` §9's v0 done criterion (§9.6 build order item 5) is now fully met on the panel
+count: Log, Console, Inspector, Profiler, Probes, World all exist.** The criterion's OTHER two
+clauses — "an edit in the inspector appears in the replay log" (blocked: `keyframes.cpp`/Replay,
+build order item 7, not started) and "zero heap allocation per frame outside `pool_vendor`" (not
+yet independently verified end-to-end) — are not yet satisfied; PR #16 does not merge until a
+fresh-context adversarial review confirms the whole v0 criterion, per the steward's own standing
+instruction, not just the panel count. Console's cvar UI and Luau REPL hand-off, and Inspector's
+fx/handle edit widgets, remain the deferrals already recorded above — still open, not silently
+closed by reaching six-of-six panels.

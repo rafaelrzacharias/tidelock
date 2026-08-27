@@ -72,7 +72,7 @@ TL_TEST(log_panel_draw_renders_every_level_newest_first, "editor,log_panel,fast"
 
 TL_TEST(log_panel_register_wires_into_editor_panel_table, "editor,log_panel,fast") {
 #if TL_DEV
-    VMemApi api = test_vmem_api();
+    static VMemApi api = test_vmem_api();
     Editor ed;
     TL_ASSERT_EQ(editor_init(&ed, &api, 0u), ERR_OK);
     log_panel_register(&ed);

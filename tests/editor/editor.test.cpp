@@ -20,7 +20,7 @@ namespace {
 void draw_noop(Editor*, World*) {}
 
 bool make_editor(Editor* ed) {
-    VMemApi api = test_vmem_api();
+    static VMemApi api = test_vmem_api();
     return editor_init(ed, &api, 0u) == ERR_OK;
 }
 }  // namespace

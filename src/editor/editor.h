@@ -93,8 +93,18 @@ struct Editor {
                              // from advancing underneath a paused panel - every other reader, a
                              // future trace export included, keeps seeing live frames)
     u8    prof_paused;      // Profiler panel: true = hold on prof_view_slot; false = always slot 0
+    u64*  world_arena_hash_cur;       // World panel: MAX_ARENAS u64s, dev_arena-backed, lazily
+                                        // allocated on first "rehash arenas" click (never a
+                                        // per-frame cost - registry_hash_all rehashes every
+                                        // HASHED arena's full [base,used), which scales with
+                                        // world size, so this is explicit-click, not every-frame)
+    u64*  world_arena_hash_prev;      // the set from the click before this one, for the panel's
+                                        // own "changed since last rehash" diff - null until the
+                                        // second click (world_arena_hash_have_prev below)
+    u8    world_arena_hash_valid;     // world_arena_hash_cur holds a real computed set
+    u8    world_arena_hash_have_prev; // world_arena_hash_prev holds a real previous set to diff
     u8    initialized;
-    u8    _pad0[6];
+    u8    _pad0[4];
 };
 
 // Zero-initializes `ed`, reserves `dev_arena_reserve` bytes (0 = a documented default, TODO.md -
