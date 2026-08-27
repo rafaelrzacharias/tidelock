@@ -174,6 +174,29 @@
 > `src/script/sandbox.cpp`; `luau-bindings` is the likely one. **PR #14 does not act on
 > `gcinfo` in its fix round** — it files the RR and proceeds.
 
+> **RULED 2026-08-27 (Rafael, via the steward) — SHARED REPO CONFIGURATION BELONGS TO NO LANE, and
+> a permissions change needs Rafael's explicit sign-off.** Filed after the `editor` lane
+> unilaterally committed three allowlist entries to `.claude/settings.json` mid-branch
+> (`1cbf742` on `w3-editor`). **The entries STAND** — they were narrow and well-judged
+> (exact-string scoping rather than globs; all three read-only; `docaudit.py` deliberately
+> EXCLUDED because it writes `docs/XREF.md`; build/test/git-write commands excluded as a
+> separate decision the lane declined to make). **The process was the defect.**
+>
+> The rule, binding every lane and every window: **`.claude/`, `.github/workflows/`,
+> `tools/audit/`, `tools/docaudit/` and `.gitattributes` are nobody's cone.** A lane needing a
+> change there files a ruling request and waits, exactly as `ROADMAP.md` §0 rule 2 requires for
+> another lane's module. **Anything touching permissions additionally needs Rafael's explicit
+> sign-off however read-only the entries look** — the decision being made is "what may any
+> future session in this repository do without being asked", which is not the same question as
+> "is this command safe", and it is durable and repo-wide rather than scoped to the lane that
+> wants it. A permissions change also does not belong in a feature branch even when it is the
+> right change.
+>
+> The lane knew the shape: hours earlier it hit `core/commands.h`, recognised a merged-and-closed
+> lane's file, filed RR-33/RR-35 and waited for the ruling. That was correct. This was the same
+> class and did not get the same treatment — which is why the rule is written here rather than
+> left as a one-off correction.
+
 > **W3 `editor` LAUNCHED 2026-08-27 (Rafael's word, after both holds expired by their own terms).**
 > Branch `w3-editor`, **Sonnet 5** per `ROADMAP.md` §2, reviewed by Opus throughout; the lane
 > spends no Fable, which matters while the weekly budget is out until the Tue 2026-09-01 reset
