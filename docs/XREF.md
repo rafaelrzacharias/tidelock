@@ -243,7 +243,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `TESTING.md` -> §9.1
 
 ## RENDER2D.md
-- `ASSETS-AND-DATA.md` -> §5
+- `ASSETS-AND-DATA.md` -> §5, §9
 - `CPP-SUBSET.md` -> §9.1
 - `FRAME-LOOP.md` -> §2, §4
 - `INPUT.md` -> §2
@@ -252,7 +252,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 
 ## RESERVED-SEAMS.md
 - `ARCHITECTURE.md` -> §11
-- `ASSETS-AND-DATA.md` -> §2, §10
+- `ASSETS-AND-DATA.md` -> §10
 - `INPUT.md` -> §2
 - `RENDER2D.md` -> §2
 - `TOOLING.md` -> §2, §12
