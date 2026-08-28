@@ -7676,3 +7676,45 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > 2026-09-01 02:00 reset regardless of what the breadth round returns. The slice was AUTHORED on
 > Opus, which §2's model policy would also put at Fable — flagged in the PR body and to Rafael as
 > his policy call, not assumed either way.
+
+> **PR #17 BREADTH ROUND IN — *fix first*, eight defects, six fixed, two filed below
+> (2026-08-28 ~11:00 local).** Full verdict is the PR comment (the durable record). The review is
+> worth reading as a model: eight attack directions, two tiers, every revert experiment
+> build-gated, a per-command clean list, and it caught its own artefact (a debug run that had
+> compiled a half-reverted file) before reporting it. **It independently re-derived the
+> re-pinning-is-zero claim and confirmed it** — the claim this steward had already stated wrongly
+> once.
+> **Fixed on the branch (`b8f231a`):** D1 (`MEMORY.md` §1.2), D2 (`GROWS_AT_BARRIER` sanctions a
+> shrink, in all four homes, plus the two guard rows that were missing entirely), D4 (`ECS.md`
+> restated where it claimed to cite), D5 (the block misattributed a supersession to
+> `CONTAINERS.md` §1), D6 (the bounding clause restored and an unreproducible scenario replaced),
+> D7 (`arena_reset_to`'s precondition promoted to `TL_CHECK`).
+>
+> **RR-53 (steward-allocated) — THE CLASS IS NOT CLOSED. `world.entities.free` diverges the same
+> way, and it needs NO save.** Review D3, **verified by execution on `b435fbb` with the RR-48 fix
+> in place**, not reasoned. `world.cpp:68` registers `world.entities.free` as
+> `HASHED|SNAPSHOT|GROWS_AT_BARRIER`. It is a vmem-backed `Array` whose arena `used` tracks
+> **`cap`**, and `cap` is the free list's PEAK count rounded to a 1024-element page — a pure
+> function of history that `array_pop`'s zeroing cannot recover, because zeroing fixes the BYTES
+> and the defect is the LENGTH. Two worlds, 1025 entities, no components, identical end state
+> asserted field by field (live_count, slots.count, free_list.count, quarantined, every `gen[i]`,
+> and the slots/gen/live extents all equal): **`free_list.cap` 2048 vs 1024, `_free_arena.used`
+> 8192 B vs 4096 B**, per-arena hash and world hash divergent. Reproducer is in the PR comment,
+> ready to drop in.
+> **Why this is NOT a steward edit under R-19:** the mechanism is different from the column's.
+> `Array`'s `used` tracks `cap`, so there is no `count * stride` to shrink to without changing how
+> `Array` grows or how its extent is hashed — new surface in `foundation`, which R-19 reserves for
+> a ruling or a lane. It is also **strictly worse than B-1 in one respect**: B-1 needed the save
+> path, and this needs only two independently-played worlds. It is bounded the same way (lockstep
+> peers replay one command stream, so not a live desync today) and becomes live at the same
+> horizon. **For Rafael: widen PR #17, or a second slice?** I will price both once #17 is merged
+> rather than guess now.
+>
+> **FINDING (review D8, out of cone, on `main`) — the tracked `tl_save_test.bin` is DELETED by
+> every local suite run.** `git ls-files | grep '\.bin$'` → `tl_save_test.bin`, committed by
+> `1bc3877` (an ancestor of `origin/main`, so not PR #17's).
+> `tests/core/save/save.test.cpp:29` writes it at a CWD-relative path and `:186` `remove()`s it.
+> Reproducer: run `tl_tests --tag '!slow'` from the repo root, then `git status --short` → ` D
+> tl_save_test.bin`. The reviewer hit it four times. Every contributor runs the suite before
+> pushing (`WORKFLOW.md` §6 R-11), so this leaves everyone one `git commit -a` from committing the
+> deletion. Owner: whoever next opens `core/save` — fix is a temp path plus untracking the file.
