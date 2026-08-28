@@ -16,7 +16,12 @@
 #include "foundation/vmem_test_api.h"
 
 enum : u32 {
-    AR_SEG_TICKS     = 300u,      // CHECKPOINT_HOT_TICKS (docs/CANON.md) - a segment's length
+    // Cite the constant, do not transcribe it (sweep area A, D6). This was a bare 300 with a
+    // comment naming CHECKPOINT_HOT_TICKS back when no C++ home existed; 99c9248 created one
+    // (net/wire.h), and the copy silently became a second spelling. The fixture sits exactly
+    // AT the format cap, so if the real constant ever moves down this copy becomes an
+    // over-cap value and every fixture built from it is refused for a reason no row names.
+    AR_SEG_TICKS     = CHECKPOINT_HOT_TICKS,   // a segment's length
     AR_SESSION_TICKS = 108000u,   // 30 min at 60 Hz (docs/NETCODE.md §13.3)
     AR_SIZE_PEERS    = 3u,        // T2's "30-min synthetic 3-peer"
 };
@@ -770,8 +775,12 @@ TL_TEST(archive_regression_log_array_is_validated, "net,archive,regression,fast"
     TL_ASSERT_EQ(ar_try_decode(seg, n, ticks, &arena), ERR_OK);
 
     // (b) a repeated R6 stable id. Note the two records sit at DIFFERENT effective ticks, so
-    // they stay correctly ordered and the adjacent-ascending check cannot see the duplicate -
-    // only a scan over the whole array can, which is the point of this row.
+    // they stay correctly ordered and the adjacent-ascending check cannot see the duplicate.
+    // Corrected 2026-08-28 (sweep area A, D7): this said "only a scan over the whole array can,
+    // which is the point of this row" - true when written, and 99c9248 then DELETED that scan and
+    // replaced it with the eight per-origin seq counters (§20.2.3). The row survived the swap and
+    // now pins the replacement rule; the reviewer confirmed it by reverting the seq-ascent rule on
+    // both sides and watching this row go red. Only the sentence was stale.
     const u8 saved_seq = seg[rec1 + 8u];
     seg[rec1 + 8u] = seg[rec0 + 8u];
     ar_repair_crcs(seg, n);
