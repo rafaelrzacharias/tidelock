@@ -10,21 +10,36 @@
 // Invariants: three own VMem ranges per column (docs/MEMORY.md §7 R-1). dense and entities are
 //   registered HASHED|SNAPSHOT|GROWS_AT_BARRIER by world_register_component; the sparse pages
 //   arena is SNAPSHOT only (derivable from entities[], snapshotted anyway for O(1) restore -
-//   docs/ECS.md §10.3). HASHING RULING (RR-48, ruled 2026-08-28, superseding the "never shrinks"
-//   form of the Array<T> ruling, docs/CONTAINERS.md §1): the hashed extent is the arena's
-//   [base, used), and for a column `used` IS the live extent - `column_remove` shrinks the dense
+//   docs/ECS.md §10.3). HASHING RULING (RR-48, ruled 2026-08-28): the hashed extent is the arena's
+//   [base, used), and FOR A COLUMN `used` IS the live extent - `column_remove` shrinks the dense
 //   and entity arenas by one row, so `used == count * stride` invariantly. Vacated rows are still
 //   zeroed, now as defence rather than as the mechanism.
-//   WHY the earlier form was wrong, since it read as a considered ruling and was: it made the
-//   extent "a pure function of the OP HISTORY, never of what was removed". History-dependence was
-//   the accepted design, and it is the defect - `used` is a high-water mark, so two peers holding
-//   identical logical state hash differently whenever one of them reached it by a different
-//   add/remove path. Measured by the W3 wave sweep (area B, B-1): a world restored from a save
-//   carried two live rows in a 24-byte extent against three rows' worth on the peer that had
-//   removed one, and the world hashes diverged with every live byte equal.
+//   SCOPE, corrected 2026-08-28 (PR #17 review, D5): this ruling is about the COLUMN and retires
+//   nothing in docs/CONTAINERS.md §1. §1's rule - a vmem-backed Array's arena `used` covers its
+//   whole committed capacity, so [count, cap) is hashed - is still true and still correct, because
+//   a ComponentTable is not an Array. An earlier draft of this block claimed to supersede a
+//   "never shrinks form of the Array ruling"; §1 contains no such form, and the misattribution
+//   would have told a reader of §1 that columns had changed something there. They have not.
+//   WHY the column's earlier form was wrong, since it read as a considered ruling and was: it made
+//   the extent "a pure function of the OP HISTORY, never of what was removed". History-dependence
+//   was the accepted design, and it is the defect - `used` is a high-water mark, so two worlds
+//   holding identical live rows hash differently whenever one reached that state by a different
+//   add/remove path. Demonstrated by this module's own regression row,
+//   world_divergent_histories_with_equal_state_hash_equally: same live rows built two ways, one
+//   hash required, and it fails without the shrink.
+//   BOUNDING, and it is load-bearing (PR #17 review, D6; TODO.md records it as such): this is NOT
+//   a live desync in the tree today. Lockstep peers replay one command stream, so their histories
+//   match; the documented same-world save/reload path is clean; and no netcode consumer of
+//   save_read exists yet. It becomes live at the first save/rejoin/late-join consumer - which is
+//   the horizon RR-48 was scheduled against, not a present fire. An earlier draft of this block
+//   stated the divergence unqualified AND cited a save-restored-world scenario that the review
+//   could not reconstruct in this tree (save_read re-adds against saved entity handles that must
+//   already be live, and the entity slotmap has no save encoder), so the scenario is replaced here
+//   by the two-worlds demonstration that the regression row actually rests on.
 //   Structure changes only inside the barrier window (GROWS_AT_BARRIER; commands.cpp is the
-//   writer) - and the guard compares `used != used_at_start`, so a shrink inside the window is
-//   exactly as legal as a growth and one outside is equally fatal.
+//   writer). A shrink there is SANCTIONED, not merely tolerated - docs/MEMORY.md §2, amended
+//   2026-08-28; the guard's `used != used_at_start` comparison is the enforcement, not the
+//   argument (PR #17 review, D2).
 // Determinism: sparse pages are committed on demand and filled with ECS_SPARSE_NONE; the
 //   page-pointer array is fixed at init (the full Entity domain's 1024 page slots), so pointer
 //   values are a pure function of the arena base and layout, restore-stable. The generation in

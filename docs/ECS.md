@@ -43,13 +43,9 @@ ComponentId world_register_component(World*, const ComponentInfo* info);   // in
   the reflection walk asserts no pointer-typed members (debug). Same assert gates event types.
 - **Column = packed dense `Array<T>` (own VMem range) + `Array<Entity>` (dense→entity) + paged
   sparse (entity index → dense index, pages of 4096 `u32`, committed on demand).** Add/remove are
-  O(1); remove is swap-remove; iteration is `0..count` packed. **The dense and entity arenas'
-  `used` tracks the LIVE extent** — `column_remove` shrinks them by one row, so
-  `used == count * stride` invariantly and the hashed extent `[base, used)` is a function of
-  the live state alone, never of add/remove history (RR-48, ruled 2026-08-28; the ruling and
-  its reasoning live in `core/column.h`'s contract block, which this cites rather than
-  restates). Before it, `used` was a high-water mark and two peers with identical live rows
-  reached by different histories hashed differently.
+  O(1); remove is swap-remove; iteration is `0..count` packed. **A column's dense and entity arenas
+  hash their LIVE extent, not a high-water mark** — the ruling, its reasoning and its bounding are
+  `core/column.h`'s contract block (RR-48, ruled 2026-08-28).
 - **Walk order is deterministic for a given world state** (packed order) and reproducible across
   runs/machines because structure changes only at barriers with a fixed apply order.
 - **Each column is a registered arena** (flags `HASHED | SNAPSHOT | GROWS_AT_BARRIER`) — the
