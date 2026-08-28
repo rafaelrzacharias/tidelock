@@ -69,17 +69,28 @@ is slack and is scheduled to finish *before* its wave's ★ lane needs it.
 
 ## 2. Lanes — scope, model, inputs, done criterion, doc
 
-**Model policy (ruled 2026-08-22).** *Fable 5 high* for the critical path and anything where a
-silent mistake is a desync found weeks later (integer/UB/ordering/hashing code). *Opus 5 high* for
-deep but well-specified systems. *Sonnet 5* for transcription-plus-tests lanes the specs fully
-pin down. **Never low effort on sim or netcode code.** Every lane's merge gets an adversarial
+**Model policy (ruled 2026-08-22; FABLE RETIRED 2026-08-28 by `WORKFLOW.md` §5 R-21).** The model
+set is **Sonnet 5 and Opus 5**. *Opus 5 high* for the critical path, for anything where a silent
+mistake is a desync found weeks later (integer/UB/ordering/hashing code), and for deep but
+well-specified systems. *Sonnet 5* for transcription-plus-tests lanes the specs fully pin down.
+**Never low effort on sim or netcode code.** Fable seated the first group until 2026-08-28; its
+weekly allowance was small enough that those lanes waited days for a reset, and `alloy-substrate`
+— the W2 keystone blocking five W3 lanes — slipped an entire wave to it. **The depth Fable was
+bought for is not waived, it is relocated**: the ★/determinism ship gate is now two disjoint Opus
+reviewers who must both return *ship* (R-22), and every confirmed determinism class must leave its
+lane as a machine gate rather than only a lesson (R-23). Nobody has a controlled comparison
+showing Opus equals Fable at that gate, which is precisely why the guarantee was replaced rather
+than dropped. Every lane's merge gets an adversarial
 review by a *different* session in a fresh context (`CLAUDE.md` rule 5), two-tier since the
 2026-08-26 token-budget ruling (round mechanics: `WORKFLOW.md` §6 R-9): Sonnet lanes are
-reviewed by Opus throughout; Opus/Fable lanes get *Opus 5 high* breadth and fix-check rounds,
-and their **ship-verdict round is always Fable 5 high with a full re-read** — the
-higher-or-equal gate holds at the round that decides. Before launching a lane, look up its
+reviewed by Opus throughout; Opus lanes get *Opus 5 high* breadth and fix-check rounds, and their
+**ship-verdict round is always a full re-read at Opus 5 high** — singly on ordinary lanes, and
+**two independent reviewers over an exhaustive disjoint partition, both of whom must return
+*ship*, on ★ and determinism-critical lanes** (`WORKFLOW.md` §5 R-22). The higher-or-equal gate
+holds at the round that decides. Before launching a lane, look up its
 model here — the launch prompt names it.
-**The steward (orchestrator) session is *Fable 5 high* (ruled 2026-08-26).** It is the
+**The steward (orchestrator) session is *Opus 5 high* (ruled 2026-08-26; reseated off Fable
+2026-08-28, R-21).** It is the
 adjudicator of last resort — closeout sweeps (`WORKFLOW.md` §1 R-7), lane-filing triage, and
 the recommendations that become rulings — so it must be higher-or-equal to the strongest lane
 it adjudicates, by the same review policy above; steward mistakes become rulings, then docs.
@@ -90,36 +101,36 @@ A new steward window states this gate in its anchor phase like any lane.
 | Wave | Lane | Model | Builds | Depends on | Done (the doc's criterion) |
 |---|---|---|---|---|---|
 | W0 | **skeleton** | Opus 5 high | CMake tree, presets, pi4 toolchain, `tl_types.h`, `tools/audit`, `tools/fingerprint`, runner stub, CI yaml | — | `BUILD.md` §10.5 |
-| W1 | ★ **fx** | Fable 5 high | `fx.h`, `fx_palette.h`, `det_math.h`, `fx_float.h`, `tools/fxcheck` | skeleton | `FX-PALETTE.md` §10.6 |
-| W1 | **mem** | Fable 5 high | vmem arena, registry, snapshot ring, scratch, handle, `mem_pool`, alloc shim | skeleton | `MEMORY.md` §8.8 |
+| W1 | ★ **fx** | Opus 5 high | `fx.h`, `fx_palette.h`, `det_math.h`, `fx_float.h`, `tools/fxcheck` | skeleton | `FX-PALETTE.md` §10.6 |
+| W1 | **mem** | Opus 5 high | vmem arena, registry, snapshot ring, scratch, handle, `mem_pool`, alloc shim | skeleton | `MEMORY.md` §8.8 |
 | W1 | **containers** | Sonnet 5 | Array/Span/SlotMap/Map/Sorted/Ring/Bitset/sort, StrView/interner/fmt | mem (`vmem_arena.h` header) | `CONTAINERS.md` §8.7 |
 | W1 | **rng/hash** | Sonnet 5 | rapidhash vendored, `tl_hash64`, `NameHash`, `rng_for`, `rng_systems.h` | skeleton | `DETERMINISM.md` §9.5 |
 | W1 | **platform** | Sonnet 5 | contract, headless impl, sdl3 impl (SDL3 + stb vendored) | skeleton | `PLATFORM.md` §9 |
 | W1 | **runner+driver** | Sonnet 5 | `tl_tests` full, `tl_driver` skeleton, harness API stubs | skeleton | `TESTING.md` §9 |
 | W1 | **tooling-rt** | Sonnet 5 | `tl_log/prof/probe/assert` headers + runtimes, crash writer | skeleton | `TOOLING.md` §9 (foundation half) |
 | W1 | **jobs** | Opus 5 high | atomics, pool, `parallel_for/levels`, shuffle mode | platform thread API header | `JOBS.md` §6.4 |
-| W2 | ★ **gate0** | Fable 5 high | `tests/gate0` solver + scenarios + shadow; run PC (arm64 legs via CI since 2026-08-25); rev-2 palette | fx, mem | `GATE0-BENCH.md` §8.5 |
-| W2 | **ecs** | Fable 5 high | reflect, columns, schedule, commands, events, encoder, diff | mem, containers, rng/hash | `ECS.md` §10.8 |
+| W2 | ★ **gate0** | Opus 5 high | `tests/gate0` solver + scenarios + shadow; run PC (arm64 legs via CI since 2026-08-25); rev-2 palette | fx, mem | `GATE0-BENCH.md` §8.5 |
+| W2 | **ecs** | Opus 5 high | reflect, columns, schedule, commands, events, encoder, diff | mem, containers, rng/hash | `ECS.md` §10.8 |
 | W2 | **luau-vm** | Opus 5 high | Luau vendored, three VMs, sandbox, `fx.*`, data VM | fx, mem | `LUAU-LAYER.md` §10.12 (VM half) |
 | W2 | **net-p1** | Opus 5 high | `wire.h`, encoder, archive (checkpoint/chain are §20.8 Phases 6–7 — row drift fixed by RR-17, 2026-08-26) | containers, rng/hash, `TL_WIRE_STRUCT` | `NETCODE.md` §20.8 Phase 1 |
-| W2 | **alloy-substrate** | Fable 5 high | pools, broadphase, sdf + carve + redistance, cavity flood, topology/union-find, bond-graph heat flux (the first exact-conservation slice), edit intake | fx, mem, containers, rng/hash | `ALLOY.md` §14.7 steps 1, 3, 4 |
+| W2 | **alloy-substrate** | Opus 5 high | pools, broadphase, sdf + carve + redistance, cavity flood, topology/union-find, bond-graph heat flux (the first exact-conservation slice), edit intake | fx, mem, containers, rng/hash | `ALLOY.md` §14.7 steps 1, 3, 4 |
 | W2 | **vendor** | Sonnet 5 | SDL_ttf, imgui, enet, monocypher builds; pool hooks; adaptors | mem, platform | links clean on the `CANON.md` matrix (4 legs) |
-| W3 | ★ **alloy-solver** | Fable 5 high | pass 3 (from gate0), contacts, colouring, velocity pass | gate0 verdict, alloy-substrate | `ALLOY.md` §14.7 step 5 (solver) |
-| W3 | **ci-matrix** | Fable 5 high | `pr.yml` on the `CANON.md` target matrix (4 hosted native legs), 4-way `build_id` gate, `binarch.py`, `targets.py` 4th triple, the target-set ruling across the docs | skeleton | all four legs green on one commit (`BUILD.md` §10.4) |
-| W3 | **governance** | Fable 5 high | `WORKFLOW.md` + the PR-per-lane rule, `perf.yml` election measurement, the perf-reference re-ruling (owned hardware retired), `NETCODE.md` §19.10 four-leg battletest plan | ci-matrix | shipped through its own draft PR with a ship review verdict |
+| W3 | ★ **alloy-solver** | Opus 5 high | pass 3 (from gate0), contacts, colouring, velocity pass | gate0 verdict, alloy-substrate | `ALLOY.md` §14.7 step 5 (solver) |
+| W3 | **ci-matrix** | Opus 5 high | `pr.yml` on the `CANON.md` target matrix (4 hosted native legs), 4-way `build_id` gate, `binarch.py`, `targets.py` 4th triple, the target-set ruling across the docs | skeleton | all four legs green on one commit (`BUILD.md` §10.4) |
+| W3 | **governance** | Opus 5 high | `WORKFLOW.md` + the PR-per-lane rule, `perf.yml` election measurement, the perf-reference re-ruling (owned hardware retired), `NETCODE.md` §19.10 four-leg battletest plan | ci-matrix | shipped through its own draft PR with a ship review verdict |
 | W3 | **loop+input** | Sonnet 5 | loop, time, phases, interp, action map, Live/Script/Replay producers, recorder | ecs, platform | `FRAME-LOOP.md` §8.4, `INPUT.md` §9.6 |
 | W3 | **assets+data** | Sonnet 5 | asset registry, loaders, data-table compiler, save v1 | ecs, luau-vm, platform | `ASSETS-AND-DATA.md` §8.5 |
 | W3 | **luau-bindings** | Opus 5 high | `ecs.*`, `alloy.*`, `input/events/data/log`, trampolines, proxies, reload, `luauc`, binding docs | ecs, alloy-substrate, luau-vm | `LUAU-LAYER.md` §10.12 |
 | W3 | **render2d** | Sonnet 5 | camera, extract, queue/sort/batch, sprite, debug draw, sdl backend | ecs, platform, `sim/views.h` | `RENDER2D.md` §9 v0 criterion |
 | W3 | **editor** | Sonnet 5 | ImGui shell, inspector, console/cvars, log, profiler, probes, replay panel | ecs, render2d, vendor | `TOOLING.md` §9 v0 panels |
-| W3 | **net-p2** | Fable 5 high | ENet transport, sequencer, `NetworkProducer`, hash exchange, 2-peer loopback | net-p1, platform, `InputProducer` seam | `NETCODE.md` §20.8 Phase 2 |
+| W3 | **net-p2** | Opus 5 high | ENet transport, sequencer, `NetworkProducer`, hash exchange, 2-peer loopback | net-p1, platform, `InputProducer` seam | `NETCODE.md` §20.8 Phase 2 |
 | W3 | **alloy-fields** / **alloy-liquids-gases** / **alloy-chemistry** | Opus 5 high | passes 1, 2+PBF+cavities, 4+fire+transitions | alloy-substrate (+solver for liquids) | `ALLOY.md` §14.7 step 5 per pass |
 | W4 | ★ **v0-integration** | Opus 5 high | `app/wiring.cpp`, moving sprite, record→replay of a session | loop+input, render2d, luau-bindings, assets, editor | `ARCHITECTURE.md` §9 v0 |
 | W4 | **hovel-A** | Opus 5 high | `tl_hovel`, 3 machines, Milestone A | net-p2, loop, mem | `NETCODE.md` §19.5 A |
 | W4 | **alloy-plants / agents** | Opus 5 high | §7, §8.2 | alloy-solver | `ALLOY.md` tests |
-| W4 | **jobs-integration** | Fable 5 high | colouring on `parallel_levels`, ecs groups, chunk-keyed merges, the 1/2/8/16 gate | jobs, alloy-solver, ecs | `JOBS.md` §3 |
+| W4 | **jobs-integration** | Opus 5 high | colouring on `parallel_levels`, ecs groups, chunk-keyed merges, the 1/2/8/16 gate | jobs, alloy-solver, ecs | `JOBS.md` §3 |
 | W5 | ★ **milestone-2** | Opus 5 high | sim view, toy dig/flood/melt slice | render2d, alloy | `ARCHITECTURE.md` §9 M2 |
-| W5 | **hovel B–E**, **net-p3…p8**, **T-A-01**, **soaks**, **game scripts** | per lane: net/T-A-01 Fable high, rest Opus/Sonnet | per their docs | W4 | per their docs |
+| W5 | **hovel B–E**, **net-p3…p8**, **T-A-01**, **soaks**, **game scripts** | per lane: net/T-A-01 Opus 5 high, rest Opus/Sonnet | per their docs | W4 | per their docs |
 
 ## 3. What this changes versus the serial TODO
 
@@ -193,6 +204,11 @@ than one lane.
 *Rev 1 — 2026-08-22. Revise at each wave boundary: record what actually ran in parallel and what
 blocked, one line per lane, so the next wave's cut is measured, not guessed. §5 opened 2026-08-27
 with the W0/W1/W2 retros this footer had been owed since it was written, plus an interim W3 line.*
+*§2 amended 2026-08-28 (ruled, Rafael, `WORKFLOW.md` §5 R-21): Fable 5 is retired from the
+program. Ten lane seats and the steward move to Opus 5 high; the model set is Sonnet 5 + Opus 5.
+The reason is scheduling, not quality — `alloy-substrate` slipped a whole wave waiting on a weekly
+reset — and the depth is relocated to R-22 (two disjoint Opus ship reviewers on ★/determinism
+lanes) and R-23 (a confirmed determinism class leaves its lane as a gate), never simply dropped.*
 *§1 amended 2026-08-27 (ruled, Rafael): the W3 `save (ecs encoder)` node is deleted from the
 graph. It had no §2 row, and §2's **assets+data** row already owns "save v1" — which that lane
 built (`src/core/save.*`, the REFLECTED + `ECS_COLUMN` encoder, PR #14). The node was stale, not

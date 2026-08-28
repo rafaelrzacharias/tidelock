@@ -7783,3 +7783,46 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > Fable (spends the seat on work a Fable reviewer reads anyway, and delays substrate), and
 > amending §2 to say the review seat governs (a real policy change taken on a convenient case —
 > §2's "never low effort on sim or netcode code" reads as being about who writes it).
+
+> **FABLE IS RETIRED FROM THE PROGRAM — R-21/R-22/R-23 ruled (Rafael, 2026-08-28 ~12:10 local).**
+> The model set is **Sonnet 5 + Opus 5**. Ten `ROADMAP.md` §2 lane seats and the steward move to
+> Opus 5 high; R-8 keeps its number and changes subject; R-9's ship-round seat and R-17's
+> Fable-specific trigger are amended; `CLAUDE.md`'s model gate carries the new set.
+> **The reason is scheduling, not quality.** `alloy-substrate` — the W2 keystone blocking five W3
+> lanes — slipped an ENTIRE WAVE waiting on a weekly reset, and PR #17 was about to wait three
+> more days for a ship round. That is the cost R-21 removes.
+> **What Fable was buying is relocated, not waived, and the honest reason is stated in the docs:
+> nobody has a controlled comparison showing Opus equals Fable at the determinism gate.** So the
+> guarantee is replaced twice over:
+> - **R-22** — on ★ and determinism-critical lanes the ship round is **two independent
+>   fresh-context Opus reviewers over an exhaustive DISJOINT partition, both of whom must return
+>   *ship***; a disagreement is a fix round, never an average. Not depth-by-repetition: PR #16
+>   measured that a seam defect appears BETWEEN two reviewers' coverage lists — three reviewers
+>   each proved one criterion satisfied inside its own area while the criterion was in fact unmet.
+>   Ordinary lanes keep one Opus ship reviewer.
+> - **R-23 — the determinism ratchet.** A confirmed determinism CLASS (not a one-off bug) does not
+>   let its lane close until it is machine-checked or filed as a ruling request naming the gate
+>   that would check it. A `LESSONS.md` line alone is no longer discharge. The evidence is entirely
+>   in-repo and is the argument: the `X = Type{}` class recurred **three** times, "an empty
+>   selection must be an error" **four** times across four tools, "a negative test refused for the
+>   wrong reason" **three** times in one file — each caught by a careful read, written down, and
+>   then repeated. A reviewer's catch is one event; a gate's catch is permanent. **Scoped so it
+>   never becomes a demand to gate judgement**: it binds determinism/ordering/hashing classes with
+>   a runtime or link-time observable. Design errors, doc contradictions, unreachable criteria and
+>   over-wide claims stay with reviewers forever — a gate written for those passes while the thing
+>   it names is false.
+>
+> **FIRST GATE UNDER R-23, and it is queued not launched: the DIVERGENT-HISTORY HARNESS.** Build
+> the same logical state N different ways and require ONE hash, over every registered arena.
+> Chosen on evidence rather than taste — it would have caught **five** confirmed instances of the
+> single recurring determinism failure in this program, "the hashed extent is a function of history
+> rather than state": B-1 (PR #17), RR-53 (`world.entities.free`), the original `Array` hashed-tail
+> defect, the `Map` reused-arena defect, and it is the whole subject of `MEMORY.md` §1.2. **Cut it
+> before or alongside `alloy-substrate`**, which adds nineteen arenas to the hashed set and is
+> exactly the moment the class multiplies; RR-53's fixed-mode slice then lands against a gate that
+> proves it rather than a test that asserts it. Owner: unassigned — `tools/` and `tests/` are
+> nobody's cone. NOT launched; Rafael's word.
+>
+> **IMMEDIATE CONSEQUENCE — the Tuesday wait is gone.** PR #17's ship round is now two disjoint
+> Opus reviewers under R-22 and can run today. `alloy-substrate`, RR-53's slice and the wave
+> sweep's own confirming round are all off the reset clock.
