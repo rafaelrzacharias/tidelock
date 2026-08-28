@@ -171,8 +171,15 @@ nowhere narrower, so the only way to budget such a heap is to replace it program
 
 - **Arena-offset guard:** at tick start record `used` of every registered arena; at tick end
   assert only scratch moved — *except* inside the barrier-apply window, where arenas flagged
-  `GROWS_AT_BARRIER` (ECS columns, Alloy pools during pass 5) may grow. A growth outside the window
-  is `TL_FATAL` in debug. This is the Layr zero-alloc guard, made structural.
+  `GROWS_AT_BARRIER` (ECS columns, Alloy pools during pass 5) may **move `used` — grow OR shrink**.
+  Any movement outside the window is `TL_FATAL` in debug. **Shrink was added by ruling
+  2026-08-28 (RR-48, PR #17 review D2); before it this clause said "grow" and the guard's code
+  already allowed either**, because it compares `used != used_at_start` rather than `>`. A column
+  now shrinks its dense and entity arenas on remove so `[base, used)` is the live extent
+  (`core/column.h`), and that legality must be a sanctioned property rather than an accident of
+  the comparison operator — a later author reading "grow" could tighten the guard to fatal on any
+  movement, or relax it to `>` to match the prose, and break lockstep hashing either way.
+  `CLAUDE.md`: silence in the spec is not permission. This is the Layr zero-alloc guard, made structural.
 - **Global allocator shim:** in `dev` and `netcode` tiers, `operator new`/`malloc` from `src/`
   code is a link error (the symbol audit) for sim libs and a `TL_FATAL` tripwire shim for the
   rest; vendor libs are routed through `mem_pool` via their hook APIs (`lua_newstate(alloc_fn)`,
@@ -360,7 +367,7 @@ Snapshot* ring_push(SnapshotRing*, u64 tick);  const Snapshot* ring_find(const S
 ```cpp
 struct ArenaGuard { u64 used_at_start[MAX_ARENAS]; u8 in_barrier; u8 _pad[7]; };
 void guard_tick_begin(ArenaGuard*, const ArenaRegistry*);       // baselines used[]; calls the alloc_shim anchor
-void guard_barrier_begin/end(ArenaGuard*, const ArenaRegistry*); // the GROWS_AT_BARRIER window: begin TL_FATALs if a barrier-flagged arena already grew this tick (growth is legal only INSIDE the window — §2, which the one-arg spelling could not enforce); end re-baselines barrier-flagged arenas
+void guard_barrier_begin/end(ArenaGuard*, const ArenaRegistry*); // the GROWS_AT_BARRIER window: begin TL_FATALs if a barrier-flagged arena's `used` already MOVED this tick, in either direction (movement is legal only INSIDE the window — §2, which the one-arg spelling could not enforce); end re-baselines barrier-flagged arenas
 void guard_tick_end(ArenaGuard*, const ArenaRegistry*);   // for each arena: if used != used_at_start and !(flags & GROWS_AT_BARRIER) → TL_FATAL(name)
 ```
 
