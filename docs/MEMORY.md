@@ -72,11 +72,23 @@ ErrCode registry_restore(ArenaRegistry*, const Snapshot*);                 // fa
   neither flag (`GROWS_AT_BARRIER` alone — the guard's business, §2).
 - **Every container on an `ARENA_HASHED` arena is SIZED AT INIT** (ruled 2026-08-24). A container
   that grows by bump-allocating a new block orphans its old one below `used`, where the arena's
-  hash covers it forever — so the hash encodes allocation history, not state. This does *not*
-  desync a session (lockstep peers run identical op histories, so their orphans are identical, and
-  checkpoints are raw arena images — `DETERMINISM.md` §5 — so a joiner inherits the exact bytes);
-  what it costs is hygiene: unbounded hashed garbage, and a hash that moves for a reason no state
-  change explains. `Array<T>` already had the fixed mode (`CONTAINERS.md` §8.1); `Map<K,V>` gained
+  hash covers it forever — so the hash encodes allocation history, not state.
+  **AMENDED 2026-08-28 (RR-48, PR #17 review D1) — the 2026-08-24 clause below was sound for the
+  paths that existed then and is not sound for the save path, which did not.** As written it read:
+  *"This does not desync a session (lockstep peers run identical op histories, so their orphans are
+  identical, and checkpoints are raw arena images — `DETERMINISM.md` §5 — so a joiner inherits the
+  exact bytes); what it costs is hygiene."* Both halves still hold **for checkpoints**: peers
+  replaying one command stream do produce identical histories, and `registry_restore` copies the
+  recorded `used` per slot, so a snapshot-restored world cannot diverge in extent from the world
+  that snapshotted it. What the clause could not consider is `core/save`, built in W3: `save_read`
+  rebuilds a column by `world_add_raw` per row, so a **loaded** column's extent is a function of
+  the load, not of the saving world's history — two worlds with identical live state and different
+  histories then hash differently. That is a desync, not hygiene, the moment anything on a lockstep
+  path consumes a save (`ASSETS-AND-DATA.md` §5 routes cross-build rejoin through exactly that).
+  ECS columns are fixed by construction — `column_remove` shrinks the arena so `[base, used)` is
+  the live extent (`core/column.h`) — and the general rule below is unchanged for every other
+  container. **The residual cost is still hygiene where it applies, but "does not desync" is no
+  longer a safe premise to size a new pool against.** `Array<T>` already had the fixed mode (`CONTAINERS.md` §8.1); `Map<K,V>` gained
   `map_init_fixed` to match (`CONTAINERS.md` §3), and that *is* the enforcement — a container
   cannot see its own arena's registry flags, but a fixed-mode container cannot grow anywhere, so
   sizing at init is checked where the growth would happen rather than where the flag lives.
