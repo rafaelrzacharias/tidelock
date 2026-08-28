@@ -152,15 +152,18 @@ struct SaveComponentMigration {
 
 // One registered arena's save shape (this lane's own construction - the doc gives the file
 // FORMAT, not how a caller maps its registered arenas to it; recorded in TODO.md as a "signature
-// added over spec", the slotmap_init/world_init precedent). `info`/`max_rows` are required for
-// REFLECTED and ECS_COLUMN, ignored for RAW_POOL/CHUNK_STORE (not yet implemented - TL_FATAL if
-// selected). `world`/`comp` are required only for ECS_COLUMN (the load-side re-add door).
+// added over spec", the slotmap_init/world_init precedent). `info` is required for REFLECTED and
+// ECS_COLUMN, ignored for RAW_POOL/CHUNK_STORE (not yet implemented - TL_FATAL if selected).
+// **`max_rows` must be exactly 1 for REFLECTED** (RR-49, ruled 2026-08-28: that kind is
+// singleton-only and the encoder TL_CHECKs it); it sizes the decode buffer for ECS_COLUMN, which
+// is the kind for a multi-row arena. `world`/`comp` are required only for ECS_COLUMN (the
+// load-side re-add door).
 struct SaveArenaDesc {
     NameHash              arena_id;      // must match the ArenaRegistry entry's id
     SaveEncoderKind        kind;
     u8                     _pad0[3];
     const ComponentInfo*   info;         // REFLECTED / ECS_COLUMN only
-    u32                    max_rows;     // decode buffer sizing, REFLECTED / ECS_COLUMN only
+    u32                    max_rows;     // ECS_COLUMN: decode buffer sizing. REFLECTED: must be 1
     ComponentId             comp;         // ECS_COLUMN only: world_add_raw's target component
 };
 

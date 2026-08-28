@@ -624,3 +624,37 @@ TL_TEST(save_read_forged_arena_count_refused, "core,save") {
     remove(SAVE_PATH);
     platform_test_shutdown(platform);
 }
+
+// --- RR-49 (ruled 2026-08-28): SAVE_ENC_REFLECTED is singleton-only, and the guard is live -----
+
+TL_TEST_EXPECT_FATAL(save_reflected_rejects_a_multi_row_descriptor, "core,save,fatal") {
+    (void)t;
+    // Before RR-49 this descriptor produced a save holding row 0 only, with save_write AND
+    // save_read both returning ERR_OK - rows 1..n lost with no error anywhere, which
+    // ASSETS-AND-DATA.md section 5 forbids by name ("no silent partial loads"). The encoder
+    // writes a literal one row and the apply side memcpy's one row, so max_rows > 1 describes an
+    // arena this kind cannot carry; ECS_COLUMN is the multi-row kind. TL_CHECK, so the trigger is
+    // live in every tier including the two that ship - which is the point, since that is where a
+    // silent partial save would actually corrupt a player's file.
+    const PlatformApi* platform = platform_test_init();
+    TL_ASSERT_NOT_NULL(platform);
+    VMemArena scratch;
+    TL_ASSERT_EQ(vmem_arena_init(&scratch, "save_rr49_scratch"_id, 16u * 1024u * 1024u, 0u,
+                                 &platform->vmem), ERR_OK);
+
+    WorldFixture* f = wt_fixture(0);
+    TL_ASSERT_TRUE(world_fixture_init(f, 1u));
+    world_register_component(&f->w, &WCfg_info);
+    world_build_schedule(&f->w);
+
+    SaveArenaDesc ad{};
+    ad.arena_id = f->w.comps[world_component_id<WCfg>(&f->w)].dense_arena.id;
+    ad.kind = SAVE_ENC_REFLECTED;
+    ad.info = &WCfg_info;
+    ad.max_rows = 3u;              // the whole of the forgery: one field, one value
+
+    SaveDesc d = base_desc(&f->reg, &f->w);
+    d.arena_descs = Span<const SaveArenaDesc>{ &ad, 1u };
+
+    (void)save_write(&d, platform, sv(SAVE_PATH), &scratch);   // TL_CHECK fires here
+}

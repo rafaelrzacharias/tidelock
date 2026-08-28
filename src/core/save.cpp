@@ -96,6 +96,15 @@ ErrCode save_write(const SaveDesc* desc, const PlatformApi* platform, StrView pa
         switch (ad->kind) {
             case SAVE_ENC_REFLECTED: {
                 TL_CHECK(!has_strid_field(ad->info));   // save.h's documented scope cut
+                // REFLECTED is SINGLETON-ONLY (RR-49, ruled 2026-08-28). The literal 1u below is
+                // the contract, not a stopgap: this arm writes one row and the apply side
+                // memcpy's one row, so a descriptor claiming more rows used to lose every row
+                // past the first and return ERR_OK - a silent partial save, against
+                // ASSETS-AND-DATA.md section 5's own "no silent partial loads" and CLAUDE.md's
+                // no-silent-fallbacks rule. TL_CHECK, not TL_ASSERT: a mis-described descriptor
+                // is a caller BUG that destroys data, and TL_ASSERT is compiled out on exactly
+                // the two tiers that ship (LESSONS.md). Multi-row arenas use ECS_COLUMN.
+                TL_CHECK(ad->max_rows == 1u);
                 const ArenaEntry* e = find_registry_entry(desc->registry, ad->arena_id);
                 TL_CHECK(e != nullptr);
                 encoder_write_rows(&w, ad->info, e->arena->base, 1u);
