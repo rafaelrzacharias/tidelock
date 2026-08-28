@@ -7867,3 +7867,30 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > `test_list.inc` remove-vs-add, Review B's three editor nits, and the three merged sweep branches
 > (`w3-sweep-a`/`-b`/`-c`) still on origin awaiting Rafael's word on deletion.
 > **Next free ids, measured not inherited: RR-54 and R-25.**
+
+> **BOTH R-24 REVIEW ROUNDS DISPATCHED (steward, 2026-08-28 22:33 local).** Recorded here because
+> R-24's own finding was that the task order lived only in a handover prompt no second session can
+> read. Neither session pushes to `main`; neither may allocate a ruling id.
+> - **PR #17 ship round — `session_01GgBnGb85zHN8tSzFkWfDAT`**, Opus 5, checked out on
+>   `w3-rr48-hash-extent` @ `0a32b45`. The SOLE reviewer, per R-24; the steward's dissent is at
+>   `WORKFLOW.md` §5 R-24 and the brief carries it, so the reviewer knows no second coverage list
+>   exists. Briefed to attack the ruling's own premise (that everything above `count` is
+>   zero-guaranteed), to judge `world_dual.test.cpp` against the divergent-histories bar rather than
+>   the "two instances, same op sequence" bar `LESSONS.md` warns is the weakest test that still looks
+>   like one, and to build all four tiers over D7's `TL_CHECK` promotion. Deliverable: one comment on
+>   PR #17, verdict + ranked defects + **coverage list**.
+> - **Wave-sweep confirming round — `session_01AzWxygKxQgD724S18UqfW6`**, Opus 5, on `main`.
+>   Closes `WORKFLOW.md` §3 artifact 2, separate dispatch per R-24. Area: `679c4b2..4030679` —
+>   the eight R-19 steward fixes (11 files + 1 binary, +212/−61) that landed on `main` with **no
+>   review round at all**, which is what R-19 authorises and why this round exists. Asked three
+>   questions: does each fix implement its ruling *and nothing wider* (R-19 is bounded); did any fix
+>   introduce a defect (RR-49's `TL_CHECK` is tier-dependent; `1850308` moves a registry off the
+>   stack; `1e16a4e` changes a CMake idiom); and what did the range leave behind that no ruling asked
+>   for. Also asked to confirm RR-50 and A-D8 are genuinely still absent. Deliverable: verdict into
+>   `TODO.md` on branch `w3-sweep-confirm`, pushed for the steward to merge — the pattern areas
+>   A/B/C used, since there is no PR to comment on.
+>
+> **Steward's own next actions, in order:** merge `w3-sweep-confirm` locally per R-16 (`--no-ff`,
+> then verify `git log -1 --format='%an <%ae> | %cn'` on `main` reads Rafael twice) — never the
+> GitHub button; relay #17's verdict to Rafael rather than acting on a fix-first alone; archive each
+> child session in the same turn its verdict lands. Backstop check-in re-armed for 00:05 local.
