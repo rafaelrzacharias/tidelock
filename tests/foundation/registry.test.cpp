@@ -35,7 +35,7 @@ struct TestWorld {
 
 bool world_init(TestWorld* w) {
     w->api = test_vmem_api();
-    w->reg = ArenaRegistry{};
+    memset(&w->reg, 0, sizeof(w->reg));   // never `= ArenaRegistry{}`: a ~96 KB stack temporary at -O0
     if (vmem_arena_init(&w->a, 0xAAu, 1u << 20, ARENA_ZERO_ON_PUSH, &w->api) != ERR_OK) { return false; }
     if (vmem_arena_init(&w->b, 0xBBu, 1u << 20, ARENA_ZERO_ON_PUSH, &w->api) != ERR_OK) { return false; }
     if (vmem_arena_init(&w->c, 0xCCu, 1u << 20, ARENA_ZERO_ON_PUSH, &w->api) != ERR_OK) { return false; }
@@ -65,7 +65,7 @@ void fill(VMemArena* a, u64 n, u8 seed) {
 }  // namespace
 
 TL_TEST(registry_snapshot_restore_round_trip, "foundation,mem,smoke") {
-    TestWorld w;
+    static TestWorld w;   // static: TestWorld carries a ~96 KB ArenaRegistry (D2)
     TL_ASSERT_TRUE(world_init(&w));
     fill(&w.a, 100u, 1u);      // odd size: forces a 64-byte-aligned gap before b's segment
     fill(&w.b, 3000u, 7u);
@@ -113,7 +113,7 @@ TL_TEST(registry_snapshot_restore_round_trip, "foundation,mem,smoke") {
 }
 
 TL_TEST(registry_restore_gates_on_fingerprint_and_count, "foundation,mem,smoke") {
-    TestWorld w;
+    static TestWorld w;   // static: TestWorld carries a ~96 KB ArenaRegistry (D2)
     TL_ASSERT_TRUE(world_init(&w));
     fill(&w.a, 64u, 3u);
 
@@ -135,10 +135,10 @@ TL_TEST(registry_restore_gates_on_fingerprint_and_count, "foundation,mem,smoke")
     TL_ASSERT_EQ(registry_restore(&w.reg, s), ERR_OK);
 
     // A registry with a different count (a different world layout): refused.
-    TestWorld v;
+    static TestWorld v;   // static: TestWorld carries a ~96 KB ArenaRegistry (D2)
     TL_ASSERT_TRUE(world_init(&v));
     registry_set_fingerprint(&v.reg, fp1);
-    ArenaRegistry two = {};
+    static ArenaRegistry two; memset(&two, 0, sizeof(two));   // static + memset, not a 96 KB temporary (D2)
     registry_add(&two, 0xAAu, &v.a, ARENA_HASHED | ARENA_SNAPSHOT);
     registry_add(&two, 0xBBu, &v.b, ARENA_SNAPSHOT);
     registry_seal(&two);
@@ -154,7 +154,7 @@ TL_TEST(registry_restore_refuses_wrong_ids_before_app_fingerprint, "foundation,m
     // entirely on registry_seal's own id fold (docs/MEMORY.md section 8.3). A same-count
     // registry with one different id, or the same ids in a different order, must be refused -
     // registration order is the lockstep contract.
-    TestWorld w;
+    static TestWorld w;   // static: TestWorld carries a ~96 KB ArenaRegistry (D2)
     TL_ASSERT_TRUE(world_init(&w));
     fill(&w.a, 64u, 3u);
 
@@ -164,9 +164,9 @@ TL_TEST(registry_restore_refuses_wrong_ids_before_app_fingerprint, "foundation,m
     TL_ASSERT_EQ(registry_snapshot(&w.reg, s, 9u), ERR_OK);
 
     // Same count, same shapes, one different id: refused with no app fingerprint ever set.
-    TestWorld v;
+    static TestWorld v;   // static: TestWorld carries a ~96 KB ArenaRegistry (D2)
     TL_ASSERT_TRUE(world_init(&v));
-    ArenaRegistry wrong_id = {};
+    static ArenaRegistry wrong_id; memset(&wrong_id, 0, sizeof(wrong_id));   // static + memset, not a 96 KB temporary (D2)
     registry_add(&wrong_id, 0xAAu, &v.a, ARENA_HASHED | ARENA_SNAPSHOT);
     registry_add(&wrong_id, 0xBBu, &v.b, ARENA_SNAPSHOT | ARENA_GROWS_AT_BARRIER);
     registry_add(&wrong_id, 0xDDu, &v.c, ARENA_HASHED | ARENA_SNAPSHOT);   // 0xDD, not 0xCC
@@ -175,7 +175,7 @@ TL_TEST(registry_restore_refuses_wrong_ids_before_app_fingerprint, "foundation,m
     TL_EXPECT_EQ(registry_restore(&wrong_id, s), ERR_SNAPSHOT_MISMATCH);
 
     // Same ids, different ORDER: also refused (the fold is order-sensitive by design).
-    ArenaRegistry wrong_order = {};
+    static ArenaRegistry wrong_order; memset(&wrong_order, 0, sizeof(wrong_order));   // static + memset, not a 96 KB temporary (D2)
     registry_add(&wrong_order, 0xBBu, &v.b, ARENA_SNAPSHOT | ARENA_GROWS_AT_BARRIER);
     registry_add(&wrong_order, 0xAAu, &v.a, ARENA_HASHED | ARENA_SNAPSHOT);
     registry_add(&wrong_order, 0xCCu, &v.c, ARENA_HASHED | ARENA_SNAPSHOT);
@@ -193,7 +193,7 @@ TL_TEST(registry_restore_refuses_wrong_ids_before_app_fingerprint, "foundation,m
 TL_TEST(registry_restore_into_fresh_world_commits, "foundation,mem,smoke") {
     // Late-join/resync shape (docs/DETERMINISM.md §5): the target arenas have never committed
     // a page; restore must commit on demand and land byte-identical extents.
-    TestWorld w;
+    static TestWorld w;   // static: TestWorld carries a ~96 KB ArenaRegistry (D2)
     TL_ASSERT_TRUE(world_init(&w));
     fill(&w.a, (u64)COMMIT_GRANULE + 100u, 5u);   // crosses a commit granule
     fill(&w.b, 10u, 9u);
@@ -203,7 +203,7 @@ TL_TEST(registry_restore_into_fresh_world_commits, "foundation,mem,smoke") {
     Snapshot* s = ring_push(&ring, 1u);
     TL_ASSERT_EQ(registry_snapshot(&w.reg, s, 1u), ERR_OK);
 
-    TestWorld f;
+    static TestWorld f;   // static: TestWorld carries a ~96 KB ArenaRegistry (D2)
     TL_ASSERT_TRUE(world_init(&f));
     TL_EXPECT_EQ(f.a.committed, (u64)0);
     TL_ASSERT_EQ(registry_restore(&f.reg, s), ERR_OK);
@@ -217,7 +217,7 @@ TL_TEST(registry_restore_into_fresh_world_commits, "foundation,mem,smoke") {
 }
 
 TL_TEST(ring_push_find_wrap_and_eviction, "foundation,mem,smoke,fast") {
-    TestWorld w;
+    static TestWorld w;   // static: TestWorld carries a ~96 KB ArenaRegistry (D2)
     TL_ASSERT_TRUE(world_init(&w));
     fill(&w.a, 16u, 1u);
 
@@ -268,7 +268,7 @@ TL_TEST(ring_push_find_wrap_and_eviction, "foundation,mem,smoke,fast") {
 TL_TEST(registry_edges_tick0_empty_and_max_arenas, "foundation,mem,fast") {
     // Edge matrix (docs/TESTING.md §7): tick 0 as a legitimate snapshot key, the empty
     // registry, and a MAX_ARENAS-full registry round trip.
-    TestWorld w;
+    static TestWorld w;   // static: TestWorld carries a ~96 KB ArenaRegistry (D2)
     TL_ASSERT_TRUE(world_init(&w));
     fill(&w.a, 48u, 2u);
 
@@ -326,7 +326,7 @@ TL_TEST(ring_overflow_is_a_budget_violation, "foundation,mem,fast") {
     // Dev tier: the overflow comes back as a named error and the slot is invalidated, so a
     // stale blob can never be found under the new tick (docs/MEMORY.md §7 R-2). The
     // netcode/ship half (TL_FATAL) is a deferred fatal-expected test.
-    TestWorld w;
+    static TestWorld w;   // static: TestWorld carries a ~96 KB ArenaRegistry (D2)
     TL_ASSERT_TRUE(world_init(&w));
     fill(&w.a, 10000u, 1u);
 
@@ -353,7 +353,7 @@ TL_TEST(ring_overflow_is_a_budget_violation, "foundation,mem,fast") {
 TL_TEST(registry_hash_region_integrity, "foundation,mem,determinism,smoke") {
     // docs/DETERMINISM.md §4: mutating a transient byte must NOT move the hash; mutating any
     // authoritative byte MUST. Automated over every registered arena.
-    TestWorld w;
+    static TestWorld w;   // static: TestWorld carries a ~96 KB ArenaRegistry (D2)
     TL_ASSERT_TRUE(world_init(&w));
     fill(&w.a, 200u, 3u);
     fill(&w.b, 100u, 5u);
@@ -485,7 +485,7 @@ void sim_step(TestWorld* w, u64 tick) {
 TL_TEST(registry_restore_reproduces_hash_trace, "foundation,mem,determinism,smoke") {
     // docs/MEMORY.md §8.8: a snapshot restore mid-run reproduces the original hash trace from
     // that tick onward - the rollback contract netcode rides on (docs/DETERMINISM.md §5).
-    TestWorld w;
+    static TestWorld w;   // static: TestWorld carries a ~96 KB ArenaRegistry (D2)
     TL_ASSERT_TRUE(world_init(&w));
     fill(&w.c, 32u, 1u);
 
@@ -531,7 +531,7 @@ TL_TEST_EXPECT_FATAL(registry_add_hashed_without_snapshot_is_fatal, "foundation,
     if (vmem_arena_init(&a, 0xF1u, 1u << 16, ARENA_ZERO_ON_PUSH, &api) != ERR_OK) {
         return;   // setup failed: exits 0, which the runner scores FAIL for a fatal-expected row
     }
-    ArenaRegistry r = {};
+    static ArenaRegistry r; memset(&r, 0, sizeof(r));   // static + memset, not a 96 KB temporary (D2)
     registry_add(&r, 0xF1u, &a, ARENA_HASHED);   // no ARENA_SNAPSHOT - TL_FATAL, exit 2
 }
 
@@ -545,7 +545,7 @@ TL_TEST_EXPECT_FATAL(registry_add_hashed_grows_without_snapshot_is_fatal, "found
     if (vmem_arena_init(&a, 0xF2u, 1u << 16, ARENA_ZERO_ON_PUSH, &api) != ERR_OK) {
         return;   // setup failed: exits 0, which the runner scores FAIL for a fatal-expected row
     }
-    ArenaRegistry r = {};
+    static ArenaRegistry r; memset(&r, 0, sizeof(r));   // static + memset, not a 96 KB temporary (D2)
     registry_add(&r, 0xF2u, &a, ARENA_HASHED | ARENA_GROWS_AT_BARRIER);   // still no SNAPSHOT - TL_FATAL
 }
 
@@ -556,14 +556,14 @@ TL_TEST_EXPECT_FATAL(registry_add_hashed_grows_without_snapshot_is_fatal, "found
 // and the second registry covers the other three (the 2026-08-25 sweep's D4: the name promised
 // "every" while three shapes went untested).
 TL_TEST(registry_add_accepts_every_legal_flag_combination, "foundation,mem,fast") {
-    TestWorld w;
+    static TestWorld w;   // static: TestWorld carries a ~96 KB ArenaRegistry (D2)
     TL_ASSERT_TRUE(world_init(&w));
     TL_EXPECT_EQ(w.reg.count, 4u);
     TL_EXPECT_EQ(w.reg.e[1].flags & ARENA_HASHED, 0u);     // SNAPSHOT | GROWS: legal
     TL_EXPECT_EQ(w.reg.e[3].flags, (u32)ARENA_GROWS_AT_BARRIER);   // GROWS alone: legal
     // The remaining three legal shapes, on a second registry over the same arenas (registration
     // records a pointer, it takes no ownership): bare membership, SNAPSHOT alone, all three bits.
-    ArenaRegistry r2 = {};
+    static ArenaRegistry r2; memset(&r2, 0, sizeof(r2));   // static + memset, not a 96 KB temporary (D2)
     registry_add(&r2, 0x01u, &w.a, 0u);
     registry_add(&r2, 0x02u, &w.b, ARENA_SNAPSHOT);
     registry_add(&r2, 0x03u, &w.c, ARENA_HASHED | ARENA_SNAPSHOT | ARENA_GROWS_AT_BARRIER);
