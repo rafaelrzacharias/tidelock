@@ -253,7 +253,12 @@ error-code fixtures that cannot exist while their prerequisite lane is unlaunche
 and round 2 judged every one of those gaps an honest deferral, not a defect (`CLAUDE.md`'s "no
 speculative breadth" — compiling against an Alloy schema, or a font pipeline, that does not exist
 yet is the Layr trap). Split below into what `assets+data` owns and has built, and what is
-deferred, each clause naming the lane that closes it.
+deferred — each deferred clause naming the lane that closes it **or stating plainly that no lane
+owns it**. Two do not, and that is the ruled state rather than an editing slip (RR-52, ruled
+2026-08-28): text/fonts gets no lane now, because nothing yet needs rendered text — `render2d`
+shipped `render/text.cpp` as a reserved stub by its own done criterion — and a lane is cut when a
+real consumer pulls it in, never on spec. Whoever takes it inherits a build change as well as
+code: `tl_core` links `stb`, not the vendored `sdl_ttf`.
 
 **Owned by `assets+data`, built (PR #14):**
 - Assets: load/dedup/refcount/free/stale; missing file and malformed image → named errors;
@@ -271,7 +276,7 @@ deferred, each clause naming the lane that closes it.
   Nightly cross-build load of the previous commit's fixture is CI-tooling's mechanism to wire,
   not built by this lane.
 
-**Deferred, each clause naming its owning lane:**
+**Deferred — each clause naming its owning lane, or recorded as unowned (RR-52):**
 - fx literal acceptance/rejection table; reference resolution incl. forward refs —
   `ERR_DATA_BAD_FX_LITERAL` and `ERR_DATA_DANGLING_REF` are declared, `TL_FATAL`'d scope cuts with
   no Alloy schema to compile a real fixture against. Owner: **alloy-substrate** (schema + the
