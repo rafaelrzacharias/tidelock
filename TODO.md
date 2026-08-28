@@ -8052,3 +8052,42 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > `ERR_OK` after dropping rows. **`alloy-substrate`'s pools are the named first consumer of
 > REFLECTED**, so this is the second time in this sweep that a bounded fix lands correct-but-half
 > and the lane most likely to trip it is the one queued next.
+
+> **THREE RULING REQUESTS FROM THE TWO R-24 ROUNDS (steward-allocated, 2026-08-28 23:15 local).**
+> Both reviewers correctly declined to allocate ids; the steward allocates, Rafael rules. Each
+> question's evidence lives in the round that raised it — this entry allocates and states the
+> question, it does not restate the finding.
+>
+> **RR-54 — the dense-ORDER channel: document it, or close it?** PR #17's ship round measured that
+> RR-48 closes the *extent* channel but that `column_remove`'s swap-remove leaves packed order a
+> function of removal history, and demonstrated two worlds with identical live rows and identical
+> extent hashing differently. `src/core/interp.cpp:29-31` already states this; `column.h`'s new
+> block states the opposite unqualified. The reviewer's read is that this is **documentation** —
+> packed order is deliberately part of the walk contract (`ECS.md`) — and that the fix is to split
+> the claim into its two channels plus either rename the regression row or add the negation row.
+> **The ruling needed:** is dense order allowed to stay history-dependent? If yes this is a doc +
+> test-name fix inside PR #17; if no it is a second slice and `alloy-substrate` waits again.
+> **This one gates a replay-based rejoin, not a restore-based one** — `registry_restore` memcpys,
+> so order survives; a replay does not.
+>
+> **RR-55 — does RR-49's ruling reach `save_read`'s REFLECTED arm?** The confirming round found
+> RR-49 implemented on the write path only: `encoder_read_rows` takes `row_count` from the stream
+> and `save.cpp:305` applies a single row, so a 3-row REFLECTED segment decodes three and keeps one,
+> returning `ERR_OK` — the silent partial load the ruling was made to close, on the path that eats
+> foreign bytes. The fix is one `TL_CHECK` plus one fatal-expected row, in the same cone.
+> **The ruling needed:** does a ruling that says "the REFLECTED arm" reach the second arm, making
+> this R-19 bounded work the steward may do now — or is it new scope needing its own slice?
+> Reviewer's confidence: **High** that the path is as traced (source, end to end); the reachability
+> half is reasoned, not measured — no forged-file reproducer was built.
+>
+> **RR-56 — does `CPP-SUBSET.md` §1's writable-static ban extend to `tests/`?** `1850308` took
+> `ArenaRegistry` off the test stack by making fifteen function-local statics, measured at
+> **1,774,608 bytes of `.bss`** (0 before). Not a correctness defect — the runner is process-per-
+> test, so each static is freshly zero-initialised — and it is legal only because
+> `tools/audit/symbols.py` audits `src/`'s static libs and not the test executable, which is an
+> exemption by scope rather than by intent. An arena would have solved it without the banned class,
+> and the safety silently depends on process-per-test: an in-process worker mode turns those
+> fifteen into shared mutable state. **The ruling needed:** does the ban cover `tests/`, and if so
+> does `symbols.py` grow to enforce it? Today the question has no home in any doc.
+>
+> **Next free ids, re-measured after this block: RR-57 and R-25.**
