@@ -7617,3 +7617,39 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > contract), **RR-50** (a `tools/` gate slice), **A's D8** (no encoder bound has a fatal-expected
 > row — new test surface across a file, not a localized fix), **B-2's multi-row question** if it is
 > ever reopened.
+
+> **RR-48 SCHEDULING AND MECHANISM RULED (Rafael, 2026-08-28). Scheduled BEFORE `alloy-substrate`,
+> as a steward slice with a fresh-context review** — so substrate registers its nineteen arenas
+> against the final hashing rule instead of being re-based onto a changed contract, and so the
+> re-pinning set never grows past what it is today.
+>
+> **STEWARD CORRECTION, against a claim that shaped the scheduling decision.** The option I put to
+> Rafael said RR-48 "changes every existing hash value in the tree — pinned traces, gate0 CSVs, the
+> fx trace pins". That was asserted, not measured, and it is wrong in two of three parts. Measured
+> now: **no test in the tree pins a literal `registry_hash_all` value** — every consumer compares
+> hashes to each other (equal / not-equal / trace self-consistency), so there is nothing to re-pin
+> there; the **fx trace pins are fx-level** (`fx_trace.test.cpp`'s `FX_TRACE_PINNED`) and are not
+> registry hashes at all. What genuinely carries registry hashes is the committed gate0 CSVs'
+> `hash_lo6` column. The decision stands and is cheaper than stated, not dearer — but this is the
+> third claim-width error by this steward in two days, and the first one to reach a decision brief.
+>
+> **MECHANISM RULED: make `used` MEAN the live extent for column arenas; `registry_hash_all` is not
+> touched.** The reviewer's recommended fix (hash `[base, base + count*stride)`) has nowhere to
+> keep that extent: `ArenaEntry` is `{id, arena*, flags, _pad}` at a `static_assert`ed 24 bytes,
+> `VMemArena` is a fully packed 64, both pinned in `MEMORY.md` §8.2/§8.3, and the registry knows
+> nothing about columns. So instead `column_remove` shrinks the arena to the live extent, and
+> `[base, used)` becomes the live extent by construction — `CANON.md`'s "per registered arena over
+> `[base, used)`" stays true exactly as written, no struct grows, no pinned size moves, and the
+> change is confined to `src/core/column.cpp`.
+> **Four preconditions checked against the tree before this was chosen, none assumed:**
+> - `column_add` already grows only when `(count+1)*stride > used`, so a shrink on remove makes
+>   `used == count*stride` an invariant rather than a new rule fighting the old code.
+> - Both column arenas are `ARENA_ZERO_ON_PUSH` and neither sets `ARENA_POISON`
+>   (`column_init`), so `arena_reset_to`'s dev-tier `0xDD` poison branch cannot fire on them, and
+>   a re-add re-zeroes the bytes it walks. The hazard this approach could have had is not live.
+> - `guard_barrier_begin` compares `used != used_at_start`, not `>`, and `guard_barrier_end`
+>   re-baselines — so a shrink INSIDE the barrier window is exactly as legal as a growth, and one
+>   outside is fatal for both. Command application (hence `column_remove`) runs inside the window.
+> - The `.pages` arena is `SNAPSHOT`-only and out of the hash, so it is untouched.
+> `column.h` carries the current behaviour as a stated hashing ruling and `column_add:68` cites it;
+> both are amended by the slice rather than left to contradict the code.
