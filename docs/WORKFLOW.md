@@ -281,6 +281,18 @@ stop, and invisible to every gate we own.
   Design errors, doc contradictions, unreachable criteria and over-wide claims stay with reviewers
   permanently — a gate written for those passes while the thing it names is false. Extends R-7's
   closeout triage rather than adding a separate step.
+- **R-24 PR #17's ship round is ONE Opus reviewer, not R-22's two (ruled 2026-08-28, Rafael):**
+  R-22 puts the ship-verdict round at two disjoint Opus reviewers on ★ and determinism-critical
+  lanes, and PR #17 (`w3-rr48-hash-extent`) changes what the lockstep world hash covers — squarely
+  inside that scope. Rafael classified it as an ordinary lane and spent one ship reviewer.
+  **The steward's dissent is recorded rather than argued again (`CLAUDE.md` rule 3):** the case for
+  two is R-22's own evidence — PR #16 measured that a seam defect appears BETWEEN two reviewers'
+  coverage lists — and #17's fix round reached past the original diff into `foundation` (D2's new
+  guard rows, D7's `TL_CHECK` promotion), which is the seam shape a single coverage list cannot
+  expose. **Scope: this binds PR #17 alone. R-22 is UNAMENDED** and still governs every other
+  ★/determinism-critical lane, `alloy-substrate` and RR-53's slice included. Recorded as a ruling
+  rather than executed as a judgement because §1 puts any edit that creates or amends a ruling on
+  Rafael's sign-off, and a single-reviewer ship round on a hashing PR deviates from a ruled rule.
 - **R-12 Doc-relevancy pass (ruled 2026-08-26, Rafael):** staleness in a status line is drift
   like any other. Every lane closeout sweep (R-7) also checks the lane's own doc — its status
   line and its claims — against what actually shipped; every wave boundary adds the pass over
@@ -375,4 +387,6 @@ amended again the same evening by the wave sweep's area-C reviewer (D2/D3): its 
 advertised the draft PRs R-5 retired, and its merge bullet still enumerated two preconditions
 after R-17 added a third — the same-evening pass that fixed §3's heading had missed its sibling. §2/§5 amended 2026-08-28 with R-19 (a closed
 lane's cone reverts to the steward, bounded) and R-20 (the valve needs the round reviewer's
-endorsement) — both from the W3 wave sweep's findings.*
+endorsement) — both from the W3 wave sweep's findings. §5 amended 2026-08-28 evening with R-24
+(PR #17's ship round is one Opus reviewer, not R-22's two) — a PR-scoped exception with the
+steward's dissent on the record; R-22 itself is unamended.*

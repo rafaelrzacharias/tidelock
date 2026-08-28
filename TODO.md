@@ -7826,3 +7826,44 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > **IMMEDIATE CONSEQUENCE — the Tuesday wait is gone.** PR #17's ship round is now two disjoint
 > Opus reviewers under R-22 and can run today. `alloy-substrate`, RR-53's slice and the wave
 > sweep's own confirming round are all off the reset clock.
+
+> **FOUR DECISIONS TAKEN (Rafael, 2026-08-28 evening, put as multiple choice by the fourth steward).**
+> Recorded here because durable context lives in committed files only (`CLAUDE.md`); the handover
+> prompt that carried the previous steward's task order was NOT in any committed file, and that gap
+> is the reason this block exists rather than a re-statement of a plan nobody can read.
+>
+> **1. PR #17's ship round is ONE Opus reviewer — RULED, and it is a deviation.** Home:
+> `WORKFLOW.md` §5 R-24, which carries the reasoning, the scope and the steward's recorded dissent.
+> R-22 is unamended and still binds every other ★/determinism-critical lane. Not restated here.
+>
+> **2. The wave-sweep confirming round (`WORKFLOW.md` §3 artifact 2) is a SEPARATE dispatch**, not
+> folded into #17's reviewer. The steward's reasoning, accepted: R-22's guarantee is that a
+> partition of ONE change is exhaustive and disjoint, so a seam defect has nowhere to hide between
+> two coverage lists; attaching an unrelated sweep confirmation to a ship reviewer gives it a second
+> job and dilutes exactly that property. Runs concurrently with #17's round; R-8 throttles fan-out
+> rather than trading review depth.
+>
+> **3. PR #17's two stale Fable sentences are CORRECTED, not left as record.** The body and the
+> fix-round comment both said the ship round was "Fable, after the 2026-09-01 reset"; R-21 retired
+> Fable the same day, so both were false on a world-readable page and either would have parked a
+> reviewer for three days. Body updated; one comment posted recording the supersession. Known and
+> accepted cost: `update_pull_request` strips the attribution footer server-side, so the repaired
+> body ends without one — `LESSONS.md` already rules that the correct trade, not a second defect.
+>
+> **4. W3 ORDER RULED — the R-23 gate lands BEFORE `alloy-substrate`.** Sequence, after #17 merges:
+> the divergent-history harness (R-23's first ratchet), then `alloy-substrate`, then W3's ★
+> `alloy-solver`; `net-p2` is independent and runs in parallel from now. Rationale on the record:
+> substrate adds nineteen arenas to the hashed set, which is the moment the "hashed extent is a
+> function of history rather than state" class multiplies, and the harness would have caught five
+> confirmed instances of it (B-1, RR-53, the `Array` hashed-tail defect, the `Map` reused-arena
+> defect, and the whole subject of `MEMORY.md` §1.2). RR-53's `array_init_fixed` slice then lands
+> against a gate that proves it rather than a test that asserts it. **This supersedes the unwritten
+> ten-item order the third steward handed over**, which put substrate ahead of the gate and existed
+> nowhere a second session could read it.
+>
+> **Still unowned and NOT scheduled by this block** (all filed above, none launched): D8
+> (`tl_save_test.bin` deleted by every suite run), A-D8 (no encoder bound has a fatal-expected row),
+> the `X = Type{}` sweep in `tests/`/`tools/`, `TL_PROF_SCOPE_W`'s dropped argument,
+> `test_list.inc` remove-vs-add, Review B's three editor nits, and the three merged sweep branches
+> (`w3-sweep-a`/`-b`/`-c`) still on origin awaiting Rafael's word on deletion.
+> **Next free ids, measured not inherited: RR-54 and R-25.**
