@@ -97,7 +97,10 @@
   and re-reviewed until the verdict is *ship*. CI must be green on all four `CANON.md` target
   legs **before** the review is requested — reviewer attention is spent on working code.
 - **The post-review-edit valve:** small edits that *implement an already-recorded ruling* may
-  merge with their lane review deferred to the wave-boundary sweep (§3). The deferral is
+  merge with their lane review deferred to the wave-boundary sweep (§3). **A fix set answering
+  review findings is NOT such an edit, and reaches the valve only with that round's own
+  reviewer recording that no further round is needed (R-20).** The steward may not substitute
+  its own verification for that endorsement. The deferral is
   recorded in `TODO.md` at merge time, never assumed — the W1 sweep (2026-08-25) found real
   defects behind exactly this valve, which is why the sweep is mandatory, not ceremonial.
 
@@ -223,6 +226,25 @@ stop, and invisible to every gate we own.
 - **R-18 Artifact 1 gates the label, not the work (ruled 2026-08-27, Rafael):** §3's artifacts
   2–4 may run mid-wave as an unlabelled sweep when the ★ lane's criterion is unreachable;
   declaring a boundary closed while a lane of that wave has never launched is forbidden (§3).
+- **R-19 A closed lane's cone reverts to the steward, bounded (ruled 2026-08-28, Rafael):** when a
+  lane merges and closes, its module has no owner, and "the next lane to touch this file" has left
+  work unowned for weeks — ten instances across six files by the W3 sweep, one of which shipped an
+  out-of-bounds write (`fmt_buf`) that no owner existed to catch. **The steward owns bounded
+  defects in a closed cone and files the record.** Bounded is the whole of the rule: a localized
+  fix, a guard, a contract-comment correction, a test made discriminating. Anything wider — a
+  redesign, an API or format change, new surface — is a ruling request or a lane, never a steward
+  edit. `ROADMAP.md` §0 rule 2 is unchanged and still bars one LANE from editing another's module;
+  this rule is about modules with no live owner at all. Filed after the sweep found that every
+  defect needing a fixer sat in a closed cone, and that both commits area A faulted were themselves
+  steward-authored.
+- **R-20 The valve needs the round's reviewer, not the steward's confidence (ruled 2026-08-28,
+  Rafael):** §2's post-review-edit valve reaches a fix set answering review findings only when that
+  round's reviewer records that no further round is needed. PR #14 had exactly that and was
+  eligible; PR #15's round-3 fix set did not, and merged on the steward's own verification — new
+  test coverage written in response to a finding is the artefact a review round exists to produce
+  and then check, not an edit implementing a recorded ruling. Without this, every *fix first*
+  becomes "merge and defer" and §2's "re-reviewed until the verdict is *ship*" has no force. Found
+  by the W3 sweep, in the merge that was deferred into it (§2).
 - **R-12 Doc-relevancy pass (ruled 2026-08-26, Rafael):** staleness in a status line is drift
   like any other. Every lane closeout sweep (R-7) also checks the lane's own doc — its status
   line and its claims — against what actually shipped; every wave boundary adds the pass over
@@ -312,4 +334,6 @@ adjudicates above its seat) and R-18 (artifact 1 gates the label, not the work);
 corrected from three artifacts to four, which R-12 had made stale when it added the fourth. §1
 amended again the same evening by the wave sweep's area-C reviewer (D2/D3): its heading still
 advertised the draft PRs R-5 retired, and its merge bullet still enumerated two preconditions
-after R-17 added a third — the same-evening pass that fixed §3's heading had missed its sibling.*
+after R-17 added a third — the same-evening pass that fixed §3's heading had missed its sibling. §2/§5 amended 2026-08-28 with R-19 (a closed
+lane's cone reverts to the steward, bounded) and R-20 (the valve needs the round reviewer's
+endorsement) — both from the W3 wave sweep's findings.*

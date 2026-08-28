@@ -7573,3 +7573,47 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > stopped moving, plus an IDLE session), not a verdict that reads complete.** A reviewer's most
 > valuable commit can be the one that corrects its own headline, and that is by construction the
 > last one it writes.
+
+> **ALL SEVEN QUEUED RULINGS DECIDED (Rafael, 2026-08-28 morning). The queue is empty.** Each is
+> recorded at its own home and cited here; this entry is the index, not a second copy.
+> - **Ownership → `WORKFLOW.md` §5 R-19.** A closed lane's cone reverts to the STEWARD, bounded.
+>   Bounded is the whole rule: a localized fix, a guard, a contract-comment correction, a test made
+>   discriminating. Wider than that — a redesign, an API or format change, new surface — is a ruling
+>   or a lane. `ROADMAP.md` §0 rule 2 is untouched: one LANE still may not edit another's module.
+>   **This unblocks every fix below.**
+> - **RR-51 → `WORKFLOW.md` §2 and §5 R-20.** The valve reaches a fix set answering review findings
+>   only with that round's reviewer recording no further round is needed; the steward may not
+>   substitute its own verification. PR #14 had it, PR #15 did not.
+> - **RR-46 → RULED: `foundation/rng_systems.h` wins.** Alloy REGISTERS its ten names in the
+>   existing enum; `ALLOY.md` §14.1/§14.5/§14.7 are amended to stop specifying a parallel
+>   `sim/rng_systems.h`. The steward performs the foundation edit before the lane launches — the
+>   first application of R-19, and the reason the lane is not blocked on Tuesday.
+> - **RR-48 → RULED: hash the LIVE extent**, `[base, base + count*stride)`, not `[base, used)`.
+>   Everything above `count` is already guaranteed zero by `column_remove`, so this discards no live
+>   information; it stops a peer's allocation high-water being part of its state, and removes the
+>   class rather than the instance. **NOT a bounded fix and therefore NOT R-19 work:** it touches
+>   `registry_hash_all`, which `CANON.md` calls the lockstep contract, and it changes every existing
+>   hash value. It gets its own slice and its own review round.
+> - **RR-49 → RULED: `SAVE_ENC_REFLECTED` is singleton-only, enforced.** `TL_CHECK(max_rows == 1u)`
+>   in the REFLECTED arm, and `save.h`'s `max_rows` wording corrected to say it is ECS_COLUMN-only.
+>   Bounded → R-19 work. Note for whoever scopes `alloy-substrate`'s pools: they are multi-row by
+>   nature, so if they want save coverage it is ECS_COLUMN or a third kind — deferred, not avoided.
+> - **RR-50 → RULED: extend `docaudit`'s constant pass over the headers `CANON.md` names**, so the
+>   value in the tree is compared to the sheet rather than prose to prose. Closes the class for every
+>   CANON constant with a C++ home. Lands with the RR-44 and RR-45 gate work as ONE `tools/` slice;
+>   `tools/docaudit/` is nobody's cone (`WORKFLOW.md` §7), so it is not lane work. Its own negative
+>   fixtures are the point — a gate is worth what its negative test is worth.
+> - **RR-52 → RULED: leave text/fonts UNOWNED and say so plainly.** No lane is cut now; nothing
+>   today needs rendered text (render2d shipped `text.cpp` as a reserved stub by its own done
+>   criterion). `ASSETS-AND-DATA.md` §8.5's headers are corrected to say "unowned" rather than
+>   claiming each clause names its owner — which is also area C's D4. Revisit when a real consumer
+>   pulls text in, per "pulled in by a real consumer, never pushed on spec".
+>
+> **What R-19 authorises the steward to do now, and what it does not.** Authorised (bounded, in
+> closed cones): RR-46's foundation registration; RR-49's guard; RR-52/C-D4's header wording; C's D5
+> (`transform.h`'s contract block claims core registers `Transform` and nothing in `src/` does);
+> A's D1 (the archive row that pins nothing), D2 (`ArenaRegistry` off the test stack), D6, D7; B-3's
+> CMake idiom split. NOT authorised, and each needs its own slice with review: **RR-48** (lockstep
+> contract), **RR-50** (a `tools/` gate slice), **A's D8** (no encoder bound has a fatal-expected
+> row — new test surface across a file, not a localized fix), **B-2's multi-row question** if it is
+> ever reopened.
