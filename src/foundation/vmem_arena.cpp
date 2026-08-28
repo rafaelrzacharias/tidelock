@@ -94,7 +94,15 @@ void* arena_push(VMemArena* a, u64 bytes, u32 align) {
 
 void arena_reset_to(VMemArena* a, u64 mark) {
     TL_ASSERT(a != nullptr);
-    TL_ASSERT(mark <= a->used);
+    // TL_CHECK, not TL_ASSERT (PR #17 review, D7). Violating this does not merely indicate a bug:
+    // the write below is unconditional, so a mark ABOVE `used` RAISES `used` and extends the
+    // hashed extent over bytes nothing wrote - silent divergence on the lockstep contract, on
+    // exactly the two tiers where TL_ASSERT compiles out. `bytes.h` already draws that line and
+    // CPP-SUBSET section 3 states it. Cheap here: this is not a per-element path.
+    // Live from RR-48 on: column_remove made this the first arena_reset_to call site in the tree
+    // that targets an ARENA_HASHED arena, and the old high-water code TOLERATED `used` running
+    // ahead of the live extent where the new code does not.
+    TL_CHECK(mark <= a->used);
 #if TL_DEV
     // Poison so a stale read shows as garbage - gated on ARENA_POISON as the header and the
     // section 8.2 flag table say, not unconditional as first shipped: poisoning EVERY arena made
