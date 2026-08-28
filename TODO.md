@@ -7894,3 +7894,161 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > then verify `git log -1 --format='%an <%ae> | %cn'` on `main` reads Rafael twice) — never the
 > GitHub button; relay #17's verdict to Rafael rather than acting on a fix-first alone; archive each
 > child session in the same turn its verdict lands. Backstop check-in re-armed for 00:05 local.
+
+> **W3 WAVE-SWEEP CONFIRMING ROUND — `WORKFLOW.md` §3 artifact 2, dispatched under R-24
+> (fresh context, 2026-08-28 ~22:55 local). Range `679c4b2..4030679` on `main`, nine commits,
+> 11 files + 1 binary, +212/−61. VERDICT: *fix first*.** These eight R-19 steward fixes landed
+> straight onto `main` with no lane, no PR and no review round; this is the first review of them.
+> **On the process question the range is clean: every fix is inside R-19's bound** — a localized
+> fix, a guard, a contract correction, a test made discriminating — and not one of them redesigns,
+> changes an API or a format, or adds surface. Nothing here needed a lane. The *fix first* verdict
+> is about one incomplete fix and one unmeasured trade, not about over-reach.
+>
+> **D1 (HIGH, ship-blocking for the next REFLECTED consumer) — RR-49 is implemented on one of its
+> two paths. `save_read` still loses rows silently, which is the exact failure the ruling names.**
+> `src/core/encoder.cpp:96-98`: `encoder_read_rows` takes `row_count` **from the stream** and
+> refuses only `row_count > max_rows`. So a REFLECTED descriptor with `max_rows = 3` meeting a
+> segment that declares 3 rows decodes all three, returns `res.value = 3` and `ERR_OK`; the apply
+> arm at `src/core/save.cpp:305` then does one `memcpy(e->arena->base, p->rows, p->ad->info->size)`
+> — a single row. Rows 1..n−1 are discarded and `save_read` returns `ERR_OK`. That is verbatim
+> `ASSETS-AND-DATA.md` §5's "no silent partial loads" and `CLAUDE.md`'s no-silent-fallbacks rule,
+> the two things RR-49 cites. The guard went on the path that consumes a caller's own in-process
+> descriptor and was left off the path that consumes **bytes from a file, possibly written by
+> another build** — the wrong half if only one could be had. `save.h`'s newly corrected wording
+> ("`max_rows` must be exactly 1 for REFLECTED") is now a contract enforced on one path of two.
+> *Mitigating half, by inspection not execution:* a conforming caller sets `max_rows = 1`, so
+> `row_count > max_rows` yields `ERR_ENC_OVERFLOW` and the file is refused. The exposure is a
+> caller that violates the documented contract and only ever reads.
+> **Confidence High** that the path is as described (traced at source end to end); I did **not**
+> build a forged-file reproducer, so the reachability half is reasoned, not measured — stated
+> plainly rather than folded into the finding. *Proposed fix:* the same one-line
+> `TL_CHECK(ad->max_rows == 1u)` in `save_read`'s REFLECTED arm plus a second fatal-expected row.
+> One line and one test in the same cone, implementing an already-ruled decision — R-19-shaped on
+> its face, but whether a ruling that says "the REFLECTED arm" reaches the second arm is a
+> steward's call. **Needs a ruling id; I am not allocating one.**
+>
+> **D2 (MEDIUM) — `1850308` bought its stack margin with 1.77 MB of `.bss`, and neither the commit
+> message nor the comments say so.** Measured, not asserted: recompiling `679c4b2`'s version of
+> `tests/foundation/registry.test.cpp` with the exact `compile_commands.json` command line from the
+> ship build gives `.bss = 0`; the file on `main` gives **`.bss = 1,774,608` bytes**. D2's own
+> evidence standard was a `ulimit -s` ladder; the replacement's cost was not measured at all.
+> **It is not a correctness defect and I checked the three ways it could have been.** The runner
+> spawns one child per test (`tests/runner/main.cpp:74`, "one child per test, always via `<self>
+> --run-one <index>`"), so every `static` is freshly zero-initialised in its own process — no
+> re-entry, no stale state, no thread race; `-fno-threadsafe-statics` (`CPP-SUBSET.md` §9) emits no
+> guard variable because these are POD; and `.bss` is demand-zero, so untouched pages cost address
+> space, not RSS. Suite green on all four tiers confirms it.
+> What is wrong is the choice of mechanism. Writable static state is the one thing
+> `CPP-SUBSET.md` §1 bans outright, and it is legal here only because `tools/audit/symbols.py`
+> audits the `src/` static libs and not the test executable — an exemption by scope, not by intent.
+> This tree has arenas everywhere; pushing `TestWorld` onto the test's own arena would have solved
+> D2 without reaching for the banned class. Second, the safety **depends on process-per-test** and
+> nothing records that: an in-process worker mode would turn fifteen function-local statics into
+> shared mutable state, and the next person to touch the runner has no way to know.
+> *Proposed fix:* an arena, or — if `.bss` is kept — the comment states the measured trade and the
+> process-per-test dependency it rests on. **Whether `CPP-SUBSET.md` §1's static ban extends to
+> `tests/` is a doc question with no home today; needs a ruling id.**
+>
+> **D3 (LOW) — `61bf4c5` corrected a false contract claim and introduced a misdirected citation.**
+> `src/core/transform.h:49-50` now says `app/wiring.cpp` "is the intended registrar and does not
+> exist yet (`docs/ARCHITECTURE.md` §9, v0, W4)". The fact is right; the citation is not.
+> `ARCHITECTURE.md` §9's v0 row (line 212) names neither `app/wiring.cpp` nor W4. The home for
+> "`app/wiring.cpp` is the one registration file" is `FRAME-LOOP.md` §8.1/§8.2; the "v0 needs
+> `app/wiring.cpp`, W4" phrasing is `RENDER2D.md`:6. `docaudit` structurally cannot catch this —
+> `ARCHITECTURE.md` §9 exists, so the reference is not dangling, merely pointed at the wrong doc,
+> which is "one fact, one home" drift arriving inside a commit whose whole purpose was correcting
+> a false contract claim. *Fix:* cite `FRAME-LOOP.md` §8.1. Everything else in the commit verified
+> exactly: nothing in `src/` registers `Transform`/`TransformPrev`, and the only two registrations
+> in the tree are `tests/render/extract.test.cpp:43-44` and `tests/render/sprite.test.cpp:36-37`.
+>
+> **D4 (LOW, and already on the record) — the stray binary, independently confirmed, plus the
+> reason CI is structurally blind to it.** `1bc3877` committed `tl_save_test.bin` (252 bytes) to
+> the repo root; it is still tracked on `origin/main`. Already filed as review D8 (line 7713) and
+> listed unowned at line 7865, so this confirms rather than discovers — **but the existing record
+> does not say why CI never sees it, and that is the half that keeps it alive.** CI runs
+> `--isolate` (`.github/workflows/pr.yml:134`), which gives every test a private cwd, so the file
+> is never touched; a local run without `--isolate` deletes it. Measured both ways in a clean
+> worktree at `origin/main`: `tl_tests --filter 'save_*'` → `git status --short` = ` D
+> tl_save_test.bin`; `tl_tests --isolate --filter 'save_*'` → clean. Two further facts for whoever
+> takes it: it is **not** the new fatal row's doing (`save_write` buffers and writes the file only
+> at the end, so the `TL_CHECK` at `:107` fires before anything is created — it is the ordinary
+> save tests' CWD-relative output at `tests/core/save/save.test.cpp:29`, swept in by a wide `git
+> add`), and `.gitignore` has no entry for it, so untracking alone will not stop it coming back.
+>
+> **R-19's two exclusions confirmed genuinely absent and still open.** **RR-50:** `git diff --stat
+> 679c4b2 4030679 -- tools/` is empty — `tools/` is untouched by the whole range — and
+> `grep -rn "static_assert.*MAX_ARENAS" src/ tests/` still returns nothing. **A's D8:**
+> `grep -rn "TL_TEST_EXPECT_FATAL" tests/net/` still returns nothing. Neither was quietly done
+> here. `registry_hash_all` is likewise untouched, so RR-48 was not pre-empted either.
+>
+> **COVERAGE — what was checked and found CLEAN, not only what broke.**
+> - **`009a5a7` RR-46 — clean, and complete in both directions.** The ten names and values match
+>   `ALLOY.md` §14.5 exactly (1..10); the `sim/rng_systems.h` row is gone from §14.1's file table;
+>   §14.7's Gate 0 hand-off and build-order step 1 are both amended; no reference to
+>   `sim/rng_systems.h` survives anywhere outside the explanatory comment; no symbol collision in
+>   `src/` or `tests/`; the two new `static_assert`s pin the engine block's floor and its ceiling
+>   under `RNG_SYS_LUAU_BASE`, closing the "a raw value in a comment is a claim" gap in the same
+>   edit. Exactly the ruling, nothing more.
+> - **`578b187` A-D1 — REVERT-VERIFIED IN BOTH DIRECTIONS on ship**, which is the one check that
+>   grades a "made discriminating" fix. Aggregate bound removed (`src/net/archive.cpp:407-410`) +
+>   new row → **FAIL** at `test_archive.test.cpp:1059`. Bound removed + the *old* row restored from
+>   `679c4b2` → **PASS**, independently reproducing D1's central claim that the row pinned nothing.
+>   Bound present + new row → PASS on all four tiers. The fix does what it says.
+> - **`1bc3877` RR-49 write half — REVERT-VERIFIED on ship.** Guard present → PASS; guard replaced
+>   by a comment → FAIL. **The briefed tier hypothesis was tested and refuted:** the fatal-expected
+>   row runs and passes on all four tiers (it is not among netcode/ship's 102 skips), so
+>   `LESSONS.md`'s "`EXPECT_FATAL` whose trigger is `#if TL_DEV` fails on netcode and ship" does not
+>   bite here — `TL_CHECK` is unconditional, as the commit message claims. The write half is sound;
+>   D1 is about the half that is missing, not this one.
+> - **`1e16a4e` B-3 — clean, object list verified identical.** The new one-idiom `foreach` yields
+>   exactly `loaders/{font,image}.cpp.o` and `producers/{live,replay,script}.cpp.o` — no TU dropped,
+>   none added, checked against the built `tl_core.dir` tree rather than by reading the glob. The
+>   `FATAL_ERROR` zero-check is the right shape and fires on an empty match.
+> - **`b48c548` RR-52 — clean and minimal.** Both bucket headers corrected; the two unowned bullets
+>   already said so plainly ("**No `ROADMAP.md` lane currently owns this**"), so the header really
+>   was the only false statement in §8.5. Doc-only, matches the ruling.
+> - **`8798b19` A-D6/D7 — clean.** `AR_SEG_TICKS` now cites `CHECKPOINT_HOT_TICKS` instead of
+>   transcribing 300; the suite is green on all four tiers, so the substitution did not move the
+>   value under any fixture built from it.
+> - **Commit identity — clean on all nine.** Every commit reads `rafaelrzacharias
+>   <rafaelrzacharias@gmail.com>` as both author and committer. No `Co-Authored-By`, no model
+>   identifier in any message (`CLAUDE.md`, R-16).
+> - **Public-repo scan over the range's added lines — clean.** No secrets, emails, local paths,
+>   IPs or session URLs.
+> - **Doc gates — clean.** `python tools/docaudit/docaudit.py` → **27 docs, 0 errors**, XREF
+>   regenerated with no diff. `python tools/audit/commit_docs.py --base origin/main` → 0 commits
+>   checked (HEAD sits at `origin/main`).
+>
+> **FOUR-TIER RESULT — real output.** Linux x86-64, clang 18, `-DTL_STRICT_TOOLCHAIN=OFF`, CI's own
+> invocation (`--isolate --tag '!slow' --timeout-ms 120000`, `.github/workflows/pr.yml:134`):
+>
+> | tier | configure | build | suite |
+> |---|---|---|---|
+> | debug | ok | 611/611 | 671 selected, 668 passed, **0 failed**, 0 timed out, 3 skipped, 0 lost |
+> | dev | ok | 611/611 | 671 selected, 668 passed, **0 failed**, 0 timed out, 3 skipped, 0 lost |
+> | netcode | ok | 598/598 | 671 selected, 569 passed, **0 failed**, 0 timed out, 102 skipped, 0 lost |
+> | ship | ok | 598/598 | 671 selected, 569 passed, **0 failed**, 0 timed out, 102 skipped, 0 lost |
+>
+> Note for anyone reading `ctest` output: the presets register **no** ctest tests ("No tests were
+> found!!!" with rc=0 on all four) — the suite is the `tl_tests` binary and must be run directly.
+> A green `ctest` here means nothing ran.
+>
+> **What this container could NOT falsify, split from what it could (`LESSONS.md`).** The ASan
+> runtime is absent (`libclang_rt.asan-x86_64.a` missing for clang 18), so the `sanitize-linux` leg
+> was not run and no sanitizer claim here is mine. That does not weaken D1: it is a logic defect in
+> which a decoded row count is dropped, not a memory error, and I would not expect a sanitizer to
+> see it at all — **High** confidence the path is real, **unverified** on any leg but the four
+> above. CI is the falsifier for Windows and arm64.
+> **One methodological note, recorded because the next session will hit it.** The bare
+> `tl_tests --workers n` invocation had not finished after ~10 minutes on dev, and `--timeout-ms`
+> defaults to **0 (off)**, so nothing bounds a long child. I am **not** claiming a hang — the
+> `slow` tag exists for rows like the 30-min synthetic 3-peer archive fixture and I did not isolate
+> which row it was. Recording only that bare `tl_tests` is not a bounded operation and the CI
+> invocation is what to reach for.
+>
+> **Bottom line: *fix first*, on D1 alone.** D2–D4 are real and worth doing but none of them would
+> hold a merge. D1 would: RR-49 was ruled to close a silent-partial-load class and it is closed on
+> the write path only, with the read path — the one that eats foreign bytes — still returning
+> `ERR_OK` after dropping rows. **`alloy-substrate`'s pools are the named first consumer of
+> REFLECTED**, so this is the second time in this sweep that a bounded fix lands correct-but-half
+> and the lane most likely to trip it is the one queued next.
