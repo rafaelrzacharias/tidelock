@@ -44,9 +44,14 @@ enum : u32 { TRANSFORM_SNAP = 1u << 0 };   // bits 1..31 reserved, zero (docs/FR
     X(pos_t, x) X(pos_t, y) X(angle_t, rot) X(u32, flags)   /* bit 0 = snap (FRAME-LOOP.md §4); bits 1..31 zero */
 TL_COMPONENT(Transform)
 
-// TransformPrev - identical field list (docs/RENDER2D.md §9.2), COMP_HIDDEN, registered by core
-// immediately after Transform. Registration order alone does not guarantee dense order stays in
-// lockstep after add/remove (column_remove is swap-remove) - dense-order parity is the ruled
+// TransformPrev - identical field list (docs/RENDER2D.md §9.2), COMP_HIDDEN. **Nothing in src/
+// registers either component today** (corrected 2026-08-28, W3 sweep area C defect D5: this block
+// claimed "registered by core immediately after Transform", which was never true - the only
+// registrations in the tree are two render test fixtures, tests/render/{extract,sprite}.test.cpp).
+// app/wiring.cpp is the intended registrar and does not exist yet (docs/ARCHITECTURE.md §9, v0,
+// W4). A consumer that needs the pair must register it itself until then.
+// Registration order alone would not guarantee dense order stays in
+// lockstep after add/remove anyway (column_remove is swap-remove) - dense-order parity is the ruled
 // interp-pair contract (TODO.md RR-28), enforced at runtime by `interp_pingpong`'s `TL_CHECK`,
 // not a structural consequence of "added/removed together".
 #define TL_FIELDS_TransformPrev(X, XA, XH) \
