@@ -1003,7 +1003,8 @@ TL_TEST(archive_log_record_count_is_bounded_by_the_format, "net,archive,edge,fas
         // Spread at exactly the ruled per-tick maximum (2026-08-26: the per-tick bound is the
         // FORMAT's now), one origin, ascending seq - 100 records over 13 ticks of the 16. The
         // all-at-one-tick shape this row used before the ruling is now itself a per-tick
-        // refusal, exercised by archive_ruled_bounds_are_enforced below.
+        // refusal, exercised by archive_ruled_bounds_are_enforced below. 13 offsets is why the
+        // shrink below cannot keep every record in range - see the note on the forgery.
         recs[i].origin_slot = 0u;
         recs[i].seq = i;
         recs[i].effective_tick = 1000u + (u64)(i / MAX_LOG_RECORDS_PER_PACKET);
@@ -1022,12 +1023,28 @@ TL_TEST(archive_log_record_count_is_bounded_by_the_format, "net,archive,edge,fas
     TL_ASSERT_EQ(archive_decode_segment(&wr, &wh, wgot, wide, wout, many, &wrc), ERR_OK);
     TL_ASSERT_EQ(wrc, many);
 
-    // 100 records against a 12-tick segment exceeds 8 per tick; every record still falls inside
-    // the shrunk range and the ids stay unique, so ONLY the format bound can refuse this.
+    // The aggregate bound CANNOT be isolated by refusal alone, and the previous version of this
+    // row claimed it could. Records occupy tick offsets 0..(many-1)/8, so keeping every record
+    // inside `narrow` ticks means many <= 8*narrow - which IS the aggregate bound. Any segment
+    // that violates it necessarily violates the per-record effective_tick range rule (or the
+    // per-tick run rule), and the previous forgery was in fact refused by the range check: this
+    // row passed with the bound reverted (found by the W3 wave-boundary sweep, area A/D1).
+    //
+    // What the bound actually buys is ORDERING, and its own comment at archive.cpp says so: it
+    // refuses from the HEADER, before the payload CRC and before a single record is parsed,
+    // which is what retires the decode amplification (a measured 17.8 s at 200,000 records).
+    // So discriminate on the error CODE, the technique archive_ruled_bounds_are_enforced row (c)
+    // already uses: inflate payload_bytes past the buffer so that reaching the truncation check
+    // yields ERR_BYTES_TRUNCATED, and shrink tick_count so the aggregate bound is violated.
+    // Bound present -> ERR_NET_MALFORMED from the header check. Bound reverted -> the decoder
+    // gets as far as the payload and answers ERR_BYTES_TRUNCATED. Two codes, one objector each.
     const u32 narrow = 12u;
     for (u32 i = 0; i < 4u; ++i) { wseg[AR_T_TICKS_OFF + i] = (u8)((narrow >> (8u*i)) & 0xFFu); }
+    const u32 fat = 0x00FFFFFFu;   // far past wn; only reachable if the header check let us by
+    for (u32 i = 0; i < 4u; ++i) { wseg[AR_T_PBYTES_OFF + i] = (u8)((fat >> (8u*i)) & 0xFFu); }
     ar_repair_crcs(wseg, wn);
     TL_EXPECT_GT((u64)many, (u64)MAX_LOG_RECORDS_PER_PACKET * (u64)narrow);
+    TL_EXPECT_GT((u64)fat, wn);
     br_init(&wr, wseg, wn);
     TL_EXPECT_EQ(archive_decode_segment(&wr, &wh, wgot, wide, wout, many, &wrc),
                  ERR_NET_MALFORMED);
