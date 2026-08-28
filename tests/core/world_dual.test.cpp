@@ -153,3 +153,56 @@ TL_TEST(world_dual_restore_reproduces_the_hash_trace, "core,ecs,world,determinis
     }
     ++t->checks;
 }
+
+// --- RR-48: the hashed extent is the LIVE extent, not a high-water mark ------------------------
+
+TL_TEST(world_divergent_histories_with_equal_state_hash_equally, "core,ecs,determinism") {
+    // The property RR-48 buys, and the one the previous "used never shrinks" ruling explicitly
+    // did NOT hold: build the SAME live state two different ways and require the same hash.
+    // LESSONS.md names this directly - "two instances, same op sequence" is the weakest
+    // determinism test that still looks like one; the property worth testing is divergent
+    // histories that converge. Before RR-48 world A's dense arena carried three rows' worth of
+    // `used` against B's two, and the two hashed differently with every live byte equal.
+    WorldFixture& a = *wt_fixture(0u);
+    WorldFixture& b = *wt_fixture(1u);
+    TL_ASSERT_TRUE(world_fixture_init(&a, 7u));
+    TL_ASSERT_TRUE(world_fixture_init(&b, 7u));
+    // Components register arenas, so the registry is sealed AFTER registration, and the world
+    // must be sealed (world_build_schedule) before commands.cpp will accept a command.
+    world_fixture_register_std(&a);
+    world_fixture_register_std(&b);
+    world_build_schedule(&a.w);
+    world_build_schedule(&b.w);
+    registry_seal(&a.reg);
+    registry_seal(&b.reg);
+
+    // A: spawn three, give all three a WPos, then remove the middle one's.
+    Entity a1 = world_spawn(&a.w), a2 = world_spawn(&a.w), a3 = world_spawn(&a.w);
+    world_flush(&a.w);
+    world_add<WPos>(&a.w, a1, WPos{ 11, 12 });
+    world_add<WPos>(&a.w, a2, WPos{ 21, 22 });
+    world_add<WPos>(&a.w, a3, WPos{ 31, 32 });
+    world_flush(&a.w);
+    world_remove(&a.w, a2, (ComponentId)world_component_id<WPos>(&a.w));
+    world_flush(&a.w);
+
+    // B: spawn the same three, give WPos to only the two that survive in A. Same live rows,
+    // never a third row allocated - the histories differ, the state does not.
+    Entity b1 = world_spawn(&b.w), b2 = world_spawn(&b.w), b3 = world_spawn(&b.w);
+    (void)b2;
+    world_flush(&b.w);
+    world_add<WPos>(&b.w, b1, WPos{ 11, 12 });
+    world_add<WPos>(&b.w, b3, WPos{ 31, 32 });
+    world_flush(&b.w);
+
+    u64 pa[MAX_ARENAS];
+    u64 pb[MAX_ARENAS];
+    const u64 ha = registry_hash_all(&a.reg, pa);
+    const u64 hb = registry_hash_all(&b.reg, pb);
+    // Per-arena first, so a failure names WHICH arena rather than only the fold.
+    TL_ASSERT_EQ(a.reg.count, b.reg.count);
+    for (u32 i = 0; i < a.reg.count; ++i) {
+        if (pa[i] != pb[i]) { TL_ASSERT_EQ(pa[i], pb[i]); }
+    }
+    TL_EXPECT_EQ(ha, hb);
+}

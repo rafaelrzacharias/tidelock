@@ -65,8 +65,11 @@ void column_add(ComponentTable* t, Entity e, const void* value) {
     TL_CHECK(!handle_is_null(e) && value != nullptr);
     u32* s = sparse_slot(t, handle_index(e));
     TL_CHECK(*s == ECS_SPARSE_NONE);   // one row per (component, entity)
-    // `used` never shrinks on remove (the hashing ruling in column.h), so a re-add below the
-    // high-water writes the zeroed row in place; only a row past `used` grows the arena.
+    // Since RR-48 `used` tracks the live extent exactly (column_remove shrinks it), so this
+    // condition is true on every add and the push always runs. It is kept as the condition rather
+    // than an unconditional push because it is what makes `used == count * stride` an INVARIANT
+    // the code states rather than a comment's promise - if a future path ever leaves `used` high,
+    // this still does the right thing instead of double-pushing.
     if (((u64)t->count + 1u) * t->stride > t->dense_arena.used) {
         void* grown = arena_push(&t->dense_arena, t->stride, t->info->align);
         TL_ASSERT(grown == t->dense + (u64)t->count * t->stride);   // the column owns its whole range
@@ -95,10 +98,18 @@ void column_remove(ComponentTable* t, Entity e) {
         t->entities[d] = t->entities[last];
         *sparse_slot(t, handle_index(t->entities[d])) = d;
     }
-    // The vacated tail row and entity slot stay inside the hashed extent - zero them (the
-    // Array<T> ruling; leaving bytes would make the hash a function of removal history).
+    // Zero the vacated tail row and entity slot. Since RR-48 these bytes leave the hashed extent
+    // a line below, so this is no longer what keeps the hash history-independent - it is kept as
+    // defence (an arena that ever loses ARENA_ZERO_ON_PUSH would otherwise hand a re-add stale
+    // bytes) and because a zeroed tail is what the snapshot ring copies.
     memset(t->dense + (u64)last * t->stride, 0, t->stride);
     t->entities[last] = Entity{ 0 };
     *s = ECS_SPARSE_NONE;
     t->count = last;
+    // RR-48: `used` IS the live extent. Without this the hashed extent is a high-water mark, and
+    // two peers with identical live rows but different add/remove histories hash differently -
+    // measured, W3 sweep area B/B-1. Legal here because command application runs inside the
+    // barrier window, where ARENA_GROWS_AT_BARRIER permits `used` to move at all.
+    arena_reset_to(&t->dense_arena, (u64)last * t->stride);
+    arena_reset_to(&t->entity_arena, (u64)last * sizeof(Entity));
 }

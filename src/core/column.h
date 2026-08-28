@@ -10,11 +10,21 @@
 // Invariants: three own VMem ranges per column (docs/MEMORY.md §7 R-1). dense and entities are
 //   registered HASHED|SNAPSHOT|GROWS_AT_BARRIER by world_register_component; the sparse pages
 //   arena is SNAPSHOT only (derivable from entities[], snapshotted anyway for O(1) restore -
-//   docs/ECS.md §10.3). HASHING RULING (the Array<T> ruling, docs/CONTAINERS.md §1): the hashed
-//   extent is the arena's [base, used), which never shrinks - every operation that vacates a
-//   dense row ZEROES it (row bytes and entity slot), so the extent's bytes are a pure function
-//   of the op history, never of what was removed. Structure changes only inside the barrier
-//   window (arena growth is GROWS_AT_BARRIER; commands.cpp is the writer).
+//   docs/ECS.md §10.3). HASHING RULING (RR-48, ruled 2026-08-28, superseding the "never shrinks"
+//   form of the Array<T> ruling, docs/CONTAINERS.md §1): the hashed extent is the arena's
+//   [base, used), and for a column `used` IS the live extent - `column_remove` shrinks the dense
+//   and entity arenas by one row, so `used == count * stride` invariantly. Vacated rows are still
+//   zeroed, now as defence rather than as the mechanism.
+//   WHY the earlier form was wrong, since it read as a considered ruling and was: it made the
+//   extent "a pure function of the OP HISTORY, never of what was removed". History-dependence was
+//   the accepted design, and it is the defect - `used` is a high-water mark, so two peers holding
+//   identical logical state hash differently whenever one of them reached it by a different
+//   add/remove path. Measured by the W3 wave sweep (area B, B-1): a world restored from a save
+//   carried two live rows in a 24-byte extent against three rows' worth on the peer that had
+//   removed one, and the world hashes diverged with every live byte equal.
+//   Structure changes only inside the barrier window (GROWS_AT_BARRIER; commands.cpp is the
+//   writer) - and the guard compares `used != used_at_start`, so a shrink inside the window is
+//   exactly as legal as a growth and one outside is equally fatal.
 // Determinism: sparse pages are committed on demand and filled with ECS_SPARSE_NONE; the
 //   page-pointer array is fixed at init (the full Entity domain's 1024 page slots), so pointer
 //   values are a pure function of the arena base and layout, restore-stable. The generation in
