@@ -997,7 +997,6 @@ The unit of paging is the §2.2 terrain chunk (8 m, 128² texels) + its dependen
 | `sim/views.h` | **the ONLY sim header render may include.** Includes only `foundation/tl_types.h`, `fx_palette.h`, `handle.h`. Defines the handle tags, `CarrierRef`, the `Particle` row (X-macro + `TL_POOL_ROW` — render reads it through `ParticleSpan`), every `*View`, `AlloyEvent`, `AlloyEventKind`. |
 | `sim/pools.h` | every other pool row (§14.2), `AlloyWorld`, the arena id table in registration order, `enum AlloyErr : u16`. Each pool header states its hashing ruling and its reuse-zeroing rule (`MEMORY.md` §1.1). |
 | `sim/alloy_consts.h` | grains, caps, thresholds, opening width, `quanta_mul`. |
-| `sim/rng_systems.h` | `enum RngSystem : u32` — closed (§14.5). |
 | `sim/solver_kernels.h` | header-only per-constraint projection formulas over the palette typedefs (§14.4.3). The FLOAT-SHADOW unit; the only solver file Gate 0 shares (§14.6). |
 | `sim/alloy.cpp` | `alloy_init`, `alloy_step` (pass sequencing, arena-offset guard hooks, event-ring merge), snapshot wrappers, `alloy_post_restore` (cache rebuild). |
 | `sim/tables.cpp` | Luau table → POD validator (§11), derived constants (α̃, `recip_cm`, `k_cache`, rule index, `v_max` fold, hysteresis gap). |
@@ -1542,9 +1541,13 @@ Per pass, the implementer checks every box before the pass is merged:
   single round of every accumulator is its "Round once" line; quanta paths use `sat_*` only;
   plain `+`/`-` on signed values carries a range comment.
 - **RNG**: every draw is `rng_for(seed, tick, system_id, carrier_bits, draw)` with `system_id`
-  from `rng_systems.h` — `SYS_BASIN 1, SYS_GROWTH 2, SYS_CHEM 3, SYS_EMBER 4, SYS_FRACTURE 5,
-  SYS_DECAY 6, SYS_WEATHER 7, SYS_CONDENSE 8, SYS_DEBRIS 9, SYS_PROMOTE 10` — and `draw` is a
-  local counter; no draw result is stored across ticks.
+  from **`foundation/rng_systems.h`** — `SYS_BASIN 1, SYS_GROWTH 2, SYS_CHEM 3, SYS_EMBER 4,
+  SYS_FRACTURE 5, SYS_DECAY 6, SYS_WEATHER 7, SYS_CONDENSE 8, SYS_DEBRIS 9, SYS_PROMOTE 10`,
+  registered there (RR-46, ruled 2026-08-28) rather than in a `sim/` copy: `rng_for`'s keyspace
+  has one home, and two enums feeding it let two systems draw the same stream. The values above
+  are the header's, and the header is authoritative — `static_assert`s there pin the block's
+  floor and its ceiling under `RNG_SYS_LUAU_BASE`. Alloy adds a name by registering it in that
+  header. `draw` is a local counter; no draw result is stored across ticks.
 - **Hash-region integrity**: the pass mutates registered arenas only where §14.2 says the row is
   authoritative; scratch never aliases a registered arena; pool growth happens only in pass 5
   between `guard_window_open/close`; `arena.used` never covers capacity.
@@ -1599,7 +1602,7 @@ other than `<stdint.h> <stddef.h> <string.h> <limits.h>`.
 | `t_budget.cpp` | G-05 scene (20k particles, 2k bodies, 500 dirty regions): per-pass ms and Σ `used` per arena written to CSV (T-A-03) |
 
 **Gate 0 hand-off.** `tl_gate0` (the disposable solver, `GATE0-BENCH.md`) may share exactly:
-`sim/solver_kernels.h`, `sim/rng_systems.h`, `sim/alloy_consts.h`, and the `Contact` struct
+`sim/solver_kernels.h`, `foundation/rng_systems.h`, `sim/alloy_consts.h`, and the `Contact` struct
 definition (copied into the bench, not included). It may not include `pools.h`, `alloy.h`, or any
 pass `.cpp`. Its measurements (G-01..G-04) are recorded against `solver_kernels.h` so a kernel
 change after Gate 0 re-runs the bench, not the whole queue.
@@ -1608,7 +1611,7 @@ change after Gate 0 re-runs the bench, not the whole queue.
 
 | Step | Files created | Tests that must pass | Measurement recorded |
 |---|---|---|---|
-| 1. Harness | `tests/sim/t_harness.cpp`, `t_budget.cpp` skeletons over an empty `AlloyWorld`; `sim/alloy.h`, `views.h`, `pools.h` (rows + asserts only), `alloy_consts.h`, `rng_systems.h` | `t_pools`, `t_hash_region` (19 empty arenas), `t_harness` on a no-op step | Σ `used` at init per arena |
+| 1. Harness | `tests/sim/t_harness.cpp`, `t_budget.cpp` skeletons over an empty `AlloyWorld`; `sim/alloy.h`, `views.h`, `pools.h` (rows + asserts only), `alloy_consts.h` (the RNG ids are registered in `foundation/rng_systems.h`, RR-46 — not created here) | `t_pools`, `t_hash_region` (19 empty arenas), `t_harness` on a no-op step | Σ `used` at init per arena |
 | 2. Gate 0 | `sim/solver_kernels.h` (①, contact, density), `tl_gate0` bench | `t_solver_kernels`, G-01..G-04, G-06 | the Gate 0 CSVs; palette rows stamped DECIDED or ladder rung recorded |
 | 3. Substrate | `broadphase.cpp`, `tables.cpp`, `edit.cpp` (intake + spawn/despawn), `alloy.cpp` (skeleton with guard hooks), `fields.cpp` (heat only) | `t_radix`, `t_broadphase`, `t_fields_heat` (the first slice, incl. worker sweep), `t_edit_cmds` (spawn/despawn), `t_compaction` | broadphase ms at 20k; heat pass ms at 500 regions |
 | 4. Topology core | `sdf.cpp`, `topology.cpp` (T1, T4–T7, T9, T12, T13), `cavity.cpp` (T8 flood/openings, no flow) | `t_sdf`, `t_union_find`, `t_fracture`, `t_cavity` (flood/merge/split), `t_islands_sleep`, fuzz on synthetic carve sequences (10⁴ random carves, Σ-mass exact, run-twice) | pass 5 ms amortised over the fuzz |
