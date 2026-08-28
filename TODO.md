@@ -7653,3 +7653,26 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > - The `.pages` arena is `SNAPSHOT`-only and out of the hash, so it is untouched.
 > `column.h` carries the current behaviour as a stated hashing ruling and `column_add:68` cites it;
 > both are amended by the slice rather than left to contradict the code.
+
+> **PR #17 (`w3-rr48-hash-extent`) OPEN, CI GREEN, BREADTH REVIEWER DISPATCHED — 2026-08-28 ~10:20
+> local.** The RR-48 slice, built by the steward under Rafael's "before substrate" scheduling.
+> **CI verified properly rather than by its badge:** run 33157239611, **`event: pull_request`**
+> (not a `workflow_dispatch`, which reports a false green because `commit_docs` falls back to
+> `HEAD~1` — `LESSONS.md`), `run_attempt: 1`, `conclusion: success`, 23/23 check runs, on
+> `head_sha b435fbb` — confirmed identical to the pushed branch head. `WORKFLOW.md` §2's
+> precondition (four-leg green BEFORE a reviewer is requested) is therefore met on evidence.
+> Note for the next steward: `pull_request_read` **`get_status`** returned `total_count: 0` here
+> and that is NOT the missing-run signal — it reads the legacy commit-status API, while GitHub
+> Actions reports through **check runs**. Use `get_check_runs`. The zero-runs symptom `LESSONS.md`
+> documents (a `dirty` PR gets no run at all) looks identical on the wrong endpoint.
+> **Reviewer:** `session_01NvkhtHdn7vJFqbVDbUDw1U`, Opus, breadth round per R-9. Briefed to treat
+> the steward's claims as claims — it is reviewing the steward's own code — and pointed at the four
+> preconditions that were checked from SOURCE and never empirically, plus the re-pinning claim,
+> which is the steward's and has already been wrong once. Its **PR comment is its only completion
+> signal** (R-15); the PR is subscribed for activity and a `send_later` backstop covers the one
+> case a subscription cannot see, a reviewer that dies without commenting.
+> **This breadth verdict does NOT authorise a merge.** `ROADMAP.md` §2 seats hashing code at Fable
+> and R-17 puts the ship-verdict round there: #17 needs a Fable full re-read after the Tue
+> 2026-09-01 02:00 reset regardless of what the breadth round returns. The slice was AUTHORED on
+> Opus, which §2's model policy would also put at Fable — flagged in the PR body and to Rafael as
+> his policy call, not assumed either way.
