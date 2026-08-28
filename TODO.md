@@ -7718,3 +7718,33 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > tl_save_test.bin`. The reviewer hit it four times. Every contributor runs the suite before
 > pushing (`WORKFLOW.md` §6 R-11), so this leaves everyone one `git commit -a` from committing the
 > deletion. Owner: whoever next opens `core/save` — fix is a temp path plus untracking the file.
+
+> **PR #17 IS GREEN ON THE FIX ROUND — head `0a32b45`, run 340, `event: pull_request`,
+> `run_attempt: 1`, 23/23 success, head_sha verified against the pushed branch (2026-08-28 ~11:20
+> local).** It cost one red round, and the diagnosis is worth more than the fix.
+> **What went red on `b8f231a`, all of it mine, all of it from one habit:** the new
+> `TL_TEST_EXPECT_FATAL` guard row failed on **netcode and ship across all four platforms** (eight
+> legs) because the whole arena guard is `#if TL_DEV` and `runner/tl_test.h` is explicit that for
+> an expect-fatal row "a trap is PASS and a clean exit is FAIL"; `audits` failed on a
+> `docs/XREF.md` that `docaudit` had regenerated and I never committed, which `pr.yml` checks as
+> its own `git diff --exit-code` step; and `build-id-cross-target` failed downstream, not
+> independently — its log reads `Found 16 artifact(s) … Total of 0 artifact(s) downloaded`,
+> because the failed build-test legs never uploaded the `build-id-*` artifacts it diffs. Chasing
+> that third one as a separate defect would have been wasted work; the log said so in one line.
+> **Root cause: validated ONE tier and a checklist carried from habit.** `LESSONS.md` already
+> says both — derive the pre-push checklist FROM `pr.yml`'s audit steps, and local validation on
+> one tier proves nothing about a gate that tier never exercises. The steward had even named the
+> tier risk in its own check-in message and pushed before acting on it. The four-leg matrix
+> caught it working exactly as designed, and a red round is billed twice (`WORKFLOW.md` §6 R-11).
+> **Fixed by tier-gating the row with `TL_SKIP`** — the sanctioned no-checks path, and the same
+> shape `registry.test.cpp` records having used for its own fatal rows before their trigger became
+> tier-live — and by committing the XREF regeneration. **Re-validated on all four tiers before
+> pushing this time:** dev 670/0, debug 670/0, netcode 570/0/103 skipped, ship 570/0/103 skipped,
+> plus docaudit, includes, commit_docs and the XREF diff step.
+> **Where #17 stands:** green, mergeable, and NOT mergeable-by-this-steward. The breadth verdict
+> was *fix first*; R-9 owes a fix-check and R-17 puts the ship-verdict round on Fable as a full
+> re-read after the Tue 2026-09-01 02:00 local reset. The steward chose not to spawn a separate
+> Opus fix-check the mandatory Fable re-read would duplicate, with the weekly budget at
+> `allowed_warning` — recorded on the PR as a judgement, open to being overruled. The Fable round
+> should cover **D2's new guard rows and D7's `TL_CHECK` promotion specifically**, since both
+> reach beyond the original diff into `foundation`.
