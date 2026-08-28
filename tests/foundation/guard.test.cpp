@@ -124,6 +124,16 @@ TL_TEST(guard_10k_tick_headless_run, "foundation,mem,soak") {
 // --- PR #17 review D2: the shrink half of the GROWS_AT_BARRIER contract ------------------------
 
 TL_TEST_EXPECT_FATAL(guard_shrink_before_the_barrier_window_is_fatal, "foundation,mem,fatal") {
+#if !TL_DEV
+    // The whole guard is `#if TL_DEV` (arena_guard.cpp:11) and MEMORY.md section 2 says the
+    // TL_FATAL is "in debug" - so below dev there is no trap to expect, and an EXPECT_FATAL body
+    // that exits cleanly is a FAIL by design (runner/tl_test.h: "a trap is PASS and a clean exit
+    // is FAIL"). TL_SKIP is the sanctioned no-checks path; registry.test.cpp records the same
+    // shape. Caught by CI, not locally: this row passed dev and reddened both netcode and both
+    // ship legs, which is LESSONS.md's "local validation on one tier proves nothing about a gate
+    // that tier never exercises" - the four-leg matrix working as designed.
+    TL_SKIP("the arena guard compiles out below dev (docs/MEMORY.md section 8.4)");
+#else
     (void)t;
     // `used` MOVING outside the barrier window is fatal in BOTH directions, and until RR-48 only
     // the growth direction had a row. This one discriminates: guard_barrier_begin compares
@@ -153,4 +163,5 @@ TL_TEST_EXPECT_FATAL(guard_shrink_before_the_barrier_window_is_fatal, "foundatio
     guard_barrier_begin(&g, &reg);           // <- fatals here: used != used_at_start
     guard_barrier_end(&g, &reg);
     guard_tick_end(&g, &reg);
+#endif
 }
