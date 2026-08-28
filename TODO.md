@@ -7748,3 +7748,38 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > `allowed_warning` — recorded on the PR as a judgement, open to being overruled. The Fable round
 > should cover **D2's new guard rows and D7's `TL_CHECK` promotion specifically**, since both
 > reach beyond the original diff into `foundation`.
+
+> **RR-53 RULED and RR-48's authorship question RULED (Rafael, 2026-08-28 ~11:40 local).**
+>
+> **RR-53 — RULED: a SECOND SLICE after #17 merges, switching `world.entities.free` to
+> `array_init_fixed`.** **This record corrects the steward's own filing above, which called it
+> "new surface in `foundation`" and therefore outside R-19.** That was wrong, and checking it
+> before writing the options is what found it: `MEMORY.md` §1.2 **already** rules that every
+> container on an `ARENA_HASHED` arena is SIZED AT INIT, and `world.entities.free` grows a page at
+> a time — so it is a container in violation of an existing rule, not a defect awaiting a new
+> mechanism. `array_init_fixed` exists (`foundation/array.h:60`). Two things the slice must NOT
+> assume, both checked: the free list **cannot simply leave the hash** — `world.cpp:192` records
+> that its COUNT is derivable (`allocated - live - quarantined`) but its **ORDER is authoritative**,
+> since it decides which slot the next spawn reuses; and restore already derives
+> `free_list.cap` from `_free_arena.used` (`world.cpp:203`), which a fixed cap changes.
+> **The price, stated to Rafael before the ruling and accepted with it:** the entity domain is 4M
+> slots (`Entity` = `Handle<EntityTag,22,10>`, `CANON.md`), so a full-domain fixed list commits
+> **~16 MB per world** up front against today's page-at-a-time growth — and `world_dual` stands up
+> two worlds. A smaller fixed cap is possible and caps live entities, which is a separate design
+> decision nobody has taken. **If the slice measures the real cost materially differently from
+> ~16 MB/world, that comes back as a ruling rather than being absorbed.**
+> Rejected, with reasons on the record: widening #17 (it is green and reviewed at its current
+> scope, and it gates `alloy-substrate`); generalising RR-48's live-extent fix to `Array` (that IS
+> the new-surface option — it needs the extent-home question answered again and would CONTRADICT
+> §1.2 rather than comply with it, so §1.2 would need re-ruling too); and deferring until a
+> consumer exists (substrate registers nineteen arenas into this set within days).
+>
+> **RR-48 authorship — RULED: the slice stands as authored on Opus; the Fable ship round is the
+> gate.** `ROADMAP.md` §2's model policy seats hashing/ordering code at Fable and PR #17 was
+> written on Opus. Ruled that §2's higher-or-equal gate holds **at the round that decides**, which
+> is R-17's Fable full re-read after the Tue 2026-09-01 reset — the same reasoning §2's own review
+> ladder already uses. Recorded honestly as a loosening rather than a non-event: it makes the
+> authorship seat advisory where the review seat is binding. Rejected: re-deriving two lines on
+> Fable (spends the seat on work a Fable reviewer reads anyway, and delays substrate), and
+> amending §2 to say the review seat governs (a real policy change taken on a convenient case —
+> §2's "never low effort on sim or netcode code" reads as being about who writes it).
