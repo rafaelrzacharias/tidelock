@@ -658,3 +658,42 @@ TL_TEST_EXPECT_FATAL(save_reflected_rejects_a_multi_row_descriptor, "core,save,f
 
     (void)save_write(&d, platform, sv(SAVE_PATH), &scratch);   // TL_CHECK fires here
 }
+
+TL_TEST_EXPECT_FATAL(save_read_reflected_rejects_a_multi_row_descriptor, "core,save,fatal") {
+    (void)t;
+    // RR-55 (ruled 2026-08-28), the READ half of RR-49. The W3 wave-sweep confirming round found
+    // the guard on save_write only, which is the wrong half to have if only one could be had: the
+    // write arm consumes the caller's own in-process descriptor, while THIS arm consumes bytes
+    // from a file that another build may have written. Before the fix a REFLECTED descriptor
+    // claiming three rows decoded every row the segment declared and the apply arm memcpy'd
+    // exactly one, dropping the rest and returning ERR_OK.
+    // The file is written FIRST with a conforming max_rows == 1 descriptor, so the bytes on disk
+    // are valid and the only thing wrong at read time is the descriptor - otherwise the row would
+    // prove nothing but that a corrupt file is refused, which save_read_forged_arena_count_refused
+    // already covers.
+    const PlatformApi* platform = platform_test_init();
+    TL_ASSERT_NOT_NULL(platform);
+    VMemArena scratch;
+    TL_ASSERT_EQ(vmem_arena_init(&scratch, "save_rr55_scratch"_id, 16u * 1024u * 1024u, 0u,
+                                 &platform->vmem), ERR_OK);
+
+    WorldFixture* f = wt_fixture(0);
+    TL_ASSERT_TRUE(world_fixture_init(f, 1u));
+    world_register_component(&f->w, &WCfg_info);
+    world_build_schedule(&f->w);
+
+    SaveArenaDesc ad{};
+    ad.arena_id = f->w.comps[world_component_id<WCfg>(&f->w)].dense_arena.id;
+    ad.kind = SAVE_ENC_REFLECTED;
+    ad.info = &WCfg_info;
+    ad.max_rows = 1u;              // conforming: produces a valid file
+
+    SaveDesc d = base_desc(&f->reg, &f->w);
+    d.arena_descs = Span<const SaveArenaDesc>{ &ad, 1u };
+    TL_ASSERT_EQ(save_write(&d, platform, sv(SAVE_PATH), &scratch), ERR_OK);
+
+    ad.max_rows = 3u;              // the whole of the forgery, and it is on the READ side only
+    u64 out_seed = 0u;
+    u64 out_tick = 0u;
+    (void)save_read(&d, platform, sv(SAVE_PATH), &scratch, &out_seed, &out_tick);   // TL_CHECK fires
+}

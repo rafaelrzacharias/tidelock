@@ -259,6 +259,19 @@ ErrCode save_read(const SaveDesc* desc, const PlatformApi* platform, StrView pat
         Span<const FieldAlias> aliases = find_aliases(desc->aliases, ad->info->name_hash);
         const SaveComponentMigration* mig = find_migration(desc->migrations, ad->info->name_hash, hdr.format_version);
 
+        // RR-55 (ruled 2026-08-28 by Rafael): RR-49's singleton-only rule binds the READ path too.
+        // The write arm got the guard; this one did not, and this is the arm that matters more -
+        // it consumes bytes from a FILE, possibly written by another build, where the write arm
+        // only ever consumes a caller's own in-process descriptor. Without it a REFLECTED
+        // descriptor with max_rows == 3 meeting a segment that declares 3 rows decoded all three
+        // and the apply arm below memcpy'd exactly one, dropping the rest and returning ERR_OK -
+        // the same "no silent partial loads" violation RR-49 was made to close
+        // (ASSETS-AND-DATA.md section 5; CLAUDE.md's no-silent-fallbacks rule).
+        // Placed BEFORE the migrator branch on purpose: a migrator is handed ad->max_rows and its
+        // return value is trusted as row_count, so guarding only the direct decode would leave the
+        // migration route open to the identical loss. Found by the W3 wave-sweep confirming round.
+        if ((SaveEncoderKind)kind == SAVE_ENC_REFLECTED) { TL_CHECK(ad->max_rows == 1u); }
+
         void* out_rows = arena_push(scratch, (u64)ad->max_rows * ad->info->size, ad->info->align);
         Entity* out_entities = nullptr;
         u32 row_count = 0u;
@@ -301,6 +314,12 @@ ErrCode save_read(const SaveDesc* desc, const PlatformApi* platform, StrView pat
                 if (desc->registry->e[j].id == p->arena_id) { e = &desc->registry->e[j]; break; }
             }
             TL_CHECK(e != nullptr);
+            // The other half of RR-55. max_rows == 1 bounds row_count ABOVE, but a migrator's
+            // return value is trusted, so nothing bounded it BELOW: a block decoding to zero rows
+            // reached this memcpy and copied `info->size` bytes of untouched scratch straight into
+            // live state - garbage in, ERR_OK out. The exact-1 form covers both ends and says what
+            // this kind means.
+            TL_CHECK(p->row_count == 1u);
             memcpy(e->arena->base, p->rows, p->ad->info->size);
         } else {   // SAVE_ENC_ECS_COLUMN
             const u8* rows_bytes = (const u8*)p->rows;

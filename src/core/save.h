@@ -156,7 +156,10 @@ struct SaveComponentMigration {
 // ECS_COLUMN, ignored for RAW_POOL/CHUNK_STORE (not yet implemented - TL_FATAL if selected).
 // **`max_rows` must be exactly 1 for REFLECTED** (RR-49, ruled 2026-08-28: that kind is
 // singleton-only and the encoder TL_CHECKs it); it sizes the decode buffer for ECS_COLUMN, which
-// is the kind for a multi-row arena. `world`/`comp` are required only for ECS_COLUMN (the
+// is the kind for a multi-row arena. **Enforced on BOTH paths since RR-55** (ruled 2026-08-28):
+// save_write's arm, and save_read's - before the migrator branch, so the migration route cannot
+// smuggle the same loss past it. RR-49 shipped the write guard alone; the read path is the one
+// that eats bytes from a foreign build, so it is the half that mattered more. `world`/`comp` are required only for ECS_COLUMN (the
 // load-side re-add door).
 struct SaveArenaDesc {
     NameHash              arena_id;      // must match the ArenaRegistry entry's id
