@@ -1,6 +1,7 @@
 # The C++ subset — coding contract (tidelock, rev 1)
 
-> **Status:** design rev 1, 2026-08-22. Expands `PIVOT-DESIGN.md` §2 into the rules a code review
+> **Status:** design rev 1, 2026-08-22; §1 reconciled against the tree 2026-08-29 (RR-56, the
+> `tests/` fixture-static carve-out). Expands `PIVOT-DESIGN.md` §2 into the rules a code review
 > checks and CI enforces. PIVOT §2 is the ruling; this doc is its operational form.
 > **Scope:** every TU under `src/`. `vendor/` and `tools/` are exempt (they compile in their own
 > TUs with their own flags and must not leak includes into ours).
@@ -39,6 +40,44 @@ exemption)** — never hashed, never snapshotted, never part of a world's regist
 | recursive/meta templates, SFINAE, concepts, expression templates | compile time + cognitive cost | review; the sanctioned list is closed |
 | `auto` for non-iterator locals, lambdas capturing by reference across a call | readability / hidden lifetime | review |
 | `thread_local` outside the job system's worker slot | hidden per-thread state the hash can't see | CI grep |
+
+**`tests/` is outside this table, and its fixture statics are SANCTIONED — by intent now, not
+merely by scope (RR-56, ruled 2026-08-29 by Rafael).** The link gate reads the `src/` libs only
+(`tools/audit/symbols.py`), so a test's writable statics were always legal, but only because
+nothing looked — the W3 sweep's confirming round correctly called that an exemption by scope rather
+than by intent. It is intent: a fixture too large for the stack lives in a function-local `static`,
+and that is the tree's one idiom for it — `tests/core/world_test_util.h`'s `wt_fixture`, the render
+lane's `dd_fixture`/`et_fixture`/`sp_fixture`, and `tests/foundation/registry.test.cpp`'s
+`TestWorld` rows, together most of the test binary's 8.3 MB `.bss`.
+
+**What makes them safe is that every fixture's `init` re-initialises all of its state on entry —
+NOT process isolation, which only one of the two run modes provides.** This is the correction the
+ruling's own evidence needed: the sweep that raised RR-56 argued the statics were safe because
+`tests/runner/main.cpp:74` gives "one child per test, always", and that is true only under
+`--isolate`. Without it (`main.cpp:697`) ordinary tests run **serially, in-process, in one
+process**, and the fixture statics persist from row to row; only `TL_TEST_EXPECT_FATAL` rows always
+get a child. **Both modes are live in CI today** — `pr.yml:134` runs the four build-test legs with
+`--isolate`, and `pr.yml:221` runs the sanitizers leg *without* it. So the shared-state case is not
+a hypothetical future worker mode; it is the leg ASan and UBSan already grade, and it passes because
+`world_fixture_init`/`world_init` and their siblings overwrite every field before use.
+
+Two rules follow, and they are the operative part of this carve-out:
+1. **A fixture static's `init` must leave no field carrying a previous row's value** — no
+   "initialised on first use" fields, no counters that accumulate, no cached pointers into a prior
+   row's arenas. A fixture that cannot promise this belongs on an arena instead.
+2. **The runner's execution model may not gain in-process *parallelism* without converting these
+   fixtures.** Serial reuse is safe under rule 1; concurrent reuse is not, and
+   `-fno-threadsafe-statics` (§9) means there is not even a guard variable to make first-use racy
+   rather than silently wrong.
+
+Two-worlds-in-one-process tests stay legal exactly as they are: they hold both worlds in one test
+body, which is reuse within a row rather than across rows.
+
+*Considered and rejected: converting the fixtures piecemeal.* Measured on the linked `tl_tests`
+(ship): the file that prompted the question holds 1,184,544 B of the binary's 8,303,264 B `.bss`
+— **14.3 %** — while eight render test bodies hold 2,107,456 B between them and the three render
+fixtures another 1,002,592 B. Converting one file removes a seventh of the class, leaves the larger
+instances untouched, and leaves the tree with two fixture idioms; the rule is made honest instead.
 
 **Allowed system includes in `src/`:** `<stdint.h>`, `<stddef.h>`, `<string.h>` (memcpy/memset/
 memcmp/**memmove** only - `memmove` is sanctioned because `CONTAINERS.md` §8's erase/insert paths

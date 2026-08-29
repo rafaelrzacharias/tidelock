@@ -7864,8 +7864,9 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > **Still unowned and NOT scheduled by this block** (all filed above, none launched): D8
 > (`tl_save_test.bin` deleted by every suite run), A-D8 (no encoder bound has a fatal-expected row),
 > the `X = Type{}` sweep in `tests/`/`tools/`, `TL_PROF_SCOPE_W`'s dropped argument,
-> `test_list.inc` remove-vs-add, Review B's three editor nits, and the three merged sweep branches
-> (`w3-sweep-a`/`-b`/`-c`) still on origin awaiting Rafael's word on deletion.
+> `test_list.inc` remove-vs-add, and Review B's three editor nits. (The merged sweep branches
+> `w3-sweep-a`/`-b`/`-c`/`-confirm` were deleted by Rafael on 2026-08-29; `origin` now carries
+> `main` alone.)
 > **Next free ids, measured not inherited: RR-54 and R-25.**
 
 > **BOTH R-24 REVIEW ROUNDS DISPATCHED (steward, 2026-08-28 22:33 local).** Recorded here because
@@ -8133,3 +8134,27 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > in-process worker mode would turn every one of them into shared mutable state — which is the
 > hazard actually worth recording, and today it is written down nowhere. (c) Convert
 > `registry.test.cpp` only, as ruled. **For Rafael.** Nothing is blocked on the answer.
+
+> **RR-56 RULED AND SHIPPED — document the carve-out (Rafael, 2026-08-29). Home:
+> `CPP-SUBSET.md` §1.** The `tests/` fixture statics are sanctioned by INTENT now, not merely by
+> the scope accident that `tools/audit/symbols.py` reads the `src/` libs only. Option (b) of three;
+> (a) convert every fixture site and (c) convert `registry.test.cpp` alone were both declined —
+> (c) because it removes 14.3 % of the class and leaves the tree with two fixture idioms.
+>
+> **The ruling's own evidence was wrong on the safety argument, and writing it down is what caught
+> it.** The confirming round held that the statics are safe because the runner spawns "one child per
+> test, always" (`tests/runner/main.cpp:74`). That holds **only under `--isolate`**. Without it
+> (`main.cpp:697`) ordinary tests run **serially in ONE process** and the fixture statics persist
+> across rows; only `TL_TEST_EXPECT_FATAL` rows always get a child. **Both modes are live in CI** —
+> `pr.yml:134` isolates on the four build-test legs, `pr.yml:221` does NOT on the sanitizers leg.
+> So the shared-state case is not a future hazard to guard against; it is the leg ASan and UBSan
+> already grade. Verified locally rather than inferred: in-process, no `--isolate`, dev **676
+> selected / 673 passed / 0 failed** and ship **676 / 573 / 0 failed**. It passes because every
+> fixture `init` overwrites all of its state on entry.
+> §1 therefore records the real invariant and two rules that follow: (1) a fixture static's `init`
+> must leave no field carrying a previous row's value — a fixture that cannot promise that belongs
+> on an arena; (2) the runner may not gain in-process PARALLELISM without converting these fixtures
+> first, since `-fno-threadsafe-statics` means there is not even a guard variable to make a racy
+> first use loud rather than silently wrong. Serial reuse is safe under (1); concurrent reuse is not.
+>
+> **Next free ids, re-measured: RR-57 and R-25.**
