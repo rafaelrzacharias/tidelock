@@ -8091,3 +8091,45 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > does `symbols.py` grow to enforce it? Today the question has no home in any doc.
 >
 > **Next free ids, re-measured after this block: RR-57 and R-25.**
+
+> **RR-54 AND RR-55 SHIPPED; PR #17 MERGED; RR-56 STOPPED AND RE-REFERRED (steward, 2026-08-29
+> 06:40 local).** Rafael ruled all three on 2026-08-28 and authorised the steward to merge #17.
+>
+> - **PR #17 MERGED — `0a68cbb`**, local `git merge --no-ff` per R-16, verified
+>   `rafaelrzacharias` as both author and committer. CI 23/23 on head `aaee8e8`; the merged tree
+>   re-validated on all four tiers before the push (676 selected, 0 failed). RR-54 landed with it:
+>   `column.h`'s HASHING RULING now names the EXTENT and DENSE-ORDER channels separately, says
+>   RR-48 closed only the first, cites `interp.cpp:29` as the order channel's one home, and states
+>   that a restore-based rejoin is order-stable where a replay-based one is not. The regression row
+>   is renamed for the extent it actually pins and a negation row asserts the order channel's
+>   difference. Ship round's D2/D3/D4 fixed in the same commit. Verdict comment `5458119625`,
+>   fix-round comment `5460565716`.
+> - **RR-55 SHIPPED — `efa39ea`.** Guard before the MIGRATOR branch, not only the direct decode,
+>   plus `TL_CHECK(row_count == 1u)` at apply: `max_rows` bounded row_count above but nothing
+>   bounded it below, so a zero-row block memcpy'd untouched scratch into live state. Both
+>   revert-verified.
+>
+> **RR-56 — NOT BUILT. The ruling was taken on an object-file number; the linked binary says
+> something different, and building the narrow slice as ruled would be close to cosmetic.**
+> This is the doc-integrity protocol's step (6) firing: what would be wrong in the big picture if
+> this slice were built as literally specified.
+> - The confirming round's `.bss = 1,774,608` is `registry.test.cpp.o`'s **object** figure. In the
+>   linked `tl_tests` (ship) the whole `.bss` is **8,303,264 B**, and the twelve surviving
+>   `TestWorld`-sized statics (0x18198 = 98,712 B each) total **1,184,544 B — 14.3 %** of it.
+> - **The pattern is tree-wide and predates `1850308`, which is the part no one had measured.**
+>   `tests/core/world_test_util.h`'s `wt_fixture` IS a function-local `static WorldFixture s[4]` and
+>   is the idiom most core tests already use. Eight render test bodies hold a 0x40508 (263,432 B)
+>   `::f` static apiece — **2,107,456 B, larger than registry.test.cpp's entire share**; the three
+>   render fixtures `dd_fixture`/`et_fixture`/`sp_fixture` add **1,002,592 B**; `g_log` is
+>   **1,015,816 B**.
+> - So converting `registry.test.cpp` alone removes 14 % of the class, leaves the larger instances
+>   untouched, and introduces a SECOND fixture idiom into a tree that has one. That is idiom drift
+>   bought at the price of a real edit, which is the trade this file exists to refuse.
+> **Three options, and the steward's recommendation is (b).** (a) Convert every fixture site to an
+> arena — a real `tests/` slice with its own review, not R-19 work, and it must answer where the
+> bootstrap arena itself lives. (b) **Keep the statics and make them honest**: `CPP-SUBSET.md` §1
+> gains an explicit `tests/` carve-out stating that fixture statics are sanctioned, that their
+> safety rests on the runner's process-per-test model (`tests/runner/main.cpp:74`), and that an
+> in-process worker mode would turn every one of them into shared mutable state — which is the
+> hazard actually worth recording, and today it is written down nowhere. (c) Convert
+> `registry.test.cpp` only, as ruled. **For Rafael.** Nothing is blocked on the answer.
