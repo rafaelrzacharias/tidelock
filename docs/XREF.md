@@ -39,6 +39,7 @@ consumer listed for it - that is the slice brief's consumer check in CLAUDE.md.
 - `ECS.md` -> §3, §5
 - `FRAME-LOOP.md` -> §3
 - `LUAU-LAYER.md` -> §3, §3.5, §5, §7, §8.3
+- `MEMORY.md` -> §5
 - `NETCODE.md` -> §5
 - `RENDER2D.md` -> §2
 - `ROADMAP.md` -> §8.5

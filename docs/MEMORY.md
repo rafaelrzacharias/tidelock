@@ -72,11 +72,23 @@ ErrCode registry_restore(ArenaRegistry*, const Snapshot*);                 // fa
   neither flag (`GROWS_AT_BARRIER` alone — the guard's business, §2).
 - **Every container on an `ARENA_HASHED` arena is SIZED AT INIT** (ruled 2026-08-24). A container
   that grows by bump-allocating a new block orphans its old one below `used`, where the arena's
-  hash covers it forever — so the hash encodes allocation history, not state. This does *not*
-  desync a session (lockstep peers run identical op histories, so their orphans are identical, and
-  checkpoints are raw arena images — `DETERMINISM.md` §5 — so a joiner inherits the exact bytes);
-  what it costs is hygiene: unbounded hashed garbage, and a hash that moves for a reason no state
-  change explains. `Array<T>` already had the fixed mode (`CONTAINERS.md` §8.1); `Map<K,V>` gained
+  hash covers it forever — so the hash encodes allocation history, not state.
+  **AMENDED 2026-08-28 (RR-48, PR #17 review D1) — the 2026-08-24 clause below was sound for the
+  paths that existed then and is not sound for the save path, which did not.** As written it read:
+  *"This does not desync a session (lockstep peers run identical op histories, so their orphans are
+  identical, and checkpoints are raw arena images — `DETERMINISM.md` §5 — so a joiner inherits the
+  exact bytes); what it costs is hygiene."* Both halves still hold **for checkpoints**: peers
+  replaying one command stream do produce identical histories, and `registry_restore` copies the
+  recorded `used` per slot, so a snapshot-restored world cannot diverge in extent from the world
+  that snapshotted it. What the clause could not consider is `core/save`, built in W3: `save_read`
+  rebuilds a column by `world_add_raw` per row, so a **loaded** column's extent is a function of
+  the load, not of the saving world's history — two worlds with identical live state and different
+  histories then hash differently. That is a desync, not hygiene, the moment anything on a lockstep
+  path consumes a save (`ASSETS-AND-DATA.md` §5 routes cross-build rejoin through exactly that).
+  ECS columns are fixed by construction — `column_remove` shrinks the arena so `[base, used)` is
+  the live extent (`core/column.h`) — and the general rule below is unchanged for every other
+  container. **The residual cost is still hygiene where it applies, but "does not desync" is no
+  longer a safe premise to size a new pool against.** `Array<T>` already had the fixed mode (`CONTAINERS.md` §8.1); `Map<K,V>` gained
   `map_init_fixed` to match (`CONTAINERS.md` §3), and that *is* the enforcement — a container
   cannot see its own arena's registry flags, but a fixed-mode container cannot grow anywhere, so
   sizing at init is checked where the growth would happen rather than where the flag lives.
@@ -171,8 +183,15 @@ nowhere narrower, so the only way to budget such a heap is to replace it program
 
 - **Arena-offset guard:** at tick start record `used` of every registered arena; at tick end
   assert only scratch moved — *except* inside the barrier-apply window, where arenas flagged
-  `GROWS_AT_BARRIER` (ECS columns, Alloy pools during pass 5) may grow. A growth outside the window
-  is `TL_FATAL` in debug. This is the Layr zero-alloc guard, made structural.
+  `GROWS_AT_BARRIER` (ECS columns, Alloy pools during pass 5) may **move `used` — grow OR shrink**.
+  Any movement outside the window is `TL_FATAL` in debug. **Shrink was added by ruling
+  2026-08-28 (RR-48, PR #17 review D2); before it this clause said "grow" and the guard's code
+  already allowed either**, because it compares `used != used_at_start` rather than `>`. A column
+  now shrinks its dense and entity arenas on remove so `[base, used)` is the live extent
+  (`core/column.h`), and that legality must be a sanctioned property rather than an accident of
+  the comparison operator — a later author reading "grow" could tighten the guard to fatal on any
+  movement, or relax it to `>` to match the prose, and break lockstep hashing either way.
+  `CLAUDE.md`: silence in the spec is not permission. This is the Layr zero-alloc guard, made structural.
 - **Global allocator shim:** in `dev` and `netcode` tiers, `operator new`/`malloc` from `src/`
   code is a link error (the symbol audit) for sim libs and a `TL_FATAL` tripwire shim for the
   rest; vendor libs are routed through `mem_pool` via their hook APIs (`lua_newstate(alloc_fn)`,
@@ -324,7 +343,7 @@ void* arena_push(VMemArena* a, u64 bytes, u32 align) {
     return p;
 }
 u64  arena_mark(const VMemArena* a) { return a->used; }
-void arena_reset_to(VMemArena* a, u64 mark) { TL_ASSERT(mark <= a->used); #if TL_DEBUG if (flags & ARENA_POISON) memset(base+mark, 0xDD, used-mark); #endif a->used = mark; }   // poison is gated on the flag: unconditional poison synchronised every arena's dev-tier dirt to 0xDD, defeating §8.8's divergent-dirt criterion (W1 mem review 3)
+void arena_reset_to(VMemArena* a, u64 mark) { TL_CHECK(mark <= a->used);   // TL_CHECK, all tiers (PR #17 review D7): the write below is unconditional, so a mark ABOVE used RAISES used and extends the hashed extent over bytes nothing wrote - silent lockstep divergence where TL_ASSERT compiles out. Live from RR-48: column_remove is the first call site targeting an ARENA_HASHED arena. #if TL_DEBUG if (flags & ARENA_POISON) memset(base+mark, 0xDD, used-mark); #endif a->used = mark; }   // poison is gated on the flag: unconditional poison synchronised every arena's dev-tier dirt to 0xDD, defeating §8.8's divergent-dirt criterion (W1 mem review 3)
 void arena_decommit_above(VMemArena* a, u64 mark) { u64 p = align_up(mark, COMMIT_GRANULE); if (p < committed) { os->decommit(base+p, committed-p); committed = p; high_water = min(high_water, p); } used = min(used, mark); }
 ```
 
@@ -360,7 +379,7 @@ Snapshot* ring_push(SnapshotRing*, u64 tick);  const Snapshot* ring_find(const S
 ```cpp
 struct ArenaGuard { u64 used_at_start[MAX_ARENAS]; u8 in_barrier; u8 _pad[7]; };
 void guard_tick_begin(ArenaGuard*, const ArenaRegistry*);       // baselines used[]; calls the alloc_shim anchor
-void guard_barrier_begin/end(ArenaGuard*, const ArenaRegistry*); // the GROWS_AT_BARRIER window: begin TL_FATALs if a barrier-flagged arena already grew this tick (growth is legal only INSIDE the window — §2, which the one-arg spelling could not enforce); end re-baselines barrier-flagged arenas
+void guard_barrier_begin/end(ArenaGuard*, const ArenaRegistry*); // the GROWS_AT_BARRIER window: begin TL_FATALs if a barrier-flagged arena's `used` already MOVED this tick, in either direction (movement is legal only INSIDE the window — §2, which the one-arg spelling could not enforce); end re-baselines barrier-flagged arenas
 void guard_tick_end(ArenaGuard*, const ArenaRegistry*);   // for each arena: if used != used_at_start and !(flags & GROWS_AT_BARRIER) → TL_FATAL(name)
 ```
 

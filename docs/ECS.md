@@ -43,9 +43,17 @@ ComponentId world_register_component(World*, const ComponentInfo* info);   // in
   the reflection walk asserts no pointer-typed members (debug). Same assert gates event types.
 - **Column = packed dense `Array<T>` (own VMem range) + `Array<Entity>` (dense→entity) + paged
   sparse (entity index → dense index, pages of 4096 `u32`, committed on demand).** Add/remove are
-  O(1); remove is swap-remove; iteration is `0..count` packed.
+  O(1); remove is swap-remove; iteration is `0..count` packed. **A column's dense and entity arenas
+  hash their LIVE extent, not a high-water mark** — the ruling, its reasoning and its bounding are
+  `core/column.h`'s contract block (RR-48, ruled 2026-08-28).
 - **Walk order is deterministic for a given world state** (packed order) and reproducible across
   runs/machines because structure changes only at barriers with a fixed apply order.
+  **Read "a given world state" as a given world INSTANCE, not as a logical state reached any which
+  way** (RR-54, ruled 2026-08-28): `remove` is swap-remove, so packed order is a function of *which*
+  row was removed, and two worlds holding the same logical state by different removal paths walk —
+  and therefore hash — in different orders, by design. RR-48 closed the *extent* channel, not this
+  one. The two channels, and which a save/rejoin consumer may rely on, are `core/column.h`'s
+  contract block; the order channel's own statement is `core/interp.cpp:29`.
 - **Each column is a registered arena** (flags `HASHED | SNAPSHOT | GROWS_AT_BARRIER`) — the
   column *is* the hash/snapshot unit, so a desync localizes to a component type. Registration
   order = component registration order = part of the lockstep contract.

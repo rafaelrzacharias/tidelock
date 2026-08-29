@@ -27,7 +27,7 @@ void guard_barrier_begin(ArenaGuard* g, const ArenaRegistry* r) {
     for (u32 i = 0; i < r->count; ++i) {
         if ((r->e[i].flags & ARENA_GROWS_AT_BARRIER) != 0u &&
             r->e[i].arena->used != g->used_at_start[i]) {
-            TL_FATAL("registered arena grew before the barrier window (docs/MEMORY.md section 2)");
+            TL_FATAL("registered arena MOVED before the barrier window (docs/MEMORY.md section 2)");
         }
     }
     g->in_barrier = 1u;

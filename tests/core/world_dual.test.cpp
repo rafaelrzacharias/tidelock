@@ -153,3 +153,121 @@ TL_TEST(world_dual_restore_reproduces_the_hash_trace, "core,ecs,world,determinis
     }
     ++t->checks;
 }
+
+// --- RR-48: the hashed extent is the LIVE extent, not a high-water mark ------------------------
+
+TL_TEST(world_divergent_histories_hash_the_same_extent, "core,ecs,determinism") {
+    // The property RR-48 buys, and the one the previous "used never shrinks" ruling explicitly
+    // did NOT hold: build the SAME live state two different ways and require the same hash.
+    // NAMED FOR THE EXTENT DELIBERATELY (RR-54, ruled 2026-08-28; PR #17 ship round D1). RR-48
+    // closes the EXTENT channel only. This fixture removes a2 - dense index 1 with `last` == 2 -
+    // so swap-remove lifts a3 into slot 1 and reproduces B's order exactly; the dense-ORDER
+    // channel is therefore silent here BY CONSTRUCTION, and an earlier name claiming the general
+    // "equal state hashes equally" property overstated what the body pins. The order channel is
+    // open by design and gets its own negation row below.
+    // LESSONS.md names this directly - "two instances, same op sequence" is the weakest
+    // determinism test that still looks like one; the property worth testing is divergent
+    // histories that converge. Before RR-48 world A's dense arena carried three rows' worth of
+    // `used` against B's two, and the two hashed differently with every live byte equal.
+    WorldFixture& a = *wt_fixture(0u);
+    WorldFixture& b = *wt_fixture(1u);
+    TL_ASSERT_TRUE(world_fixture_init(&a, 7u));
+    TL_ASSERT_TRUE(world_fixture_init(&b, 7u));
+    // Components register arenas, so the registry is sealed AFTER registration, and the world
+    // must be sealed (world_build_schedule) before commands.cpp will accept a command.
+    world_fixture_register_std(&a);
+    world_fixture_register_std(&b);
+    world_build_schedule(&a.w);
+    world_build_schedule(&b.w);
+    registry_seal(&a.reg);
+    registry_seal(&b.reg);
+
+    // A: spawn three, give all three a WPos, then remove the middle one's.
+    Entity a1 = world_spawn(&a.w), a2 = world_spawn(&a.w), a3 = world_spawn(&a.w);
+    world_flush(&a.w);
+    world_add<WPos>(&a.w, a1, WPos{ 11, 12 });
+    world_add<WPos>(&a.w, a2, WPos{ 21, 22 });
+    world_add<WPos>(&a.w, a3, WPos{ 31, 32 });
+    world_flush(&a.w);
+    world_remove(&a.w, a2, (ComponentId)world_component_id<WPos>(&a.w));
+    world_flush(&a.w);
+
+    // B: spawn the same three, give WPos to only the two that survive in A. Same live rows,
+    // never a third row allocated - the histories differ, the state does not.
+    Entity b1 = world_spawn(&b.w), b2 = world_spawn(&b.w), b3 = world_spawn(&b.w);
+    (void)b2;
+    world_flush(&b.w);
+    world_add<WPos>(&b.w, b1, WPos{ 11, 12 });
+    world_add<WPos>(&b.w, b3, WPos{ 31, 32 });
+    world_flush(&b.w);
+
+    u64 pa[MAX_ARENAS];
+    u64 pb[MAX_ARENAS];
+    const u64 ha = registry_hash_all(&a.reg, pa);
+    const u64 hb = registry_hash_all(&b.reg, pb);
+    // Per-arena first, so a failure names WHICH arena rather than only the fold.
+    TL_ASSERT_EQ(a.reg.count, b.reg.count);
+    for (u32 i = 0; i < a.reg.count; ++i) {
+        if (pa[i] != pb[i]) { TL_ASSERT_EQ(pa[i], pb[i]); }
+    }
+    TL_EXPECT_EQ(ha, hb);
+}
+
+TL_TEST(world_divergent_removal_order_hashes_differently_by_design, "core,ecs,determinism") {
+    // The NEGATION of the row above, and the reason it is here rather than filed as a defect:
+    // RR-54 (ruled 2026-08-28 by Rafael) settled that the dense-ORDER channel stays
+    // history-dependent. column_remove is swap-remove, so WHICH row was removed decides the
+    // permutation; src/core/interp.cpp:29 is the standing statement of that. LESSONS.md: where a
+    // property is false by design, test the negation and say so, so nobody "fixes" it later.
+    // Differs from the row above in ONE character - a1 instead of a2 - and that is the whole
+    // point: removing dense index 0 makes swap-remove lift the LAST row into slot 0, which no
+    // add-only history reproduces. If this row ever goes green, the order channel was closed
+    // without amending RR-54 and column.h's HASHING RULING block is now wrong.
+    WorldFixture& a = *wt_fixture(0u);
+    WorldFixture& b = *wt_fixture(1u);
+    TL_ASSERT_TRUE(world_fixture_init(&a, 7u));
+    TL_ASSERT_TRUE(world_fixture_init(&b, 7u));
+    world_fixture_register_std(&a);
+    world_fixture_register_std(&b);
+    world_build_schedule(&a.w);
+    world_build_schedule(&b.w);
+    registry_seal(&a.reg);
+    registry_seal(&b.reg);
+
+    // A: spawn three, give all three a WPos, then remove the FIRST one's. Swap-remove lifts a3
+    // into slot 0, so A's dense order is [a3, a2] - values [{31,32}, {21,22}].
+    Entity a1 = world_spawn(&a.w), a2 = world_spawn(&a.w), a3 = world_spawn(&a.w);
+    (void)a2; (void)a3;
+    world_flush(&a.w);
+    world_add<WPos>(&a.w, a1, WPos{ 11, 12 });
+    world_add<WPos>(&a.w, a2, WPos{ 21, 22 });
+    world_add<WPos>(&a.w, a3, WPos{ 31, 32 });
+    world_flush(&a.w);
+    world_remove(&a.w, a1, (ComponentId)world_component_id<WPos>(&a.w));
+    world_flush(&a.w);
+
+    // B: the same two survivors, added directly - dense order [b2, b3], values
+    // [{21,22}, {31,32}]. Same live SET, same row count, opposite permutation.
+    Entity b1 = world_spawn(&b.w), b2 = world_spawn(&b.w), b3 = world_spawn(&b.w);
+    (void)b1;
+    world_flush(&b.w);
+    world_add<WPos>(&b.w, b2, WPos{ 21, 22 });
+    world_add<WPos>(&b.w, b3, WPos{ 31, 32 });
+    world_flush(&b.w);
+
+    // Same number of live rows...
+    TL_ASSERT_EQ(world_column<WPos>(&a.w).count, world_column<WPos>(&b.w).count);
+    // ...and RR-48 holds, so every hashed arena spans the same number of bytes. This is the half
+    // that must stay true: if an extent ever differs here the failure is RR-48's, not RR-54's.
+    TL_ASSERT_EQ(a.reg.count, b.reg.count);
+    for (u32 i = 0; i < a.reg.count; ++i) {
+        TL_ASSERT_EQ(a.reg.e[i].arena->used, b.reg.e[i].arena->used);
+    }
+
+    // ...yet the fold differs, because the bytes are in a different order. By design.
+    u64 pa[MAX_ARENAS];
+    u64 pb[MAX_ARENAS];
+    const u64 ha = registry_hash_all(&a.reg, pa);
+    const u64 hb = registry_hash_all(&b.reg, pb);
+    TL_EXPECT_TRUE(ha != hb);
+}

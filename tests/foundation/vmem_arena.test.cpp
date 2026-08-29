@@ -269,3 +269,29 @@ TL_TEST_EXPECT_FATAL(vmem_push_one_byte_past_reserve_is_fatal, "foundation,mem,f
     (void)arena_push(&a, a.reserved, 1u);   // the whole budget: legal, the edge is inclusive
     (void)arena_push(&a, 1u, 1u);           // one past it: TL_FATAL, exit 2
 }
+
+TL_TEST_EXPECT_FATAL(vmem_reset_to_above_used_is_fatal, "foundation,mem,fatal") {
+    (void)t;
+    // Pins the TL_CHECK(mark <= a->used) that D7 promoted from TL_ASSERT (PR #17 review; this row
+    // added on the ship round's D2, which found the promotion untested on the two tiers it exists
+    // for). The asymmetry that made it visible: this PR added a fatal row for the guard change,
+    // which is #if TL_DEV and so only matters where a trap ALREADY existed, and none for this one,
+    // which only matters where a trap did NOT.
+    // NO tier gate here, deliberately, and that is the whole point of the row: TL_CHECK is live in
+    // all four tiers where TL_ASSERT compiles out below dev. If this is ever reverted to
+    // TL_ASSERT, dev and debug stay green and THIS row is what goes red on netcode and ship.
+    // What the revert would cost, if the row were absent: `a->used = mark` runs unguarded, the
+    // hashed extent [base, used) grows over bytes nothing ever wrote, and every peer that took
+    // that path hashes memory no state change explains - a lockstep desync with no failing test.
+    // Idiom matches vmem_push_one_byte_past_reserve_is_fatal above: the if/return setup rather
+    // than an assert, because for a fatal-expected row a clean exit is FAIL, not PASS.
+    VMemApi api = test_vmem_api();
+    VMemArena a = {};
+    if (vmem_arena_init(&a, 0x9004u, 4096u, 0u, &api) != ERR_OK) {
+        return;   // setup failed: exits 0, which the runner scores FAIL for a fatal-expected row
+    }
+    if (arena_push(&a, 64u, 16u) == nullptr) {
+        return;   // ditto: no push, no meaningful `used` to sit above
+    }
+    arena_reset_to(&a, 128u);   // above `used` (64): would RAISE it over unwritten bytes. TL_FATAL.
+}

@@ -28,8 +28,11 @@ struct Snapshot;  // foundation/snapshot.h
 enum : u32 { MAX_ARENAS = 4096 };  // docs/CANON.md "Sizes and caps" (E-2 ruling 2026-08-26)
 
 // Registry membership flags (docs/MEMORY.md section 1.2): HASHED = folded into the world hash;
-// SNAPSHOT = copied by registry_snapshot; GROWS_AT_BARRIER = may grow inside the barrier-apply
-// window (ECS columns, Alloy pools during pass 5) without tripping the guard.
+// SNAPSHOT = copied by registry_snapshot; GROWS_AT_BARRIER = `used` may MOVE - grow or shrink -
+// inside the barrier-apply window (ECS columns, Alloy pools during pass 5) without tripping the
+// guard. Shrink is sanctioned by ruling 2026-08-28 (docs/MEMORY.md section 2), not merely
+// tolerated by the guard's `!=` comparison: an ECS column shrinks on remove so its hashed extent
+// is the live extent (core/column.h).
 // HASHED IMPLIES SNAPSHOT: registry_add TL_FATALs on the combination without it (ruled
 // 2026-08-24, docs/MEMORY.md section 1.2). SNAPSHOT without HASHED stays legal - state that is
 // restored but deliberately outside the hash.
@@ -104,8 +107,8 @@ static_assert(__is_trivially_copyable(ArenaGuard), "");
 #if TL_DEV
 // Records every registered arena's `used` and the CRT-alloc counter at tick start.
 void guard_tick_begin(ArenaGuard* g, const ArenaRegistry* r);
-// Opens the barrier-apply window. TL_FATAL if a GROWS_AT_BARRIER arena already grew this tick
-// (growth is legal only INSIDE the window). Takes the registry so it can look - section 8.4's
+// Opens the barrier-apply window. TL_FATAL if a GROWS_AT_BARRIER arena's `used` already MOVED
+// this tick, in either direction (movement is legal only INSIDE the window). Takes the registry so it can look - section 8.4's
 // one-arg spelling cannot enforce its own section 2 semantics (TODO.md, W1 mem notes).
 void guard_barrier_begin(ArenaGuard* g, const ArenaRegistry* r);
 // Closes the barrier-apply window; GROWS_AT_BARRIER arenas are re-baselined at their new `used`.
