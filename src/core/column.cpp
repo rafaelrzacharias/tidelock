@@ -100,8 +100,10 @@ void column_remove(ComponentTable* t, Entity e) {
     }
     // Zero the vacated tail row and entity slot. Since RR-48 these bytes leave the hashed extent
     // a line below, so this is no longer what keeps the hash history-independent - it is kept as
-    // defence (an arena that ever loses ARENA_ZERO_ON_PUSH would otherwise hand a re-add stale
-    // bytes) and because a zeroed tail is what the snapshot ring copies.
+    // defence, and only that: an arena that ever loses ARENA_ZERO_ON_PUSH would otherwise hand a
+    // re-add stale bytes. It is NOT for the snapshot ring (corrected 2026-08-28, PR #17 ship
+    // round D3): arena_reset_to drops `used` to last * stride two lines below, and
+    // registry_snapshot copies exactly [base, used), so the ring never sees this row.
     memset(t->dense + (u64)last * t->stride, 0, t->stride);
     t->entities[last] = Entity{ 0 };
     *s = ECS_SPARSE_NONE;

@@ -21,12 +21,28 @@
 //   "never shrinks form of the Array ruling"; §1 contains no such form, and the misattribution
 //   would have told a reader of §1 that columns had changed something there. They have not.
 //   WHY the column's earlier form was wrong, since it read as a considered ruling and was: it made
-//   the extent "a pure function of the OP HISTORY, never of what was removed". History-dependence
+//   the EXTENT "a pure function of the OP HISTORY, never of what was removed". History-dependence
 //   was the accepted design, and it is the defect - `used` is a high-water mark, so two worlds
-//   holding identical live rows hash differently whenever one reached that state by a different
-//   add/remove path. Demonstrated by this module's own regression row,
-//   world_divergent_histories_with_equal_state_hash_equally: same live rows built two ways, one
-//   hash required, and it fails without the shrink.
+//   holding identical live rows hash a different NUMBER OF BYTES whenever one reached that state
+//   by a different add/remove path. Demonstrated by this module's own regression row,
+//   world_divergent_histories_hash_the_same_extent: same live rows built two ways, one extent
+//   required, and it fails without the shrink.
+//   TWO CHANNELS, and RR-48 closes exactly ONE of them (RR-54, ruled 2026-08-28 by Rafael, on the
+//   PR #17 ship round's D1). History reaches a column's hash by two independent routes:
+//     (1) EXTENT - how many bytes get hashed. `used` as a high-water mark. CLOSED by this ruling.
+//     (2) DENSE ORDER - which permutation those bytes are in. column_remove is swap-remove, so the
+//         packed order is a function of WHICH row was removed. NOT closed, and deliberately not:
+//         packed order is part of the walk contract (docs/ECS.md §2), and every consumer reads a
+//         column BY ENTITY, never by dense index. src/core/interp.cpp:29 is the standing statement
+//         of the order channel and remains its one home - this block cites it, never restates it.
+//   So two worlds with identical live rows AND identical extent can still hash differently, by
+//   design. What a consumer may rely on: a RESTORE-based rejoin is order-stable (registry_restore
+//   memcpys the bytes, so the permutation survives verbatim); a REPLAY-based rejoin is NOT, since
+//   it rebuilds dense order from its own command history. A late-join path that replays must
+//   compare live state by entity, not by hashing a column and expecting a peer to match.
+//   The negation is pinned by world_divergent_removal_order_hashes_differently_by_design, which
+//   asserts the hashes DIFFER while the extents match - LESSONS.md requires a property that is
+//   false by design to have its negation tested and said out loud, so nobody "fixes" it later.
 //   BOUNDING, and it is load-bearing (PR #17 review, D6; TODO.md records it as such): this is NOT
 //   a live desync in the tree today. Lockstep peers replay one command stream, so their histories
 //   match; the documented same-world save/reload path is clean; and no netcode consumer of

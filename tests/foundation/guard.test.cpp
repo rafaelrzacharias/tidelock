@@ -5,7 +5,7 @@
 // arena push mid-tick), GROWS_AT_BARRIER growth before its window, nonzero CRT delta - each is
 // the guard's TL_FATAL by design. **"shrink mid-tick" came off this list 2026-08-28** (PR #17
 // review D2): the macro exists now, and that row is what pins guard_barrier_begin's `!=`
-// comparison against a "fix" to `>` - see guard_barrier_begin_fatals_on_a_shrink_before_the_window.
+// comparison against a "fix" to `>` - see guard_shrink_before_the_barrier_window_is_fatal.
 #include "runner/tl_test.h"
 #include "foundation/arena_registry.h"
 #include "foundation/alloc_shim.h"
