@@ -7653,3 +7653,441 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > - The `.pages` arena is `SNAPSHOT`-only and out of the hash, so it is untouched.
 > `column.h` carries the current behaviour as a stated hashing ruling and `column_add:68` cites it;
 > both are amended by the slice rather than left to contradict the code.
+
+> **PR #17 (`w3-rr48-hash-extent`) OPEN, CI GREEN, BREADTH REVIEWER DISPATCHED — 2026-08-28 ~10:20
+> local.** The RR-48 slice, built by the steward under Rafael's "before substrate" scheduling.
+> **CI verified properly rather than by its badge:** run 33157239611, **`event: pull_request`**
+> (not a `workflow_dispatch`, which reports a false green because `commit_docs` falls back to
+> `HEAD~1` — `LESSONS.md`), `run_attempt: 1`, `conclusion: success`, 23/23 check runs, on
+> `head_sha b435fbb` — confirmed identical to the pushed branch head. `WORKFLOW.md` §2's
+> precondition (four-leg green BEFORE a reviewer is requested) is therefore met on evidence.
+> Note for the next steward: `pull_request_read` **`get_status`** returned `total_count: 0` here
+> and that is NOT the missing-run signal — it reads the legacy commit-status API, while GitHub
+> Actions reports through **check runs**. Use `get_check_runs`. The zero-runs symptom `LESSONS.md`
+> documents (a `dirty` PR gets no run at all) looks identical on the wrong endpoint.
+> **Reviewer:** `session_01NvkhtHdn7vJFqbVDbUDw1U`, Opus, breadth round per R-9. Briefed to treat
+> the steward's claims as claims — it is reviewing the steward's own code — and pointed at the four
+> preconditions that were checked from SOURCE and never empirically, plus the re-pinning claim,
+> which is the steward's and has already been wrong once. Its **PR comment is its only completion
+> signal** (R-15); the PR is subscribed for activity and a `send_later` backstop covers the one
+> case a subscription cannot see, a reviewer that dies without commenting.
+> **This breadth verdict does NOT authorise a merge.** `ROADMAP.md` §2 seats hashing code at Fable
+> and R-17 puts the ship-verdict round there: #17 needs a Fable full re-read after the Tue
+> 2026-09-01 02:00 reset regardless of what the breadth round returns. The slice was AUTHORED on
+> Opus, which §2's model policy would also put at Fable — flagged in the PR body and to Rafael as
+> his policy call, not assumed either way.
+
+> **PR #17 BREADTH ROUND IN — *fix first*, eight defects, six fixed, two filed below
+> (2026-08-28 ~11:00 local).** Full verdict is the PR comment (the durable record). The review is
+> worth reading as a model: eight attack directions, two tiers, every revert experiment
+> build-gated, a per-command clean list, and it caught its own artefact (a debug run that had
+> compiled a half-reverted file) before reporting it. **It independently re-derived the
+> re-pinning-is-zero claim and confirmed it** — the claim this steward had already stated wrongly
+> once.
+> **Fixed on the branch (`b8f231a`):** D1 (`MEMORY.md` §1.2), D2 (`GROWS_AT_BARRIER` sanctions a
+> shrink, in all four homes, plus the two guard rows that were missing entirely), D4 (`ECS.md`
+> restated where it claimed to cite), D5 (the block misattributed a supersession to
+> `CONTAINERS.md` §1), D6 (the bounding clause restored and an unreproducible scenario replaced),
+> D7 (`arena_reset_to`'s precondition promoted to `TL_CHECK`).
+>
+> **RR-53 (steward-allocated) — THE CLASS IS NOT CLOSED. `world.entities.free` diverges the same
+> way, and it needs NO save.** Review D3, **verified by execution on `b435fbb` with the RR-48 fix
+> in place**, not reasoned. `world.cpp:68` registers `world.entities.free` as
+> `HASHED|SNAPSHOT|GROWS_AT_BARRIER`. It is a vmem-backed `Array` whose arena `used` tracks
+> **`cap`**, and `cap` is the free list's PEAK count rounded to a 1024-element page — a pure
+> function of history that `array_pop`'s zeroing cannot recover, because zeroing fixes the BYTES
+> and the defect is the LENGTH. Two worlds, 1025 entities, no components, identical end state
+> asserted field by field (live_count, slots.count, free_list.count, quarantined, every `gen[i]`,
+> and the slots/gen/live extents all equal): **`free_list.cap` 2048 vs 1024, `_free_arena.used`
+> 8192 B vs 4096 B**, per-arena hash and world hash divergent. Reproducer is in the PR comment,
+> ready to drop in.
+> **Why this is NOT a steward edit under R-19:** the mechanism is different from the column's.
+> `Array`'s `used` tracks `cap`, so there is no `count * stride` to shrink to without changing how
+> `Array` grows or how its extent is hashed — new surface in `foundation`, which R-19 reserves for
+> a ruling or a lane. It is also **strictly worse than B-1 in one respect**: B-1 needed the save
+> path, and this needs only two independently-played worlds. It is bounded the same way (lockstep
+> peers replay one command stream, so not a live desync today) and becomes live at the same
+> horizon. **For Rafael: widen PR #17, or a second slice?** I will price both once #17 is merged
+> rather than guess now.
+>
+> **FINDING (review D8, out of cone, on `main`) — the tracked `tl_save_test.bin` is DELETED by
+> every local suite run.** `git ls-files | grep '\.bin$'` → `tl_save_test.bin`, committed by
+> `1bc3877` (an ancestor of `origin/main`, so not PR #17's).
+> `tests/core/save/save.test.cpp:29` writes it at a CWD-relative path and `:186` `remove()`s it.
+> Reproducer: run `tl_tests --tag '!slow'` from the repo root, then `git status --short` → ` D
+> tl_save_test.bin`. The reviewer hit it four times. Every contributor runs the suite before
+> pushing (`WORKFLOW.md` §6 R-11), so this leaves everyone one `git commit -a` from committing the
+> deletion. Owner: whoever next opens `core/save` — fix is a temp path plus untracking the file.
+
+> **PR #17 IS GREEN ON THE FIX ROUND — head `0a32b45`, run 340, `event: pull_request`,
+> `run_attempt: 1`, 23/23 success, head_sha verified against the pushed branch (2026-08-28 ~11:20
+> local).** It cost one red round, and the diagnosis is worth more than the fix.
+> **What went red on `b8f231a`, all of it mine, all of it from one habit:** the new
+> `TL_TEST_EXPECT_FATAL` guard row failed on **netcode and ship across all four platforms** (eight
+> legs) because the whole arena guard is `#if TL_DEV` and `runner/tl_test.h` is explicit that for
+> an expect-fatal row "a trap is PASS and a clean exit is FAIL"; `audits` failed on a
+> `docs/XREF.md` that `docaudit` had regenerated and I never committed, which `pr.yml` checks as
+> its own `git diff --exit-code` step; and `build-id-cross-target` failed downstream, not
+> independently — its log reads `Found 16 artifact(s) … Total of 0 artifact(s) downloaded`,
+> because the failed build-test legs never uploaded the `build-id-*` artifacts it diffs. Chasing
+> that third one as a separate defect would have been wasted work; the log said so in one line.
+> **Root cause: validated ONE tier and a checklist carried from habit.** `LESSONS.md` already
+> says both — derive the pre-push checklist FROM `pr.yml`'s audit steps, and local validation on
+> one tier proves nothing about a gate that tier never exercises. The steward had even named the
+> tier risk in its own check-in message and pushed before acting on it. The four-leg matrix
+> caught it working exactly as designed, and a red round is billed twice (`WORKFLOW.md` §6 R-11).
+> **Fixed by tier-gating the row with `TL_SKIP`** — the sanctioned no-checks path, and the same
+> shape `registry.test.cpp` records having used for its own fatal rows before their trigger became
+> tier-live — and by committing the XREF regeneration. **Re-validated on all four tiers before
+> pushing this time:** dev 670/0, debug 670/0, netcode 570/0/103 skipped, ship 570/0/103 skipped,
+> plus docaudit, includes, commit_docs and the XREF diff step.
+> **Where #17 stands:** green, mergeable, and NOT mergeable-by-this-steward. The breadth verdict
+> was *fix first*; R-9 owes a fix-check and R-17 puts the ship-verdict round on Fable as a full
+> re-read after the Tue 2026-09-01 02:00 local reset. The steward chose not to spawn a separate
+> Opus fix-check the mandatory Fable re-read would duplicate, with the weekly budget at
+> `allowed_warning` — recorded on the PR as a judgement, open to being overruled. The Fable round
+> should cover **D2's new guard rows and D7's `TL_CHECK` promotion specifically**, since both
+> reach beyond the original diff into `foundation`.
+
+> **RR-53 RULED and RR-48's authorship question RULED (Rafael, 2026-08-28 ~11:40 local).**
+>
+> **RR-53 — RULED: a SECOND SLICE after #17 merges, switching `world.entities.free` to
+> `array_init_fixed`.** **This record corrects the steward's own filing above, which called it
+> "new surface in `foundation`" and therefore outside R-19.** That was wrong, and checking it
+> before writing the options is what found it: `MEMORY.md` §1.2 **already** rules that every
+> container on an `ARENA_HASHED` arena is SIZED AT INIT, and `world.entities.free` grows a page at
+> a time — so it is a container in violation of an existing rule, not a defect awaiting a new
+> mechanism. `array_init_fixed` exists (`foundation/array.h:60`). Two things the slice must NOT
+> assume, both checked: the free list **cannot simply leave the hash** — `world.cpp:192` records
+> that its COUNT is derivable (`allocated - live - quarantined`) but its **ORDER is authoritative**,
+> since it decides which slot the next spawn reuses; and restore already derives
+> `free_list.cap` from `_free_arena.used` (`world.cpp:203`), which a fixed cap changes.
+> **The price, stated to Rafael before the ruling and accepted with it:** the entity domain is 4M
+> slots (`Entity` = `Handle<EntityTag,22,10>`, `CANON.md`), so a full-domain fixed list commits
+> **~16 MB per world** up front against today's page-at-a-time growth — and `world_dual` stands up
+> two worlds. A smaller fixed cap is possible and caps live entities, which is a separate design
+> decision nobody has taken. **If the slice measures the real cost materially differently from
+> ~16 MB/world, that comes back as a ruling rather than being absorbed.**
+> Rejected, with reasons on the record: widening #17 (it is green and reviewed at its current
+> scope, and it gates `alloy-substrate`); generalising RR-48's live-extent fix to `Array` (that IS
+> the new-surface option — it needs the extent-home question answered again and would CONTRADICT
+> §1.2 rather than comply with it, so §1.2 would need re-ruling too); and deferring until a
+> consumer exists (substrate registers nineteen arenas into this set within days).
+>
+> **RR-48 authorship — RULED: the slice stands as authored on Opus; the Fable ship round is the
+> gate.** `ROADMAP.md` §2's model policy seats hashing/ordering code at Fable and PR #17 was
+> written on Opus. Ruled that §2's higher-or-equal gate holds **at the round that decides**, which
+> is R-17's Fable full re-read after the Tue 2026-09-01 reset — the same reasoning §2's own review
+> ladder already uses. Recorded honestly as a loosening rather than a non-event: it makes the
+> authorship seat advisory where the review seat is binding. Rejected: re-deriving two lines on
+> Fable (spends the seat on work a Fable reviewer reads anyway, and delays substrate), and
+> amending §2 to say the review seat governs (a real policy change taken on a convenient case —
+> §2's "never low effort on sim or netcode code" reads as being about who writes it).
+
+> **FABLE IS RETIRED FROM THE PROGRAM — R-21/R-22/R-23 ruled (Rafael, 2026-08-28 ~12:10 local).**
+> The model set is **Sonnet 5 + Opus 5**. Ten `ROADMAP.md` §2 lane seats and the steward move to
+> Opus 5 high; R-8 keeps its number and changes subject; R-9's ship-round seat and R-17's
+> Fable-specific trigger are amended; `CLAUDE.md`'s model gate carries the new set.
+> **The reason is scheduling, not quality.** `alloy-substrate` — the W2 keystone blocking five W3
+> lanes — slipped an ENTIRE WAVE waiting on a weekly reset, and PR #17 was about to wait three
+> more days for a ship round. That is the cost R-21 removes.
+> **What Fable was buying is relocated, not waived, and the honest reason is stated in the docs:
+> nobody has a controlled comparison showing Opus equals Fable at the determinism gate.** So the
+> guarantee is replaced twice over:
+> - **R-22** — on ★ and determinism-critical lanes the ship round is **two independent
+>   fresh-context Opus reviewers over an exhaustive DISJOINT partition, both of whom must return
+>   *ship***; a disagreement is a fix round, never an average. Not depth-by-repetition: PR #16
+>   measured that a seam defect appears BETWEEN two reviewers' coverage lists — three reviewers
+>   each proved one criterion satisfied inside its own area while the criterion was in fact unmet.
+>   Ordinary lanes keep one Opus ship reviewer.
+> - **R-23 — the determinism ratchet.** A confirmed determinism CLASS (not a one-off bug) does not
+>   let its lane close until it is machine-checked or filed as a ruling request naming the gate
+>   that would check it. A `LESSONS.md` line alone is no longer discharge. The evidence is entirely
+>   in-repo and is the argument: the `X = Type{}` class recurred **three** times, "an empty
+>   selection must be an error" **four** times across four tools, "a negative test refused for the
+>   wrong reason" **three** times in one file — each caught by a careful read, written down, and
+>   then repeated. A reviewer's catch is one event; a gate's catch is permanent. **Scoped so it
+>   never becomes a demand to gate judgement**: it binds determinism/ordering/hashing classes with
+>   a runtime or link-time observable. Design errors, doc contradictions, unreachable criteria and
+>   over-wide claims stay with reviewers forever — a gate written for those passes while the thing
+>   it names is false.
+>
+> **FIRST GATE UNDER R-23, and it is queued not launched: the DIVERGENT-HISTORY HARNESS.** Build
+> the same logical state N different ways and require ONE hash, over every registered arena.
+> Chosen on evidence rather than taste — it would have caught **five** confirmed instances of the
+> single recurring determinism failure in this program, "the hashed extent is a function of history
+> rather than state": B-1 (PR #17), RR-53 (`world.entities.free`), the original `Array` hashed-tail
+> defect, the `Map` reused-arena defect, and it is the whole subject of `MEMORY.md` §1.2. **Cut it
+> before or alongside `alloy-substrate`**, which adds nineteen arenas to the hashed set and is
+> exactly the moment the class multiplies; RR-53's fixed-mode slice then lands against a gate that
+> proves it rather than a test that asserts it. Owner: unassigned — `tools/` and `tests/` are
+> nobody's cone. NOT launched; Rafael's word.
+>
+> **IMMEDIATE CONSEQUENCE — the Tuesday wait is gone.** PR #17's ship round is now two disjoint
+> Opus reviewers under R-22 and can run today. `alloy-substrate`, RR-53's slice and the wave
+> sweep's own confirming round are all off the reset clock.
+
+> **FOUR DECISIONS TAKEN (Rafael, 2026-08-28 evening, put as multiple choice by the fourth steward).**
+> Recorded here because durable context lives in committed files only (`CLAUDE.md`); the handover
+> prompt that carried the previous steward's task order was NOT in any committed file, and that gap
+> is the reason this block exists rather than a re-statement of a plan nobody can read.
+>
+> **1. PR #17's ship round is ONE Opus reviewer — RULED, and it is a deviation.** Home:
+> `WORKFLOW.md` §5 R-24, which carries the reasoning, the scope and the steward's recorded dissent.
+> R-22 is unamended and still binds every other ★/determinism-critical lane. Not restated here.
+>
+> **2. The wave-sweep confirming round (`WORKFLOW.md` §3 artifact 2) is a SEPARATE dispatch**, not
+> folded into #17's reviewer. The steward's reasoning, accepted: R-22's guarantee is that a
+> partition of ONE change is exhaustive and disjoint, so a seam defect has nowhere to hide between
+> two coverage lists; attaching an unrelated sweep confirmation to a ship reviewer gives it a second
+> job and dilutes exactly that property. Runs concurrently with #17's round; R-8 throttles fan-out
+> rather than trading review depth.
+>
+> **3. PR #17's two stale Fable sentences are CORRECTED, not left as record.** The body and the
+> fix-round comment both said the ship round was "Fable, after the 2026-09-01 reset"; R-21 retired
+> Fable the same day, so both were false on a world-readable page and either would have parked a
+> reviewer for three days. Body updated; one comment posted recording the supersession. Known and
+> accepted cost: `update_pull_request` strips the attribution footer server-side, so the repaired
+> body ends without one — `LESSONS.md` already rules that the correct trade, not a second defect.
+>
+> **4. W3 ORDER RULED — the R-23 gate lands BEFORE `alloy-substrate`.** Sequence, after #17 merges:
+> the divergent-history harness (R-23's first ratchet), then `alloy-substrate`, then W3's ★
+> `alloy-solver`; `net-p2` is independent and runs in parallel from now. Rationale on the record:
+> substrate adds nineteen arenas to the hashed set, which is the moment the "hashed extent is a
+> function of history rather than state" class multiplies, and the harness would have caught five
+> confirmed instances of it (B-1, RR-53, the `Array` hashed-tail defect, the `Map` reused-arena
+> defect, and the whole subject of `MEMORY.md` §1.2). RR-53's `array_init_fixed` slice then lands
+> against a gate that proves it rather than a test that asserts it. **This supersedes the unwritten
+> ten-item order the third steward handed over**, which put substrate ahead of the gate and existed
+> nowhere a second session could read it.
+>
+> **Still unowned and NOT scheduled by this block** (all filed above, none launched): D8
+> (`tl_save_test.bin` deleted by every suite run), A-D8 (no encoder bound has a fatal-expected row),
+> the `X = Type{}` sweep in `tests/`/`tools/`, `TL_PROF_SCOPE_W`'s dropped argument,
+> `test_list.inc` remove-vs-add, Review B's three editor nits, and the three merged sweep branches
+> (`w3-sweep-a`/`-b`/`-c`) still on origin awaiting Rafael's word on deletion.
+> **Next free ids, measured not inherited: RR-54 and R-25.**
+
+> **BOTH R-24 REVIEW ROUNDS DISPATCHED (steward, 2026-08-28 22:33 local).** Recorded here because
+> R-24's own finding was that the task order lived only in a handover prompt no second session can
+> read. Neither session pushes to `main`; neither may allocate a ruling id.
+> - **PR #17 ship round — `session_01GgBnGb85zHN8tSzFkWfDAT`**, Opus 5, checked out on
+>   `w3-rr48-hash-extent` @ `0a32b45`. The SOLE reviewer, per R-24; the steward's dissent is at
+>   `WORKFLOW.md` §5 R-24 and the brief carries it, so the reviewer knows no second coverage list
+>   exists. Briefed to attack the ruling's own premise (that everything above `count` is
+>   zero-guaranteed), to judge `world_dual.test.cpp` against the divergent-histories bar rather than
+>   the "two instances, same op sequence" bar `LESSONS.md` warns is the weakest test that still looks
+>   like one, and to build all four tiers over D7's `TL_CHECK` promotion. Deliverable: one comment on
+>   PR #17, verdict + ranked defects + **coverage list**.
+> - **Wave-sweep confirming round — `session_01AzWxygKxQgD724S18UqfW6`**, Opus 5, on `main`.
+>   Closes `WORKFLOW.md` §3 artifact 2, separate dispatch per R-24. Area: `679c4b2..4030679` —
+>   the eight R-19 steward fixes (11 files + 1 binary, +212/−61) that landed on `main` with **no
+>   review round at all**, which is what R-19 authorises and why this round exists. Asked three
+>   questions: does each fix implement its ruling *and nothing wider* (R-19 is bounded); did any fix
+>   introduce a defect (RR-49's `TL_CHECK` is tier-dependent; `1850308` moves a registry off the
+>   stack; `1e16a4e` changes a CMake idiom); and what did the range leave behind that no ruling asked
+>   for. Also asked to confirm RR-50 and A-D8 are genuinely still absent. Deliverable: verdict into
+>   `TODO.md` on branch `w3-sweep-confirm`, pushed for the steward to merge — the pattern areas
+>   A/B/C used, since there is no PR to comment on.
+>
+> **Steward's own next actions, in order:** merge `w3-sweep-confirm` locally per R-16 (`--no-ff`,
+> then verify `git log -1 --format='%an <%ae> | %cn'` on `main` reads Rafael twice) — never the
+> GitHub button; relay #17's verdict to Rafael rather than acting on a fix-first alone; archive each
+> child session in the same turn its verdict lands. Backstop check-in re-armed for 00:05 local.
+
+> **W3 WAVE-SWEEP CONFIRMING ROUND — `WORKFLOW.md` §3 artifact 2, dispatched under R-24
+> (fresh context, 2026-08-28 ~22:55 local). Range `679c4b2..4030679` on `main`, nine commits,
+> 11 files + 1 binary, +212/−61. VERDICT: *fix first*.** These eight R-19 steward fixes landed
+> straight onto `main` with no lane, no PR and no review round; this is the first review of them.
+> **On the process question the range is clean: every fix is inside R-19's bound** — a localized
+> fix, a guard, a contract correction, a test made discriminating — and not one of them redesigns,
+> changes an API or a format, or adds surface. Nothing here needed a lane. The *fix first* verdict
+> is about one incomplete fix and one unmeasured trade, not about over-reach.
+>
+> **D1 (HIGH, ship-blocking for the next REFLECTED consumer) — RR-49 is implemented on one of its
+> two paths. `save_read` still loses rows silently, which is the exact failure the ruling names.**
+> `src/core/encoder.cpp:96-98`: `encoder_read_rows` takes `row_count` **from the stream** and
+> refuses only `row_count > max_rows`. So a REFLECTED descriptor with `max_rows = 3` meeting a
+> segment that declares 3 rows decodes all three, returns `res.value = 3` and `ERR_OK`; the apply
+> arm at `src/core/save.cpp:305` then does one `memcpy(e->arena->base, p->rows, p->ad->info->size)`
+> — a single row. Rows 1..n−1 are discarded and `save_read` returns `ERR_OK`. That is verbatim
+> `ASSETS-AND-DATA.md` §5's "no silent partial loads" and `CLAUDE.md`'s no-silent-fallbacks rule,
+> the two things RR-49 cites. The guard went on the path that consumes a caller's own in-process
+> descriptor and was left off the path that consumes **bytes from a file, possibly written by
+> another build** — the wrong half if only one could be had. `save.h`'s newly corrected wording
+> ("`max_rows` must be exactly 1 for REFLECTED") is now a contract enforced on one path of two.
+> *Mitigating half, by inspection not execution:* a conforming caller sets `max_rows = 1`, so
+> `row_count > max_rows` yields `ERR_ENC_OVERFLOW` and the file is refused. The exposure is a
+> caller that violates the documented contract and only ever reads.
+> **Confidence High** that the path is as described (traced at source end to end); I did **not**
+> build a forged-file reproducer, so the reachability half is reasoned, not measured — stated
+> plainly rather than folded into the finding. *Proposed fix:* the same one-line
+> `TL_CHECK(ad->max_rows == 1u)` in `save_read`'s REFLECTED arm plus a second fatal-expected row.
+> One line and one test in the same cone, implementing an already-ruled decision — R-19-shaped on
+> its face, but whether a ruling that says "the REFLECTED arm" reaches the second arm is a
+> steward's call. **Needs a ruling id; I am not allocating one.**
+>
+> **D2 (MEDIUM) — `1850308` bought its stack margin with 1.77 MB of `.bss`, and neither the commit
+> message nor the comments say so.** Measured, not asserted: recompiling `679c4b2`'s version of
+> `tests/foundation/registry.test.cpp` with the exact `compile_commands.json` command line from the
+> ship build gives `.bss = 0`; the file on `main` gives **`.bss = 1,774,608` bytes**. D2's own
+> evidence standard was a `ulimit -s` ladder; the replacement's cost was not measured at all.
+> **It is not a correctness defect and I checked the three ways it could have been.** The runner
+> spawns one child per test (`tests/runner/main.cpp:74`, "one child per test, always via `<self>
+> --run-one <index>`"), so every `static` is freshly zero-initialised in its own process — no
+> re-entry, no stale state, no thread race; `-fno-threadsafe-statics` (`CPP-SUBSET.md` §9) emits no
+> guard variable because these are POD; and `.bss` is demand-zero, so untouched pages cost address
+> space, not RSS. Suite green on all four tiers confirms it.
+> What is wrong is the choice of mechanism. Writable static state is the one thing
+> `CPP-SUBSET.md` §1 bans outright, and it is legal here only because `tools/audit/symbols.py`
+> audits the `src/` static libs and not the test executable — an exemption by scope, not by intent.
+> This tree has arenas everywhere; pushing `TestWorld` onto the test's own arena would have solved
+> D2 without reaching for the banned class. Second, the safety **depends on process-per-test** and
+> nothing records that: an in-process worker mode would turn fifteen function-local statics into
+> shared mutable state, and the next person to touch the runner has no way to know.
+> *Proposed fix:* an arena, or — if `.bss` is kept — the comment states the measured trade and the
+> process-per-test dependency it rests on. **Whether `CPP-SUBSET.md` §1's static ban extends to
+> `tests/` is a doc question with no home today; needs a ruling id.**
+>
+> **D3 (LOW) — `61bf4c5` corrected a false contract claim and introduced a misdirected citation.**
+> `src/core/transform.h:49-50` now says `app/wiring.cpp` "is the intended registrar and does not
+> exist yet (`docs/ARCHITECTURE.md` §9, v0, W4)". The fact is right; the citation is not.
+> `ARCHITECTURE.md` §9's v0 row (line 212) names neither `app/wiring.cpp` nor W4. The home for
+> "`app/wiring.cpp` is the one registration file" is `FRAME-LOOP.md` §8.1/§8.2; the "v0 needs
+> `app/wiring.cpp`, W4" phrasing is `RENDER2D.md`:6. `docaudit` structurally cannot catch this —
+> `ARCHITECTURE.md` §9 exists, so the reference is not dangling, merely pointed at the wrong doc,
+> which is "one fact, one home" drift arriving inside a commit whose whole purpose was correcting
+> a false contract claim. *Fix:* cite `FRAME-LOOP.md` §8.1. Everything else in the commit verified
+> exactly: nothing in `src/` registers `Transform`/`TransformPrev`, and the only two registrations
+> in the tree are `tests/render/extract.test.cpp:43-44` and `tests/render/sprite.test.cpp:36-37`.
+>
+> **D4 (LOW, and already on the record) — the stray binary, independently confirmed, plus the
+> reason CI is structurally blind to it.** `1bc3877` committed `tl_save_test.bin` (252 bytes) to
+> the repo root; it is still tracked on `origin/main`. Already filed as review D8 (line 7713) and
+> listed unowned at line 7865, so this confirms rather than discovers — **but the existing record
+> does not say why CI never sees it, and that is the half that keeps it alive.** CI runs
+> `--isolate` (`.github/workflows/pr.yml:134`), which gives every test a private cwd, so the file
+> is never touched; a local run without `--isolate` deletes it. Measured both ways in a clean
+> worktree at `origin/main`: `tl_tests --filter 'save_*'` → `git status --short` = ` D
+> tl_save_test.bin`; `tl_tests --isolate --filter 'save_*'` → clean. Two further facts for whoever
+> takes it: it is **not** the new fatal row's doing (`save_write` buffers and writes the file only
+> at the end, so the `TL_CHECK` at `:107` fires before anything is created — it is the ordinary
+> save tests' CWD-relative output at `tests/core/save/save.test.cpp:29`, swept in by a wide `git
+> add`), and `.gitignore` has no entry for it, so untracking alone will not stop it coming back.
+>
+> **R-19's two exclusions confirmed genuinely absent and still open.** **RR-50:** `git diff --stat
+> 679c4b2 4030679 -- tools/` is empty — `tools/` is untouched by the whole range — and
+> `grep -rn "static_assert.*MAX_ARENAS" src/ tests/` still returns nothing. **A's D8:**
+> `grep -rn "TL_TEST_EXPECT_FATAL" tests/net/` still returns nothing. Neither was quietly done
+> here. `registry_hash_all` is likewise untouched, so RR-48 was not pre-empted either.
+>
+> **COVERAGE — what was checked and found CLEAN, not only what broke.**
+> - **`009a5a7` RR-46 — clean, and complete in both directions.** The ten names and values match
+>   `ALLOY.md` §14.5 exactly (1..10); the `sim/rng_systems.h` row is gone from §14.1's file table;
+>   §14.7's Gate 0 hand-off and build-order step 1 are both amended; no reference to
+>   `sim/rng_systems.h` survives anywhere outside the explanatory comment; no symbol collision in
+>   `src/` or `tests/`; the two new `static_assert`s pin the engine block's floor and its ceiling
+>   under `RNG_SYS_LUAU_BASE`, closing the "a raw value in a comment is a claim" gap in the same
+>   edit. Exactly the ruling, nothing more.
+> - **`578b187` A-D1 — REVERT-VERIFIED IN BOTH DIRECTIONS on ship**, which is the one check that
+>   grades a "made discriminating" fix. Aggregate bound removed (`src/net/archive.cpp:407-410`) +
+>   new row → **FAIL** at `test_archive.test.cpp:1059`. Bound removed + the *old* row restored from
+>   `679c4b2` → **PASS**, independently reproducing D1's central claim that the row pinned nothing.
+>   Bound present + new row → PASS on all four tiers. The fix does what it says.
+> - **`1bc3877` RR-49 write half — REVERT-VERIFIED on ship.** Guard present → PASS; guard replaced
+>   by a comment → FAIL. **The briefed tier hypothesis was tested and refuted:** the fatal-expected
+>   row runs and passes on all four tiers (it is not among netcode/ship's 102 skips), so
+>   `LESSONS.md`'s "`EXPECT_FATAL` whose trigger is `#if TL_DEV` fails on netcode and ship" does not
+>   bite here — `TL_CHECK` is unconditional, as the commit message claims. The write half is sound;
+>   D1 is about the half that is missing, not this one.
+> - **`1e16a4e` B-3 — clean, object list verified identical.** The new one-idiom `foreach` yields
+>   exactly `loaders/{font,image}.cpp.o` and `producers/{live,replay,script}.cpp.o` — no TU dropped,
+>   none added, checked against the built `tl_core.dir` tree rather than by reading the glob. The
+>   `FATAL_ERROR` zero-check is the right shape and fires on an empty match.
+> - **`b48c548` RR-52 — clean and minimal.** Both bucket headers corrected; the two unowned bullets
+>   already said so plainly ("**No `ROADMAP.md` lane currently owns this**"), so the header really
+>   was the only false statement in §8.5. Doc-only, matches the ruling.
+> - **`8798b19` A-D6/D7 — clean.** `AR_SEG_TICKS` now cites `CHECKPOINT_HOT_TICKS` instead of
+>   transcribing 300; the suite is green on all four tiers, so the substitution did not move the
+>   value under any fixture built from it.
+> - **Commit identity — clean on all nine.** Every commit reads `rafaelrzacharias
+>   <rafaelrzacharias@gmail.com>` as both author and committer. No `Co-Authored-By`, no model
+>   identifier in any message (`CLAUDE.md`, R-16).
+> - **Public-repo scan over the range's added lines — clean.** No secrets, emails, local paths,
+>   IPs or session URLs.
+> - **Doc gates — clean.** `python tools/docaudit/docaudit.py` → **27 docs, 0 errors**, XREF
+>   regenerated with no diff. `python tools/audit/commit_docs.py --base origin/main` → 0 commits
+>   checked (HEAD sits at `origin/main`).
+>
+> **FOUR-TIER RESULT — real output.** Linux x86-64, clang 18, `-DTL_STRICT_TOOLCHAIN=OFF`, CI's own
+> invocation (`--isolate --tag '!slow' --timeout-ms 120000`, `.github/workflows/pr.yml:134`):
+>
+> | tier | configure | build | suite |
+> |---|---|---|---|
+> | debug | ok | 611/611 | 671 selected, 668 passed, **0 failed**, 0 timed out, 3 skipped, 0 lost |
+> | dev | ok | 611/611 | 671 selected, 668 passed, **0 failed**, 0 timed out, 3 skipped, 0 lost |
+> | netcode | ok | 598/598 | 671 selected, 569 passed, **0 failed**, 0 timed out, 102 skipped, 0 lost |
+> | ship | ok | 598/598 | 671 selected, 569 passed, **0 failed**, 0 timed out, 102 skipped, 0 lost |
+>
+> Note for anyone reading `ctest` output: the presets register **no** ctest tests ("No tests were
+> found!!!" with rc=0 on all four) — the suite is the `tl_tests` binary and must be run directly.
+> A green `ctest` here means nothing ran.
+>
+> **What this container could NOT falsify, split from what it could (`LESSONS.md`).** The ASan
+> runtime is absent (`libclang_rt.asan-x86_64.a` missing for clang 18), so the `sanitize-linux` leg
+> was not run and no sanitizer claim here is mine. That does not weaken D1: it is a logic defect in
+> which a decoded row count is dropped, not a memory error, and I would not expect a sanitizer to
+> see it at all — **High** confidence the path is real, **unverified** on any leg but the four
+> above. CI is the falsifier for Windows and arm64.
+> **One methodological note, recorded because the next session will hit it.** The bare
+> `tl_tests --workers n` invocation had not finished after ~10 minutes on dev, and `--timeout-ms`
+> defaults to **0 (off)**, so nothing bounds a long child. I am **not** claiming a hang — the
+> `slow` tag exists for rows like the 30-min synthetic 3-peer archive fixture and I did not isolate
+> which row it was. Recording only that bare `tl_tests` is not a bounded operation and the CI
+> invocation is what to reach for.
+>
+> **Bottom line: *fix first*, on D1 alone.** D2–D4 are real and worth doing but none of them would
+> hold a merge. D1 would: RR-49 was ruled to close a silent-partial-load class and it is closed on
+> the write path only, with the read path — the one that eats foreign bytes — still returning
+> `ERR_OK` after dropping rows. **`alloy-substrate`'s pools are the named first consumer of
+> REFLECTED**, so this is the second time in this sweep that a bounded fix lands correct-but-half
+> and the lane most likely to trip it is the one queued next.
+
+> **THREE RULING REQUESTS FROM THE TWO R-24 ROUNDS (steward-allocated, 2026-08-28 23:15 local).**
+> Both reviewers correctly declined to allocate ids; the steward allocates, Rafael rules. Each
+> question's evidence lives in the round that raised it — this entry allocates and states the
+> question, it does not restate the finding.
+>
+> **RR-54 — the dense-ORDER channel: document it, or close it?** PR #17's ship round measured that
+> RR-48 closes the *extent* channel but that `column_remove`'s swap-remove leaves packed order a
+> function of removal history, and demonstrated two worlds with identical live rows and identical
+> extent hashing differently. `src/core/interp.cpp:29-31` already states this; `column.h`'s new
+> block states the opposite unqualified. The reviewer's read is that this is **documentation** —
+> packed order is deliberately part of the walk contract (`ECS.md`) — and that the fix is to split
+> the claim into its two channels plus either rename the regression row or add the negation row.
+> **The ruling needed:** is dense order allowed to stay history-dependent? If yes this is a doc +
+> test-name fix inside PR #17; if no it is a second slice and `alloy-substrate` waits again.
+> **This one gates a replay-based rejoin, not a restore-based one** — `registry_restore` memcpys,
+> so order survives; a replay does not.
+>
+> **RR-55 — does RR-49's ruling reach `save_read`'s REFLECTED arm?** The confirming round found
+> RR-49 implemented on the write path only: `encoder_read_rows` takes `row_count` from the stream
+> and `save.cpp:305` applies a single row, so a 3-row REFLECTED segment decodes three and keeps one,
+> returning `ERR_OK` — the silent partial load the ruling was made to close, on the path that eats
+> foreign bytes. The fix is one `TL_CHECK` plus one fatal-expected row, in the same cone.
+> **The ruling needed:** does a ruling that says "the REFLECTED arm" reach the second arm, making
+> this R-19 bounded work the steward may do now — or is it new scope needing its own slice?
+> Reviewer's confidence: **High** that the path is as traced (source, end to end); the reachability
+> half is reasoned, not measured — no forged-file reproducer was built.
+>
+> **RR-56 — does `CPP-SUBSET.md` §1's writable-static ban extend to `tests/`?** `1850308` took
+> `ArenaRegistry` off the test stack by making fifteen function-local statics, measured at
+> **1,774,608 bytes of `.bss`** (0 before). Not a correctness defect — the runner is process-per-
+> test, so each static is freshly zero-initialised — and it is legal only because
+> `tools/audit/symbols.py` audits `src/`'s static libs and not the test executable, which is an
+> exemption by scope rather than by intent. An arena would have solved it without the banned class,
+> and the safety silently depends on process-per-test: an in-process worker mode turns those
+> fifteen into shared mutable state. **The ruling needed:** does the ban cover `tests/`, and if so
+> does `symbols.py` grow to enforce it? Today the question has no home in any doc.
+>
+> **Next free ids, re-measured after this block: RR-57 and R-25.**

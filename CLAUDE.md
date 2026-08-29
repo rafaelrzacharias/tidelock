@@ -61,9 +61,12 @@ commit. Silence in the spec is not permission.
 The foundry/ore program rotted because facts were restated in several docs and code was built one
 narrow slice at a time. Two rules, one tool:
 - **Model gate — before any lane or task starts, not after.** Look up the lane's model in
-  `docs/ROADMAP.md` §2, state it ("This lane is **Fable 5 high**; you are on <current model>"), and
+  `docs/ROADMAP.md` §2, state it ("This lane is **Opus 5 high**; you are on <current model>"), and
   **wait for Rafael to confirm he has switched** before writing the slice brief or touching a file.
-  Never start on a model lower than the lane's; if the current model is unknown, ask.
+  Never start on a model lower than the lane's; if the current model is unknown, ask. The set is
+  **Sonnet 5 and Opus 5** — Fable was retired 2026-08-28 (`WORKFLOW.md` §5 R-21) because lanes
+  seated on it waited days for a weekly reset; the depth it bought is now carried by R-22's
+  two-reviewer ship gate and R-23's determinism ratchet, not dropped.
 - **Before implementing anything, write a slice brief** (in the reply, ≤12 lines, before any code):
   (1) the spec section being built; (2) the docs it consumes (its "Read first" list + `CANON.md`);
   (3) its **consumers** — open `docs/XREF.md` and read every section that cites the one you are

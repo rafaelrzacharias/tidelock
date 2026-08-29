@@ -172,12 +172,17 @@ stop, and invisible to every gate we own.
 - **R-7 Lane closeout sweep (ruled 2026-08-26, Rafael):** a lane's report is its filed record,
   and every merge is followed by a steward triage of that lane's filings before the lane
   closes; a wave never closes over an untriaged filing (§1).
-- **R-8 Budget-aware wave sequencing (ruled 2026-08-26, Rafael):** the DAG decides what MAY
-  run, the weekly token budget decides WHEN — Fable lanes launch just after a reset, never
-  demoted to fit before one (§6).
-- **R-9 Two-tier reviews (ruled 2026-08-26, Rafael):** breadth rounds fresh-context, middle
-  rounds delta-scoped, the ship-verdict round a full re-read; the model per round is
-  `ROADMAP.md` §2's policy (§6).
+- **R-8 Budget-aware concurrency (ruled 2026-08-26; SUBJECT REPLACED 2026-08-28, Rafael):** the
+  DAG decides what MAY run, the shared weekly window decides HOW MUCH runs at once. The original
+  rule scheduled Fable lanes against their reset; R-21 retired Fable, so there is no scarce seat
+  left to defer *for* — and deferring a lane for days was the cost that ruling removed. What
+  survives is the half that always mattered: when the weekly window is strained, throttle
+  concurrent lanes and reviewer fan-out rather than starting more (§6).
+- **R-9 Two-tier reviews (ruled 2026-08-26; ship-round seat amended 2026-08-28 by R-21/R-22):**
+  breadth rounds fresh-context, middle rounds delta-scoped, the ship-verdict round a full
+  re-read; the model per round is `ROADMAP.md` §2's policy (§6). The ship round is **Opus 5 high**
+  — singly on ordinary lanes, and **two disjoint reviewers on ★ and determinism-critical lanes**
+  (R-22).
 - **R-10 Steward economy (ruled 2026-08-26, Rafael):** the steward's tokens buy judgment,
   never mechanical reads — targeted queries, python over saved dumps, cheap-model subagents
   for harvesting, windows retired at phase boundaries (§6).
@@ -213,16 +218,17 @@ stop, and invisible to every gate we own.
   PR #16 merged as `claude[bot] <…> | GitHub` — every other property of that merge was correct,
   which is why nothing caught it (§1).
 - **R-17 A demoted steward may hold the queue, never adjudicate above its seat (ruled
-  2026-08-27, Rafael):** R-8's principle is *defer, don't demote*, and it is written for lanes.
-  The steward cannot defer — deferring it means nothing is triaged, dispatched or closed out —
-  so when the weekly budget is out it runs below `ROADMAP.md` §2's seat rather than stopping.
-  That is a real demotion and it is bounded: the steward may dispatch, sweep mechanically, run
-  R-12 passes, edit docs and record rulings, but it **must not adjudicate a lane seated above
-  it** — an R-7 closeout, a ship verdict or a ruling on a Fable-seated lane waits for a Fable
-  steward. §2's higher-or-equal gate holds at the round that decides, for the steward exactly
-  as for a reviewer. Filed when this window, seated Fable and running Opus, found that
-  `alloy-substrate` (Fable 5 high) launches at the reset and would otherwise have been
-  adjudicated from below (§6).
+  2026-08-27; generalised off Fable 2026-08-28 by R-21):** the steward cannot defer — deferring it
+  means nothing is triaged, dispatched or closed out — so if it is ever running below
+  `ROADMAP.md` §2's seat it holds the queue rather than stopping. That is bounded: it may
+  dispatch, sweep mechanically, run R-12 passes, edit docs and record rulings, but it **must not
+  adjudicate a lane seated above it** — an R-7 closeout, a ship verdict or a ruling on such a lane
+  waits for a steward at or above that seat. §2's higher-or-equal gate holds at the round that
+  decides, for the steward exactly as for a reviewer. **Largely dormant since R-21**: the steward
+  is Opus 5 high and Opus is now the top seat, so nothing is seated above it — the rule binds
+  again only if a steward is ever run on Sonnet, and is kept for that case rather than deleted.
+  Filed when a Fable-seated window running Opus found that `alloy-substrate` would otherwise have
+  been adjudicated from below (§6).
 - **R-18 Artifact 1 gates the label, not the work (ruled 2026-08-27, Rafael):** §3's artifacts
   2–4 may run mid-wave as an unlabelled sweep when the ★ lane's criterion is unreachable;
   declaring a boundary closed while a lane of that wave has never launched is forbidden (§3).
@@ -245,6 +251,48 @@ stop, and invisible to every gate we own.
   and then check, not an edit implementing a recorded ruling. Without this, every *fix first*
   becomes "merge and defer" and §2's "re-reviewed until the verdict is *ship*" has no force. Found
   by the W3 sweep, in the merge that was deferred into it (§2).
+- **R-21 Fable is retired; the model set is Sonnet 5 and Opus 5 (ruled 2026-08-28, Rafael):** the
+  weekly Fable allowance is small enough that lanes seated on it waited days for a reset, and the
+  program cannot be held back by a seat. Every `ROADMAP.md` §2 Fable seat becomes **Opus 5 high**;
+  Sonnet 5 keeps the transcription-plus-tests lanes; the steward is Opus 5 high. **What Fable was
+  buying is not waved away — it is replaced by R-22 and R-23**, because no one has a controlled
+  comparison showing Opus equals Fable at the determinism gate, and pretending otherwise would be
+  the kind of unevidenced claim this file exists to stop. The trade is explicit: a model guarantee
+  is exchanged for a process guarantee plus a machine one.
+- **R-22 The ★/determinism ship gate is TWO disjoint Opus reviewers (ruled 2026-08-28, Rafael):**
+  on ★ lanes and anything determinism-critical (integer/UB/ordering/hashing, sim and netcode), the
+  ship-verdict round is two independent fresh-context Opus 5 high reviewers over an **exhaustive
+  and disjoint partition** of the change, each publishing what it checked CLEAN as well as what it
+  found; **both must return *ship***, and a disagreement is a fix round, never an average. Not
+  depth-by-repetition: PR #16 measured that a seam defect appears BETWEEN two reviewers' coverage
+  lists and is structurally invisible to either alone — three reviewers each proved one criterion
+  satisfied within its own area while the criterion was in fact unmet. Ordinary lanes keep a single
+  Opus ship reviewer.
+- **R-23 The determinism ratchet — a confirmed class leaves its lane as a GATE (ruled 2026-08-28,
+  Rafael):** when a review or a lane confirms a determinism defect *class* (not a one-off bug), the
+  lane does not close until that class is either machine-checked or filed as a ruling request
+  naming the gate that would check it. A `LESSONS.md` line alone is no longer discharge. Evidence
+  this is needed is entirely in-repo: the `X = Type{}` stack-temporary class recurred **three**
+  times, "an empty selection must be an error" **four** times across four tools, and "a negative
+  test refused for the wrong reason" **three** times in one file — each caught by a careful read,
+  written down, and then repeated, because a lesson is advisory and a gate is not. A reviewer's
+  catch is one event; a gate's catch is permanent. Scope, so this does not become a demand to gate
+  judgement: it binds determinism/ordering/hashing classes with a runtime or link-time observable.
+  Design errors, doc contradictions, unreachable criteria and over-wide claims stay with reviewers
+  permanently — a gate written for those passes while the thing it names is false. Extends R-7's
+  closeout triage rather than adding a separate step.
+- **R-24 PR #17's ship round is ONE Opus reviewer, not R-22's two (ruled 2026-08-28, Rafael):**
+  R-22 puts the ship-verdict round at two disjoint Opus reviewers on ★ and determinism-critical
+  lanes, and PR #17 (`w3-rr48-hash-extent`) changes what the lockstep world hash covers — squarely
+  inside that scope. Rafael classified it as an ordinary lane and spent one ship reviewer.
+  **The steward's dissent is recorded rather than argued again (`CLAUDE.md` rule 3):** the case for
+  two is R-22's own evidence — PR #16 measured that a seam defect appears BETWEEN two reviewers'
+  coverage lists — and #17's fix round reached past the original diff into `foundation` (D2's new
+  guard rows, D7's `TL_CHECK` promotion), which is the seam shape a single coverage list cannot
+  expose. **Scope: this binds PR #17 alone. R-22 is UNAMENDED** and still governs every other
+  ★/determinism-critical lane, `alloy-substrate` and RR-53's slice included. Recorded as a ruling
+  rather than executed as a judgement because §1 puts any edit that creates or amends a ruling on
+  Rafael's sign-off, and a single-reviewer ship round on a hashing PR deviates from a ruled rule.
 - **R-12 Doc-relevancy pass (ruled 2026-08-26, Rafael):** staleness in a status line is drift
   like any other. Every lane closeout sweep (R-7) also checks the lane's own doc — its status
   line and its claims — against what actually shipped; every wave boundary adds the pass over
@@ -253,18 +301,21 @@ stop, and invisible to every gate we own.
 
 ## 6. The token budget — scheduling and session economy (ruled 2026-08-26)
 
-Fable 5 usage is capped per week (reset: Tuesday); the program codes every week without
-stopping. The rules below, and quality is never the variable traded — the `ROADMAP.md` §2 model
-policy ("never low effort on sim or netcode code") outranks every line here.
+Model usage is capped per week across the whole account (reset: Tuesday); the program codes every
+week without stopping. Until 2026-08-28 this section was about rationing **Fable**; R-21 retired
+that seat, and what remains is a single shared window that four concurrent sessions can strain on
+their own — this session watched every child report `allowed_warning` while three reviewers ran.
+The rules below, and quality is never the variable traded — the `ROADMAP.md` §2 model policy
+("never low effort on sim or netcode code") outranks every line here.
 
-- **R-8 — sequencing.** Within a wave, Sonnet/Opus lanes launch first; a Fable lane is
-  scheduled against the reset (it starts just after one, not squeezed in before the cap).
-  `ROADMAP.md` §1's DAG bounds what may run in parallel; the budget only reorders inside
-  those bounds. Deferring a Fable lane a few days is always cheaper than demoting it — the
-  net-p1 review record (43 defects, five of them canonical-bytes classes feeding the §20.2.8
-  hash chain) is the standing evidence that model strength at the sim/netcode gate pays.
-  **The steward is the one seat this rule cannot defer** — see §5 R-17 for what a demoted
-  steward may and may not do.
+- **R-8 — concurrency, not deferral.** `ROADMAP.md` §1's DAG bounds what may run in parallel;
+  the window bounds how much of that bound to actually use. When it is strained, run fewer lanes
+  and fewer concurrent reviewers — **do not** trade the review depth R-22 requires, and do not
+  defer a lane hoping for a better seat, which is what R-21 removed. The net-p1 review record
+  (43 defects, five of them canonical-bytes classes feeding the §20.2.8 hash chain) remains the
+  standing evidence that depth at the sim/netcode gate pays; R-21 changed WHERE that depth comes
+  from (two disjoint reviewers plus gates, R-22/R-23), not whether it is paid for.
+  **The steward's own seat is never the thing throttled** — see §5 R-17.
 - **R-9 — reviews.** Round 1 of any review is a fresh-context breadth pass; middle rounds
   verify fixes delta-scoped — the fix diff against the finding, not a whole-PR re-read; the
   ship-verdict round is always a full re-read. Which model runs which round is `ROADMAP.md`
@@ -336,4 +387,6 @@ amended again the same evening by the wave sweep's area-C reviewer (D2/D3): its 
 advertised the draft PRs R-5 retired, and its merge bullet still enumerated two preconditions
 after R-17 added a third — the same-evening pass that fixed §3's heading had missed its sibling. §2/§5 amended 2026-08-28 with R-19 (a closed
 lane's cone reverts to the steward, bounded) and R-20 (the valve needs the round reviewer's
-endorsement) — both from the W3 wave sweep's findings.*
+endorsement) — both from the W3 wave sweep's findings. §5 amended 2026-08-28 evening with R-24
+(PR #17's ship round is one Opus reviewer, not R-22's two) — a PR-scoped exception with the
+steward's dissent on the record; R-22 itself is unamended.*
