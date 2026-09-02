@@ -8158,3 +8158,27 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 > first use loud rather than silently wrong. Serial reuse is safe under (1); concurrent reuse is not.
 >
 > **Next free ids, re-measured: RR-57 and R-25.**
+
+> **NIGHTLY `perf` SCHEDULE DISABLED (Rafael, 2026-09-02 — exhausted Actions quota).** The cron
+> `43 3 * * *` is commented out in `.github/workflows/perf.yml`; `workflow_dispatch` is retained,
+> so the G-05 sweep still runs on demand. This is a HOLD, not a retirement: `WORKFLOW.md` §4's
+> perf-leg election is a ruling made FROM the data when it is wanted, and never needed a nightly
+> cadence to be made. Restore by uncommenting two lines.
+>
+> **What it cost, measured on run `33607122302` (2026-09-02) rather than estimated.** The two
+> WINDOWS legs are the entire bill — `windows-latest` 20.5 min, `windows-11-arm` 14 min — and
+> Windows bills at a 2x multiplier: **~69 billable-equivalent minutes every night**, ~400 over the
+> six nights since 2026-08-28.
+>
+> **RR-57 — the perf lane's two LINUX legs have been failing nightly since at least 2026-08-28 and
+> nobody noticed, because the workflow's only consumer is an artifact nobody has collected.**
+> `ubuntu-latest` and `ubuntu-24.04-arm` both fail at step 8, `configure + build (netcode - the
+> timing tier)`, in ~25 s; `windows-latest` and `windows-11-arm` complete the same step and the
+> full sweep. So half the CANON matrix has produced NO perf data for six nights while the other
+> half paid full price for it. Not diagnosed here — the schedule is off, so it is no longer
+> burning anything, and diagnosing it is its own slice. Two facts for whoever takes it: the failure
+> is in the netcode-tier configure+build on Linux only, and `pr.yml`'s Linux legs build the same
+> tier green on every push, so the difference is in `perf.yml`'s own environment setup (it installs
+> `clang lld llvm ninja-build` from apt, where `pr.yml` does not) rather than in the tree.
+> **This is why a scheduled job whose output nobody reads is worse than no job: it fails silently
+> and bills for the half that still works.** Whoever restores the cron fixes the Linux legs first.
