@@ -11,17 +11,24 @@ name: perf
 
 on:
   workflow_dispatch:
-  # NIGHTLY SCHEDULE DISABLED 2026-09-02 (Rafael, on an exhausted Actions quota). The cron was
-  # `43 3 * * *`. Restore it by uncommenting the two lines below - nothing else has to change.
+  # NIGHTLY SCHEDULE DISABLED 2026-09-02 (Rafael). The cron was `43 3 * * *`; restore it by
+  # uncommenting the two lines below - nothing else has to change.
   #   schedule:
   #     - cron: '43 3 * * *'
   #
-  # What it was costing, measured on run 33607122302 (2026-09-02) rather than estimated: the two
-  # WINDOWS legs are the whole bill - windows-latest ran 20.5 min and windows-11-arm 14 min, and
-  # Windows bills at a 2x multiplier, so ~69 billable-equivalent minutes EVERY night. The two
-  # Linux legs cost almost nothing because they have been failing in ~25 s at "configure + build"
-  # every night since at least 2026-08-28 (filed in TODO.md) - so a third of the matrix has been
-  # producing no data at all while the Windows half kept paying full price.
+  # WHY, corrected 2026-09-02 after the billing report was read. The first version of this comment
+  # blamed an exhausted Actions quota. That was WRONG and is worth recording rather than quietly
+  # fixing: the quota was being consumed by a different repository entirely (`prometheus-os`,
+  # $20.20 of a $20.61 day, since deleted). This workflow's share was ~$0.34, and tidelock is a
+  # PUBLIC repo, so GitHub reports `billable: 0` on its runs - they never drew on the allowance at
+  # all. Cost was not the reason to stop this job, and the measurement that looked like a cause was
+  # only ever a correlation.
+  # The REAL reason to leave it off, which survives the correction: half the matrix has been
+  # broken and unread. The two LINUX legs have failed in ~25 s at "configure + build" every night
+  # since at least 2026-08-28 while the two Windows legs completed the full sweep - so the job has
+  # been producing a partial dataset nobody collected, and nothing failed loudly enough to notice.
+  # Filed as RR-57 in TODO.md. Fix the Linux legs first; restoring the cron before then just
+  # resumes half-blind nightly runs.
   # This is a hold, not a retirement: `workflow_dispatch` still runs the sweep on demand, which is
   # what WORKFLOW.md §4 actually needs for a perf-leg election - that ruling is made FROM the data
   # on request, and never needed a nightly cadence to be made.

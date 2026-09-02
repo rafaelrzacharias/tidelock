@@ -8159,16 +8159,27 @@ were validly inside §2's valve. What the valve deferred, and what this sweep fo
 >
 > **Next free ids, re-measured: RR-57 and R-25.**
 
-> **NIGHTLY `perf` SCHEDULE DISABLED (Rafael, 2026-09-02 — exhausted Actions quota).** The cron
-> `43 3 * * *` is commented out in `.github/workflows/perf.yml`; `workflow_dispatch` is retained,
-> so the G-05 sweep still runs on demand. This is a HOLD, not a retirement: `WORKFLOW.md` §4's
-> perf-leg election is a ruling made FROM the data when it is wanted, and never needed a nightly
-> cadence to be made. Restore by uncommenting two lines.
+> **NIGHTLY `perf` SCHEDULE DISABLED (Rafael, 2026-09-02).** The cron `43 3 * * *` is commented
+> out in `.github/workflows/perf.yml`; `workflow_dispatch` is retained, so the G-05 sweep still
+> runs on demand. This is a HOLD, not a retirement: `WORKFLOW.md` §4's perf-leg election is a
+> ruling made FROM the data when it is wanted, and never needed a nightly cadence to be made.
+> Restore by uncommenting two lines.
 >
-> **What it cost, measured on run `33607122302` (2026-09-02) rather than estimated.** The two
-> WINDOWS legs are the entire bill — `windows-latest` 20.5 min, `windows-11-arm` 14 min — and
-> Windows bills at a 2x multiplier: **~69 billable-equivalent minutes every night**, ~400 over the
-> six nights since 2026-08-28.
+> **CORRECTED SAME DAY, and the correction is the point.** This entry first said the cron was
+> disabled "on an exhausted Actions quota", and cited ~69 billable-equivalent minutes a night as
+> the cause. **That attribution was wrong.** The billing report named the real consumer: a
+> different repository, `prometheus-os`, at **$20.20 of a $20.61 day** (3,378 Linux minutes) —
+> since deleted by Rafael. This workflow's whole share was **~$0.34**, and because tidelock is a
+> PUBLIC repo GitHub reports `billable: 0` on its runs, so they never drew on the allowance at
+> all. The nightly perf job was the most expensive thing *visible from inside this repo*, which is
+> not the same as being the cause, and the measurement that made it look causal was a correlation
+> the search had been scoped into. **Method note worth keeping: a per-repo measurement cannot
+> falsify an account-level claim — the account-level report can, and should have been asked for
+> first.**
+>
+> **The reason to leave it off, which survives the correction:** RR-57 below. Half the matrix has
+> been failing nightly and nobody noticed. Fix the Linux legs before restoring the cron; until
+> then, restoring it only resumes half-blind runs.
 >
 > **RR-57 — the perf lane's two LINUX legs have been failing nightly since at least 2026-08-28 and
 > nobody noticed, because the workflow's only consumer is an artifact nobody has collected.**
