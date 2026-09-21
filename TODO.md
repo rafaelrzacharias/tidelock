@@ -1831,6 +1831,36 @@ right; it is the template the others now follow.
       wiring + the sim view (**Milestone 2**: dig/flood/melt a toy slice on screen).
 - [ ] T-A-02 `v_max` validator · T-A-03 arena-set size · T-A-05 per-arena hash views · T-A-06
       island-merge telegraph.
+- [ ] **RR-17 — `ALLOY.md` §14.2 `ChunkTexels` states 51,200 B for 50,176 bytes of fields.**
+      `i16 dist[128*128]` (32,768) + `u8 mat[128*128]` (16,384) + `u16 cav[32*32]` (2,048) =
+      **50,176**, and the struct's own comment says 51,200. One of the two is authoritative and
+      the difference is not cosmetic: it is the resident footprint of every chunk, the arena
+      reservation, and the snapshot-blob budget (`MEMORY.md` §7) — 1,024 B per chunk, so the
+      whole grid is a gibibyte of budget that a reader who trusts the comment has not reserved.
+      The two readings also disagree about the material array: 51,200 is exactly the field list
+      with `u16 mat[128*128]`, which contradicts the same block's "material_id low byte, solid
+      materials are ids < 256 by validator rule". **Ruling needed:** is the field list
+      authoritative (and the comment corrected), or the total (and the material array widened)?
+      Found by implementing §14.2 in the engine's own repo: the format gate there is built from
+      the field list and had to pick an answer.
+- [ ] **RR-18 — the `cav[]` label can hold 15 bits and `CavityHandle` has 16.**
+      §14.2: `u16 cav[32*32]` is "coarse 4-texel cell → cavity slot (**bit 15 set → basin
+      slot**); 0xFFFF = solid", so a label names cavity slot 0..0x7FFF — 32,768 of them.
+      `CANON.md` gives `CavityHandle = Handle<CavityTag,16,16>`, i.e. 65,536 slots. A cavity
+      whose slot index is at or past 0x8000 cannot be written into a label without being read
+      back as a basin. **Ruling needed:** either the cavity domain is 15 index bits (and the
+      handle row changes), or the basin label needs an encoding that does not steal the top bit
+      of a cavity label. An implementation must refuse past the label's own bound rather than
+      wrap, which is a hard cap on live cavities at half the handle space — cheap now, a
+      redesign later if a scene ever approaches it.
+- [ ] **RR-19 — `CarrierRef`'s four kinds do not include the chunk, which is what sleeps.**
+      §1.1/§14.2: `CarrierRef = {kind:2, id:30}` over particle | body-region | cavity | basin —
+      all four kinds taken. `ALLOY.md` §13 and §14.4.5 T11 make the **chunk** the unit of
+      hashing, streaming and sleeping, and `WakeEvent` is "a sorted array keyed (tick, carrier)",
+      so a sleeping chunk requires a carrier kind the field does not have, and widening `kind`
+      changes a row that a snapshot may already carry. **Ruling needed:** a fifth kind (and the
+      field's new width), or a ruling that a sleeping chunk is carried by another kind and the
+      chunk identity travels beside it.
 
 ## Job system (post-v0, before parallel Alloy — `docs/JOBS.md`)
 - [ ] Atomic-counter pool, `parallel_for`/`parallel_levels`, per-worker scratch, chunk-tagged
